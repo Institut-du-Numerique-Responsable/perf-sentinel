@@ -262,8 +262,18 @@ Verify a downloaded binary:
 
 ```bash
 gh attestation verify perf-sentinel-linux-amd64 \
+  --repo Institut-du-Numerique-Responsable/perf-sentinel
+```
+
+Binaries of v0.26.2 and earlier were attested before the repository moved
+to the Institut du Numérique Responsable. Their attestations stayed under
+the original account, so they verify by owner, pinned to the original
+repository:
+
+```bash
+gh attestation verify perf-sentinel-linux-amd64 \
   --owner robintra \
-  --repo perf-sentinel
+  --signer-repo robintra/perf-sentinel
 ```
 
 A successful verification confirms that the binary was built from a

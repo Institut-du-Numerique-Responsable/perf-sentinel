@@ -274,8 +274,18 @@ Vérifier un binaire téléchargé :
 
 ```bash
 gh attestation verify perf-sentinel-linux-amd64 \
+  --repo Institut-du-Numerique-Responsable/perf-sentinel
+```
+
+Les binaires de v0.26.2 et antérieures ont été attestés avant le passage
+du dépôt à l'Institut du Numérique Responsable. Leurs attestations sont
+restées sous le compte d'origine, elles se vérifient donc par
+propriétaire, épinglées au dépôt d'origine :
+
+```bash
+gh attestation verify perf-sentinel-linux-amd64 \
   --owner robintra \
-  --repo perf-sentinel
+  --signer-repo robintra/perf-sentinel
 ```
 
 Une vérification réussie confirme que le binaire vient d'un tag de

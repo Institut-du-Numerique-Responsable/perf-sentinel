@@ -149,9 +149,12 @@ Les binaires de release portent :
 Le chart Helm est signé avec Cosign. Les images de conteneur ne portent aucune signature Cosign et le workflow de release n'émet aucune attestation pour elles. BuildKit ajoute à l'index de l'image un document de provenance non signé, que rien ne relie à l'attestation du binaire. Voir la [politique de pinning supply chain](SUPPLY-CHAIN-FR.md) pour le détail et la [chaîne d'approvisionnement logicielle](HELM-DEPLOYMENT-FR.md#chaîne-dapprovisionnement-logicielle) pour le chart.
 
 ```bash
-gh attestation verify perf-sentinel-linux-amd64 --repo robintra/perf-sentinel
-gh attestation verify perf-sentinel-linux-amd64 --repo robintra/perf-sentinel \
+# releases construites depuis le passage à l'organisation INR
+gh attestation verify perf-sentinel-linux-amd64 --repo Institut-du-Numerique-Responsable/perf-sentinel
+gh attestation verify perf-sentinel-linux-amd64 --repo Institut-du-Numerique-Responsable/perf-sentinel \
   --predicate-type https://spdx.dev/Document/v2.3
+# v0.26.2 et antérieures, attestées sous le compte d'origine
+gh attestation verify perf-sentinel-linux-amd64 --owner robintra --signer-repo robintra/perf-sentinel
 cargo audit bin perf-sentinel-linux-amd64
 ```
 
