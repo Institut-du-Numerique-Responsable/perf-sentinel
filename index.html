@@ -1006,6 +1006,10 @@
   [data-ps-root]{--rh-1:clamp(32px,3vw,40px);--rh-2:clamp(48px,5vw,64px);--rh-3:clamp(80px,8vw,112px);--rh-band:clamp(40px,4vw,56px)}
   main>section:not([data-screen-label="Hero"]){margin-top:var(--rh-gap,var(--rh-2))}
   @media(max-width:560px){[data-gov]{grid-template-columns:minmax(0,1fr)!important;gap:18px!important;padding-top:24px!important}[data-gov]>a{max-width:160px}}
+  /* Touch targets: small controls get an invisible 44px hit area, nothing moves on screen */
+  :is(.ps-lang-btn,.ps-th-btn,[data-burger],[data-ptab],[data-embed-tab],[data-copy],header a[href^="https://github.com/"],[data-nav] a){position:relative}:is(.ps-lang-btn,.ps-th-btn,[data-burger],[data-ptab],[data-embed-tab],[data-copy],header a[href^="https://github.com/"],[data-nav] a)::before{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%)}
+  /* Footer links stack 9px apart: their hit area fills that gap instead of overlapping a neighbour */
+  footer a{position:relative}footer a::before{content:"";position:absolute;inset:-5px 0}
   /* Section headings and intros share one setting each; the forced line break in a few headings only helps on wide screens */
   [data-ps-root] main h2{line-height:1.2;text-wrap:balance}
   @media(max-width:560px){[data-ps-root] main h2 br{display:none}}
