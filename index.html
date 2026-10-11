@@ -1225,7 +1225,7 @@
 @media(max-width:900px){[data-stack-tb]{display:none}[data-stack-tm]{display:grid;grid-template-columns:auto 1fr;margin-top:28px;border-top:1px solid var(--border)}[data-stack-tm] [data-stack-hd]{padding:12px 14px;border-bottom:1px solid var(--border)}[data-stack-tm] [data-stack-hd]:first-child,[data-stack-ml]{border-right:1px solid var(--border)}[data-stack-ml],[data-stack-mf]{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)}[data-stack-ml]{justify-content:center;min-width:100px;min-height:60px}[data-stack-mf]{flex-wrap:wrap;gap:6px 22px}[data-stack-mf] span{height:50px;display:flex;align-items:center}}
 @media(max-width:620px){[data-persona-hint]{display:none}[data-persona-bar]{gap:5px;margin-bottom:24px}[data-persona-bar] [data-ptab]{font-size:12.5px;padding:6px 10px;min-height:44px;flex:none}[data-persona-bar]:not(:has([data-pbubble])){flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:-4px -28px 20px;padding:4px 28px;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent)}[data-persona-bar]::-webkit-scrollbar{display:none}[data-persona-bar] [data-plabel]{flex:none}[data-hero-eyebrow]{display:none!important}[data-hero-eyebrow]+h1{margin-top:4px!important}}
 /* Mobile hamburger nav: the button toggles navOpen, the panel shows on data-open */
-[data-burger]{display:none;padding:0;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid var(--border);border-radius:9px;background:var(--surface);cursor:pointer;flex:none}
+[data-stars][data-n=""]{display:none!important}@media(max-width:420px){header [data-stars]{display:none!important}}[data-burger]{display:none;padding:0;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid var(--border);border-radius:9px;background:var(--surface);cursor:pointer;flex:none}
 [data-burger] i{position:relative;display:block;width:17px;height:2px;background:var(--text-2);border-radius:2px}
 [data-burger] i::before,[data-burger] i::after{content:'';position:absolute;left:0;width:17px;height:2px;background:var(--text-2);border-radius:2px}
 [data-burger] i::before{top:-5px}[data-burger] i::after{top:5px}
@@ -1353,8 +1353,8 @@
       <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
         <button onClick="{{ toggleLang }}" class="ps-lang-btn" aria-label="{{ langAria }}" title="{{ langAria }}"><span class="ps-lang-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3c2.5 2.4 4 5.6 4 9s-1.5 6.6-4 9c-2.5-2.4-4-5.6-4-9s1.5-6.6 4-9z"></path></svg></span><span class="ps-lang-win"><span class="ps-lang-track"><span class="ps-lang-cell ps-lang-cur">{{ langActive }}</span><span class="ps-lang-cell ps-lang-next">{{ langTarget }}</span></span></span></button>
         <button onClick="{{ toggleTheme }}" class="ps-th-btn" aria-label="{{ themeAria }}" title="{{ themeAria }}">{{ themeIcon }}{{ themeLabel }}</button>
-        <a data-plain href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" aria-label="Perf Sentinel on GitHub" style="display:flex;align-items:center;gap:8px;height:34px;box-sizing:border-box;font-size:13px;font-weight:600;color:#FFFFFF;background:#24292F;border:1px solid rgba(240,246,252,.18);border-radius:8px;padding:0 12px" style-hover="background:#30363D">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"></path></svg><span class="gh-txt">GitHub</span></a>
+        <a data-plain href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" aria-label="{{ ghAria }}" style="display:flex;align-items:center;gap:8px;height:34px;box-sizing:border-box;font-size:13px;font-weight:600;color:#FFFFFF;background:#24292F;border:1px solid rgba(240,246,252,.18);border-radius:8px;padding:0 12px" style-hover="background:#30363D">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"></path></svg><span class="gh-txt">GitHub</span><span data-stars="" data-n="{{ psStarsN }}" style="display:inline-flex;align-items:center;gap:5px;align-self:stretch;margin:0 -12px 0 4px;padding:0 11px;border-left:1px solid rgba(240,246,252,.18);font-variant-numeric:tabular-nums"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>{{ psStarsN }}</span></a>
         <button type="button" data-burger="" aria-label="Menu" aria-expanded="{{ navOpen }}" aria-controls="ps-mobnav" onClick="{{ toggleNav }}"><i aria-hidden="true"></i></button>
       </div>
       <nav data-mobnav="" id="ps-mobnav" data-open="{{ navOpen }}" aria-label="Menu" onClick="{{ navLinkClose }}">
@@ -1996,6 +1996,8 @@
             </div>
           </div>
         </div>
+
+        <div data-stars-row="" style="position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;margin-top:30px;padding-top:24px;border-top:1px solid rgba(224,244,237,.14)"><span style="font-size:14px;color:#A9D8C6;margin-right:6px">{{ starsLead }}</span><a data-plain data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" target="_blank" rel="noopener" aria-label="{{ psStarsAria }}" style="display:inline-flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;padding:0 16px;border:1px solid rgba(224,244,237,.3);border-radius:9px;color:#E0F4ED;font-size:14px;font-weight:600" style-hover="border-color:rgba(224,244,237,.6)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span>{{ psStarsName }}</span><span data-stars="" data-n="{{ psStarsN }}" style="padding-left:9px;border-left:1px solid rgba(224,244,237,.3);font-variant-numeric:tabular-nums;color:#A9D8C6">{{ psStarsN }}</span></a><a data-plain data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub" target="_blank" rel="noopener" aria-label="{{ hubStarsAria }}" style="display:inline-flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;padding:0 16px;border:1px solid rgba(224,244,237,.3);border-radius:9px;color:#E0F4ED;font-size:14px;font-weight:600" style-hover="border-color:rgba(224,244,237,.6)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span>{{ hubStarsName }}</span><span data-stars="" data-n="{{ hubStarsN }}" style="padding-left:9px;border-left:1px solid rgba(224,244,237,.3);font-variant-numeric:tabular-nums;color:#A9D8C6">{{ hubStarsN }}</span></a></div>
       </div>
     </section>
 
@@ -2066,7 +2068,7 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props="{&quot;defaultMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;clair&quot;,&quot;sombre&quot;],&quot;default&quot;:&quot;clair&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;defaultLang&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;en&quot;,&quot;fr&quot;],&quot;default&quot;:&quot;en&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;installCommand&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;cargo install perf-sentinel --locked&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
 class Component extends DCLogic {
-  state = { mode: null, sysFlip: false, lang: null, persona: null, spot: false, tip: false, copied: false, rustVersion: null, dotnetVersion: null, psVersion: null, hubVersion: null, dots: null, dotCur: null, navOpen: false };
+  state = { mode: null, sysFlip: false, lang: null, persona: null, spot: false, tip: false, copied: false, rustVersion: null, dotnetVersion: null, psVersion: null, hubVersion: null, psStars: null, hubStars: null, dots: null, dotCur: null, navOpen: false };
 
   componentDidMount() {
     // A stored French choice only moves the bare site root to /fr/. Any other
@@ -2102,6 +2104,8 @@ class Component extends DCLogic {
       .catch(() => {});
     this.fetchRelease('Institut-du-Numerique-Responsable/perf-sentinel', 'psVersion');
     this.fetchRelease('Institut-du-Numerique-Responsable/PerfSentinelHub', 'hubVersion');
+    this.fetchStars('Institut-du-Numerique-Responsable/perf-sentinel', 'psStars');
+    this.fetchStars('Institut-du-Numerique-Responsable/PerfSentinelHub', 'hubStars');
     // A hash that targets a <details> opens it, at load and on later hash changes.
     this._onHash = () => { try { const el = document.getElementById(decodeURIComponent(location.hash.slice(1))); if (el && el.tagName === 'DETAILS') el.open = true; } catch (e) {} };
     window.addEventListener('hashchange', this._onHash);
@@ -2138,6 +2142,33 @@ class Component extends DCLogic {
         try { sessionStorage.setItem(store, v); } catch (e) {}
       })
       .catch(() => {});
+  }
+
+  // Star count, cached the same way. A failed call leaves the buttons without a number.
+  fetchStars(repo, key) {
+    const store = 'ps-stars-' + key;
+    try { const v = sessionStorage.getItem(store); if (v) { this.setState({ [key]: +v }); return; } } catch (e) {}
+    fetch('https://api.github.com/repos/' + repo)
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(j => {
+        const n = j && j.stargazers_count;
+        if (!Number.isInteger(n) || n < 0) return;
+        this.setState({ [key]: n });
+        try { sessionStorage.setItem(store, String(n)); } catch (e) {}
+      })
+      .catch(() => {});
+  }
+
+  starVals(t, lang) {
+    const fmt = n => (n > 0 ? new Intl.NumberFormat(lang, { notation: 'compact' }).format(n) : '');
+    const aria = (name, n) => t.starAria.replace('{name}', name) + (n > 0 ? ', ' + t.starCount.replace('{n}', n) : '');
+    const ps = this.state.psStars, hub = this.state.hubStars;
+    return {
+      starsLead: t.starsLead, psStarsName: 'Perf Sentinel', hubStarsName: 'Perf Sentinel Hub',
+      psStarsN: fmt(ps), hubStarsN: fmt(hub),
+      psStarsAria: aria('Perf Sentinel', ps), hubStarsAria: aria('Perf Sentinel Hub', hub),
+      ghAria: t.ghAriaBase + (ps > 0 ? ', ' + t.starCount.replace('{n}', ps) : ''),
+    };
   }
 
   syncDots() {
@@ -2729,7 +2760,7 @@ class Component extends DCLogic {
         ctaTitle: 'Put the sentinel in your pipeline',
         ctaText: 'Built-in demo with nothing to install on the app side, then a quality gate on captured traces or an OTLP daemon beside your tracing.',
         demoCmt1: 'terminal report', demoCmt2: 'interactive TUI', demoCmt3: 'HTML dashboard',
-        ctaGuide: 'Prebuilt binaries, Docker image and Helm chart in the guide', copyLabel: 'Copy', copiedLabel: 'Copied',
+        ctaGuide: 'Prebuilt binaries, Docker image and Helm chart in the guide', starsLead: 'Find it useful? A star helps others discover it.', starAria: 'Star {name} on GitHub', starCount: '{n} stars', ghAriaBase: 'Perf Sentinel on GitHub', copyLabel: 'Copy', copiedLabel: 'Copied',
         ftTagline: 'Protocol-level I/O anti-pattern detector, self-hostable and carbon-aware.',
         ftColProduct: 'Product', ftColDocs: 'Documentation', ftColProject: 'Project',
         ftDocQuickstart: 'Quickstart', ftDocCli: 'CLI reference', ftDocConfig: 'Configuration', ftDocMethod: 'GreenOps methodology',
@@ -2948,7 +2979,7 @@ class Component extends DCLogic {
         ctaTitle: 'Posez la sentinelle dans votre pipeline',
         ctaText: 'Démo intégrée sans rien installer côté apps, puis quality gate sur traces capturées ou daemon OTLP à côté de votre tracing.',
         demoCmt1: 'rapport terminal', demoCmt2: 'TUI interactif', demoCmt3: 'dashboard HTML',
-        ctaGuide: 'Binaires précompilés, image Docker et chart Helm dans le guide', copyLabel: 'Copier', copiedLabel: 'Copié',
+        ctaGuide: 'Binaires précompilés, image Docker et chart Helm dans le guide', starsLead: 'Le projet vous sert ? Une étoile l’aide à se faire connaître.', starAria: 'Ajouter une étoile à {name} sur GitHub', starCount: '{n} étoiles', ghAriaBase: 'Perf Sentinel sur GitHub', copyLabel: 'Copier', copiedLabel: 'Copié',
         ftTagline: "Détecteur d'anti-patterns d'I/O au niveau protocole, auto-hébergeable et carbon-aware.",
         ftColProduct: 'Produit', ftColDocs: 'Documentation', ftColProject: 'Projet',
         ftDocQuickstart: 'Démarrage rapide', ftDocCli: 'Référence CLI', ftDocConfig: 'Configuration', ftDocMethod: 'Méthodologie GreenOps',
@@ -3067,6 +3098,7 @@ class Component extends DCLogic {
       ctaTitle: t.ctaTitle, ctaText: t.ctaText,
       demoCmt1: t.demoCmt1, demoCmt2: t.demoCmt2, demoCmt3: t.demoCmt3,
       copyLabel: t.copyLabel, copiedLabel: t.copiedLabel,
+      ...this.starVals(t, lang),
       ctaGuide: t.ctaGuide, ctaGuideHref: lang === 'fr' ? '/fr/guide#install' : '/guide#install',
       psRelLabel: 'Perf Sentinel v' + (this.state.psVersion || '0.26.2'),
       psRelHref: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v' + (this.state.psVersion || '0.26.2'),
