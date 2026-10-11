@@ -8,8 +8,8 @@ objet JSON autonome) via l'API HTTP du daemon (daemon ack, depuis
 cohabiter.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/ack-stores_dark.svg">
-  <img alt="Les deux magasins d'acquittements, leurs rédacteurs et leurs lecteurs" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/ack-stores.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/ack-stores_dark.svg">
+  <img alt="Les deux magasins d'acquittements, leurs rédacteurs et leurs lecteurs" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/ack-stores.svg">
 </picture>
 
 Deux choses que le schéma rend visibles. Le daemon lit les deux

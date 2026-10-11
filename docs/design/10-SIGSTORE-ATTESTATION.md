@@ -279,7 +279,7 @@ What a consumer should conclude when each check fails:
 - **Binary attestation FAIL**: the binary referenced by
   `integrity.binary_verification_url` does not match the SLSA
   attestation, or the source-uri does not match
-  `github.com/robintra/perf-sentinel`. Treat as untrusted.
+  `github.com/Institut-du-Numerique-Responsable/perf-sentinel`. Treat as untrusted.
 
 The overall verdict surfaces as one of `TRUSTED` (content hash +
 signature both OK), `PARTIAL` (content hash OK but signature

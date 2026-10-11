@@ -1,20 +1,20 @@
 <p align="center">
-    <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Frobintra%2Fperf-sentinel%2Fmain%2FCargo.toml&query=%24.workspace.package.rust-version&suffix=%20stable&label=rust%202024&color=D34516&logo=rust" alt="Rust" /></a>
-    <a href="https://github.com/robintra/perf-sentinel/actions/workflows/ci.yml"><img src="https://github.com/robintra/perf-sentinel/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-    <a href="https://github.com/robintra/perf-sentinel/actions/workflows/security-audit.yml"><img src="https://github.com/robintra/perf-sentinel/actions/workflows/security-audit.yml/badge.svg" alt="Security Audit" /></a>
+    <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FInstitut-du-Numerique-Responsable%2Fperf-sentinel%2Fmain%2FCargo.toml&query=%24.workspace.package.rust-version&suffix=%20stable&label=rust%202024&color=D34516&logo=rust" alt="Rust" /></a>
+    <a href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/actions/workflows/ci.yml"><img src="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <a href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/actions/workflows/security-audit.yml"><img src="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/actions/workflows/security-audit.yml/badge.svg" alt="Security Audit" /></a>
     <a href="https://sonarcloud.io/summary/overall?id=robintrassard_perf-sentinel"><img src="https://sonarcloud.io/api/project_badges/measure?project=robintrassard_perf-sentinel&metric=coverage" alt="Coverage" /></a>
     <a href="https://sonarcloud.io/summary/overall?id=robintrassard_perf-sentinel"><img src="https://sonarcloud.io/api/project_badges/measure?project=robintrassard_perf-sentinel&metric=alert_status" alt="Quality Gate" /></a>
-    <a href="https://github.com/robintra/perf-sentinel/actions/workflows/release.yml"><img src="https://github.com/robintra/perf-sentinel/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
+    <a href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/actions/workflows/release.yml"><img src="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
     <a href="https://crates.io/crates/perf-sentinel"><img src="https://img.shields.io/crates/v/perf-sentinel?logo=rust&label=crates.io&color=D34516" alt="crates.io" /></a>
     <a href="https://docs.rs/perf-sentinel-core"><img src="https://img.shields.io/badge/docs.rs-perf--sentinel--core-66c2a5?logo=docsdotrs&logoColor=white" alt="docs.rs" /></a>
-    <a href="https://github.com/robintra/perf-sentinel/pkgs/container/perf-sentinel"><img src="https://img.shields.io/badge/ghcr.io-perf--sentinel-2496ED?logo=docker&logoColor=white" alt="Container image" /></a>
+    <a href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/pkgs/container/perf-sentinel"><img src="https://img.shields.io/badge/ghcr.io-perf--sentinel-2496ED?logo=docker&logoColor=white" alt="Container image" /></a>
     <a href="https://hub.docker.com/r/robintrassard/perf-sentinel"><img src="https://img.shields.io/badge/docker%20hub-perf--sentinel-2496ED?logo=docker&logoColor=white" alt="Docker Hub" /></a>
     <a href="https://artifacthub.io/packages/helm/perf-sentinel/perf-sentinel"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/perf-sentinel" alt="Artifact Hub" /></a>
 </p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/logo/logo-dark-horizontal.svg">
-  <img alt="perf-sentinel" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/logo/logo-horizontal.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-dark-horizontal.svg">
+  <img alt="perf-sentinel" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg">
 </picture>
 
 **Self-hosted single binary (17 MB idle, RSS then set by `max_retained_findings`) that detects I/O anti-patterns (N+1, redundant calls, slow SQL/HTTP, fanout) in your services' OpenTelemetry traces and turns that exact I/O into an energy and carbon estimate. Run it as a CI quality gate on captured traces (or for local exploration and post-mortems), or as a long-running OTLP daemon (live dashboard, Prometheus metrics, query API).**
@@ -23,7 +23,7 @@
 > - **Prerequisite:** your services must emit **OpenTelemetry traces** (SQL + HTTP spans), **or dd-trace bridged through a Collector**, and those spans must carry the query text (`db.statement` / `db.query.text`) and the target URL (`http.url` / `url.full`). Language-specific setup (Java / C# / Rust / Go / Node.js / Python / Ruby / PHP): [docs/INSTRUMENTATION.md](docs/INSTRUMENTATION.md). **Without an OpenTelemetry SDK**, teams on Datadog can bridge dd-trace through the OTel Collector `datadogreceiver` instead, see [Coming from Datadog](docs/INTEGRATION.md#coming-from-datadog-dd-trace-no-opentelemetry).
 > - **Audit your own tracing first:** spans that lack those attributes are dropped. On OTLP input the report counts them (spans received, spans filtered, and the daemon exports the count on `/metrics`), but a thin or empty report can still mean *no problems found* or *no usable instrumentation*. `perf-sentinel inspect` shows what was extracted from your traces. An empty span tree means those attributes are missing upstream. For what instrumentation quality caps: [Instrumentation quality bounds findings](docs/LIMITATIONS.md#instrumentation-quality-bounds-findings).
 > - **What it is *not*:** a full APM, a continuous profiler, or a standalone regulatory carbon accounting platform (yet). See [What Perf Sentinel is not](#what-perf-sentinel-is-not).
-> - **Maturity:** beta, pre-1.0. In production with one team since June 2026, on a Kubernetes cluster. The CLI surface, config keys and on-disk formats may still change between releases before 1.0, with breaking changes called out in the [release notes](https://github.com/robintra/perf-sentinel/releases). The JSON output enums are the one part under an explicit stability contract (see [Input and output formats](#input-and-output-formats)).
+> - **Maturity:** beta, pre-1.0. In production with one team since June 2026, on a Kubernetes cluster. The CLI surface, config keys and on-disk formats may still change between releases before 1.0, with breaking changes called out in the [release notes](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases). The JSON output enums are the one part under an explicit stability contract (see [Input and output formats](#input-and-output-formats)).
 
 ---
 
@@ -36,8 +36,8 @@ perf-sentinel report --input traces.json --output report.html
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/dashboard_dark.gif">
-  <img alt="dashboard tour" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/dashboard_light.gif">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/dashboard_dark.gif">
+  <img alt="dashboard tour" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/dashboard_light.gif">
 </picture>
 
 ...or, if you prefer your terminal, an interactive TUI to drill down through Analyze, Inspect and Explain in a single session:
@@ -46,20 +46,20 @@ perf-sentinel report --input traces.json --output report.html
 perf-sentinel analyze --tui --input traces.json
 ```
 
-![all-in-one TUI: Analyze drills into Inspect then Explain, Esc walks back up](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/demo.gif)
+![all-in-one TUI: Analyze drills into Inspect then Explain, Esc walks back up](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/demo.gif)
 
 For frozen frames you can zoom into panel by panel, jump to [Still frames](#still-frames). The per-command animated demos are collapsed just below.
 
 **Grafana**, when you run the daemon: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json) over Prometheus `/metrics`, [`examples/grafana-findings-dashboard.json`](examples/grafana-findings-dashboard.json) over the query API through the Infinity plugin. Neither ships in the Helm chart. Import them into the Grafana you already run. A `Compatibility` badge on each says when the daemon feeding it is older than its panels need. French variants of both, with every title and description translated, sit under [`examples/FR/`](examples/FR).
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/overview-dark.png">
-  <img alt="Grafana overview dashboard: the Compatibility badge ending the first panel line, I/O rates by service, finding types by severity and the waste ratio gauge" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/overview.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/overview-dark.png">
+  <img alt="Grafana overview dashboard: the Compatibility badge ending the first panel line, I/O rates by service, finding types by severity and the waste ratio gauge" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/overview.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/findings-dark.png">
-  <img alt="Grafana findings dashboard: the daemon status line with its Compatibility badge, the findings table naming operation, endpoint and call site, and the cross-service correlations" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/findings.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings-dark.png">
+  <img alt="Grafana findings dashboard: the daemon status line with its Compatibility badge, the findings table naming operation, endpoint and call site, and the cross-service correlations" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings.png">
 </picture>
 
 <details>
@@ -67,27 +67,27 @@ For frozen frames you can zoom into panel by panel, jump to [Still frames](#stil
 
 Terminal report (`perf-sentinel analyze`):
 
-![analyze terminal report](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/analyze/demo.gif)
+![analyze terminal report](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/analyze/demo.gif)
 
 Inspect, the standalone four-panel TUI (`perf-sentinel inspect`):
 
-![inspect demo: severity colors and the scrollable detail panel](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/inspect/demo.gif)
+![inspect demo: severity colors and the scrollable detail panel](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/inspect/demo.gif)
 
 Explain a single trace (`perf-sentinel explain --trace-id <id>`):
 
-![explain demo: annotated span tree and trace-level findings](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/explain/demo.gif)
+![explain demo: annotated span tree and trace-level findings](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/explain/demo.gif)
 
 pg_stat_statements hotspots (`perf-sentinel pg-stat`):
 
-![pg-stat demo: SQL ranked by total time, calls and mean latency](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/pg-stat/demo.gif)
+![pg-stat demo: SQL ranked by total time, calls and mean latency](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/pg-stat/demo.gif)
 
 Calibrate energy factors (`perf-sentinel calibrate`):
 
-![calibrate demo: per-service factors from measured energy](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/calibrate/demo.gif)
+![calibrate demo: per-service factors from measured energy](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/calibrate/demo.gif)
 
 Periodic disclosure preview (`perf-sentinel disclose --tui`):
 
-![disclose preview: calendar stepper, aggregated summary, official-validator verdict](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/demo.gif)
+![disclose preview: calendar stepper, aggregated summary, official-validator verdict](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/demo.gif)
 
 </details>
 
@@ -129,7 +129,7 @@ Each finding carries: type, severity, normalized template, occurrences, source e
 cargo install perf-sentinel --locked
 
 # or download a prebuilt binary (Linux amd64/arm64, macOS arm64, Windows amd64)
-curl -LO https://github.com/robintra/perf-sentinel/releases/latest/download/perf-sentinel-linux-amd64
+curl -LO https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/latest/download/perf-sentinel-linux-amd64
 chmod +x perf-sentinel-linux-amd64 && sudo mv perf-sentinel-linux-amd64 /usr/local/bin/perf-sentinel
 
 # or run via Docker
@@ -187,7 +187,7 @@ Full subcommand reference: `perf-sentinel <cmd> --help`, or [docs/CLI.md](docs/C
 <details>
 <summary>Map of the Perf Sentinel subcommands and the artifacts they consume or produce</summary>
 
-<img alt="CLI commands overview" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/cli-commands.svg">
+<img alt="CLI commands overview" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/cli-commands.svg">
 
 </details>
 
@@ -212,11 +212,11 @@ perf-sentinel query findings --service order-svc                   # talk to a r
 
 ## Hub, optional but recommended
 
-A `watch` daemon holds its findings in memory. The ring buffer forgets, and `/api/findings` answers at most 1,000 rows. That covers the current state but not the history. [PerfSentinelHub](https://github.com/robintra/PerfSentinelHub) is a separate service that collects from every daemon and records when each finding was first seen, which the daemons cannot reconstruct.
+A `watch` daemon holds its findings in memory. The ring buffer forgets, and `/api/findings` answers at most 1,000 rows. That covers the current state but not the history. [PerfSentinelHub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub) is a separate service that collects from every daemon and records when each finding was first seen, which the daemons cannot reconstruct.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher_dark.gif">
-  <img alt="the Hub launcher: pick a source, shape a run, read the fleet" src="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher_light.gif">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher_dark.gif">
+  <img alt="the Hub launcher: pick a source, shape a run, read the fleet" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher_light.gif">
 </picture>
 
 What it adds on top of a daemon:
@@ -235,36 +235,36 @@ It never replaces this engine. Every analysis spawns this binary as a subprocess
 Starting a run against a trace backend, which is the form that takes a service, a window and a trace cap. A daemon source takes no parameters at all:
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-new-dark.png">
-  <img alt="run an analysis: sources grouped by kind, the full backend form" src="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-new.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-new-dark.png">
+  <img alt="run an analysis: sources grouped by kind, the full backend form" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-new.png">
 </picture>
 
 Fleet health, one row per source, unfolded onto the gauges and tuning hints a daemon publishes about itself:
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-sources-dark.png">
-  <img alt="fleet health: daemons and trace backends, one row unfolded" src="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-sources.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-sources-dark.png">
+  <img alt="fleet health: daemons and trace backends, one row unfolded" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-sources.png">
 </picture>
 
 Recent runs, in the states they ended in:
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-recent-dark.png">
-  <img alt="recent analyses in mixed terminal states" src="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-recent.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-recent-dark.png">
+  <img alt="recent analyses in mixed terminal states" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-recent.png">
 </picture>
 
 One run, with the quality gate leading its result strip:
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-run-dark.png">
-  <img alt="a single run: event log, result strip and request parameters" src="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-run.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-run-dark.png">
+  <img alt="a single run: event log, result strip and request parameters" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-run.png">
 </picture>
 
 The rendered dashboard, served from the Hub's own origin:
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-report-dark.png">
-  <img alt="the engine's HTML dashboard embedded in the Hub" src="https://raw.githubusercontent.com/robintra/PerfSentinelHub/main/docs/img/hub/launcher-report.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-report-dark.png">
+  <img alt="the engine's HTML dashboard embedded in the Hub" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-report.png">
 </picture>
 
 </details>
@@ -312,48 +312,48 @@ Two behaviours to know before sizing. Upstream trace sampling (head-based vs tai
 <details>
 <summary><b>Local dev</b></summary>
 
-![Local dev zoom-in: batch on captured trace, local daemon at 127.0.0.1, inspect TUI, report HTML](https://raw.githubusercontent.com/robintra/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-local-dev.svg)
+![Local dev zoom-in: batch on captured trace, local daemon at 127.0.0.1, inspect TUI, report HTML](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-local-dev.svg)
 
 </details>
 
 <details>
 <summary><b>CI/CD</b></summary>
 
-![CI zoom-in: perf integration tests + analyze --ci quality gate, SARIF for code scanning, optional Tempo / jaeger-query nightly](https://raw.githubusercontent.com/robintra/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-CI.svg)
+![CI zoom-in: perf integration tests + analyze --ci quality gate, SARIF for code scanning, optional Tempo / jaeger-query nightly](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-CI.svg)
 
 </details>
 
 <details>
 <summary><b>Staging</b></summary>
 
-![Staging zoom-in: focus-service pod with sidecar daemon, /api/findings polled by QA / SRE](https://raw.githubusercontent.com/robintra/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-staging.svg)
+![Staging zoom-in: focus-service pod with sidecar daemon, /api/findings polled by QA / SRE](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-staging.svg)
 
 </details>
 
 <details>
 <summary><b>Production</b></summary>
 
-![Production zoom-in: centralized daemon ingesting via OTel Collector and direct OTLP, /api/* + /metrics + NDJSON](https://raw.githubusercontent.com/robintra/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-production.svg)
+![Production zoom-in: centralized daemon ingesting via OTel Collector and direct OTLP, /api/* + /metrics + NDJSON](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-production.svg)
 
 </details>
 
 <details>
 <summary><b>GreenOps (cross-cutting)</b></summary>
 
-![GreenOps integration: external real-time sources (Scaphandre RAPL kWh on x86, Kepler RAPL kWh per container or process, Redfish BMC watts for bare-metal, Electricity Maps gCO₂/kWh) plus internal cold sources (Cloud SPECpower kWh, embodied carbon gCO₂e/req via Boavizta + HotCarbon 2024, network transport kWh/GB via Mytton 2024) feeding Perf Sentinel in batch or daemon mode, emitting energy and carbon alongside traces](https://raw.githubusercontent.com/robintra/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-GreenOps.svg)
+![GreenOps integration: external real-time sources (Scaphandre RAPL kWh on x86, Kepler RAPL kWh per container or process, Redfish BMC watts for bare-metal, Electricity Maps gCO₂/kWh) plus internal cold sources (Cloud SPECpower kWh, embodied carbon gCO₂e/req via Boavizta + HotCarbon 2024, network transport kWh/GB via Mytton 2024) feeding Perf Sentinel in batch or daemon mode, emitting energy and carbon alongside traces](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-GreenOps.svg)
 
 </details>
 
 <details>
 <summary>End-to-end view: how the four environments fit together</summary>
 
-![Global Perf Sentinel integration across local dev, CI, staging and prod](https://raw.githubusercontent.com/robintra/perf-sentinel-simulation-lab/main/docs/diagrams/svg/global-integration.svg)
+![Global Perf Sentinel integration across local dev, CI, staging and prod](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/global-integration.svg)
 
 </details>
 
 Live operator monitor over a running daemon, for DevOps / SRE, six Tab-cycled tabs (Advisor hints, Energy/carbon mix, Trends charts, Scrapers health, Config, Incidents) via `perf-sentinel query --daemon <URL> monitor`:
 
-![query monitor: six live tabs cycled with Tab over a running daemon](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/demo.gif)
+![query monitor: six live tabs cycled with Tab over a running daemon](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/demo.gif)
 
 ### Data handling
 
@@ -482,111 +482,111 @@ The [Quick look](#quick-look) section at the top shows live GIFs. The frozen fra
 
 **Configuration** (`.perf-sentinel.toml`):
 
-![config](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/analyze/config.png)
+![config](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/analyze/config.png)
 
 **All-in-one TUI** (`perf-sentinel analyze --tui`). One session drills down Analyze, Inspect and Explain via Enter, Esc walks back up, the tab bar tracks the active view:
 
-![Analyze view: the GreenOps summary dashboard under the view tab bar](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/analyze.png)
+![Analyze view: the GreenOps summary dashboard under the view tab bar](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/analyze.png)
 
-![Inspect view: the four-panel browser, traces, findings, correlations and detail](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/inspect.png)
+![Inspect view: the four-panel browser, traces, findings, correlations and detail](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/inspect.png)
 
-![Explain view: a trace's full-screen annotated span tree](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/explain.png)
+![Explain view: a trace's full-screen annotated span tree](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/explain.png)
 
 **Analysis report** (`perf-sentinel analyze`) page by page, with a small overlap so every finding appears fully on at least one page:
 
-![page 1: N+1 SQL, N+1 HTTP, redundant SQL](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/analyze/report-1.png)
+![page 1: N+1 SQL, N+1 HTTP, redundant SQL](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/analyze/report-1.png)
 
-![page 2: redundant HTTP, slow SQL, slow HTTP](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/analyze/report-2.png)
+![page 2: redundant HTTP, slow SQL, slow HTTP](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/analyze/report-2.png)
 
-![page 3: excessive fanout, chatty service, pool saturation](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/analyze/report-3.png)
+![page 3: excessive fanout, chatty service, pool saturation](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/analyze/report-3.png)
 
-![page 4: serialized calls, GreenOps summary, quality gate](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/analyze/report-4.png)
+![page 4: serialized calls, GreenOps summary, quality gate](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/analyze/report-4.png)
 
 **Explain mode** (`perf-sentinel explain --trace-id <id>`). Span-anchored findings (N+1, redundant, slow, fanout) are rendered inline next to the offending spans. Trace-level findings (chatty service, pool saturation, serialized calls) are surfaced in a dedicated header above the tree:
 
-![explain tree view with excessive fanout annotation on the parent span](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/explain/tree.png)
+![explain tree view with excessive fanout annotation on the parent span](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/explain/tree.png)
 
-![explain trace-level header with chatty service warning](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/explain/trace-level.png)
+![explain trace-level header with chatty service warning](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/explain/trace-level.png)
 
 **Inspect mode** (`perf-sentinel inspect`). The findings panel header colors findings by severity. Below are four frames walking the demo fixture across the three severity levels, including a detail-panel view with its scroll feature:
 
-![inspect TUI, initial view: the highest-impact trace first, N+1 SQL critical (red) with 10 occurrences and a batch suggestion](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/inspect/main.png)
+![inspect TUI, initial view: the highest-impact trace first, N+1 SQL critical (red) with 10 occurrences and a batch suggestion](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/inspect/main.png)
 
-![inspect TUI, detail panel active: top of the excessive fanout span tree](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/inspect/detail.png)
+![inspect TUI, detail panel active: top of the excessive fanout span tree](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/inspect/detail.png)
 
-![inspect TUI, detail panel scrolled down: bottom half of the fanout tree](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/inspect/detail-scrolled.png)
+![inspect TUI, detail panel scrolled down: bottom half of the fanout tree](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/inspect/detail-scrolled.png)
 
-![inspect TUI, redundant HTTP info (cyan): 3 identical token validations](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/inspect/info.png)
+![inspect TUI, redundant HTTP info (cyan): 3 identical token validations](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/inspect/info.png)
 
 `inspect --input` also auto-detects a pre-computed Report JSON (e.g. a daemon snapshot from `/api/export/report`, or `tempo`/`jaeger-query --format json`). Findings and Correlations panels light up fully, and the Detail panel draws the masked span trees the report carries, stubbing only a trace whose spans the input does not hold:
 
-![inspect TUI, Report-mode input: 4 panels with cross-trace correlations and the span tree the report carries](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/inspect/report-mode.png)
+![inspect TUI, Report-mode input: 4 panels with cross-trace correlations and the span tree the report carries](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/inspect/report-mode.png)
 
 **Live operator monitor** (`perf-sentinel query --daemon <URL> monitor`). Read-only, daemon-backed, six Tab-cycled tabs (the Incidents tab alone takes an API key, the read-only one suffices). The data it surfaces (config hints, source provenance, per-region intensities) is categorical and high-cardinality, so the bounded-label rule keeps it off Prometheus `/metrics`:
 
-![Advisor tab: the daemon's settings-advisor hints, here a trace window nearing its cap](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/advisor.png)
+![Advisor tab: the daemon's settings-advisor hints, here a trace window nearing its cap](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/advisor.png)
 
-![Energy tab: the effective energy/carbon mix per service and per region, cold vs hot intensity sources](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/energy.png)
+![Energy tab: the effective energy/carbon mix per service and per region, cold vs hot intensity sources](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/energy.png)
 
-![Trends tab: energy and carbon curves over the poll history, runtime gauges as a share of their caps under the advisor threshold](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/trends.png)
+![Trends tab: energy and carbon curves over the poll history, runtime gauges as a share of their caps under the advisor threshold](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/trends.png)
 
-![Scrapers tab: live health of the energy backends from /api/energy](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/scrapers.png)
+![Scrapers tab: live health of the energy backends from /api/energy](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/scrapers.png)
 
 **pg-stat mode** (`perf-sentinel pg-stat --input <pg_stat_statements.csv>`): ranks SQL queries by total execution time, by call count, by mean latency. Cross-reference with your traces via `--traces` to spot queries that dominate the DB without showing up in instrumentation. The MySQL twin is `perf-sentinel mysql-stat --input <digests.csv>` over `performance_schema.events_statements_summary_by_digest` (fourth ranking: rows examined). Digests longer than `performance_schema_max_digest_length` (default 1024) arrive truncated and silently miss the trace cross-reference. Raise the setting for long queries:
 
-![pg-stat: top hotspots by total time, calls and mean latency](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/pg-stat/hotspots.png)
+![pg-stat: top hotspots by total time, calls and mean latency](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/pg-stat/hotspots.png)
 
 **Calibrate mode** (`perf-sentinel calibrate --traces <traces.json> --measured-energy <energy.csv>`):
 
-![calibrate input: CSV with per-service power readings](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/calibrate/csv.png)
+![calibrate input: CSV with per-service power readings](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/calibrate/csv.png)
 
-![calibrate run: warnings and per-service factors printed](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/calibrate/run.png)
+![calibrate run: warnings and per-service factors printed](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/calibrate/run.png)
 
-![calibrate output: generated TOML with calibration factors](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/calibrate/output.png)
+![calibrate output: generated TOML with calibration factors](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/calibrate/output.png)
 
 **Disclose preview** (`perf-sentinel disclose --tui`). A read-only preview of the periodic disclosure: a calendar stepper over the period, live intent and confidentiality toggles, and the equivalent command to copy. It never writes or hashes a report:
 
-![disclose preview, month view: settings header, aggregated summary, equivalent command](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/preview.png)
+![disclose preview, month view: settings header, aggregated summary, equivalent command](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/preview.png)
 
-![disclose preview, quarter view: the g stepper widens the period to the whole quarter](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/quarter.png)
+![disclose preview, quarter view: the g stepper widens the period to the whole quarter](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/quarter.png)
 
-![disclose preview, official intent: the validator reports why the report is not yet publishable](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/official.png)
+![disclose preview, official intent: the validator reports why the report is not yet publishable](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/official.png)
 
 **Report dashboard** (`perf-sentinel report`), one still per tab. Each `<picture>` serves the dark variant when your browser advertises `prefers-color-scheme: dark`:
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/findings-dark.png">
-  <img alt="report dashboard: Findings narrowed by the Warning severity and the Service menu" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/findings.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/findings-dark.png">
+  <img alt="report dashboard: Findings narrowed by the Warning severity and the Service menu" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/findings.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/explain-dark.png">
-  <img alt="report dashboard: Explain trace tree with five highlighted N+1 SELECTs and a Java JPA suggested fix" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/explain.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/explain-dark.png">
+  <img alt="report dashboard: Explain trace tree with five highlighted N+1 SELECTs and a Java JPA suggested fix" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/explain.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/pg-stat-dark.png">
-  <img alt="report dashboard: pg_stat Calls ranking, 15 rows" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/pg-stat.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/pg-stat-dark.png">
+  <img alt="report dashboard: pg_stat Calls ranking, 15 rows" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/pg-stat.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/diff-dark.png">
-  <img alt="report dashboard: Diff tab, one new finding flagged as a regression" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/diff.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/diff-dark.png">
+  <img alt="report dashboard: Diff tab, one new finding flagged as a regression" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/diff.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/correlations-dark.png">
-  <img alt="report dashboard: Correlations tab, three cross-trace pairs with confidence and median lag" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/correlations.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/correlations-dark.png">
+  <img alt="report dashboard: Correlations tab, three cross-trace pairs with confidence and median lag" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/correlations.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/greenops-dark.png">
-  <img alt="report dashboard: GreenOps tab with multi-region CO₂ breakdown across eu-west-3, us-east-1 and eu-central-1" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/greenops.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/greenops-dark.png">
+  <img alt="report dashboard: GreenOps tab with multi-region CO₂ breakdown across eu-west-3, us-east-1 and eu-central-1" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/greenops.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/cheatsheet-dark.png">
-  <img alt="report dashboard: cheatsheet modal listing the full keyboard shortcut table" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/cheatsheet.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/cheatsheet-dark.png">
+  <img alt="report dashboard: cheatsheet modal listing the full keyboard shortcut table" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/cheatsheet.png">
 </picture>
 
 </details>
@@ -622,11 +622,11 @@ Every GitHub Action is pinned to a 40-character commit SHA, the production image
 
 ## Releasing
 
-Releases follow a documented procedure. The companion repo [perf-sentinel-simulation-lab](https://github.com/robintra/perf-sentinel-simulation-lab/blob/main/docs/SCENARIOS.md) is the mandatory pre-tag release gate: 36 end-to-end scenarios on a local Kubernetes (k3d) cluster, covering nine deployment modes plus CI templates, failure modes and load limits. Each scenario ships a Mermaid diagram, the exact inputs/outputs, and the gotchas hit during validation. Step-by-step in [docs/RELEASE-PROCEDURE.md](docs/RELEASE-PROCEDURE.md).
+Releases follow a documented procedure. The companion repo [perf-sentinel-simulation-lab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/blob/main/docs/SCENARIOS.md) is the mandatory pre-tag release gate: 36 end-to-end scenarios on a local Kubernetes (k3d) cluster, covering nine deployment modes plus CI templates, failure modes and load limits. Each scenario ships a Mermaid diagram, the exact inputs/outputs, and the gotchas hit during validation. Step-by-step in [docs/RELEASE-PROCEDURE.md](docs/RELEASE-PROCEDURE.md).
 
 ## Support
 
-Support is best-effort, with no commercial offer and no service-level agreement. Questions, bugs and feature requests go to [GitHub issues](https://github.com/robintra/perf-sentinel/issues), which offer bug and feature templates. Vulnerabilities go through private reporting instead, acknowledged within 72 hours on a best-effort basis, see [SECURITY.md](SECURITY.md). Only the latest minor release receives security fixes. The software comes without warranty and with limited liability (AGPL-3.0, sections 15 and 16).
+Support is best-effort, with no commercial offer and no service-level agreement. Questions, bugs and feature requests go to [GitHub issues](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues), which offer bug and feature templates. Vulnerabilities go through private reporting instead, acknowledged within 72 hours on a best-effort basis, see [SECURITY.md](SECURITY.md). Only the latest minor release receives security fixes. The software comes without warranty and with limited liability (AGPL-3.0, sections 15 and 16).
 
 ## License
 

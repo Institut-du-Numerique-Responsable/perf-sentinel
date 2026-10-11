@@ -54,7 +54,7 @@ perf-sentinel disclose --tui \
   --org-config /etc/perf-sentinel/org.toml
 ```
 
-![disclose preview: calendar stepper widens the period, the summary updates, and the official validator reports its verdict](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/demo.gif)
+![disclose preview: calendar stepper widens the period, the summary updates, and the official validator reports its verdict](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/demo.gif)
 
 Only `--input` and `--org-config` stay required. The period, intent, and confidentiality are set live:
 
@@ -75,11 +75,11 @@ A report carries the total operational energy and carbon of the workload (span-d
 
 Publishing both lets a reader compare the two and see how much avoidable waste a loose operator threshold would otherwise hide. For `intent = official`, the validator rejects a report whose `canonical_waste.n_plus_one_threshold` is not the binary's canonical value.
 
-![disclose preview, month view: settings header, aggregated summary, and the equivalent command in the footer](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/preview.png)
+![disclose preview, month view: settings header, aggregated summary, and the equivalent command in the footer](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/preview.png)
 
-![disclose preview, quarter view: the `g` stepper widens the period to the whole quarter](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/quarter.png)
+![disclose preview, quarter view: the `g` stepper widens the period to the whole quarter](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/quarter.png)
 
-![disclose preview, official intent: the validator reports why the report is not yet publishable](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/official.png)
+![disclose preview, official intent: the validator reports why the report is not yet publishable](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/official.png)
 
 ## ESRS E1 crosswalk (v1.3)
 
@@ -345,7 +345,7 @@ Example before / after on a fresh disclosure:
 "integrity": {
   "content_hash": "sha256:abc123...",
   "binary_hash": "sha256:def456...",
-  "binary_verification_url": "https://github.com/robintra/perf-sentinel/releases/tag/v0.7.0",
+  "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.7.0",
   "trace_integrity_chain": null,
   "signature": null,
   "binary_attestation": null
@@ -357,7 +357,7 @@ Example before / after on a fresh disclosure:
 "integrity": {
   "content_hash": "sha256:abc123...",
   "binary_hash": "sha256:def456...",
-  "binary_verification_url": "https://github.com/robintra/perf-sentinel/releases/tag/v0.7.0",
+  "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.7.0",
   "trace_integrity_chain": null,
   "signature": {
     "format": "sigstore-cosign-intoto-v1",

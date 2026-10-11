@@ -103,6 +103,6 @@ disclaimers = []
 [notes.reference_urls]
 # Override these URLs to point at the documentation hosted on your
 # transparency domain rather than the upstream repository.
-methodology = "https://github.com/robintra/perf-sentinel/blob/main/docs/METHODOLOGY.md"
-project = "https://github.com/robintra/perf-sentinel"
-schema = "https://github.com/robintra/perf-sentinel/blob/main/docs/schemas/perf-sentinel-report-v1.json"
+methodology = "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/METHODOLOGY.md"
+project = "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel"
+schema = "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/schemas/perf-sentinel-report-v1.json"

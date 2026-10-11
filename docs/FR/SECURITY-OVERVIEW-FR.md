@@ -1,6 +1,6 @@
 # Vue d'ensemble sécurité
 
-Cette page rassemble, pour une revue de sécurité, ce que Perf Sentinel et son service compagnon [PerfSentinelHub](https://github.com/robintra/PerfSentinelHub) exposent, envoient, stockent et signent. Chaque point donne le comportement par défaut et ce qui reste à la charge de l'exploitant, et renvoie au document qui le détaille. Les faits sont vérifiés sur le moteur en 0.25.4 et le Hub en 0.3.4.
+Cette page rassemble, pour une revue de sécurité, ce que Perf Sentinel et son service compagnon [PerfSentinelHub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub) exposent, envoient, stockent et signent. Chaque point donne le comportement par défaut et ce qui reste à la charge de l'exploitant, et renvoie au document qui le détaille. Les faits sont vérifiés sur le moteur en 0.25.4 et le Hub en 0.3.4.
 
 Perf Sentinel est un binaire unique, auto-hébergé, qui analyse des traces OpenTelemetry, en CI ou en daemon (`watch`). Le Hub est un service optionnel, auto-hébergé lui aussi, qui garde l'historique des findings d'une flotte de daemons. Aucun des deux n'est un SaaS, et aucun n'envoie de télémétrie d'usage.
 
@@ -98,7 +98,7 @@ Le CORS est désactivé par défaut, et une origine joker combinée à une clé 
 - **Routes ouvertes même avec la connexion :** `/api/findings`, `/api/findings/{traceId}`, la route d'import (qui a sa propre clé), `/health` et `/metrics`. Gardez-les sur un réseau interne.
 - **Lanceur :** il exécute le binaire moteur embarqué en sous-processus avec une liste d'arguments, sans shell. Le chemin du binaire et les endpoints de traces viennent de la configuration seulement. Les saisies de l'utilisateur sont validées, et une exécution s'arrête après 300 s par défaut.
 
-Détails : [authentification du Hub](https://github.com/robintra/PerfSentinelHub/blob/main/docs/FR/AUTHENTICATION-FR.md), [limites du Hub](https://github.com/robintra/PerfSentinelHub/blob/main/docs/FR/LIMITATIONS-FR.md).
+Détails : [authentification du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/FR/AUTHENTICATION-FR.md), [limites du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/FR/LIMITATIONS-FR.md).
 
 ## Durcissement
 
@@ -165,15 +165,15 @@ cargo audit bin perf-sentinel-linux-amd64
 - Les actions sont épinglées par SHA.
 - CodeQL, SonarCloud, Trivy, OSV-Scanner, Gitleaks, TruffleHog et OpenSSF Scorecard tournent en CI.
 
-L'image poussée sur GHCR n'est pas signée dans le registre : vérifiez les artefacts de release comme le décrit la [procédure de release du Hub](https://github.com/robintra/PerfSentinelHub/blob/main/RELEASING.md).
+L'image poussée sur GHCR n'est pas signée dans le registre : vérifiez les artefacts de release comme le décrit la [procédure de release du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/RELEASING.md).
 
 Les deux dépôts exigent des commits signés sur leur branche principale, le moteur par sa protection de branche et le Hub par son ensemble de règles `Protect default branch`. Sur les deux, le rôle Administrateur peut contourner la règle. Sur le moteur, les commits fusionnés avant le 3 octobre 2026 ont été réécrits par la fusion par rebase de GitHub et ne portent pas de signature. Les tags de release sont signés sur les deux.
 
 ## Signaler une vulnérabilité
 
 Les deux projets reçoivent les signalements par le signalement privé de vulnérabilités de GitHub.
-- **Moteur :** accusé de réception sous 72 heures, au mieux puisque le projet a un seul mainteneur pour le moment. Première évaluation sous 7 jours. Un CVE est demandé à partir de la sévérité Medium. Seule la dernière version mineure reçoit les correctifs. Voir [SECURITY.md](https://github.com/robintra/perf-sentinel/blob/main/SECURITY.md).
-- **Hub :** accusé de réception sous 3 jours ouvrés, évaluation sous 7 jours ouvrés. Seule la dernière version `0.x` publiée reçoit les correctifs. Voir la [politique de sécurité du Hub](https://github.com/robintra/PerfSentinelHub/blob/main/SECURITY.md).
+- **Moteur :** accusé de réception sous 72 heures, au mieux puisque le projet a un seul mainteneur pour le moment. Première évaluation sous 7 jours. Un CVE est demandé à partir de la sévérité Medium. Seule la dernière version mineure reçoit les correctifs. Voir [SECURITY.md](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/SECURITY.md).
+- **Hub :** accusé de réception sous 3 jours ouvrés, évaluation sous 7 jours ouvrés. Seule la dernière version `0.x` publiée reçoit les correctifs. Voir la [politique de sécurité du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/SECURITY.md).
 
 ## Recommandations de déploiement
 

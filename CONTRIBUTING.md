@@ -12,7 +12,7 @@ Thank you for your interest in contributing to Perf Sentinel! This document cove
 
 ```bash
 # Clone the repository
-git clone https://github.com/robintra/perf-sentinel.git
+git clone https://github.com/Institut-du-Numerique-Responsable/perf-sentinel.git
 cd perf-sentinel
 
 # Build the workspace

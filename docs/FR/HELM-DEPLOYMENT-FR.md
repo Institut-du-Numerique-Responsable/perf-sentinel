@@ -38,8 +38,8 @@ Une fois le pod prêt, pointez votre OpenTelemetry Collector vers `perf-sentinel
 Le chart est sentinel-only. Les utilisateurs composent Perf Sentinel avec le chart upstream [open-telemetry/opentelemetry-collector](https://github.com/open-telemetry/opentelemetry-helm-charts) plutôt que d'embarquer un collector qui dériverait des releases upstream.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/helm-topology_dark.svg">
-  <img alt="Topologie du déploiement Helm" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/helm-topology.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/helm-topology_dark.svg">
+  <img alt="Topologie du déploiement Helm" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/helm-topology.svg">
 </picture>
 
 ### Sampling du collector et ce qui atteint le daemon
@@ -203,7 +203,7 @@ La vérification Cosign keyless relie chaque release à un run spécifique du wo
 
 ```bash
 cosign verify \
-  --certificate-identity-regexp '^https://github.com/robintra/perf-sentinel/\.github/workflows/helm-release\.yml@refs/tags/chart-v' \
+  --certificate-identity-regexp '^https://github.com/(robintra|Institut-du-Numerique-Responsable)/perf-sentinel/\.github/workflows/helm-release\.yml@refs/tags/chart-v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/robintra/charts/perf-sentinel:0.9.21
 ```
@@ -222,11 +222,11 @@ Chaque tarball de chart publié porte une attestation de provenance de build SLS
 
 ```bash
 gh release download chart-v0.9.21 \
-  --repo robintra/perf-sentinel \
+  --repo Institut-du-Numerique-Responsable/perf-sentinel \
   --pattern 'perf-sentinel-*.tgz'
 
 gh attestation verify perf-sentinel-0.9.21.tgz \
-  --repo robintra/perf-sentinel
+  --repo Institut-du-Numerique-Responsable/perf-sentinel
 ```
 
 Si vous avez déjà récupéré l'artifact OCI et préférez ne pas télécharger
@@ -236,7 +236,7 @@ référence OCI :
 ```bash
 docker login ghcr.io
 gh attestation verify oci://ghcr.io/robintra/charts/perf-sentinel:0.9.21 \
-  --repo robintra/perf-sentinel
+  --repo Institut-du-Numerique-Responsable/perf-sentinel
 ```
 
 Les deux recettes produisent la même assurance. Associez celle que
@@ -255,12 +255,12 @@ ci-dessus. Le filtre `--predicate-type` sélectionne l'attestation SBOM SPDX
 plutôt que celle de provenance de build :
 
 ```bash
-gh release download chart-v0.9.21 --repo robintra/perf-sentinel \
+gh release download chart-v0.9.21 --repo Institut-du-Numerique-Responsable/perf-sentinel \
   --pattern 'perf-sentinel-*.tgz' \
   --pattern 'perf-sentinel-chart-*.spdx.json'
 
 gh attestation verify perf-sentinel-0.9.21.tgz \
-  --repo robintra/perf-sentinel \
+  --repo Institut-du-Numerique-Responsable/perf-sentinel \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 
@@ -273,7 +273,7 @@ release.
 Pour les contributeurs et les utilisateurs qui veulent inspecter, modifier ou faire un bisect sur le chart avant de l'installer, un clone local fonctionne toujours :
 
 ```bash
-git clone https://github.com/robintra/perf-sentinel.git
+git clone https://github.com/Institut-du-Numerique-Responsable/perf-sentinel.git
 cd perf-sentinel
 
 # Inspectez ou surchargez les valeurs par défaut avant install.
@@ -708,8 +708,8 @@ le chart dérive du Grafana que vous exploitez déjà. Importez-le de deux
 façons.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/overview-dark.png">
-  <img alt="tableau de bord d'aperçu perf-sentinel : la pastille Compatibility en fin de première ligne, les débits d'E/S par service, les types de findings par sévérité et la jauge de gaspillage" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/overview.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/overview-dark.png">
+  <img alt="tableau de bord d'aperçu perf-sentinel : la pastille Compatibility en fin de première ligne, les débits d'E/S par service, les types de findings par sévérité et la jauge de gaspillage" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/overview.png">
 </picture>
 
 Import manuel : dans Grafana, ouvrez Dashboards puis Import, téléversez le
@@ -878,8 +878,8 @@ installez-le d'abord et épinglez sa version là où vous le provisionnez) :
   la 0.4.0.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/findings-dark.png">
-  <img alt="tableau de bord findings perf-sentinel : la ligne d'état du daemon avec sa pastille Compatibility, la table des findings qui nomme l'opération, l'endpoint et le site d'appel, et les corrélations entre services" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/findings.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings-dark.png">
+  <img alt="tableau de bord findings perf-sentinel : la ligne d'état du daemon avec sa pastille Compatibility, la table des findings qui nomme l'opération, l'endpoint et le site d'appel, et les corrélations entre services" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings.png">
 </picture>
 
 **Ni port-forward, ni Ingress.** C'est le backend de Grafana qui fait la
@@ -1015,7 +1015,7 @@ sur l'URL du daemon.
 
 Les tables ci-dessus lisent le ring du daemon, borné en volume et non en
 durée, donc le sélecteur de temps ne peut pas remonter. Là où un
-[PerfSentinelHub](https://github.com/robintra/PerfSentinelHub) est
+[PerfSentinelHub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub) est
 déployé (0.3.0 et suivants), la rangée repliée `History (Hub)` lit le Hub
 à la place. Elle appelle le `GET /api/findings` du Hub avec la plage du
 sélecteur (`from`, `to`), la variable `Environment`, et les filtres

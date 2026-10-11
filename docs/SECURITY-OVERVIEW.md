@@ -1,6 +1,6 @@
 # Security overview
 
-This page gathers, for a security review, what Perf Sentinel and its companion service [PerfSentinelHub](https://github.com/robintra/PerfSentinelHub) expose, send, store and sign. Each statement gives the default and what is left to the operator, and points to the document that details it. Facts are checked against the engine at 0.25.4 and the Hub at 0.3.4.
+This page gathers, for a security review, what Perf Sentinel and its companion service [PerfSentinelHub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub) expose, send, store and sign. Each statement gives the default and what is left to the operator, and points to the document that details it. Facts are checked against the engine at 0.25.4 and the Hub at 0.3.4.
 
 Perf Sentinel is a single self-hosted binary that analyzes OpenTelemetry traces, in CI or as a daemon (`watch`). The Hub is an optional self-hosted service that keeps the history of findings across a fleet of daemons. Neither is a SaaS, and neither sends usage telemetry.
 
@@ -98,7 +98,7 @@ CORS is off by default, and a wildcard origin combined with a write key is refus
 - **Routes open even with sign-in:** `/api/findings`, `/api/findings/{traceId}`, the import route (which has its own key), `/health` and `/metrics`. Keep them on an internal network.
 - **Launcher:** it runs the bundled engine binary as a subprocess with an argument list, without a shell. The binary path and the trace endpoints come from the configuration only. User inputs are validated, and a run stops after 300 s by default.
 
-Details: [Hub authentication](https://github.com/robintra/PerfSentinelHub/blob/main/docs/AUTHENTICATION.md), [Hub limitations](https://github.com/robintra/PerfSentinelHub/blob/main/docs/LIMITATIONS.md).
+Details: [Hub authentication](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/AUTHENTICATION.md), [Hub limitations](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LIMITATIONS.md).
 
 ## Hardening
 
@@ -165,15 +165,15 @@ cargo audit bin perf-sentinel-linux-amd64
 - Actions are pinned by SHA.
 - CodeQL, SonarCloud, Trivy, OSV-Scanner, Gitleaks, TruffleHog and OpenSSF Scorecard run in CI.
 
-The image pushed to GHCR is not signed in the registry: verify the release artefacts as described in [Hub releasing](https://github.com/robintra/PerfSentinelHub/blob/main/RELEASING.md).
+The image pushed to GHCR is not signed in the registry: verify the release artefacts as described in [Hub releasing](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/RELEASING.md).
 
 Both repositories require signed commits on their main branch, the engine through branch protection and the Hub through its `Protect default branch` ruleset. On both, the Administrator role can bypass the rule. On the engine, commits merged before 3 October 2026 were rewritten by GitHub's rebase merge and carry no signature. Release tags are signed on both.
 
 ## Reporting a vulnerability
 
 Both projects take reports through GitHub private vulnerability reporting.
-- **Engine:** acknowledgment within 72 hours, best effort since the project has a single maintainer for now. Initial assessment within 7 days. A CVE is requested from Medium severity up. Only the latest minor release receives fixes. See [SECURITY.md](https://github.com/robintra/perf-sentinel/blob/main/SECURITY.md).
-- **Hub:** acknowledgment within 3 business days, assessment within 7 business days. Only the latest `0.x` release receives fixes. See the [Hub security policy](https://github.com/robintra/PerfSentinelHub/blob/main/SECURITY.md).
+- **Engine:** acknowledgment within 72 hours, best effort since the project has a single maintainer for now. Initial assessment within 7 days. A CVE is requested from Medium severity up. Only the latest minor release receives fixes. See [SECURITY.md](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/SECURITY.md).
+- **Hub:** acknowledgment within 3 business days, assessment within 7 business days. Only the latest `0.x` release receives fixes. See the [Hub security policy](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/SECURITY.md).
 
 ## Deployment recommendations
 

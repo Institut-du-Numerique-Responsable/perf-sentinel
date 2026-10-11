@@ -155,7 +155,7 @@ cargo audit
 
 # 4. Inspecter les permissions actions du repo. Attendu : enabled et
 #    `selected` (pas `all`). Nécessite gh CLI authentifié.
-gh api repos/robintra/perf-sentinel/actions/permissions
+gh api repos/Institut-du-Numerique-Responsable/perf-sentinel/actions/permissions
 ```
 
 ## Bumper un pin manuellement
@@ -233,7 +233,7 @@ Si vous n'avez jamais utilisé Sigstore, cette introduction courte est un préal
 
 **Qui signe avec quelle clé.** Cosign génère un nouveau couple de clés éphémère juste avant la signature. Fulcio émet un certificat de 10 minutes qui lie la moitié *publique* de ce couple à l'identité OIDC. Une fois la signature envoyée à Rekor, le couple de clés est détruit. Il ne reste que la signature, le certificat et l'entrée Rekor, ce dont un vérifieur a besoin.
 
-**L'identité OIDC** est le sujet du certificat Fulcio, remonté comme `signer_identity` + `signer_issuer` dans tout document qui enregistre la signature. Pour un workflow GitHub Actions de release, l'identité est l'URL du workflow (`https://github.com/robintra/perf-sentinel/.github/workflows/release.yml@refs/tags/...`) et l'issuer est `https://token.actions.githubusercontent.com`. Pour un individu qui signe localement avec un compte Google, l'identité est l'email et l'issuer est `https://accounts.google.com`. Les consommateurs doivent épingler la regex d'identité attendue et l'issuer dans leur politique de vérification.
+**L'identité OIDC** est le sujet du certificat Fulcio, remonté comme `signer_identity` + `signer_issuer` dans tout document qui enregistre la signature. Pour un workflow GitHub Actions de release, l'identité est l'URL du workflow (`https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/.github/workflows/release.yml@refs/tags/...`) et l'issuer est `https://token.actions.githubusercontent.com`. Pour un individu qui signe localement avec un compte Google, l'identité est l'email et l'issuer est `https://accounts.google.com`. Les consommateurs doivent épingler la regex d'identité attendue et l'issuer dans leur politique de vérification.
 
 **Limite connue : migration de fournisseur OIDC.** L'URL de l'issuer est inscrite dans le certificat, donc enregistrée dans Rekor. Si l'organisation productrice change plus tard de fournisseur d'identité, les signatures passées restent valides mais les nouvelles signatures porteront une valeur `signer_issuer` différente. Les politiques de vérification qui épinglent un issuer spécifique devront être mises à jour, sinon elles rejetteront les nouvelles signatures comme non fiables. Anticiper la politique d'épinglage en prévision des migrations de fournisseur.
 
@@ -329,7 +329,7 @@ le prédicat de l'attestation, le binaire en est le sujet) :
 
 ```bash
 gh attestation verify perf-sentinel-linux-amd64 \
-  --repo robintra/perf-sentinel \
+  --repo Institut-du-Numerique-Responsable/perf-sentinel \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 

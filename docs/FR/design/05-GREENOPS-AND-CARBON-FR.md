@@ -136,8 +136,8 @@ Quand `total_io_ops == 0`, le ratio est `0.0` (pas NaN). C'est la fraction d'op�
 Le pipeline de scoring résout deux dimensions indépendantes pour chaque span : **l'énergie par opération** (`E`) et **l'intensité du réseau électrique** (`I`). Chacune a sa propre chaîne de repli, de la source la plus précise jusqu'aux valeurs embarquées par défaut.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/carbon-scoring_dark.svg">
-  <img alt="Résolution de l'énergie et de l'intensité dans le scoring carbone" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/carbon-scoring.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/carbon-scoring_dark.svg">
+  <img alt="Résolution de l'énergie et de l'intensité dans le scoring carbone" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/carbon-scoring.svg">
 </picture>
 
 ### Alignement SCI v1.0

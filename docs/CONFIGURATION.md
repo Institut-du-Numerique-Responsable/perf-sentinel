@@ -2,7 +2,7 @@
 
 Perf Sentinel is configured via a `.perf-sentinel.toml` file. All fields are optional and have sensible defaults.
 
-<img alt="CLI commands overview" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/cli-commands.svg">
+<img alt="CLI commands overview" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/cli-commands.svg">
 
 ## Contents
 

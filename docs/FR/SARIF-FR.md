@@ -22,7 +22,7 @@ Perf Sentinel émet du SARIF v2.1.0 via `--format sarif` sur `analyze` et `diff`
 
 ## Outil
 
-`runs[].tool.driver` est toujours `{ name: "perf-sentinel", version: <CARGO_PKG_VERSION>, informationUri: "https://github.com/robintra/perf-sentinel" }`. Le tableau `rules` pré-déclare les 12 types de findings, quel que soit le nombre de results émis, pour que les consommateurs SARIF puissent afficher les descriptions de règles même sur une exécution propre.
+`runs[].tool.driver` est toujours `{ name: "perf-sentinel", version: <CARGO_PKG_VERSION>, informationUri: "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" }`. Le tableau `rules` pré-déclare les 12 types de findings, quel que soit le nombre de results émis, pour que les consommateurs SARIF puissent afficher les descriptions de règles même sur une exécution propre.
 
 ## Schéma
 
