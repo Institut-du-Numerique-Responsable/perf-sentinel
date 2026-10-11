@@ -48,7 +48,7 @@ key is needed except for the Incidents tab, which takes
 `--api-key-file` (or `PERF_SENTINEL_DAEMON_API_KEY`) and accepts the
 read-only `[daemon] read_api_key`.
 
-![all-in-one TUI: Analyze drills into Inspect then Explain, Esc walks back up](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/demo.gif)
+![all-in-one TUI: Analyze drills into Inspect then Explain, Esc walks back up](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/demo.gif)
 
 ## Views and drill-down
 
@@ -74,11 +74,11 @@ the masked trees a Report carries (a daemon snapshot, or
 `tempo`/`jaeger-query --format json`). A trace whose spans the input
 does not hold shows a hint instead.
 
-![Analyze view: the GreenOps summary dashboard under the view tab bar](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/analyze.png)
+![Analyze view: the GreenOps summary dashboard under the view tab bar](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/analyze.png)
 
-![Inspect view: the four-panel browser, traces, findings, correlations and detail](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/inspect.png)
+![Inspect view: the four-panel browser, traces, findings, correlations and detail](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/inspect.png)
 
-![Explain view: a trace's full-screen annotated span tree](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/explain.png)
+![Explain view: a trace's full-screen annotated span tree](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/explain.png)
 
 ## Layout
 
@@ -267,14 +267,14 @@ The data each tab surfaces (config hints, source provenance,
 per-region intensities) is categorical and high-cardinality, so the
 bounded-label rule keeps it off Prometheus `/metrics`.
 
-![query monitor cycles six tabs over a live daemon: Advisor, Energy, Trends, Scrapers, Config, Incidents](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/demo.gif)
+![query monitor cycles six tabs over a live daemon: Advisor, Energy, Trends, Scrapers, Config, Incidents](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/demo.gif)
 
 - **Advisor** renders the daemon's settings-advisor hints
   (`warning_details`), color-coded by kind. A well-dimensioned daemon
   reports no hints. The capture below is an undersized one whose trace
   window is pinned near its cap.
 
-  ![Advisor tab: a tuning hint, active traces within 90% of max_active_traces](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/advisor.png)
+  ![Advisor tab: a tuning hint, active traces within 90% of max_active_traces](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/advisor.png)
 
 - **Energy** shows the effective energy/carbon mix straight from the
   live `green_summary`: per service (effective source, measured share,
@@ -285,7 +285,7 @@ bounded-label rule keeps it off Prometheus `/metrics`.
   A service none of whose operations was measured reads `I/O counts`
   as its source.
 
-  ![Energy tab: per-service and per-region energy/carbon mix with cold intensity sources](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/energy.png)
+  ![Energy tab: per-service and per-region energy/carbon mix with cold intensity sources](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/energy.png)
 
 - **Trends** plots the poll history as live braille charts: energy and
   carbon per scoring window on top, and below them the Headroom chart,
@@ -301,13 +301,13 @@ bounded-label rule keeps it off Prometheus `/metrics`.
   fields need a 0.8.8 daemon. Against an older one the Headroom panel
   degrades to a hint.
 
-  ![Trends tab: energy and carbon curves over the poll history, headroom percentages under the advisor threshold](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/trends.png)
+  ![Trends tab: energy and carbon curves over the poll history, headroom percentages under the advisor threshold](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/trends.png)
 
 - **Scrapers** reads `/api/energy` for live backend health. Here
   `cloud_energy` is configured but its endpoint is unreachable, so its
   freshness age climbs while the unconfigured backends stay dashed.
 
-  ![Scrapers tab: backend health, cloud_energy configured with a climbing freshness age](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/scrapers.png)
+  ![Scrapers tab: backend health, cloud_energy configured with a climbing freshness age](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/scrapers.png)
 
 - **Config** reads `/api/config` for the daemon's effective `[daemon]`
   settings, read-only. Each parameter shows its current value, the
@@ -318,7 +318,7 @@ bounded-label rule keeps it off Prometheus `/metrics`.
   store as enabled/disabled) and never shown in clear. Needs a 0.8.8+
   daemon, older ones show a hint.
 
-  ![Config tab: daemon parameters with current value, default and description, modified values flagged](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/config.png)
+  ![Config tab: daemon parameters with current value, default and description, modified values flagged](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/config.png)
 
 - **Incidents** reads `GET /api/incidents` for the restarts and memory
   events your alerting posted to the daemon (since 0.20.0), newest
@@ -343,7 +343,7 @@ bounded-label rule keeps it off Prometheus `/metrics`.
   `perf-sentinel query incidents --offset` pages further and
   `--namespace` narrows the list to one namespace.
 
-  ![Incidents tab: one OOM kill of checkout-svc still firing, its window captured complete, one finding that fired before the restart](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/incidents.png)
+  ![Incidents tab: one OOM kill of checkout-svc still firing, its window captured complete, one finding that fired before the restart](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/incidents.png)
 
 When the daemon becomes unreachable, the last good snapshot stays on
 screen with a `[STALE]` indicator instead of going blank.

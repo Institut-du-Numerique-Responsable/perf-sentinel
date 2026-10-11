@@ -580,9 +580,42 @@ fn output_references_commit(output: &str, commit: &str) -> bool {
         .any(|(i, _)| i == 0 || !output.as_bytes()[i - 1].is_ascii_hexdigit())
 }
 
+/// Where GitHub keeps a release's provenance. Releases built since the
+/// repository moved to the Institut du Numérique Responsable are attested in
+/// its repository. Earlier ones stayed under the original account, which only
+/// answers by owner, pinned to the original repository as signer.
+const ATTESTATION_SCOPES: [&[&str]; 2] = [
+    &["--repo", "Institut-du-Numerique-Responsable/perf-sentinel"],
+    &[
+        "--owner",
+        "robintra",
+        "--signer-repo",
+        "robintra/perf-sentinel",
+    ],
+];
+
+/// Runs `verify` against each scope in turn and returns the stdout of the
+/// first one that verifies. A rejection moves on to the next scope, a spawn
+/// failure stops at once.
+fn first_verified_scope(
+    mut verify: impl FnMut(&[&str]) -> std::io::Result<std::process::Output>,
+) -> Result<Vec<u8>, Status> {
+    let mut rejection = String::from("(no stderr)");
+    for scope in ATTESTATION_SCOPES {
+        match verify(scope) {
+            Ok(out) if out.status.success() => return Ok(out.stdout),
+            Ok(out) => rejection = last_stderr_line(&out.stderr),
+            Err(e) => return Err(Status::Fail(format!("gh spawn failed: {e}"))),
+        }
+    }
+    Err(Status::Fail(format!(
+        "gh attestation verify rejected: {rejection}"
+    )))
+}
+
 /// Verify a binary's GitHub build provenance via `gh attestation verify`.
 ///
-/// The `--repo` slug is a compile-time constant and `binary` is an
+/// The scopes are compile-time constants and `binary` is an
 /// operator-supplied path (never report-derived), so no argument
 /// sanitisation is needed on the command itself. When `expected_commit` is set
 /// (the report records one), the verified attestation must reference that commit
@@ -594,16 +627,18 @@ fn run_gh_attestation_verify(binary: &Path, expected_commit: Option<&str>) -> St
             "gh CLI not found on PATH, cannot verify binary attestation".to_string(),
         );
     }
-    let mut cmd = Command::new("gh");
-    cmd.arg("attestation")
-        .arg("verify")
-        .arg(binary)
-        .arg("--repo")
-        .arg("robintra/perf-sentinel")
-        .arg("--format")
-        .arg("json");
-    match cmd.output() {
-        Ok(out) if out.status.success() => {
+    let verified = first_verified_scope(|scope| {
+        Command::new("gh")
+            .arg("attestation")
+            .arg("verify")
+            .arg(binary)
+            .args(scope)
+            .arg("--format")
+            .arg("json")
+            .output()
+    });
+    match verified {
+        Ok(stdout) => {
             if let Some(commit) = expected_commit {
                 let commit = commit.trim();
                 // A cross-check is only meaningful against a real git SHA. An
@@ -615,7 +650,7 @@ fn run_gh_attestation_verify(binary: &Path, expected_commit: Option<&str>) -> St
                         sanitise_for_terminal(commit)
                     ));
                 }
-                if !output_references_commit(&String::from_utf8_lossy(&out.stdout), commit) {
+                if !output_references_commit(&String::from_utf8_lossy(&stdout), commit) {
                     return Status::Fail(format!(
                         "binary attestation verified, but it does not reference the report's recorded commit {}",
                         sanitise_for_terminal(commit)
@@ -627,11 +662,7 @@ fn run_gh_attestation_verify(binary: &Path, expected_commit: Option<&str>) -> St
                 sanitise_for_terminal(&binary.display().to_string())
             ))
         }
-        Ok(out) => Status::Fail(format!(
-            "gh attestation verify rejected: {}",
-            last_stderr_line(&out.stderr)
-        )),
-        Err(e) => Status::Fail(format!("gh spawn failed: {e}")),
+        Err(status) => status,
     }
 }
 
@@ -1003,6 +1034,57 @@ mod tests {
             }
             _ => panic!("expected Fail on dash-prefixed identity, got display"),
         }
+    }
+
+    #[cfg(unix)]
+    fn gh_output(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attestation_falls_back_to_the_pre_transfer_account() {
+        let mut seen = Vec::new();
+        let got = first_verified_scope(|scope| {
+            seen.push(scope.join(" "));
+            Ok(if seen.len() == 1 {
+                gh_output(1, "", "HTTP 404: Not Found")
+            } else {
+                gh_output(0, "86b3223", "")
+            })
+        });
+        assert!(matches!(got.as_deref(), Ok(b"86b3223")));
+        assert_eq!(
+            seen,
+            [
+                "--repo Institut-du-Numerique-Responsable/perf-sentinel",
+                "--owner robintra --signer-repo robintra/perf-sentinel",
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attestation_stops_at_the_first_verified_scope() {
+        let mut calls = 0;
+        let got = first_verified_scope(|_| {
+            calls += 1;
+            Ok(gh_output(0, "ok", ""))
+        });
+        assert!(got.is_ok());
+        assert_eq!(calls, 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attestation_reports_the_last_rejection() {
+        let got = first_verified_scope(|_| Ok(gh_output(1, "", "no attestations found")));
+        assert!(matches!(got, Err(Status::Fail(m)) if m.ends_with("no attestations found")));
     }
 
     #[test]

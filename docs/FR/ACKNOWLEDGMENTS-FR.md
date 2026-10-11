@@ -9,26 +9,26 @@ Le chemin runtime (contre un daemon vivant) s'ajoute par-dessus : la sous-comman
 
 **Sous-commande CLI contre le daemon** (`create` / `list` / `revoke`, depuis 0.5.22) :
 
-![ack CLI : create, list et revoke contre le daemon](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/ack/cli.gif)
+![ack CLI : create, list et revoke contre le daemon](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/ack/cli.gif)
 
 **Pied de page du repli TOML CI** (sortie `analyze` par défaut, les criticals sont supprimés et la quality gate passe à PASSED) :
 
-![analyze avec deux findings acquittés via TOML, indication en pied et gate PASSED](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/ack/fallback-default.png)
+![analyze avec deux findings acquittés via TOML, indication en pied et gate PASSED](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/ack/fallback-default.png)
 
 **TUI mode live** (`perf-sentinel query inspect`, depuis 0.5.24) : la touche `a` ouvre une modale ack sur le finding sélectionné, `u` révoque :
 
-![query inspect TUI : modale ack remplie avec reason, expires et by, prête à soumettre](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/ack/tui-modal-filled.png)
+![query inspect TUI : modale ack remplie avec reason, expires et by, prête à soumettre](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/ack/tui-modal-filled.png)
 
 **Dashboard HTML en mode live** (`--daemon-url`, depuis 0.5.23) : bouton `Ack` par finding qui ouvre une modale postant au daemon, onglet `Acks` listant les acks actifs avec `Revoke` par ligne :
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/ack-modal-dark.png">
-  <img alt="dashboard mode live : modale Acknowledge finding ouverte depuis une ligne de finding" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/ack-modal.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/ack-modal-dark.png">
+  <img alt="dashboard mode live : modale Acknowledge finding ouverte depuis une ligne de finding" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/ack-modal.png">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/ack-panel-dark.png">
-  <img alt="dashboard mode live : panneau Acknowledgments listant trois acks actifs avec boutons Revoke" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/report/ack-panel.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/ack-panel-dark.png">
+  <img alt="dashboard mode live : panneau Acknowledgments listant trois acks actifs avec boutons Revoke" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/report/ack-panel.png">
 </picture>
 
 </details>

@@ -7,8 +7,8 @@ version = "0.26.2"
 edition = "2024"
 license = "AGPL-3.0-only"
 rust-version = "1.99.0"
-repository = "https://github.com/robintra/perf-sentinel"
-homepage = "https://github.com/robintra/perf-sentinel"
+repository = "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel"
+homepage = "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel"
 keywords = ["performance", "n-plus-one", "greenops", "observability", "opentelemetry"]
 categories = ["development-tools::profiling", "command-line-utilities"]
 

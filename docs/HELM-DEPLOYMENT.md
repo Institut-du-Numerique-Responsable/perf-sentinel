@@ -54,8 +54,8 @@ chart instead of bundling a collector that would get out of sync with
 upstream releases.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/helm-topology_dark.svg">
-  <img alt="Helm deployment topology" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/helm-topology.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/helm-topology_dark.svg">
+  <img alt="Helm deployment topology" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/helm-topology.svg">
 </picture>
 
 ### Collector sampling and what reaches the daemon
@@ -233,7 +233,7 @@ published release workflow, and the OIDC issuer must be GitHub Actions:
 
 ```bash
 cosign verify \
-  --certificate-identity-regexp '^https://github.com/robintra/perf-sentinel/\.github/workflows/helm-release\.yml@refs/tags/chart-v' \
+  --certificate-identity-regexp '^https://github.com/(robintra|Institut-du-Numerique-Responsable)/perf-sentinel/\.github/workflows/helm-release\.yml@refs/tags/chart-v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/robintra/charts/perf-sentinel:0.9.21
 ```
@@ -272,21 +272,26 @@ attestation is queryable via `gh`:
 
 ```bash
 gh release download chart-v0.9.21 \
-  --repo robintra/perf-sentinel \
+  --repo Institut-du-Numerique-Responsable/perf-sentinel \
   --pattern 'perf-sentinel-*.tgz'
 
 gh attestation verify perf-sentinel-0.9.21.tgz \
-  --repo robintra/perf-sentinel
+  --owner robintra --signer-repo robintra/perf-sentinel
 ```
 
-If you already have the OCI artifact pulled and prefer not to fetch
-the tarball, verify the build provenance directly against the OCI
-reference:
+Charts released before the repository moved to the Institut du Numérique
+Responsable are attested under the original account, hence `--owner` and
+`--signer-repo`. Charts released after the move verify with
+`--repo Institut-du-Numerique-Responsable/perf-sentinel`.
+
+Without the release assets, pull the chart from the registry instead.
+`helm pull` writes the same tarball the attestation covers, the OCI
+artifact itself carries no attestation:
 
 ```bash
-docker login ghcr.io
-gh attestation verify oci://ghcr.io/robintra/charts/perf-sentinel:0.9.21 \
-  --repo robintra/perf-sentinel
+helm pull oci://ghcr.io/robintra/charts/perf-sentinel --version 0.9.21
+gh attestation verify perf-sentinel-0.9.21.tgz \
+  --owner robintra --signer-repo robintra/perf-sentinel
 ```
 
 Either recipe produces the same assurance. Pair whichever one you
@@ -305,12 +310,12 @@ verify it against the tarball, exactly like the provenance check above. The
 build-provenance one:
 
 ```bash
-gh release download chart-v0.9.21 --repo robintra/perf-sentinel \
+gh release download chart-v0.9.21 --repo Institut-du-Numerique-Responsable/perf-sentinel \
   --pattern 'perf-sentinel-*.tgz' \
   --pattern 'perf-sentinel-chart-*.spdx.json'
 
 gh attestation verify perf-sentinel-0.9.21.tgz \
-  --repo robintra/perf-sentinel \
+  --owner robintra --signer-repo robintra/perf-sentinel \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 
@@ -324,7 +329,7 @@ For contributors and users who want to inspect, patch, or bisect the
 chart before installing, a local clone still works:
 
 ```bash
-git clone https://github.com/robintra/perf-sentinel.git
+git clone https://github.com/Institut-du-Numerique-Responsable/perf-sentinel.git
 cd perf-sentinel
 
 # Inspect or override defaults before install.
@@ -959,8 +964,8 @@ does not bundle a collector: a dashboard pinned in the chart drifts from
 the Grafana you already run. Import it one of two ways.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/overview-dark.png">
-  <img alt="perf-sentinel overview dashboard: the Compatibility badge ending the first panel line, I/O rates by service, finding types by severity and the waste ratio gauge" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/overview.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/overview-dark.png">
+  <img alt="perf-sentinel overview dashboard: the Compatibility badge ending the first panel line, I/O rates by service, finding types by severity and the waste ratio gauge" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/overview.png">
 </picture>
 
 Manual import: in Grafana open Dashboards then Import, upload the JSON,
@@ -1120,8 +1125,8 @@ install it first and pin its version where you provision it):
   `GET /api/status` has returned since 0.4.0.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/findings-dark.png">
-  <img alt="perf-sentinel findings dashboard: the daemon status line with its Compatibility badge, the findings table naming operation, endpoint and call site, and the cross-service correlations" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/grafana/findings.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings-dark.png">
+  <img alt="perf-sentinel findings dashboard: the daemon status line with its Compatibility badge, the findings table naming operation, endpoint and call site, and the cross-service correlations" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings.png">
 </picture>
 
 **No port-forward and no Ingress.** Grafana's backend performs the
@@ -1244,7 +1249,7 @@ serves every panel. With a header configured Infinity requires
 
 The tables above read the daemon's ring, bounded by volume and not by
 time, so the time picker cannot reach back. Where a
-[PerfSentinelHub](https://github.com/robintra/PerfSentinelHub) is
+[PerfSentinelHub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub) is
 deployed (0.3.0 and later), the collapsed `History (Hub)` row reads the
 Hub instead. It calls the Hub's `GET /api/findings` with the picker's
 range (`from`, `to`), the `Environment` variable, and the `Service` and

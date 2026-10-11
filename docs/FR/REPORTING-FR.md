@@ -54,7 +54,7 @@ perf-sentinel disclose --tui \
   --org-config /etc/perf-sentinel/org.toml
 ```
 
-![prévisualisation disclose : le stepper calendaire élargit la période, le résumé se met à jour, et le validateur officiel rend son verdict](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/demo.gif)
+![prévisualisation disclose : le stepper calendaire élargit la période, le résumé se met à jour, et le validateur officiel rend son verdict](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/demo.gif)
 
 Seuls `--input` et `--org-config` restent requis. La période, l'intent et la confidentialité se règlent en direct :
 
@@ -75,11 +75,11 @@ Un rapport porte l'énergie et le carbone opérationnels totaux de la charge (d�
 
 Publier les deux permet à un lecteur de les comparer et de voir combien de gaspillage évitable un seuil opérateur relâché masquerait. Pour `intent = official`, le validateur refuse un rapport dont le `canonical_waste.n_plus_one_threshold` n'est pas la valeur canonique du binaire.
 
-![prévisualisation disclose, vue mois : en-tête des réglages, résumé agrégé, et la commande équivalente en pied de page](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/preview.png)
+![prévisualisation disclose, vue mois : en-tête des réglages, résumé agrégé, et la commande équivalente en pied de page](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/preview.png)
 
-![prévisualisation disclose, vue trimestre : le stepper `g` élargit la période au trimestre entier](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/quarter.png)
+![prévisualisation disclose, vue trimestre : le stepper `g` élargit la période au trimestre entier](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/quarter.png)
 
-![prévisualisation disclose, intent official : le validateur explique pourquoi le rapport n'est pas encore publiable](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/official.png)
+![prévisualisation disclose, intent official : le validateur explique pourquoi le rapport n'est pas encore publiable](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/official.png)
 
 ## Correspondance ESRS E1 (v1.3)
 
@@ -355,7 +355,7 @@ Exemple avant / après sur une divulgation fraîche :
 "integrity": {
   "content_hash": "sha256:abc123...",
   "binary_hash": "sha256:def456...",
-  "binary_verification_url": "https://github.com/robintra/perf-sentinel/releases/tag/v0.7.0",
+  "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.7.0",
   "trace_integrity_chain": null,
   "signature": null,
   "binary_attestation": null
@@ -367,7 +367,7 @@ Exemple avant / après sur une divulgation fraîche :
 "integrity": {
   "content_hash": "sha256:abc123...",
   "binary_hash": "sha256:def456...",
-  "binary_verification_url": "https://github.com/robintra/perf-sentinel/releases/tag/v0.7.0",
+  "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.7.0",
   "trace_integrity_chain": null,
   "signature": {
     "format": "sigstore-cosign-intoto-v1",

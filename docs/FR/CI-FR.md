@@ -272,8 +272,8 @@ Le baseline est rafraîchi à chaque push vers `main`, donc l'onglet Diff
 compare toujours les traces de la PR contre le dernier état fusionné.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/baseline-flow_dark.svg">
-  <img alt="Baseline et placement du gate en CI" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/baseline-flow.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/baseline-flow_dark.svg">
+  <img alt="Baseline et placement du gate en CI" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/baseline-flow.svg">
 </picture>
 
 Deux propriétés découlent de ce flux. Le premier passage sur le tronc
@@ -668,8 +668,8 @@ La sous-commande `diff` compare deux jeux de traces et émet un rapport delta qu
 La comparaison est une différence d'ensembles sur les identités de findings, pas une comparaison d'exécutions de tests. Rien ne lui indique quels scénarios chaque côté a exécutés, donc le sens d'une colonne dépend de ce que les deux campagnes ont couvert :
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/diff-classification_dark.svg">
-  <img alt="Classement d'un finding par le Diff" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/diff-classification.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/diff-classification_dark.svg">
+  <img alt="Classement d'un finding par le Diff" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/diff-classification.svg">
 </picture>
 
 Trois conséquences :
@@ -729,7 +729,7 @@ jobs:
       - name: Install perf-sentinel
         run: |
           set -euo pipefail
-          BASE_URL="https://github.com/robintra/perf-sentinel/releases/download/v${PERF_SENTINEL_VERSION}"
+          BASE_URL="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/download/v${PERF_SENTINEL_VERSION}"
           curl -sSLf -o perf-sentinel-linux-amd64 "${BASE_URL}/perf-sentinel-linux-amd64"
           curl -sSLf -o SHA256SUMS.txt            "${BASE_URL}/SHA256SUMS.txt"
           grep 'perf-sentinel-linux-amd64' SHA256SUMS.txt | sha256sum -c -

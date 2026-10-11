@@ -147,7 +147,7 @@ cargo audit
 
 # 4. Inspect actions permissions on the repo. Expected: enabled and
 #    `selected` (not `all`). Requires gh CLI authenticated.
-gh api repos/robintra/perf-sentinel/actions/permissions
+gh api repos/Institut-du-Numerique-Responsable/perf-sentinel/actions/permissions
 ```
 
 ## Bumping a pin manually
@@ -222,7 +222,7 @@ If you have not used Sigstore before, this short primer is a prerequisite for th
 
 **Who signs with which key.** Cosign generates a brand-new ephemeral keypair just before signing. Fulcio issues a 10-minute certificate that binds the *public* half of that keypair to the OIDC identity. Once the signature is uploaded to Rekor the keypair is discarded. What remains is the signature, the certificate, and the Rekor entry, which is what a verifier needs.
 
-**The OIDC identity** is the subject of the Fulcio certificate, surfaced as `signer_identity` + `signer_issuer` in any document that records the signature. For a GitHub Actions release workflow the identity is the workflow URL (`https://github.com/robintra/perf-sentinel/.github/workflows/release.yml@refs/tags/...`) and the issuer is `https://token.actions.githubusercontent.com`. For an individual signing locally with a Google account, the identity is the email address and the issuer is `https://accounts.google.com`. Consumers should pin the expected identity regex and issuer in their verification policy.
+**The OIDC identity** is the subject of the Fulcio certificate, surfaced as `signer_identity` + `signer_issuer` in any document that records the signature. For a GitHub Actions release workflow the identity is the workflow URL (`https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/.github/workflows/release.yml@refs/tags/...`) and the issuer is `https://token.actions.githubusercontent.com`. For an individual signing locally with a Google account, the identity is the email address and the issuer is `https://accounts.google.com`. Consumers should pin the expected identity regex and issuer in their verification policy.
 
 **Known limitation: OIDC issuer migration.** The issuer URL is recorded inside the certificate and therefore in Rekor. If the producing organisation migrates between identity providers later, past signatures remain valid but new signatures will carry a different `signer_issuer`. Verifier policies that pin a specific issuer must be updated, otherwise they reject the new signatures as untrusted. Plan the pinning policy with provider migrations in mind.
 
@@ -262,8 +262,18 @@ Verify a downloaded binary:
 
 ```bash
 gh attestation verify perf-sentinel-linux-amd64 \
+  --repo Institut-du-Numerique-Responsable/perf-sentinel
+```
+
+Binaries of v0.26.2 and earlier were attested before the repository moved
+to the Institut du Numérique Responsable. Their attestations stayed under
+the original account, so they verify by owner, pinned to the original
+repository:
+
+```bash
+gh attestation verify perf-sentinel-linux-amd64 \
   --owner robintra \
-  --repo perf-sentinel
+  --signer-repo robintra/perf-sentinel
 ```
 
 A successful verification confirms that the binary was built from a
@@ -306,9 +316,11 @@ is the attestation's predicate, the binary is its subject):
 
 ```bash
 gh attestation verify perf-sentinel-linux-amd64 \
-  --repo robintra/perf-sentinel \
+  --repo Institut-du-Numerique-Responsable/perf-sentinel \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
+
+For v0.26.2 and earlier, replace `--repo` with `--owner robintra --signer-repo robintra/perf-sentinel`, as above.
 
 The SBOM is derived from the Linux amd64 binary. The four release binaries
 share their Rust dependency closure bar a few platform-shim crates, so the SBOM

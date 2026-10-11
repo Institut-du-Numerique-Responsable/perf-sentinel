@@ -153,7 +153,7 @@ pipeline {
                            message: 'perf-sentinel: download failed, stage marked unstable') {
                     sh '''
                         set -euo pipefail
-                        BASE_URL="https://github.com/robintra/perf-sentinel/releases/download/v${PERF_SENTINEL_VERSION}"
+                        BASE_URL="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/download/v${PERF_SENTINEL_VERSION}"
                         curl -sSLf -o perf-sentinel-linux-amd64 "${BASE_URL}/perf-sentinel-linux-amd64"
                         curl -sSLf -o SHA256SUMS.txt            "${BASE_URL}/SHA256SUMS.txt"
                     '''

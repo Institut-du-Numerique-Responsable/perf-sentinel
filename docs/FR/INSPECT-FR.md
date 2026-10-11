@@ -51,7 +51,7 @@ n'est requise sauf pour l'onglet Incidents, qui prend `--api-key-file`
 (ou `PERF_SENTINEL_DAEMON_API_KEY`) et accepte la clé en lecture seule
 `[daemon] read_api_key`.
 
-![TUI tout-en-un : Analyze descend vers Inspect puis Explain, Esc remonte](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/demo.gif)
+![TUI tout-en-un : Analyze descend vers Inspect puis Explain, Esc remonte](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/demo.gif)
 
 ## Vues et drill-down
 
@@ -77,11 +77,11 @@ ou `query inspect`) ou depuis les arbres masqués qu'un Report porte (un
 instantané daemon, ou `tempo`/`jaeger-query --format json`). Une trace
 dont l'entrée ne contient pas les spans affiche une indication à la place.
 
-![Vue Analyze : le tableau de bord de synthèse GreenOps sous la barre d'onglets](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/analyze.png)
+![Vue Analyze : le tableau de bord de synthèse GreenOps sous la barre d'onglets](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/analyze.png)
 
-![Vue Inspect : le navigateur à quatre panneaux, traces, findings, corrélations et détail](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/inspect.png)
+![Vue Inspect : le navigateur à quatre panneaux, traces, findings, corrélations et détail](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/inspect.png)
 
-![Vue Explain : l'arbre de spans annoté plein écran d'une trace](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/tui/explain.png)
+![Vue Explain : l'arbre de spans annoté plein écran d'une trace](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/explain.png)
 
 ## Disposition
 
@@ -279,7 +279,7 @@ sources, intensités par région) sont catégorielles et à haute
 cardinalité, donc la règle des labels bornés les garde hors du
 `/metrics` Prometheus.
 
-![query monitor parcourt six onglets sur un daemon vivant : Advisor, Energy, Trends, Scrapers, Config, Incidents](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/demo.gif)
+![query monitor parcourt six onglets sur un daemon vivant : Advisor, Energy, Trends, Scrapers, Config, Incidents](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/demo.gif)
 
 - **Advisor** affiche les indications du conseiller de réglages du
   daemon (`warning_details`), colorées par type. Un daemon bien
@@ -287,7 +287,7 @@ cardinalité, donc la règle des labels bornés les garde hors du
   un daemon sous-dimensionné dont la fenêtre de traces est bloquée près
   de son plafond.
 
-  ![Onglet Advisor : une indication de réglage, traces actives à 90 % ou plus de max_active_traces](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/advisor.png)
+  ![Onglet Advisor : une indication de réglage, traces actives à 90 % ou plus de max_active_traces](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/advisor.png)
 
 - **Energy** montre le mix énergie/carbone effectif directement depuis
   le `green_summary` live : par service (source effective, part mesurée,
@@ -298,7 +298,7 @@ cardinalité, donc la règle des labels bornés les garde hors du
   Un service dont aucune opération n'a été mesurée affiche `I/O counts`
   comme source.
 
-  ![Onglet Energy : mix énergie/carbone par service et par région avec des sources d'intensité froides](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/energy.png)
+  ![Onglet Energy : mix énergie/carbone par service et par région avec des sources d'intensité froides](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/energy.png)
 
 - **Trends** trace l'historique de sondage en courbes braille live :
   l'énergie et le carbone par fenêtre de scoring en haut, et en dessous
@@ -315,14 +315,14 @@ cardinalité, donc la règle des labels bornés les garde hors du
   champs de plafond demandent un daemon 0.8.8. Face à un daemon plus
   ancien, le panneau Headroom se dégrade en indication.
 
-  ![Onglet Trends : courbes d'énergie et de carbone sur l'historique de sondage, pourcentages de headroom sous le seuil advisor](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/trends.png)
+  ![Onglet Trends : courbes d'énergie et de carbone sur l'historique de sondage, pourcentages de headroom sous le seuil advisor](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/trends.png)
 
 - **Scrapers** lit `/api/energy` pour la santé live des backends. Ici
   `cloud_energy` est configuré mais son endpoint est injoignable, donc
   son âge de fraîcheur grimpe tandis que les backends non configurés
   restent en tiret.
 
-  ![Onglet Scrapers : santé des backends, cloud_energy configuré avec un âge de fraîcheur qui grimpe](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/scrapers.png)
+  ![Onglet Scrapers : santé des backends, cloud_energy configuré avec un âge de fraîcheur qui grimpe](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/scrapers.png)
 
 - **Config** lit `/api/config` pour les réglages `[daemon]` effectifs
   du daemon, en lecture seule. Chaque paramètre montre sa valeur
@@ -333,7 +333,7 @@ cardinalité, donc la règle des labels bornés les garde hors du
   d'incidents enabled/disabled) et jamais montrés en clair.
   Nécessite un daemon 0.8.8+, les plus anciens affichent une indication.
 
-  ![Onglet Config : paramètres du daemon avec valeur actuelle, défaut et description, valeurs modifiées signalées](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/config.png)
+  ![Onglet Config : paramètres du daemon avec valeur actuelle, défaut et description, valeurs modifiées signalées](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/config.png)
 
 - **Incidents** lit `GET /api/incidents` pour les redémarrages et
   événements mémoire que votre alerting a postés au daemon (depuis
@@ -361,7 +361,7 @@ cardinalité, donc la règle des labels bornés les garde hors du
   `perf-sentinel query incidents --offset` pagine au-delà et
   `--namespace` restreint la liste à un namespace.
 
-  ![Onglet Incidents : un OOM kill de checkout-svc encore actif, sa fenêtre capturée complète, un finding qui se déclenchait avant le redémarrage](https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/monitor/incidents.png)
+  ![Onglet Incidents : un OOM kill de checkout-svc encore actif, sa fenêtre capturée complète, un finding qui se déclenchait avant le redémarrage](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/monitor/incidents.png)
 
 Quand le daemon devient injoignable, le dernier instantané valide reste
 affiché avec un indicateur `[STALE]` au lieu de se vider.

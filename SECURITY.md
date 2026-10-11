@@ -19,12 +19,12 @@ Only the latest minor release receives security fixes. Users on older versions a
 
 Instead, report them privately through GitHub's built-in private vulnerability reporting:
 
-1. Navigate to the [Security tab](https://github.com/robintra/perf-sentinel/security) of this repository.
+1. Navigate to the [Security tab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/security) of this repository.
 2. Click **Report a vulnerability**.
 3. Fill in the advisory form with as much detail as possible.
 
 Alternatively, you can open a private security advisory directly at:
-https://github.com/robintra/perf-sentinel/security/advisories/new
+https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/security/advisories/new
 
 ### What to include in your report
 

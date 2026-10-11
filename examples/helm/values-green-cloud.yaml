@@ -36,7 +36,7 @@ config:
       #   instance_type: looked up in the embedded SPECpower table. An unknown one
       #     warns at startup and falls back to a provider average, which only makes
       #     the figure coarser. That warning is how you check yours. Full list:
-      #     https://github.com/robintra/perf-sentinel/blob/main/docs/INSTANCE-TYPES.md
+      #     https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/INSTANCE-TYPES.md
       default_provider = "aws"
       default_instance_type = "c5.4xlarge"
       # Omit `cpu_metric` and the query is derived from the provider:

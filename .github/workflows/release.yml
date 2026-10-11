@@ -182,7 +182,7 @@ jobs:
 
   # SLSA build provenance attestation (Build Level 2) for every release binary.
   # Stored in the GitHub attestations API (no release asset), queryable
-  # via `gh attestation verify <binary> --owner robintra --repo perf-sentinel`.
+  # via `gh attestation verify <binary> --repo Institut-du-Numerique-Responsable/perf-sentinel`.
   # Uses the GitHub-native `actions/attest-build-provenance` (maintained
   # under the actions/ org) since 0.7.1, instead of
   # `slsa-framework/slsa-github-generator` (in de-facto maintenance since
@@ -253,7 +253,7 @@ jobs:
       # re-run (crate version already on crates.io), fail loudly on any
       # other error. An `|| echo warning` fallback would hide a real compile
       # failure during `cargo publish --verify` behind a green job. See the
-      # post-mortem on https://github.com/robintra/perf-sentinel/releases/tag/v0.4.0.
+      # post-mortem on https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.4.0.
       - name: Publish perf-sentinel-core
         shell: bash
         run: |

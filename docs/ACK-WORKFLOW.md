@@ -7,8 +7,8 @@ via the daemon HTTP API (daemon ack, since 0.5.20). They cover
 different operational scenarios and can be used side-by-side.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/ack-stores_dark.svg">
-  <img alt="The two acknowledgment stores, their writers and their readers" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/ack-stores.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/ack-stores_dark.svg">
+  <img alt="The two acknowledgment stores, their writers and their readers" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/ack-stores.svg">
 </picture>
 
 Two things the diagram makes visible. The daemon reads both stores

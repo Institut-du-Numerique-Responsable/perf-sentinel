@@ -41,7 +41,7 @@ Run Perf Sentinel in your CI pipeline to catch N+1 queries before they reach pro
 ### Install
 
 ```bash
-curl -LO https://github.com/robintra/perf-sentinel/releases/latest/download/perf-sentinel-linux-amd64
+curl -LO https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/latest/download/perf-sentinel-linux-amd64
 chmod +x perf-sentinel-linux-amd64
 sudo mv perf-sentinel-linux-amd64 /usr/local/bin/perf-sentinel
 ```
@@ -125,7 +125,7 @@ Production deployment where services send traces to an OpenTelemetry Collector. 
 
 ```bash
 # Fetch the example compose file (no checkout needed), then start it
-curl -o docker-compose.yml https://raw.githubusercontent.com/robintra/perf-sentinel/main/examples/docker-compose-collector.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/examples/docker-compose-collector.yml
 docker compose up -d
 ```
 
@@ -184,8 +184,8 @@ Key metrics: `perf_sentinel_findings_total{type, severity, service, grouping}`, 
 Perf Sentinel ingests OTLP, not Datadog's native APM format, and it ships no Datadog adapter. If your services are instrumented with **dd-trace** (Datadog's proprietary tracer) and you have no OpenTelemetry instrumentation, bridge them with an OpenTelemetry Collector running the [`datadogreceiver`](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/datadogreceiver/README.md). The receiver implements the Datadog Agent trace intake API on port 8126, converts dd-trace spans to OTLP, and an `otlp` exporter forwards a copy to Perf Sentinel. No application code changes are required: you repoint dd-trace at the Collector, and you can keep sending to Datadog in parallel.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/dd-trace-bridge_dark.svg">
-  <img alt="dd-trace bridge topology: the Collector datadogreceiver forwards OTLP to the watch daemon, to a Tempo/Jaeger backend pulled in batch by tempo/jaeger-query, or to a file exporter whose OTLP JSON dump feeds analyze --input." src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/dd-trace-bridge.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/dd-trace-bridge_dark.svg">
+  <img alt="dd-trace bridge topology: the Collector datadogreceiver forwards OTLP to the watch daemon, to a Tempo/Jaeger backend pulled in batch by tempo/jaeger-query, or to a file exporter whose OTLP JSON dump feeds analyze --input." src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/dd-trace-bridge.svg">
 </picture>
 
 Perf Sentinel reads the Datadog resource (`dd.span.Resource`, where dd-trace leaves the obfuscated SQL) natively, so SQL detection works as long as each span keeps a database signal: the stable `db.system.name` (what current receiver versions emit), the older `db.system`, or the dd-trace `db.type` tag. No attribute remapping in the Collector is required. If a Collector version strips all of them, add a `transform` processor that restores one so the gate can fire.
@@ -244,7 +244,7 @@ Debug a single service in dev/staging. Perf Sentinel runs alongside the service,
 
 ```bash
 # Fetch the example compose file (no checkout needed), then start it
-curl -o docker-compose.yml https://raw.githubusercontent.com/robintra/perf-sentinel/main/examples/docker-compose-sidecar.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/examples/docker-compose-sidecar.yml
 docker compose up -d
 ```
 
@@ -521,8 +521,8 @@ Sending an auth header over plain `http://` emits a `tracing::warn!` once at scr
 When neither Scaphandre nor cloud energy are available but you have reference energy measurements from an external source (power meter, RAPL export, datacenter monitoring), the `perf-sentinel calibrate` subcommand tunes the I/O-to-energy proxy coefficients per service. The three-step workflow:
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/calibration-workflow_dark.svg">
-  <img alt="Calibration workflow" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/calibration-workflow.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/calibration-workflow_dark.svg">
+  <img alt="Calibration workflow" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/calibration-workflow.svg">
 </picture>
 
 **1. Measure.** Run a reference workload and collect both traces (standard Perf Sentinel JSON format) and energy measurements (CSV with `timestamp,service,power_watts` or `timestamp,service,energy_kwh` columns, auto-detected from the header).

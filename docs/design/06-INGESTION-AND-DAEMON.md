@@ -3,8 +3,8 @@
 ## OTLP conversion
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/otlp-conversion_dark.svg">
-  <img alt="OTLP two-pass conversion" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/otlp-conversion.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/otlp-conversion_dark.svg">
+  <img alt="OTLP two-pass conversion" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/otlp-conversion.svg">
 </picture>
 
 ### Two-pass design
@@ -152,8 +152,8 @@ This avoids parsing the full payload into a `serde_json::Value` for detection, e
 ## Daemon event loop
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/daemon_dark.svg">
-  <img alt="Daemon architecture" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/daemon.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/daemon_dark.svg">
+  <img alt="Daemon architecture" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/daemon.svg">
 </picture>
 
 ### Architecture
@@ -434,8 +434,8 @@ Per-trace failures log at `debug`, not `error`. A single classified summary line
 ## Daemon query API
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/query-api_dark.svg">
-  <img alt="Daemon query API architecture" src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/query-api.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/query-api_dark.svg">
+  <img alt="Daemon query API architecture" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/query-api.svg">
 </picture>
 
 The daemon exposes its internal state via HTTP endpoints alongside the existing `/v1/traces`, `/metrics` and `/health` routes on port 4318.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/schemas/perf-sentinel-report-v1.json",
+  "$id": "https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/schemas/perf-sentinel-report-v1.json",
   "title": "perf-sentinel periodic disclosure report",
   "description": "Aggregated, hash-verifiable disclosure of perf-sentinel detections over a calendar period (typically a quarter). Intended for public transparency. Distinct from the per-batch Report tree.",
   "type": "object",

@@ -298,7 +298,7 @@ Ce qu'un consommateur doit conclure quand chaque vérification échoue :
 - **Binary attestation FAIL** : le binaire référencé par
   `integrity.binary_verification_url` ne correspond pas à
   l'attestation SLSA, ou le source-uri ne correspond pas à
-  `github.com/robintra/perf-sentinel`. Traiter comme non fiable.
+  `github.com/Institut-du-Numerique-Responsable/perf-sentinel`. Traiter comme non fiable.
 
 Le verdict global apparaît comme `TRUSTED` (content hash +
 signature OK), `PARTIAL` (content hash OK mais signature
