@@ -88,7 +88,10 @@ fn draw_brand_footer(f: &mut Frame, area: Rect) {
         Span::styled("Powered by ", dim_style()),
         Span::styled("perf-sentinel", green),
         Span::styled(" (", dim_style()),
-        Span::styled("github.com/robintra/perf-sentinel", green_link),
+        Span::styled(
+            "github.com/Institut-du-Numerique-Responsable/perf-sentinel",
+            green_link,
+        ),
         Span::styled(")", dim_style()),
     ]);
     f.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);

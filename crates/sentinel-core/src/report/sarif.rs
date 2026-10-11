@@ -451,7 +451,9 @@ pub fn report_to_sarif(report: &Report) -> SarifLog {
                 driver: SarifDriver {
                     name: "perf-sentinel".to_string(),
                     version: env!("CARGO_PKG_VERSION").to_string(),
-                    information_uri: "https://github.com/robintra/perf-sentinel".to_string(),
+                    information_uri:
+                        "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel"
+                            .to_string(),
                     rules: build_rules(),
                 },
             },
@@ -496,7 +498,9 @@ pub fn findings_to_sarif(findings: &[Finding]) -> SarifLog {
                 driver: SarifDriver {
                     name: "perf-sentinel".to_string(),
                     version: env!("CARGO_PKG_VERSION").to_string(),
-                    information_uri: "https://github.com/robintra/perf-sentinel".to_string(),
+                    information_uri:
+                        "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel"
+                            .to_string(),
                     rules: build_rules(),
                 },
             },
