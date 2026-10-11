@@ -10,14 +10,14 @@
   /* Vertical rhythm by role: tight inside the evaluation chapter, default between sections, a large break before GreenOps and the CTA */
   [data-ps-root]{--rh-1:clamp(32px,3vw,40px);--rh-2:clamp(48px,5vw,64px);--rh-3:clamp(80px,8vw,112px);--rh-band:clamp(40px,4vw,56px)}
   main>section:not([data-screen-label="Hero"]){margin-top:var(--rh-gap,var(--rh-2))}
-  @media(max-width:560px){[data-gov]{grid-template-columns:minmax(0,1fr)!important;gap:18px!important;padding:22px!important}[data-gov]>a{max-width:240px}}
+  @media(max-width:560px){[data-gov]{grid-template-columns:minmax(0,1fr)!important;gap:18px!important;padding-top:24px!important}[data-gov]>a{max-width:160px}}
   /* Section headings and intros share one setting each; the forced line break in a few headings only helps on wide screens */
   [data-ps-root] main h2{line-height:1.2;text-wrap:balance}
   @media(max-width:560px){[data-ps-root] main h2 br{display:none}}
   [data-intro]{margin:18px 0 0;max-width:720px;font-size:15.5px;line-height:1.65;color:var(--text-2)}
   [data-links]{display:flex;flex-wrap:wrap;align-items:center;gap:8px 28px}
   @media(max-width:560px){#start [data-nontech-only]>a{flex:1 1 100%;text-align:center}}
-  #greenops,#start{--rh-gap:var(--rh-3)}#comparatif,#license,#security{--rh-gap:var(--rh-1)}#start{padding-bottom:var(--rh-2)}
+  #greenops,#start{--rh-gap:var(--rh-3)}#comparatif,#license,#security{--rh-gap:var(--rh-1)}#governance{padding-bottom:var(--rh-2)}
   /* Phones: the GreenOps panel drops its frame, the cards inside keep theirs and get the full width */
   @media(max-width:767px){#greenops>div{padding:0!important;background:none!important;border:0!important;border-radius:0!important}}
   /* Without #mesure (exec, legal, proc), #comparatif opens the chapter and keeps the default gap */

@@ -1006,14 +1006,14 @@
   /* Vertical rhythm by role: tight inside the evaluation chapter, default between sections, a large break before GreenOps and the CTA */
   [data-ps-root]{--rh-1:clamp(32px,3vw,40px);--rh-2:clamp(48px,5vw,64px);--rh-3:clamp(80px,8vw,112px);--rh-band:clamp(40px,4vw,56px)}
   main>section:not([data-screen-label="Hero"]){margin-top:var(--rh-gap,var(--rh-2))}
-  @media(max-width:560px){[data-gov]{grid-template-columns:minmax(0,1fr)!important;gap:18px!important;padding:22px!important}[data-gov]>a{max-width:240px}}
+  @media(max-width:560px){[data-gov]{grid-template-columns:minmax(0,1fr)!important;gap:18px!important;padding-top:24px!important}[data-gov]>a{max-width:160px}}
   /* Section headings and intros share one setting each; the forced line break in a few headings only helps on wide screens */
   [data-ps-root] main h2{line-height:1.2;text-wrap:balance}
   @media(max-width:560px){[data-ps-root] main h2 br{display:none}}
   [data-intro]{margin:18px 0 0;max-width:720px;font-size:15.5px;line-height:1.65;color:var(--text-2)}
   [data-links]{display:flex;flex-wrap:wrap;align-items:center;gap:8px 28px}
   @media(max-width:560px){#start [data-nontech-only]>a{flex:1 1 100%;text-align:center}}
-  #greenops,#start{--rh-gap:var(--rh-3)}#comparatif,#license,#security{--rh-gap:var(--rh-1)}#start{padding-bottom:var(--rh-2)}
+  #greenops,#start{--rh-gap:var(--rh-3)}#comparatif,#license,#security{--rh-gap:var(--rh-1)}#governance{padding-bottom:var(--rh-2)}
   /* Phones: the GreenOps panel drops its frame, the cards inside keep theirs and get the full width */
   @media(max-width:767px){#greenops>div{padding:0!important;background:none!important;border:0!important;border-radius:0!important}}
   /* Without #mesure (exec, legal, proc), #comparatif opens the chapter and keeps the default gap */
@@ -1971,19 +1971,6 @@
       </div> <a data-plain href="{{ secMoreHref }}" style="display:inline-flex;align-items:center;gap:7px;margin-top:24px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ secMore }}</span><span data-arrow> →</span></a>
     </section>
 
-    <!-- STEWARDSHIP -->
-    <section id="governance" data-screen-label="Governance">
-      <div data-gov="" style="display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:32px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px 30px">
-        <a data-plain href="https://institutnr.org/" target="_blank" rel="noopener" style="display:block"><img data-logo="light" src="assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width:100%;height:auto"><img data-logo="dark" src="assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width:100%;height:auto"></a>
-        <div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent);letter-spacing:.04em">{{ govEyebrow }}</div>
-          <h2 style="margin:12px 0 0;font-size:clamp(24px,2.7vw,31px);font-weight:700;letter-spacing:-.018em;color:var(--text);text-wrap:balance">{{ govTitleA }}<span style="color:var(--accent-strong)">{{ govTitleB }}</span></h2>
-          <p style="margin:12px 0 0;font-size:15px;line-height:1.6;color:var(--text-2);max-width:62ch">{{ govBodyA }}<a href="https://github.com/robintra" target="_blank" rel="noopener" style="color:var(--accent-strong);font-weight:600">Robin Trassard</a>{{ govBodyB }}</p>
-          <div data-links="" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:10px 22px"><a data-plain href="https://institutnr.org/" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>institutnr.org</span><span data-arrow="ext"> ↗</span></a><a data-plain href="https://github.com/Institut-du-Numerique-Responsable" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ govGh }}</span><span data-arrow="ext"> ↗</span></a></div>
-        </div>
-      </div>
-    </section>
-
     <!-- CTA -->
     <section id="start" data-screen-label="CTA">
       <div style="position:relative;overflow:hidden;border-radius:20px;border:1px solid var(--border);background:#0B523A;padding:clamp(34px,5vw,56px)">
@@ -2009,6 +1996,19 @@
       </div>
     </section>
 
+    <!-- STEWARDSHIP -->
+    <section id="governance" data-screen-label="Governance">
+      <div data-gov="" style="display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr);gap:32px;align-items:center;border-top:1px solid var(--border);padding-top:32px">
+        <a data-plain href="https://institutnr.org/" target="_blank" rel="noopener" style="display:block"><img data-logo="light" src="assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width:100%;height:auto"><img data-logo="dark" src="assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width:100%;height:auto"></a>
+        <div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent);letter-spacing:.04em">{{ govEyebrow }}</div>
+          <h2 style="margin:12px 0 0;font-size:clamp(24px,2.7vw,31px);font-weight:700;letter-spacing:-.018em;color:var(--text);text-wrap:balance">{{ govTitleA }}<span style="color:var(--accent-strong)">{{ govTitleB }}</span></h2>
+          <p style="margin:12px 0 0;font-size:15px;line-height:1.6;color:var(--text-2);max-width:62ch">{{ govBodyA }}<a href="https://github.com/robintra" target="_blank" rel="noopener" style="color:var(--accent-strong);font-weight:600">Robin Trassard</a>{{ govBodyB }}</p>
+          <div data-links="" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:10px 22px"><a data-plain href="https://institutnr.org/" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>institutnr.org</span><span data-arrow="ext"> ↗</span></a><a data-plain href="https://github.com/Institut-du-Numerique-Responsable" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ govGh }}</span><span data-arrow="ext"> ↗</span></a></div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <!-- FOOTER -->
@@ -2018,7 +2018,6 @@
         <div>
           <img data-logo="light" src="assets/logo-h-light.svg" alt="Perf Sentinel" style="height:40px;width:auto"><img data-logo="dark" src="assets/logo-h-dark.svg" alt="Perf Sentinel" style="height:40px;width:auto">
           <p style="margin:16px 0 0;font-size:13.5px;color:var(--text-2);max-width:240px;line-height:1.55">{{ ftTagline }}</p>
-          <a data-plain href="https://institutnr.org/" target="_blank" rel="noopener" style="display:inline-flex;flex-direction:column;gap:8px;margin-top:22px;font-size:12px;color:var(--text-2)"><span>{{ inrFtLabel }}</span><img data-logo="light" src="assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="height:52px;width:auto"><img data-logo="dark" src="assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="height:52px;width:auto"></a>
         </div>
         <div>
           <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:13px">{{ ftColProduct }}</div>
@@ -2736,7 +2735,6 @@ class Component extends DCLogic {
         ftBottomLeft: '© 2026 Robin Trassard and contributors · Institut du Numérique Responsable · AGPL-3.0 · Eco-designed page, no tracking script',
         inrBy: 'An open-source project stewarded by',
         inrArt: 'the ', inrName: 'Institut du Numérique Responsable',
-        inrFtLabel: 'Stewarded by',
         govEyebrow: '// governance',
         govTitleA: 'Stewarded by the ',
         govTitleB: 'Institut du Numérique Responsable',
@@ -2956,7 +2954,6 @@ class Component extends DCLogic {
         ftBottomLeft: '© 2026 Robin Trassard et contributeurs · Institut du Numérique Responsable · AGPL-3.0 · Page éco-conçue, sans script de tracking',
         inrBy: 'Un projet open-source porté par',
         inrArt: 'l’', inrName: 'Institut du Numérique Responsable',
-        inrFtLabel: 'Porté par',
         govEyebrow: '// gouvernance',
         govTitleA: 'Porté par l’',
         govTitleB: 'Institut du Numérique Responsable',
@@ -3074,7 +3071,7 @@ class Component extends DCLogic {
       hubRelHref: 'https://github.com/robintra/PerfSentinelHub/releases/tag/v' + (this.state.hubVersion || '0.3.8'),
       ftTagline: t.ftTagline, ftColProduct: t.ftColProduct, ftColDocs: t.ftColDocs, ftColProject: t.ftColProject,
       ftDocQuickstart: t.ftDocQuickstart, ftDocCli: t.ftDocCli, ftDocConfig: t.ftDocConfig, ftDocMethod: t.ftDocMethod,
-      ftProjLicense: t.ftProjLicense, ftBadgeNote: t.ftBadgeNote, ftBottomLeft: t.ftBottomLeft, ftBottomRight: t.ftBottomRight, inrBy: t.inrBy, inrArt: t.inrArt, inrName: t.inrName, inrFtLabel: t.inrFtLabel, govEyebrow: t.govEyebrow, govTitleA: t.govTitleA, govTitleB: t.govTitleB, govBodyA: t.govBodyA, govBodyB: t.govBodyB, govGh: t.govGh,
+      ftProjLicense: t.ftProjLicense, ftBadgeNote: t.ftBadgeNote, ftBottomLeft: t.ftBottomLeft, ftBottomRight: t.ftBottomRight, inrBy: t.inrBy, inrArt: t.inrArt, inrName: t.inrName, govEyebrow: t.govEyebrow, govTitleA: t.govTitleA, govTitleB: t.govTitleB, govBodyA: t.govBodyA, govBodyB: t.govBodyB, govGh: t.govGh,
       ftLegalNotice: t.ftLegalNotice, ftPrivacy: t.ftPrivacy, ftLegalHref: lang === 'fr' ? '/mentions-legales' : '/legal-notice', ftPrivacyHref: lang === 'fr' ? '/confidentialite' : '/privacy-policy',
     };
   }
