@@ -2128,41 +2128,40 @@ class Component extends DCLogic {
 
   componentDidUpdate() { if (this._onDots) this._onDots(); }
 
-  // Latest published release, kept for the session: the unauthenticated
-  // GitHub API allows 60 calls an hour per IP.
-  fetchRelease(repo, key) {
-    const store = 'ps-rel-' + key;
-    try { const v = sessionStorage.getItem(store); if (v) { this.setState({ [key]: v }); return; } } catch (e) {}
-    fetch('https://api.github.com/repos/' + repo + '/releases/latest')
+  // GitHub reads are kept six hours in localStorage: the unauthenticated API
+  // allows 60 calls an hour per IP, shared by everyone behind that IP.
+  cachedGitHub(store, path, pick, key) {
+    try { const c = JSON.parse(localStorage.getItem(store)); if (c && Date.now() - c.t < 216e5) { this.setState({ [key]: c.v }); return; } } catch (e) {}
+    fetch('https://api.github.com/repos/' + path)
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then(j => {
-        const v = j && typeof j.tag_name === 'string' ? j.tag_name.replace(/^v/, '') : '';
-        if (!/^\d+\.\d+\.\d+[\w.\-+]*$/.test(v)) return;
+        const v = pick(j);
+        if (v == null) return;
         this.setState({ [key]: v });
-        try { sessionStorage.setItem(store, v); } catch (e) {}
+        try { localStorage.setItem(store, JSON.stringify({ t: Date.now(), v })); } catch (e) {}
       })
       .catch(() => {});
   }
 
-  // Star count, cached the same way. A failed call leaves the buttons without a number.
+  fetchRelease(repo, key) {
+    this.cachedGitHub('ps-rel-' + key, repo + '/releases/latest', j => {
+      const v = j && typeof j.tag_name === 'string' ? j.tag_name.replace(/^v/, '') : '';
+      return /^\d+\.\d+\.\d+[\w.\-+]*$/.test(v) ? v : null;
+    }, key);
+  }
+
   fetchStars(repo, key) {
-    const store = 'ps-stars-' + key;
-    try { const v = sessionStorage.getItem(store); if (v) { this.setState({ [key]: +v }); return; } } catch (e) {}
-    fetch('https://api.github.com/repos/' + repo)
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then(j => {
-        const n = j && j.stargazers_count;
-        if (!Number.isInteger(n) || n < 0) return;
-        this.setState({ [key]: n });
-        try { sessionStorage.setItem(store, String(n)); } catch (e) {}
-      })
-      .catch(() => {});
+    this.cachedGitHub('ps-stars-' + key, repo, j => {
+      const n = j && j.stargazers_count;
+      return Number.isInteger(n) && n >= 0 ? n : null;
+    }, key);
   }
 
   starVals(t, lang) {
     const fmt = n => (n > 0 ? new Intl.NumberFormat(lang, { notation: 'compact' }).format(n) : '');
     const aria = (name, n) => t.starAria.replace('{name}', name) + (n > 0 ? ', ' + t.starCount.replace('{n}', n) : '');
-    const ps = this.state.psStars, hub = this.state.hubStars;
+    // Fallback when GitHub does not answer, to bump by hand like the version fallbacks.
+    const ps = this.state.psStars ?? 25, hub = this.state.hubStars ?? 0;
     return {
       starsLead: t.starsLead, psStarsName: 'Perf Sentinel', hubStarsName: 'Perf Sentinel Hub',
       psStarsN: fmt(ps), hubStarsN: fmt(hub),
