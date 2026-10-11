@@ -423,7 +423,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/robintra/perf-sentinel:${{ steps.version.outputs.tag }}
-            ghcr.io/robintra/perf-sentinel:latest
+            ghcr.io/institut-du-numerique-responsable/perf-sentinel:${{ steps.version.outputs.tag }}
+            ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest
             robintrassard/perf-sentinel:${{ steps.version.outputs.tag }}
             robintrassard/perf-sentinel:latest

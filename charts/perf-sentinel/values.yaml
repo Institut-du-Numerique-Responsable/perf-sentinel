@@ -4,7 +4,7 @@
 # -- Container image settings.
 image:
   # -- Container image repository.
-  repository: ghcr.io/robintra/perf-sentinel
+  repository: ghcr.io/institut-du-numerique-responsable/perf-sentinel
   # -- Image tag. When empty, falls back to .Chart.AppVersion so `helm upgrade`
   # to a newer chart automatically picks up the matching daemon version.
   tag: ""

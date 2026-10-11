@@ -7,8 +7,28 @@ application version, replacing the earlier independent `0.2.x` chart
 line. The two are not locked together: an application release bumps
 both, while a chart-only release bumps `version` alone and leaves
 `appVersion` on the last application release, as `0.9.16`, `0.9.18`
-through `0.9.21` and `0.9.27` did. Read `appVersion` in `Chart.yaml`, never
+through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
+
+## [0.26.3]
+
+### Changed
+
+- **The chart and its default image move to the Institut du Numérique
+  Responsable namespace.** `image.repository` defaults to
+  `ghcr.io/institut-du-numerique-responsable/perf-sentinel`, and the chart
+  is published at
+  `oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel`.
+  Every image and chart version published under `ghcr.io/robintra` was
+  copied there with its signature, so a pinned tag or digest resolves at
+  both addresses, but only the new one receives new releases. A values
+  file that sets `image.repository` keeps pulling from where it points.
+- `home`, `sources`, `icon` and the Artifact Hub links point at the
+  repository's new home.
+- Chart-only release, `appVersion` intentionally unchanged (still
+  `0.26.2`).
+
+No `values.yaml` key is added or removed, and no template changes.
 
 ## [0.26.2]
 

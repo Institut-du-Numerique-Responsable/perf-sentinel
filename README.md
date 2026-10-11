@@ -134,7 +134,7 @@ chmod +x perf-sentinel-linux-amd64 && sudo mv perf-sentinel-linux-amd64 /usr/loc
 
 # or run via Docker
 docker run --rm -p 4317:4317 -p 4318:4318 \
-  ghcr.io/robintra/perf-sentinel:latest watch --listen-address 0.0.0.0
+  ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest watch --listen-address 0.0.0.0
 ```
 
 Linux binaries target musl (fully static, run on any distro and `FROM scratch` images). A Helm chart is available under [`charts/perf-sentinel/`](charts/perf-sentinel/). See [docs/HELM-DEPLOYMENT.md](docs/HELM-DEPLOYMENT.md).

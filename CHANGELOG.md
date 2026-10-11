@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Changed
+
+- The daemon image and the Helm chart move to `ghcr.io/institut-du-numerique-responsable/perf-sentinel` and `oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel`, following the repository to the Institut du Numérique Responsable. Every version already published under `ghcr.io/robintra` was copied there with its signature, and the old namespace receives no new releases. The Docker Hub image keeps its name, `robintrassard/perf-sentinel`.
+
 ## [0.26.2] - 2026-10-09
 
 This release is a patch: it removes nothing, and no public type of `perf-sentinel-core` changes shape, `CorrelationEndpoint` and `CodeLocation` only gain `PartialOrd` and `Ord`. Its theme is reproducibility: outputs that followed the iteration order of a hash map, which differs on every run and every daemon restart, now follow the input or a total sort, so the same input gives the same report, SARIF, terminal output and daemon API responses. No finding appears or disappears and no detector verdict changes. A tied cross-trace slow finding now names the same trace on every run, and its signature with it. Three figures and one load rule move. Avoidable I/O, and the waste ratio, avoidable CO2, counters and disclosure figures built on it, rises on traces that span several groupings or repeat one query with several parameter sets, so it is not comparable across the upgrade for such traffic. A configuration whose region keys differ only in case and map to different values is rejected at load.

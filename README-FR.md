@@ -134,7 +134,7 @@ chmod +x perf-sentinel-linux-amd64 && sudo mv perf-sentinel-linux-amd64 /usr/loc
 
 # ou via Docker
 docker run --rm -p 4317:4317 -p 4318:4318 \
-  ghcr.io/robintra/perf-sentinel:latest watch --listen-address 0.0.0.0
+  ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest watch --listen-address 0.0.0.0
 ```
 
 Les binaires Linux ciblent musl (entièrement statiques, fonctionnent sur n'importe quelle distribution et dans les images `FROM scratch`). Un chart Helm est disponible sous [`charts/perf-sentinel/`](charts/perf-sentinel/). Voir [docs/FR/HELM-DEPLOYMENT-FR.md](docs/FR/HELM-DEPLOYMENT-FR.md).

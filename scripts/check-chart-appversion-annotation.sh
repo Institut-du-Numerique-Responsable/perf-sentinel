@@ -27,7 +27,7 @@ fi
 
 APP_VERSION=$(awk -F'"' '/^appVersion:/ { print $2; exit }' "${CHART_FILE}")
 IMAGE_TAG=$(awk '
-  /^[[:space:]]+image: ghcr\.io\/robintra\/perf-sentinel:/ {
+  /^[[:space:]]+image: ghcr\.io\/institut-du-numerique-responsable\/perf-sentinel:/ {
     sub(/.*:/, "")
     gsub(/[[:space:]]/, "")
     print

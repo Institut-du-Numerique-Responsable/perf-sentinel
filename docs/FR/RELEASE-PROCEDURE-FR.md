@@ -79,7 +79,7 @@ appVersion: "X.Y.Z"   # suit la release perf-sentinel
 
 Deux annotations du même fichier et le changelog du chart bougent avec `appVersion`, et seule la première saute aux yeux :
 
-- `artifacthub.io/images` : le tag `ghcr.io/robintra/perf-sentinel:X.Y.Z`. Artifact Hub annonce cette image, donc un tag périmé y pointe les lecteurs vers le daemon précédent. `scripts/check-chart-appversion-annotation.sh` tourne dans la CI des PR et fait échouer le build quand il traîne derrière `appVersion`.
+- `artifacthub.io/images` : le tag `ghcr.io/institut-du-numerique-responsable/perf-sentinel:X.Y.Z`. Artifact Hub annonce cette image, donc un tag périmé y pointe les lecteurs vers le daemon précédent. `scripts/check-chart-appversion-annotation.sh` tourne dans la CI des PR et fait échouer le build quand il traîne derrière `appVersion`.
 - `artifacthub.io/changes` : une nouvelle entrée par release, décrivant le changement du point de vue de l'opérateur.
 - `charts/perf-sentinel/CHANGELOG.md` : la section correspondante, que `scripts/check-chart-version-bumped.sh` exige.
 
@@ -224,7 +224,7 @@ Le tag du chart est enveloppé dans le même genre de commande qui échoue ferm�
 scripts/release-chart.sh chart-vA.B.C
 ```
 
-Il lance tous les pre-checks (branche, arbre propre, identité de signature, sync remote, absence du tag) et le gate de version (`scripts/check-helm-tag-version.sh`). Il lance aussi un gate image GHCR qui refuse de tagger tant que l'image du daemon épinglée par le chart (`ghcr.io/robintra/perf-sentinel:<appVersion>`) n'est pas publiée, pour qu'un `helm install` ne tire jamais une image manquante. Attendez que `release.yml` publie cette image (typiquement 5 à 10 minutes après l'étape 6), puis lancez le script. `--dry-run` vérifie les gates, `--yes` saute la confirmation, et `--skip-image-check` contourne le gate image. Le tag est toujours signé.
+Il lance tous les pre-checks (branche, arbre propre, identité de signature, sync remote, absence du tag) et le gate de version (`scripts/check-helm-tag-version.sh`). Il lance aussi un gate image GHCR qui refuse de tagger tant que l'image du daemon épinglée par le chart (`ghcr.io/institut-du-numerique-responsable/perf-sentinel:<appVersion>`) n'est pas publiée, pour qu'un `helm install` ne tire jamais une image manquante. Attendez que `release.yml` publie cette image (typiquement 5 à 10 minutes après l'étape 6), puis lancez le script. `--dry-run` vérifie les gates, `--yes` saute la confirmation, et `--skip-image-check` contourne le gate image. Le tag est toujours signé.
 
 Le repli manuel, une fois l'image GHCR en ligne :
 

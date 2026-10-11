@@ -167,12 +167,12 @@ jobs:
         # the helm output format ever drifts.
         run: |
           set -o pipefail
-          push_output=$(helm push "out/${{ steps.package.outputs.tarball_name }}" oci://ghcr.io/robintra/charts 2>&1)
+          push_output=$(helm push "out/${{ steps.package.outputs.tarball_name }}" oci://ghcr.io/institut-du-numerique-responsable/charts 2>&1)
           printf '%s\n' "${push_output}"
           digest=$(printf '%s\n' "${push_output}" | grep -oE 'sha256:[a-f0-9]{64}' | head -n 1 || true)
           if [ -z "${digest}" ]; then
             echo "::warning::helm push output did not surface a digest, falling back to crane digest"
-            digest=$(crane digest "ghcr.io/robintra/charts/perf-sentinel:${{ needs.check-chart-version.outputs.chart_version }}" || true)
+            digest=$(crane digest "ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel:${{ needs.check-chart-version.outputs.chart_version }}" || true)
           fi
           if [ -z "${digest}" ]; then
             echo "::error::could not extract digest for the pushed chart (helm and crane both empty)"
@@ -196,7 +196,7 @@ jobs:
       - name: Push artifacthub-repo.yml to OCI
         run: |
           oras push \
-            ghcr.io/robintra/charts/perf-sentinel:artifacthub.io \
+            ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel:artifacthub.io \
             --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
             charts/perf-sentinel/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
 
@@ -236,7 +236,7 @@ jobs:
       - name: Sign OCI artifact
         run: |
           cosign sign --yes \
-            "ghcr.io/robintra/charts/perf-sentinel@${{ needs.publish.outputs.oci_digest }}"
+            "ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel@${{ needs.publish.outputs.oci_digest }}"
 
   # SLSA v1.0 build provenance on the packaged .tgz. Attestation is
   # stored on the repo and queryable via `gh attestation verify`.
