@@ -2140,7 +2140,7 @@ class Component extends DCLogic {
     const root = document.querySelector('#dc-root [data-ps-root]');
     if (!root) return;
     const el = (id) => id === 'top' ? root.querySelector('section[data-screen-label="Hero"]') : root.querySelector('#' + id);
-    const ids = ['top', 'why', 'detection', 'stack', 'modes', 'perf', 'hub', 'carbone', 'greenops', 'mesure', 'comparatif', 'license', 'security', 'start'];
+    const ids = ['top', 'why', 'detection', 'stack', 'modes', 'perf', 'hub', 'carbone', 'greenops', 'mesure', 'comparatif', 'license', 'security', 'start', 'governance'];
     const vis = ids.filter(id => { const e = el(id); return e && e.getClientRects().length > 0; });
     const line = window.innerHeight * 0.4;
     let cur = vis[0] || null;
@@ -2528,7 +2528,7 @@ class Component extends DCLogic {
       en: {
         nav: ['Detection', 'Deploy', 'GreenOps', 'Comparison'],
         skipLink: 'Skip to content',
-        dots: { aria: 'Page sections', top: 'Home', why: 'Why', carbone: 'Carbon', detection: 'Detection', stack: 'Stack', modes: 'Deploy', perf: 'Performance', hub: 'Hub', greenops: 'GreenOps', mesure: 'Measurement', comparatif: 'Comparison', license: 'License', security: 'Security', start: 'Get started' },
+        dots: { aria: 'Page sections', top: 'Home', why: 'Why', carbone: 'Carbon', detection: 'Detection', stack: 'Stack', modes: 'Deploy', perf: 'Performance', hub: 'Hub', greenops: 'GreenOps', mesure: 'Measurement', comparatif: 'Comparison', license: 'License', security: 'Security', start: 'Get started', governance: 'Governance' },
         eyebrowHero: 'Self-hosted single binary · OpenTelemetry · ', eyebrowHeroGreen: 'Open source AGPL-3.0',
         heroTitle: 'Spot the wasted I/O in your traces. Price it in energy and carbon.',
         heroSub: 'Perf Sentinel catches N+1s, redundant calls, slow queries and fanout in your OpenTelemetry traces, as a CI quality gate or an OTLP daemon, then turns every avoidable I/O into energy and CO₂.',
@@ -2747,7 +2747,7 @@ class Component extends DCLogic {
       fr: {
         nav: ['Détection', 'Déploiement', 'GreenOps', 'Comparatif'],
         skipLink: 'Aller au contenu',
-        dots: { aria: 'Sections de la page', top: 'Accueil', why: 'Pourquoi', carbone: 'Carbone', detection: 'Détection', stack: 'Technologies', modes: 'Déploiement', perf: 'Performance', hub: 'Hub', greenops: 'GreenOps', mesure: 'Mesure', comparatif: 'Comparatif', license: 'Licence', security: 'Sécurité', start: 'Démarrer' },
+        dots: { aria: 'Sections de la page', top: 'Accueil', why: 'Pourquoi', carbone: 'Carbone', detection: 'Détection', stack: 'Technologies', modes: 'Déploiement', perf: 'Performance', hub: 'Hub', greenops: 'GreenOps', mesure: 'Mesure', comparatif: 'Comparatif', license: 'Licence', security: 'Sécurité', start: 'Démarrer', governance: 'Gouvernance' },
         eyebrowHero: 'Mono-binaire auto-hébergé · OpenTelemetry · ', eyebrowHeroGreen: 'Open source AGPL-3.0',
         heroTitle: 'Détectez les I/O gaspillées de vos traces. Chiffrez-⁠les en énergie et carbone.',
         heroSub: 'Perf Sentinel repère les N+1, appels redondants, requêtes lentes et fanout dans vos traces OpenTelemetry, en quality gate CI ou en daemon OTLP, puis convertit chaque I/O évitable en énergie et en CO₂.',
