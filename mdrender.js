@@ -193,7 +193,7 @@
     });
     var kind = /\/$/.test(href) ? '/tree/main/' : '/blob/main/';
     var path = segs.join('/') + (/\/$/.test(href) ? '/' : '');
-    return { external: true, href: 'https://github.com/robintra/perf-sentinel' + kind + path + (anchor ? '#' + anchor : '') };
+    return { external: true, href: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel' + kind + path + (anchor ? '#' + anchor : '') };
   }
   function inline(text, ctx) {
     var codes = [];
@@ -224,7 +224,7 @@
   // Several provided mermaid SVG exports lost their node labels (only the title
   // survives), so they render as empty boxes. Show the SVG only when it actually
   // carries its labels; otherwise fall back to the ASCII diagram in the markdown.
-  var RAW_DIAGRAMS = 'https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/diagrams/svg/';
+  var RAW_DIAGRAMS = 'https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/';
   function isGoodDiagram(url) { return /\/diagrams\/svg\//.test(url); }
   function nextIsGoodDiagram(lines, i) {
     var j = i; while (j < lines.length && lines[j].trim() === '') j++;
