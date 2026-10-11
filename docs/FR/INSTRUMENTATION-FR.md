@@ -72,7 +72,7 @@ spec:
     spec:
       containers:
         - name: perf-sentinel
-          image: ghcr.io/robintra/perf-sentinel:latest
+          image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest
           ports:
             - containerPort: 4317   # OTLP gRPC
             - containerPort: 4318   # OTLP HTTP + /metrics
@@ -188,7 +188,7 @@ service:
       exporters: [awsxray, otlp/perf-sentinel]
 ```
 
-Déployez Perf Sentinel comme tâche ECS ou Deployment EKS. Pour ECS, utilisez l'image Docker basée sur `scratch` (`ghcr.io/robintra/perf-sentinel:latest`).
+Déployez Perf Sentinel comme tâche ECS ou Deployment EKS. Pour ECS, utilisez l'image Docker basée sur `scratch` (`ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest`).
 
 ### GCP (Cloud Trace + OTel Collector)
 

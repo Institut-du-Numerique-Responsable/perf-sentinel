@@ -19,7 +19,7 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
 
   perf-sentinel:
-    image: ghcr.io/robintra/perf-sentinel:latest
+    image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest
     # Share the app's network namespace so localhost works. The reference
     # config (`listen_address = "127.0.0.1"`) is valid here because both
     # containers see the same loopback. For the collector topology (separate

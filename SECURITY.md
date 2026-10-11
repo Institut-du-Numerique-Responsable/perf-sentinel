@@ -53,7 +53,7 @@ The following components are in scope for security reports:
 - Opt-in outbound connections: the energy scrapers (Alumet, Scaphandre, Kepler, Redfish, cloud energy AWS/GCP/Azure, Electricity Maps), the pull-based ingesters (Tempo, Jaeger query API, pg_stat via Prometheus), the findings push to PerfSentinelHub (`[daemon.hub_export]`) and the `verify-hash --url` fetch.
 - Configuration file parsing (`.perf-sentinel.toml`).
 - SARIF, JSON, OpenMetrics, HTML dashboard and NDJSON archive output.
-- Docker images published to Docker Hub (`robintrassard/perf-sentinel`) and GHCR (`ghcr.io/robintra/perf-sentinel`).
+- Docker images published to Docker Hub (`robintrassard/perf-sentinel`) and GHCR (`ghcr.io/institut-du-numerique-responsable/perf-sentinel`).
 
 ### Out of scope
 

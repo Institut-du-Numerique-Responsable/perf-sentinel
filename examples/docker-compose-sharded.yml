@@ -39,7 +39,7 @@ services:
       retries: 3
 
   perf-sentinel-0:
-    image: ghcr.io/robintra/perf-sentinel:latest
+    image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest
     command: ["watch", "--config", "/etc/perf-sentinel/.perf-sentinel.toml"]
     volumes:
       - ./60-daemon-docker.toml:/etc/perf-sentinel/.perf-sentinel.toml:ro
@@ -58,7 +58,7 @@ services:
       retries: 3
 
   perf-sentinel-1:
-    image: ghcr.io/robintra/perf-sentinel:latest
+    image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest
     command: ["watch", "--config", "/etc/perf-sentinel/.perf-sentinel.toml"]
     volumes:
       - ./60-daemon-docker.toml:/etc/perf-sentinel/.perf-sentinel.toml:ro

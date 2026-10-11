@@ -28,7 +28,7 @@ For a non-Helm alternative, see the raw manifests in
 ## TL;DR
 
 ```bash
-helm install perf-sentinel oci://ghcr.io/robintra/charts/perf-sentinel \
+helm install perf-sentinel oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel \
   --version 0.9.21 \
   --namespace observability --create-namespace
 kubectl --namespace observability get pods -l app.kubernetes.io/name=perf-sentinel
@@ -134,16 +134,22 @@ integrity depends on trace-ID routing, see
 ## Install from OCI registry
 
 The chart is published as an OCI artifact at
-`oci://ghcr.io/robintra/charts/perf-sentinel`. Every version gets
+`oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel`. Every version gets
 Cosign keyless signing (GitHub OIDC, Rekor transparency log), a
 SLSA v1.0 build provenance attestation stored on the repository's
 attestation store, and an SPDX SBOM shipped both as a GitHub Release
 asset and as a signed attestation.
 
+Until the repository moved to the Institut du Numérique Responsable, the
+chart and the daemon image were published under `ghcr.io/robintra`. Every
+version published there was copied to the new namespace with its
+signature, so a pinned version resolves at both addresses, but only the
+new one receives new releases.
+
 ### Pin a version
 
 ```bash
-helm install perf-sentinel oci://ghcr.io/robintra/charts/perf-sentinel \
+helm install perf-sentinel oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel \
   --version 0.9.21 \
   --namespace observability --create-namespace \
   -f my-values.yaml
@@ -159,7 +165,7 @@ against a different chart.
 
 ### Use as a subchart or from Argo CD
 
-`oci://ghcr.io/robintra/charts/perf-sentinel` is the full chart URL, the
+`oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel` is the full chart URL, the
 form `helm install` takes. A `dependencies:` entry wants the parent
 namespace instead, because Helm appends `name` to `repository`:
 
@@ -167,10 +173,10 @@ namespace instead, because Helm appends `name` to `repository`:
 dependencies:
   - name: perf-sentinel
     version: 0.9.21
-    repository: oci://ghcr.io/robintra/charts   # namespace, not the chart URL
+    repository: oci://ghcr.io/institut-du-numerique-responsable/charts   # namespace, not the chart URL
 ```
 
-Same split for an Argo CD `Application`: `repoURL: ghcr.io/robintra/charts`
+Same split for an Argo CD `Application`: `repoURL: ghcr.io/institut-du-numerique-responsable/charts`
 plus `chart: perf-sentinel`.
 
 Repeating the chart name in `repository` resolves to
@@ -181,10 +187,10 @@ when it is a path problem. To confirm the artifact is public, pull an
 anonymous token and fetch the manifest:
 
 ```bash
-token=$(curl -s "https://ghcr.io/token?scope=repository%3Arobintra%2Fcharts%2Fperf-sentinel%3Apull&service=ghcr.io" | jq -r .token)
+token=$(curl -s "https://ghcr.io/token?scope=repository%3Ainstitut-du-numerique-responsable%2Fcharts%2Fperf-sentinel%3Apull&service=ghcr.io" | jq -r .token)
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $token" \
   -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
-  https://ghcr.io/v2/robintra/charts/perf-sentinel/manifests/0.9.21
+  https://ghcr.io/v2/institut-du-numerique-responsable/charts/perf-sentinel/manifests/0.9.21
 ```
 
 ## Artifact Hub
@@ -200,7 +206,7 @@ reference or to redo it on another registry:
 
 1. Sign in to artifacthub.io with a GitHub account.
 2. In the control panel, add a repository of kind "Helm charts (OCI)"
-   pointing to `oci://ghcr.io/robintra/charts/perf-sentinel`.
+   pointing to `oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel`.
 3. Artifact Hub issues a `repositoryID` (UUID).
 4. Put that UUID in `charts/perf-sentinel/artifacthub-repo.yml`, commit
    and push.
@@ -235,7 +241,7 @@ published release workflow, and the OIDC issuer must be GitHub Actions:
 cosign verify \
   --certificate-identity-regexp '^https://github.com/(robintra|Institut-du-Numerique-Responsable)/perf-sentinel/\.github/workflows/helm-release\.yml@refs/tags/chart-v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/robintra/charts/perf-sentinel:0.9.21
+  ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel:0.9.21
 ```
 
 **Requires cosign 3.0 or newer.** The signature is a Sigstore bundle
@@ -289,7 +295,7 @@ Without the release assets, pull the chart from the registry instead.
 artifact itself carries no attestation:
 
 ```bash
-helm pull oci://ghcr.io/robintra/charts/perf-sentinel --version 0.9.21
+helm pull oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel --version 0.9.21
 gh attestation verify perf-sentinel-0.9.21.tgz \
   --owner robintra --signer-repo robintra/perf-sentinel
 ```

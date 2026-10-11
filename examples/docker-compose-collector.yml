@@ -35,7 +35,7 @@ services:
       retries: 3
 
   perf-sentinel:
-    image: ghcr.io/robintra/perf-sentinel:latest
+    image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest
     # Mount the Docker-specific config so the daemon binds to `0.0.0.0`
     # (required because the collector is in a sibling container and cannot
     # reach the daemon's loopback). To enable optional scrapers, mount the

@@ -79,7 +79,7 @@ appVersion: "X.Y.Z"   # tracks the perf-sentinel release
 
 Two annotations in the same file and the chart changelog move with `appVersion`, and only the first one is obvious:
 
-- `artifacthub.io/images`: the `ghcr.io/robintra/perf-sentinel:X.Y.Z` tag. Artifact Hub advertises this image, so a stale tag there points readers at the previous daemon. `scripts/check-chart-appversion-annotation.sh` runs in PR CI and fails the build when it trails `appVersion`.
+- `artifacthub.io/images`: the `ghcr.io/institut-du-numerique-responsable/perf-sentinel:X.Y.Z` tag. Artifact Hub advertises this image, so a stale tag there points readers at the previous daemon. `scripts/check-chart-appversion-annotation.sh` runs in PR CI and fails the build when it trails `appVersion`.
 - `artifacthub.io/changes`: a new entry per release, describing the change from the operator's point of view.
 - `charts/perf-sentinel/CHANGELOG.md`: the matching section, which `scripts/check-chart-version-bumped.sh` requires.
 
@@ -220,7 +220,7 @@ The chart tag is wrapped in the same kind of fail-closed command as the binary t
 scripts/release-chart.sh chart-vA.B.C
 ```
 
-It runs every pre-check (branch, working tree, signing identity, remote sync, tag absence) and the version gate (`scripts/check-helm-tag-version.sh`). It also runs a GHCR image gate that refuses to tag until the daemon image the chart pins (`ghcr.io/robintra/perf-sentinel:<appVersion>`) is published, so a `helm install` never pulls a missing image. Wait for `release.yml` to publish that image (typically 5-10 minutes after step 6), then run the script. Use `--dry-run` to check the gates, `--yes` to skip the confirmation, and `--skip-image-check` to bypass the image gate. The tag is always signed.
+It runs every pre-check (branch, working tree, signing identity, remote sync, tag absence) and the version gate (`scripts/check-helm-tag-version.sh`). It also runs a GHCR image gate that refuses to tag until the daemon image the chart pins (`ghcr.io/institut-du-numerique-responsable/perf-sentinel:<appVersion>`) is published, so a `helm install` never pulls a missing image. Wait for `release.yml` to publish that image (typically 5-10 minutes after step 6), then run the script. Use `--dry-run` to check the gates, `--yes` to skip the confirmation, and `--skip-image-check` to bypass the image gate. The tag is always signed.
 
 The manual fallback, once the GHCR image is live:
 
