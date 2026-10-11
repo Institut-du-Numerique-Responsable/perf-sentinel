@@ -991,6 +991,7 @@
   /* Vertical rhythm by role: tight inside the evaluation chapter, default between sections, a large break before GreenOps and the CTA */
   [data-ps-root]{--rh-1:clamp(32px,3vw,40px);--rh-2:clamp(48px,5vw,64px);--rh-3:clamp(80px,8vw,112px);--rh-band:clamp(40px,4vw,56px)}
   main>section:not([data-screen-label="Hero"]){margin-top:var(--rh-gap,var(--rh-2))}
+  @media(max-width:560px){[data-gov]{grid-template-columns:minmax(0,1fr)!important;gap:18px!important;padding:22px!important}[data-gov]>a{max-width:240px}}
   /* Section headings and intros share one setting each; the forced line break in a few headings only helps on wide screens */
   [data-ps-root] main h2{line-height:1.2;text-wrap:balance}
   @media(max-width:560px){[data-ps-root] main h2 br{display:none}}
@@ -1384,6 +1385,7 @@
           <a data-plain data-nontech-only="" href="{{ ctaCarbonHref }}" style="font-size:15px;font-weight:600;color:var(--on-accent);background:#0b523a;border-radius:9px;padding:13px 22px" style-hover="filter:brightness(1.05)">{{ ctaCarbon }}</a>
           <a data-plain data-nontech-only="" href="{{ ctaHowHref }}" style="font-size:15px;font-weight:600;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:13px 22px" style-hover="border-color:var(--accent)">{{ ctaHow }}</a>
         </div>
+        <a data-plain data-inr-hero="" href="https://institutnr.org/" target="_blank" rel="noopener" style="display:flex;width:fit-content;align-items:center;gap:12px;min-height:44px;margin-top:22px;font-size:13.5px;line-height:1.35;color:var(--text-2)"><img data-logo="light" src="assets/inr-logo.svg" alt="" style="height:40px;width:auto"><img data-logo="dark" src="assets/inr-logo-dark.svg" alt="" style="height:40px;width:auto"><span>{{ inrBy }}<br>{{ inrArt }}<strong style="color:var(--text);font-weight:600">{{ inrName }}</strong></span></a>
       </div>
 
       <img data-logo="light" src="assets/mark-light.svg" alt="" aria-hidden="true" class="ps-hero-mark" style="position:absolute;top:110px;right:0;width:clamp(170px,23vw,300px);pointer-events:none;filter:drop-shadow(0 18px 40px rgba(6,31,44,.28))">
@@ -1954,6 +1956,19 @@
       </div> <a data-plain href="{{ secMoreHref }}" style="display:inline-flex;align-items:center;gap:7px;margin-top:24px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ secMore }}</span><span data-arrow> →</span></a>
     </section>
 
+    <!-- STEWARDSHIP -->
+    <section id="governance" data-screen-label="Governance">
+      <div data-gov="" style="display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:32px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px 30px">
+        <a data-plain href="https://institutnr.org/" target="_blank" rel="noopener" style="display:block"><img data-logo="light" src="assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width:100%;height:auto"><img data-logo="dark" src="assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width:100%;height:auto"></a>
+        <div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent);letter-spacing:.04em">{{ govEyebrow }}</div>
+          <h2 style="margin:12px 0 0;font-size:clamp(24px,2.7vw,31px);font-weight:700;letter-spacing:-.018em;color:var(--text);text-wrap:balance">{{ govTitleA }}<span style="color:var(--accent-strong)">{{ govTitleB }}</span></h2>
+          <p style="margin:12px 0 0;font-size:15px;line-height:1.6;color:var(--text-2);max-width:62ch">{{ govBodyA }}<a href="https://github.com/robintra" target="_blank" rel="noopener" style="color:var(--accent-strong);font-weight:600">Robin Trassard</a>{{ govBodyB }}</p>
+          <div data-links="" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:10px 22px"><a data-plain href="https://institutnr.org/" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>institutnr.org</span><span data-arrow="ext"> ↗</span></a><a data-plain href="https://github.com/Institut-du-Numerique-Responsable" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ govGh }}</span><span data-arrow="ext"> ↗</span></a></div>
+        </div>
+      </div>
+    </section>
+
     <!-- CTA -->
     <section id="start" data-screen-label="CTA">
       <div style="position:relative;overflow:hidden;border-radius:20px;border:1px solid var(--border);background:#0B523A;padding:clamp(34px,5vw,56px)">
@@ -1988,6 +2003,7 @@
         <div>
           <img data-logo="light" src="assets/logo-h-light.svg" alt="Perf Sentinel" style="height:40px;width:auto"><img data-logo="dark" src="assets/logo-h-dark.svg" alt="Perf Sentinel" style="height:40px;width:auto">
           <p style="margin:16px 0 0;font-size:13.5px;color:var(--text-2);max-width:240px;line-height:1.55">{{ ftTagline }}</p>
+          <a data-plain href="https://institutnr.org/" target="_blank" rel="noopener" style="display:inline-flex;flex-direction:column;gap:8px;margin-top:22px;font-size:12px;color:var(--text-2)"><span>{{ inrFtLabel }}</span><img data-logo="light" src="assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="height:52px;width:auto"><img data-logo="dark" src="assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="height:52px;width:auto"></a>
         </div>
         <div>
           <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:13px">{{ ftColProduct }}</div>
@@ -2702,7 +2718,16 @@ class Component extends DCLogic {
         ftDocQuickstart: 'Quickstart', ftDocCli: 'CLI reference', ftDocConfig: 'Configuration', ftDocMethod: 'GreenOps methodology',
         ftProjLicense: 'AGPL-3.0 license', ftLegalNotice: 'Legal notice', ftPrivacy: 'Privacy',
         ftBadgeNote: 'badge slot, to wire up',
-        ftBottomLeft: '© 2026 Perf Sentinel · AGPL-3.0 · Eco-designed page, no tracking script',
+        ftBottomLeft: '© 2026 Robin Trassard and contributors · Institut du Numérique Responsable · AGPL-3.0 · Eco-designed page, no tracking script',
+        inrBy: 'An open-source project stewarded by',
+        inrArt: 'the ', inrName: 'Institut du Numérique Responsable',
+        inrFtLabel: 'Stewarded by',
+        govEyebrow: '// governance',
+        govTitleA: 'Stewarded by the ',
+        govTitleB: 'Institut du Numérique Responsable',
+        govBodyA: 'Started as a personal project, Perf Sentinel has joined the INR, a French non-profit that grew out of the Club Green IT. Its creator, ',
+        govBodyB: ', still leads it within the institute. Also a full-stack developer at Onepoint, back-end leaning and specialized in performance and eco-design, Robin designed Perf Sentinel on personal time. The code stays under AGPL-3.0 and is developed in the open on the INR GitHub.',
+        govGh: 'INR on GitHub',
         ftBottomRight: 'Logo & banner, ',
         badges: ['Ecoindex', 'Green Web Foundation'],
         langSwitch: 'FR',
@@ -2913,7 +2938,16 @@ class Component extends DCLogic {
         ftDocQuickstart: 'Démarrage rapide', ftDocCli: 'Référence CLI', ftDocConfig: 'Configuration', ftDocMethod: 'Méthodologie GreenOps',
         ftProjLicense: 'Licence AGPL-3.0', ftLegalNotice: 'Mentions légales', ftPrivacy: 'Confidentialité',
         ftBadgeNote: 'emplacement badge, à brancher',
-        ftBottomLeft: '© 2026 Perf Sentinel · AGPL-3.0 · Page éco-conçue, sans script de tracking',
+        ftBottomLeft: '© 2026 Robin Trassard et contributeurs · Institut du Numérique Responsable · AGPL-3.0 · Page éco-conçue, sans script de tracking',
+        inrBy: 'Un projet open-source porté par',
+        inrArt: 'l’', inrName: 'Institut du Numérique Responsable',
+        inrFtLabel: 'Porté par',
+        govEyebrow: '// gouvernance',
+        govTitleA: 'Porté par l’',
+        govTitleB: 'Institut du Numérique Responsable',
+        govBodyA: 'Né comme projet personnel, Perf Sentinel a rejoint l’INR, association loi 1901 issue du Club Green IT. Son créateur, ',
+        govBodyB: ', continue de le diriger au sein de l’institut. Par ailleurs développeur fullstack chez Onepoint, orienté back-end et spécialisé en performance et éco-conception, Robin a conçu Perf Sentinel sur son temps personnel. Le code reste sous AGPL-3.0 et se développe en public sur le GitHub de l’INR.',
+        govGh: 'Le GitHub de l’INR',
         ftBottomRight: 'Logo & bannière, ',
         badges: ['Ecoindex', 'Green Web Foundation'],
         langSwitch: 'EN',
@@ -3025,7 +3059,7 @@ class Component extends DCLogic {
       hubRelHref: 'https://github.com/robintra/PerfSentinelHub/releases/tag/v' + (this.state.hubVersion || '0.3.8'),
       ftTagline: t.ftTagline, ftColProduct: t.ftColProduct, ftColDocs: t.ftColDocs, ftColProject: t.ftColProject,
       ftDocQuickstart: t.ftDocQuickstart, ftDocCli: t.ftDocCli, ftDocConfig: t.ftDocConfig, ftDocMethod: t.ftDocMethod,
-      ftProjLicense: t.ftProjLicense, ftBadgeNote: t.ftBadgeNote, ftBottomLeft: t.ftBottomLeft, ftBottomRight: t.ftBottomRight,
+      ftProjLicense: t.ftProjLicense, ftBadgeNote: t.ftBadgeNote, ftBottomLeft: t.ftBottomLeft, ftBottomRight: t.ftBottomRight, inrBy: t.inrBy, inrArt: t.inrArt, inrName: t.inrName, inrFtLabel: t.inrFtLabel, govEyebrow: t.govEyebrow, govTitleA: t.govTitleA, govTitleB: t.govTitleB, govBodyA: t.govBodyA, govBodyB: t.govBodyB, govGh: t.govGh,
       ftLegalNotice: t.ftLegalNotice, ftPrivacy: t.ftPrivacy, ftLegalHref: lang === 'fr' ? '/mentions-legales' : '/legal-notice', ftPrivacyHref: lang === 'fr' ? '/confidentialite' : '/privacy-policy',
     };
   }
