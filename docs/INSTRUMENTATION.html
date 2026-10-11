@@ -196,7 +196,7 @@
 <span style="color:var(--code-sub)">    spec</span>:
 <span style="color:var(--code-sub)">      containers</span>:
         - name: perf-sentinel
-<span style="color:var(--code-sub)">          image</span>: ghcr.io/robintra/perf-sentinel:latest
+<span style="color:var(--code-sub)">          image</span>: ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest
 <span style="color:var(--code-sub)">          ports</span>:
             - containerPort: 4317   # OTLP gRPC
             - containerPort: 4318   # OTLP HTTP + /metrics
@@ -287,7 +287,7 @@
 <span style="color:var(--code-sub)">    traces</span>:
 <span style="color:var(--code-sub)">      receivers</span>: [otlp]
 <span style="color:var(--code-sub)">      exporters</span>: [awsxray, otlp/perf-sentinel]</code></pre></div>
-<p class="ps-p">Deploy Perf Sentinel as an ECS task or EKS Deployment. For ECS, use the <code class="ps-ic">scratch</code>-based Docker image (<code class="ps-ic">ghcr.io/robintra/perf-sentinel:latest</code>).</p>
+<p class="ps-p">Deploy Perf Sentinel as an ECS task or EKS Deployment. For ECS, use the <code class="ps-ic">scratch</code>-based Docker image (<code class="ps-ic">ghcr.io/institut-du-numerique-responsable/perf-sentinel:latest</code>).</p>
 <h3 id="gcp-cloud-trace--otel-collector" class="ps-h3">GCP (Cloud Trace + OTel Collector)</h3>
 <p class="ps-p">GCP Cloud Trace supports OTLP ingestion natively. Use the standard OTel Collector with both the <code class="ps-ic">googlecloud</code> exporter and the Perf Sentinel exporter:</p>
 <div class="ps-code"><div class="ps-code-lang">yaml</div><pre><code><span style="color:var(--code-sub)">exporters</span>:
