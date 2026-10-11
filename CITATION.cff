@@ -1,0 +1,28 @@
+# Citation metadata, readable by people, search engines and AI assistants.
+# Citation File Format 1.2.0, https://citation-file-format.github.io
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Perf Sentinel: I/O anti-pattern detection in OpenTelemetry traces, priced in energy and carbon"
+abstract: "Perf Sentinel finds N+1 queries, redundant calls, slow queries and fanout in OpenTelemetry traces, as a CI quality gate or an OTLP daemon, then converts every avoidable I/O into energy and CO2."
+authors:
+  - given-names: "Robin"
+    family-names: "Trassard"
+    alias: "robintra"
+    affiliation: "Institut du Numérique Responsable"
+contact:
+  - given-names: "Robin"
+    family-names: "Trassard"
+    alias: "robintra"
+    affiliation: "Institut du Numérique Responsable"
+repository-code: "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel"
+url: "https://perf-sentinel.dev"
+license: AGPL-3.0-only
+keywords:
+  - "opentelemetry"
+  - "performance"
+  - "n-plus-one"
+  - "green-software"
+  - "greenops"
+  - "observability"
+  - "rust"
