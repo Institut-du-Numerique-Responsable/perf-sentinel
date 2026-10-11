@@ -21,7 +21,7 @@ YES=0
 SKIP_IMAGE_CHECK=0
 
 CHART_FILE="${REPO_ROOT}/charts/perf-sentinel/Chart.yaml"
-IMAGE_REPO="ghcr.io/robintra/perf-sentinel"
+IMAGE_REPO="ghcr.io/institut-du-numerique-responsable/perf-sentinel"
 
 emit_error() {
   if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
@@ -285,7 +285,7 @@ fi
 emit_notice ""
 emit_notice "Released ${TAG} at ${SHORT_SHA}"
 emit_notice "  .github/workflows/helm-release.yml is now running. It will:"
-emit_notice "    - package the chart and push it to ghcr.io/robintra/charts as an OCI artifact"
+emit_notice "    - package the chart and push it to ghcr.io/institut-du-numerique-responsable/charts as an OCI artifact"
 emit_notice "    - cosign keyless sign the artifact"
 emit_notice "    - attest SLSA build provenance (gh attestation verify)"
 emit_notice "    - generate and attest an SPDX SBOM"
