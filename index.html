@@ -1226,13 +1226,13 @@
 @media(max-width:900px){[data-stack-tb]{display:none}[data-stack-tm]{display:grid;grid-template-columns:auto 1fr;margin-top:28px;border-top:1px solid var(--border)}[data-stack-tm] [data-stack-hd]{padding:12px 14px;border-bottom:1px solid var(--border)}[data-stack-tm] [data-stack-hd]:first-child,[data-stack-ml]{border-right:1px solid var(--border)}[data-stack-ml],[data-stack-mf]{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)}[data-stack-ml]{justify-content:center;min-width:100px;min-height:60px}[data-stack-mf]{flex-wrap:wrap;gap:6px 22px}[data-stack-mf] span{height:50px;display:flex;align-items:center}}
 @media(max-width:620px){[data-persona-hint]{display:none}[data-persona-bar]{gap:5px;margin-bottom:24px}[data-persona-bar] [data-ptab]{font-size:12.5px;padding:6px 10px;min-height:44px;flex:none}[data-persona-bar]:not(:has([data-pbubble])){flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:-4px -28px 20px;padding:4px 28px;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent)}[data-persona-bar]::-webkit-scrollbar{display:none}[data-persona-bar] [data-plabel]{flex:none}[data-hero-eyebrow]{display:none!important}[data-hero-eyebrow]+h1{margin-top:4px!important}}
 /* Mobile hamburger nav: the button toggles navOpen, the panel shows on data-open */
-[data-stars][data-n=""]{display:none!important}[data-gh-split]:has(> [data-stars]:not([data-n=""])) .gh-txt{display:none}[data-gh-split]:has(> [data-stars]:not([data-n=""])) > a:first-child{border-radius:7px 0 0 7px!important}:is([data-gh-star],[data-star-btn]):is(:hover,:focus-visible) svg{fill:#26CD94;stroke:#26CD94}@media(max-width:420px){.ps-lang-win{display:none!important}}@media(max-width:359px){header [data-stars]{display:none!important}[data-gh-split] > a:first-child{border-radius:7px!important}}[data-burger]{display:none;padding:0;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid var(--border);border-radius:9px;background:var(--surface);cursor:pointer;flex:none}
+[data-stars][data-n=""]{display:none!important}[data-cta-view="ci"] [data-cta-panel="try"],[data-cta-view="try"] [data-cta-panel="ci"]{display:none}[data-cta-tab]{font-family:inherit;font-size:13px;font-weight:600;min-height:36px;padding:0 14px;border-radius:8px;cursor:pointer;color:#E0F4ED;background:transparent;border:1px solid rgba(224,244,237,.3);transition:border-color .15s ease}[data-cta-tab]:hover{border-color:rgba(224,244,237,.6)}[data-cta-tab][aria-pressed="true"]{color:#0B523A;background:#E0F4ED;border-color:#E0F4ED}[data-cta-tab]:focus-visible{outline:2px solid #E0F4ED;outline-offset:2px}[data-gh-split]:has(> [data-stars]:not([data-n=""])) .gh-txt{display:none}[data-gh-split]:has(> [data-stars]:not([data-n=""])) > a:first-child{border-radius:7px 0 0 7px!important}:is([data-gh-star],[data-star-btn]):is(:hover,:focus-visible) svg{fill:#26CD94;stroke:#26CD94}@media(max-width:420px){.ps-lang-win{display:none!important}}@media(max-width:359px){header [data-stars]{display:none!important}[data-gh-split] > a:first-child{border-radius:7px!important}}[data-burger]{display:none;padding:0;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid var(--border);border-radius:9px;background:var(--surface);cursor:pointer;flex:none}
 [data-burger] i{position:relative;display:block;width:17px;height:2px;background:var(--text-2);border-radius:2px}
 [data-burger] i::before,[data-burger] i::after{content:'';position:absolute;left:0;width:17px;height:2px;background:var(--text-2);border-radius:2px}
 [data-burger] i::before{top:-5px}[data-burger] i::after{top:5px}
 [data-mobnav]{display:none}
 /* Phones: the arrow is drawn at the end of the link text, glued by a no-break space, so it never ends up alone on a line */
-@media(max-width:560px){a[data-plain]:has(>[data-ltext]+[data-arrow]){display:inline-block!important}a[data-plain]>[data-ltext]+[data-arrow]{display:none}a[data-plain]>[data-ltext]:has(+[data-arrow])::after{content:"\00a0→"}a[data-plain]>[data-ltext]:has(+[data-arrow="ext"])::after{content:"\00a0↗"}}
+@media(max-width:560px){a[data-plain]:has(>[data-ltext]+[data-arrow]){display:inline-block!important}a[data-plain]>[data-ltext]:has(>.sc-interp)+[data-arrow]{display:none}a[data-plain]>[data-ltext]:has(>.sc-interp):has(+[data-arrow]){text-decoration:none}a[data-plain]>[data-ltext]:has(>.sc-interp):has(+[data-arrow])>.sc-interp{text-decoration:underline;text-underline-offset:2px}a[data-plain]>[data-ltext]:has(>.sc-interp):has(+[data-arrow])::after{content:"\00a0→"}a[data-plain]>[data-ltext]:has(>.sc-interp):has(+[data-arrow="ext"])::after{content:"\00a0↗"}}
 /* Below 768px the arrow doc links get a 44px hit area from a centred pseudo-element, so their layout (inline margin-top included) does not move */
 @media(max-width:767px){main a[data-plain]:has(>[data-ltext]+[data-arrow]){position:relative}main a[data-plain]:has(>[data-ltext]+[data-arrow])::after{content:"";position:absolute;left:0;right:0;top:50%;height:100%;min-height:44px;transform:translateY(-50%)}}
 @media(max-width:560px){.gh-txt{display:none}}@media(max-width:1120px){.ps-th-lbl{display:none!important}.ps-th-btn{width:34px;padding:0}}@media(max-width:1080px){[data-nav]{gap:16px!important}}@media(max-width:980px){[data-nav]{gap:10px!important}}@media(max-width:1040px){[data-nav-sec]{display:none}}@media(max-width:560px){header>div{gap:10px!important}}@media(max-width:380px){header img[data-logo]{height:30px!important}}
@@ -1983,13 +1983,29 @@
             <p style="margin:14px 0 0;font-size:16px;color:#A9D8C6;line-height:1.6">{{ ctaText }}</p>
           </div>
           <div>
-            <div data-term="" data-tech-only="" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#E0F4ED;background:rgba(0,0,0,.28);border:1px solid rgba(224,244,237,.14);border-radius:10px;padding:15px 18px;line-height:2;max-width:100%;overflow-x:auto">
-              <div class="ps-l1"><span><span class="ps-pr" style="color:#26CD94">$</span> {{ installView }}</span><button type="button" data-copy="{{ installCommand }}" data-copied="{{ copiedLabel }}" aria-live="polite">{{ copyLabel }}</button></div>
-              <div><span class="ps-pr" style="color:#26CD94">$</span> perf-sentinel demo <span class="ps-cm" style="color:#7FB6A2"># {{ demoCmt1 }}</span></div>
-              <div><span class="ps-pr" style="color:#26CD94">$</span> perf-sentinel demo --tui <span class="ps-cm" style="color:#7FB6A2"># {{ demoCmt2 }}</span></div>
-              <div><span class="ps-pr" style="color:#26CD94">$</span> perf-sentinel demo --html demo.html <span class="ps-cm" style="color:#7FB6A2"># {{ demoCmt3 }}</span></div>
+            <div data-tech-only="" data-cta-view="ci">
+              <div data-cta-tabs="" style="display:flex;gap:8px;margin-bottom:12px"><button type="button" data-cta-tab="try" aria-pressed="false">{{ ctaTabTry }}</button><button type="button" data-cta-tab="ci" aria-pressed="true">{{ ctaTabCi }}</button></div>
+              <div data-cta-panel="ci">
+                <div data-term="" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#E0F4ED;background:rgba(0,0,0,.28);border:1px solid rgba(224,244,237,.14);border-radius:10px;padding:15px 18px;line-height:2;max-width:100%;overflow-x:auto">
+                  <div style="color:#7FB6A2;margin-bottom:0"># {{ ciCmt1 }}</div>
+                  <div><span class="ps-pr" style="color:#26CD94">$</span> {{ ciCmd1View }}</div>
+                  <div style="color:#7FB6A2;margin-bottom:0"># {{ ciCmt2 }}</div>
+                  <div><span class="ps-pr" style="color:#26CD94">$</span> {{ ciCmd2View }}</div>
+                  <div style="color:#7FB6A2;margin-bottom:0"># {{ ciCmt3 }}</div>
+                  <div><span class="ps-pr" style="color:#26CD94">$</span> {{ ciCmd3View }}</div>
+                </div>
+              <a data-plain href="{{ ctaCiHref }}" style="display:inline-flex;align-items:center;gap:7px;margin-top:18px;font-size:14px;font-weight:600;color:#E0F4ED" style-hover="gap:11px"><span data-ltext>{{ ctaCiLink }}</span><span data-arrow> →</span></a>
+              </div>
+              <div data-cta-panel="try">
+              <div data-term="" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#E0F4ED;background:rgba(0,0,0,.28);border:1px solid rgba(224,244,237,.14);border-radius:10px;padding:15px 18px;line-height:2;max-width:100%;overflow-x:auto">
+                <div class="ps-l1"><span><span class="ps-pr" style="color:#26CD94">$</span> {{ installView }}</span><button type="button" data-copy="{{ installCommand }}" data-copied="{{ copiedLabel }}" aria-live="polite">{{ copyLabel }}</button></div>
+                <div><span class="ps-pr" style="color:#26CD94">$</span> perf-sentinel demo <span class="ps-cm" style="color:#7FB6A2"># {{ demoCmt1 }}</span></div>
+                <div><span class="ps-pr" style="color:#26CD94">$</span> perf-sentinel demo --tui <span class="ps-cm" style="color:#7FB6A2"># {{ demoCmt2 }}</span></div>
+                <div><span class="ps-pr" style="color:#26CD94">$</span> perf-sentinel demo --html demo.html <span class="ps-cm" style="color:#7FB6A2"># {{ demoCmt3 }}</span></div>
+              </div>
+              <a data-plain href="{{ ctaGuideHref }}" style="display:inline-flex;align-items:center;gap:7px;margin-top:18px;font-size:14px;font-weight:600;color:#E0F4ED" style-hover="gap:11px"><span data-ltext>{{ ctaGuide }}</span><span data-arrow> →</span></a>
+              </div>
             </div>
-            <a data-plain data-tech-only="" href="{{ ctaGuideHref }}" style="display:inline-flex;align-items:center;gap:7px;margin-top:18px;font-size:14px;font-weight:600;color:#E0F4ED" style-hover="gap:11px"><span data-ltext>{{ ctaGuide }}</span><span data-arrow> →</span></a>
             <div data-nontech-only="" style="display:flex;gap:12px;flex-wrap:wrap">
               <a data-plain href="{{ ctaEndAHref }}" style="font-size:15px;font-weight:600;color:#0B523A;background:#E0F4ED;border-radius:9px;padding:13px 22px" style-hover="filter:brightness(.96)">{{ ctaEndA }}</a>
               <a data-plain href="{{ ctaEndBHref }}" style="font-size:15px;font-weight:600;color:#E0F4ED;background:transparent;border:1px solid rgba(224,244,237,.3);border-radius:9px;padding:13px 22px" style-hover="border-color:rgba(224,244,237,.6)">{{ ctaEndB }}</a>
@@ -2759,7 +2775,7 @@ class Component extends DCLogic {
         ctaTitle: 'Put the sentinel in your pipeline',
         ctaText: 'Built-in demo with nothing to install on the app side, then a quality gate on captured traces or an OTLP daemon beside your tracing.',
         demoCmt1: 'terminal report', demoCmt2: 'interactive TUI', demoCmt3: 'HTML dashboard',
-        ctaGuide: 'Prebuilt binaries, Docker image and Helm chart in the guide', starsLead: 'Find it useful? A star helps others discover it.', starAria: 'Star {name} on GitHub', starCount: '{n} stars', ghAriaBase: 'Perf Sentinel on GitHub', copyLabel: 'Copy', copiedLabel: 'Copied',
+        ctaGuide: 'Prebuilt binaries, Docker image and Helm chart in the guide', ctaTabTry: 'Try it', ctaTabCi: 'In CI', ciCmt1: '1. the traces of your integration tests', ciCmt2: '2. the gate: exit code 1 when a threshold is crossed', ciCmt3: '3. the findings in Code scanning (SARIF)', ctaCiLink: 'GitHub Actions, GitLab CI and Jenkins templates', starsLead: 'Find it useful? A star helps others discover it.', starAria: 'Star {name} on GitHub', starCount: '{n} stars', ghAriaBase: 'Perf Sentinel on GitHub', copyLabel: 'Copy', copiedLabel: 'Copied',
         ftTagline: 'Protocol-level I/O anti-pattern detector, self-hostable and carbon-aware.',
         ftColProduct: 'Product', ftColDocs: 'Documentation', ftColProject: 'Project',
         ftDocQuickstart: 'Quickstart', ftDocCli: 'CLI reference', ftDocConfig: 'Configuration', ftDocMethod: 'GreenOps methodology',
@@ -2978,7 +2994,7 @@ class Component extends DCLogic {
         ctaTitle: 'Posez la sentinelle dans votre pipeline',
         ctaText: 'Démo intégrée sans rien installer côté apps, puis quality gate sur traces capturées ou daemon OTLP à côté de votre tracing.',
         demoCmt1: 'rapport terminal', demoCmt2: 'TUI interactif', demoCmt3: 'dashboard HTML',
-        ctaGuide: 'Binaires précompilés, image Docker et chart Helm dans le guide', starsLead: 'Le projet vous sert ? Une étoile l’aide à se faire connaître.', starAria: 'Ajouter une étoile à {name} sur GitHub', starCount: '{n} étoiles', ghAriaBase: 'Perf Sentinel sur GitHub', copyLabel: 'Copier', copiedLabel: 'Copié',
+        ctaGuide: 'Binaires précompilés, image Docker et chart Helm dans le guide', ctaTabTry: 'Essayer', ctaTabCi: 'En CI', ciCmt1: '1. les traces de vos tests d’intégration', ciCmt2: '2. le gate : code de sortie 1 si un seuil est franchi', ciCmt3: '3. les findings dans Code scanning (SARIF)', ctaCiLink: 'Modèles GitHub Actions, GitLab CI et Jenkins', starsLead: 'Le projet vous sert ? Une étoile l’aide à se faire connaître.', starAria: 'Ajouter une étoile à {name} sur GitHub', starCount: '{n} étoiles', ghAriaBase: 'Perf Sentinel sur GitHub', copyLabel: 'Copier', copiedLabel: 'Copié',
         ftTagline: "Détecteur d'anti-patterns d'I/O au niveau protocole, auto-hébergeable et carbon-aware.",
         ftColProduct: 'Produit', ftColDocs: 'Documentation', ftColProject: 'Projet',
         ftDocQuickstart: 'Démarrage rapide', ftDocCli: 'Référence CLI', ftDocConfig: 'Configuration', ftDocMethod: 'Méthodologie GreenOps',
@@ -3098,6 +3114,13 @@ class Component extends DCLogic {
       demoCmt1: t.demoCmt1, demoCmt2: t.demoCmt2, demoCmt3: t.demoCmt3,
       copyLabel: t.copyLabel, copiedLabel: t.copiedLabel,
       ...this.starVals(t, lang),
+      ctaTabTry: t.ctaTabTry, ctaTabCi: t.ctaTabCi, ciCmt1: t.ciCmt1, ciCmt2: t.ciCmt2, ciCmt3: t.ciCmt3, ctaCiLink: t.ctaCiLink,
+      ctaCiHref: lang === 'fr' ? '/docs/fr/CI' : '/docs/CI',
+      ...Object.fromEntries([
+        'perf-sentinel capture -o traces.json -- mvn verify',
+        'perf-sentinel analyze --input traces.json --ci',
+        'perf-sentinel analyze --input traces.json --format sarif > findings.sarif',
+      ].map((c, k) => [`ciCmd${k + 1}View`, c.split(' ').flatMap((w, i) => [i ? ' ' : '', React.createElement('span', { key: i, style: { whiteSpace: 'nowrap' } }, w)])])),
       ctaGuide: t.ctaGuide, ctaGuideHref: lang === 'fr' ? '/fr/guide#install' : '/guide#install',
       psRelLabel: 'Perf Sentinel v' + (this.state.psVersion || '0.26.2'),
       psRelHref: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v' + (this.state.psVersion || '0.26.2'),
@@ -3152,6 +3175,8 @@ class Component extends DCLogic {
     pushTheme();
   }
   document.addEventListener('click',function(e){
+    var c=e.target.closest&&e.target.closest('[data-cta-tab]');
+    if(c){var w=c.closest('[data-cta-view]');if(w){w.setAttribute('data-cta-view',c.getAttribute('data-cta-tab'));var b=w.querySelectorAll('[data-cta-tab]');for(var i=0;i<b.length;i++)b[i].setAttribute('aria-pressed',b[i]===c?'true':'false');}return;}
     var t=e.target.closest&&e.target.closest('[data-embed-tab]');
     if(t){apply(t.getAttribute('data-embed-tab'));return;}
   });
