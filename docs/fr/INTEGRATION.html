@@ -156,7 +156,7 @@
 <h2 id="démarrage-rapide--ci-batch" class="ps-h2">Démarrage rapide : CI batch</h2>
 <p class="ps-p">Exécutez Perf Sentinel dans votre pipeline CI pour détecter les requêtes N+1 avant qu'elles n'atteignent la production. Pas de daemon, pas de Docker, juste un binaire qui lit un fichier de traces et retourne le code 1 quand le quality gate échoue.</p>
 <h3 id="installation" class="ps-h3">Installation</h3>
-<div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--code-cmd);font-weight:600">curl</span> <span style="color:var(--code-flag)">-LO</span> https://github.com/robintra/perf-sentinel/releases/latest/download/perf-sentinel-linux-amd64
+<div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--code-cmd);font-weight:600">curl</span> <span style="color:var(--code-flag)">-LO</span> https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/latest/download/perf-sentinel-linux-amd64
 <span style="color:var(--code-cmd);font-weight:600">chmod</span> +x perf-sentinel-linux-amd64
 <span style="color:var(--code-cmd);font-weight:600">sudo</span> mv perf-sentinel-linux-amd64 /usr/local/bin/perf-sentinel</code></pre></div>
 <h3 id="configurer-les-seuils" class="ps-h3">Configurer les seuils</h3>
@@ -212,7 +212,7 @@
 <p class="ps-p">Déploiement production où les services envoient les traces à un OpenTelemetry Collector. Zéro modification de code, uniquement de la configuration YAML.</p>
 <h3 id="démarrer-perf-sentinel--collector" class="ps-h3">Démarrer Perf Sentinel + collector</h3>
 <div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--term-comment)"># Récupérer le fichier compose d'exemple (sans cloner le dépôt), puis le démarrer</span>
-<span style="color:var(--code-cmd);font-weight:600">curl</span> <span style="color:var(--code-flag)">-o</span> docker-compose.yml https://raw.githubusercontent.com/robintra/perf-sentinel/main/examples/docker-compose-collector.yml
+<span style="color:var(--code-cmd);font-weight:600">curl</span> <span style="color:var(--code-flag)">-o</span> docker-compose.yml https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/examples/docker-compose-collector.yml
 <span style="color:var(--code-cmd);font-weight:600">docker</span> compose up <span style="color:var(--code-flag)">-d</span></code></pre></div>
 <p class="ps-p">L'URL brute suit <code class="ps-ic">main</code>. Remplacez <code class="ps-ic">main</code> par un tag de release (par exemple <code class="ps-ic">v0.8.13</code>) pour figer une version précise.</p>
 <p class="ps-p">Cela démarre un OTel Collector sur 4317 (gRPC) + 4318 (HTTP) et Perf Sentinel en mode watch derrière lui.</p>
@@ -278,7 +278,7 @@
 <h2 id="démarrage-rapide--sidecar" class="ps-h2">Démarrage rapide : sidecar</h2>
 <p class="ps-p">Déboguez un service unique en dev/staging. Perf Sentinel tourne à côté du service, en partageant son namespace réseau.</p>
 <div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--term-comment)"># Récupérer le fichier compose d'exemple (sans cloner le dépôt), puis le démarrer</span>
-<span style="color:var(--code-cmd);font-weight:600">curl</span> <span style="color:var(--code-flag)">-o</span> docker-compose.yml https://raw.githubusercontent.com/robintra/perf-sentinel/main/examples/docker-compose-sidecar.yml
+<span style="color:var(--code-cmd);font-weight:600">curl</span> <span style="color:var(--code-flag)">-o</span> docker-compose.yml https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/examples/docker-compose-sidecar.yml
 <span style="color:var(--code-cmd);font-weight:600">docker</span> compose up <span style="color:var(--code-flag)">-d</span></code></pre></div>
 <p class="ps-p">Config de l'app (pas de saut réseau, même namespace) :</p>
 <div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--code-cmd);font-weight:600">OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318</span>

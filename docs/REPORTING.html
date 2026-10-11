@@ -163,7 +163,7 @@
 <div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--code-cmd);font-weight:600">perf-sentinel</span> <span style="color:var(--code-sub)">disclose</span> <span style="color:var(--code-flag)">--tui</span> \
   <span style="color:var(--code-flag)">--input</span> <span style="color:var(--code-cmd);font-weight:600">/var/lib/perf-sentinel/reports.ndjson</span> \
   <span style="color:var(--code-flag)">--org-config</span> <span style="color:var(--code-cmd);font-weight:600">/etc/perf-sentinel/org.toml</span></code></pre></div>
-<figure class="ps-media"><button type="button" class="ps-media-btn" data-src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/demo.gif"><span class="ps-media-play">▶</span> disclose preview: calendar stepper widens the period, the summary updates, and the official validator reports its verdict</button></figure>
+<figure class="ps-media"><button type="button" class="ps-media-btn" data-src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/demo.gif"><span class="ps-media-play">▶</span> disclose preview: calendar stepper widens the period, the summary updates, and the official validator reports its verdict</button></figure>
 <p class="ps-p">Only <code class="ps-ic">--input</code> and <code class="ps-ic">--org-config</code> stay required. The period, intent, and confidentiality are set live:</p>
 <ul>
 <li><code class="ps-ic">g</code> cycles the granularity (month, quarter, year, custom). For the first three, <code class="ps-ic">from</code> and <code class="ps-ic">to</code> snap to calendar boundaries. <code class="ps-ic">custom</code> lets you edit each edge by hand.</li>
@@ -180,9 +180,9 @@
 <li><strong>Operational</strong> (<code class="ps-ic">aggregate.operational_waste</code>). Computed at the operator's configured threshold and recorded with that threshold.</li>
 </ul>
 <p class="ps-p">Publishing both lets a reader compare the two and see how much avoidable waste a loose operator threshold would otherwise hide. For <code class="ps-ic">intent = official</code>, the validator rejects a report whose <code class="ps-ic">canonical_waste.n_plus_one_threshold</code> is not the binary's canonical value.</p>
-<figure class="ps-media"><button type="button" class="ps-media-btn" data-src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/preview.png"><span class="ps-media-play">▶</span> disclose preview, month view: settings header, aggregated summary, and the equivalent command in the footer</button></figure>
-<figure class="ps-media"><button type="button" class="ps-media-btn" data-src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/quarter.png"><span class="ps-media-play">▶</span> disclose preview, quarter view: the `g` stepper widens the period to the whole quarter</button></figure>
-<figure class="ps-media"><button type="button" class="ps-media-btn" data-src="https://raw.githubusercontent.com/robintra/perf-sentinel/main/docs/img/disclose/official.png"><span class="ps-media-play">▶</span> disclose preview, official intent: the validator reports why the report is not yet publishable</button></figure>
+<figure class="ps-media"><button type="button" class="ps-media-btn" data-src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/preview.png"><span class="ps-media-play">▶</span> disclose preview, month view: settings header, aggregated summary, and the equivalent command in the footer</button></figure>
+<figure class="ps-media"><button type="button" class="ps-media-btn" data-src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/quarter.png"><span class="ps-media-play">▶</span> disclose preview, quarter view: the `g` stepper widens the period to the whole quarter</button></figure>
+<figure class="ps-media"><button type="button" class="ps-media-btn" data-src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/official.png"><span class="ps-media-play">▶</span> disclose preview, official intent: the validator reports why the report is not yet publishable</button></figure>
 <h2 id="esrs-e1-crosswalk-v13" class="ps-h2">ESRS E1 crosswalk (v1.3)</h2>
 <p class="ps-p">Every report carries <code class="ps-ic">methodology.standard_crosswalk</code>, an interpretive map from its figures to the EU climate-reporting standard ESRS E1 (Delegated Regulation (EU) 2023/5303):</p>
 <ul>
@@ -353,7 +353,7 @@
 <span style="color:var(--code-sub)">&quot;integrity&quot;</span>: {
   <span style="color:var(--code-sub)">&quot;content_hash&quot;</span>: <span style="color:var(--code-num)">&quot;sha256:abc123...&quot;</span>,
   <span style="color:var(--code-sub)">&quot;binary_hash&quot;</span>: <span style="color:var(--code-num)">&quot;sha256:def456...&quot;</span>,
-  <span style="color:var(--code-sub)">&quot;binary_verification_url&quot;</span>: <span style="color:var(--code-num)">&quot;https://github.com/robintra/perf-sentinel/releases/tag/v0.7.0&quot;</span>,
+  <span style="color:var(--code-sub)">&quot;binary_verification_url&quot;</span>: <span style="color:var(--code-num)">&quot;https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.7.0&quot;</span>,
   <span style="color:var(--code-sub)">&quot;trace_integrity_chain&quot;</span>: <span style="color:var(--code-flag)">null</span>,
   <span style="color:var(--code-sub)">&quot;signature&quot;</span>: <span style="color:var(--code-flag)">null</span>,
   <span style="color:var(--code-sub)">&quot;binary_attestation&quot;</span>: <span style="color:var(--code-flag)">null</span>
@@ -362,7 +362,7 @@
 <span style="color:var(--code-sub)">&quot;integrity&quot;</span>: {
   <span style="color:var(--code-sub)">&quot;content_hash&quot;</span>: <span style="color:var(--code-num)">&quot;sha256:abc123...&quot;</span>,
   <span style="color:var(--code-sub)">&quot;binary_hash&quot;</span>: <span style="color:var(--code-num)">&quot;sha256:def456...&quot;</span>,
-  <span style="color:var(--code-sub)">&quot;binary_verification_url&quot;</span>: <span style="color:var(--code-num)">&quot;https://github.com/robintra/perf-sentinel/releases/tag/v0.7.0&quot;</span>,
+  <span style="color:var(--code-sub)">&quot;binary_verification_url&quot;</span>: <span style="color:var(--code-num)">&quot;https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.7.0&quot;</span>,
   <span style="color:var(--code-sub)">&quot;trace_integrity_chain&quot;</span>: <span style="color:var(--code-flag)">null</span>,
   <span style="color:var(--code-sub)">&quot;signature&quot;</span>: {
     <span style="color:var(--code-sub)">&quot;format&quot;</span>: <span style="color:var(--code-num)">&quot;sigstore-cosign-intoto-v1&quot;</span>,
