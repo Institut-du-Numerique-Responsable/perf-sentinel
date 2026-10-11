@@ -1008,7 +1008,7 @@
   main>section:not([data-screen-label="Hero"]){margin-top:var(--rh-gap,var(--rh-2))}
   @media(max-width:560px){[data-gov]{grid-template-columns:minmax(0,1fr)!important;gap:18px!important;padding-top:24px!important}[data-gov]>a{max-width:160px}}
   /* Touch targets: small controls get an invisible 44px hit area, nothing moves on screen */
-  :is(.ps-lang-btn,.ps-th-btn,[data-burger],[data-ptab],[data-embed-tab],[data-copy],header a[href^="https://github.com/"],[data-nav] a){position:relative}:is(.ps-lang-btn,.ps-th-btn,[data-burger],[data-ptab],[data-embed-tab],[data-copy],header a[href^="https://github.com/"],[data-nav] a)::before{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%)}
+  :is(.ps-lang-btn,.ps-th-btn,[data-burger],[data-ptab],[data-embed-tab],[data-cta-tab],[data-copy],header a[href^="https://github.com/"],[data-nav] a){position:relative}:is(.ps-lang-btn,.ps-th-btn,[data-burger],[data-ptab],[data-embed-tab],[data-cta-tab],[data-copy],header a[href^="https://github.com/"],[data-nav] a)::before{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%)}
   /* Footer links stack 9px apart: their hit area fills that gap instead of overlapping a neighbour */
   footer a{position:relative}footer a::before{content:"";position:absolute;inset:-5px 0}
   /* Section headings and intros share one setting each; the forced line break in a few headings only helps on wide screens */
