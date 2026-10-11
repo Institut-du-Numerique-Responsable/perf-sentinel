@@ -9,10 +9,10 @@ type: application
 version: 0.26.2
 appVersion: "0.26.2"
 kubeVersion: ">=1.24.0-0"
-home: https://github.com/robintra/perf-sentinel
-icon: https://raw.githubusercontent.com/robintra/perf-sentinel/main/logo/logo-horizontal.svg
+home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
+icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
 sources:
-  - https://github.com/robintra/perf-sentinel
+  - https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 keywords:
   - performance
   - n-plus-one
@@ -30,11 +30,11 @@ annotations:
   artifacthub.io/license: AGPL-3.0-only
   artifacthub.io/links: |
     - name: Source
-      url: https://github.com/robintra/perf-sentinel
+      url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
     - name: Documentation
-      url: https://github.com/robintra/perf-sentinel/tree/main/docs
+      url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/tree/main/docs
     - name: Helm deployment guide
-      url: https://github.com/robintra/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
+      url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
     - kind: fixed
       description: "appVersion 0.26.2. The daemon's outputs no longer change from one restart to the next on the same traffic: the order of findings, correlations and acks, the trace a tied cross-trace slow finding names and with it its signature, the pair a chatty suggestion names, and the roots kept past max_events_per_trace. Avoidable I/O rises on traces that span several groupings or repeat one query with several parameter sets, in perf_sentinel_avoidable_io_ops, perf_sentinel_service_avoidable_io_ops_total and the periodic disclosures."
@@ -42,7 +42,7 @@ annotations:
       description: "A config or fragment whose [green.service_regions], or active [green.electricity_maps] region_map, holds two keys that differ only in case and map to different values is rejected at load. Keep one of the two keys before upgrading. No values.yaml key is added or removed, and no template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/robintra/perf-sentinel:0.26.2
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.26.2
       platforms:
         - linux/amd64
         - linux/arm64
