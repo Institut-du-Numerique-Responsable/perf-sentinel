@@ -276,17 +276,22 @@ gh release download chart-v0.9.21 \
   --pattern 'perf-sentinel-*.tgz'
 
 gh attestation verify perf-sentinel-0.9.21.tgz \
-  --repo Institut-du-Numerique-Responsable/perf-sentinel
+  --owner robintra --signer-repo robintra/perf-sentinel
 ```
 
-If you already have the OCI artifact pulled and prefer not to fetch
-the tarball, verify the build provenance directly against the OCI
-reference:
+Charts released before the repository moved to the Institut du Numérique
+Responsable are attested under the original account, hence `--owner` and
+`--signer-repo`. Charts released after the move verify with
+`--repo Institut-du-Numerique-Responsable/perf-sentinel`.
+
+Without the release assets, pull the chart from the registry instead.
+`helm pull` writes the same tarball the attestation covers, the OCI
+artifact itself carries no attestation:
 
 ```bash
-docker login ghcr.io
-gh attestation verify oci://ghcr.io/robintra/charts/perf-sentinel:0.9.21 \
-  --repo Institut-du-Numerique-Responsable/perf-sentinel
+helm pull oci://ghcr.io/robintra/charts/perf-sentinel --version 0.9.21
+gh attestation verify perf-sentinel-0.9.21.tgz \
+  --owner robintra --signer-repo robintra/perf-sentinel
 ```
 
 Either recipe produces the same assurance. Pair whichever one you
@@ -310,7 +315,7 @@ gh release download chart-v0.9.21 --repo Institut-du-Numerique-Responsable/perf-
   --pattern 'perf-sentinel-chart-*.spdx.json'
 
 gh attestation verify perf-sentinel-0.9.21.tgz \
-  --repo Institut-du-Numerique-Responsable/perf-sentinel \
+  --owner robintra --signer-repo robintra/perf-sentinel \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 

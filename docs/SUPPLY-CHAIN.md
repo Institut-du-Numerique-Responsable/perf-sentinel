@@ -320,6 +320,8 @@ gh attestation verify perf-sentinel-linux-amd64 \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 
+For v0.26.2 and earlier, replace `--repo` with `--owner robintra --signer-repo robintra/perf-sentinel`, as above.
+
 The SBOM is derived from the Linux amd64 binary. The four release binaries
 share their Rust dependency closure bar a few platform-shim crates, so the SBOM
 documents the release as a whole.
