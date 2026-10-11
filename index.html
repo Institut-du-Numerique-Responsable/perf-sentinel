@@ -910,33 +910,49 @@
             <p data-dc-tpl="1126" style="margin: 14px 0px 0px; font-size: 16px; color: rgb(169, 216, 198); line-height: 1.6;"><span class="sc-interp">Built-in demo with nothing to install on the app side, then a quality gate on captured traces or an OTLP daemon beside your tracing.</span></p>
           </div>
           <div data-dc-tpl="1127">
-            <div data-dc-tpl="1128" data-term="" data-tech-only="" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: rgb(224, 244, 237); background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(224, 244, 237, 0.14); border-radius: 10px; padding: 15px 18px; line-height: 2; max-width: 100%; overflow-x: auto;">
-              <div data-dc-tpl="1129" class="ps-l1"><span data-dc-tpl="1130"><span data-dc-tpl="1131" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">cargo</span> <span style="white-space: nowrap;">install</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">--locked</span></span><button data-dc-tpl="1132" type="button" data-copy="cargo install perf-sentinel --locked" data-copied="Copied" aria-live="polite"><span class="sc-interp">Copy</span></button></div>
-              <div data-dc-tpl="1133"><span data-dc-tpl="1134" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo <span data-dc-tpl="1135" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">terminal report</span></span></div>
-              <div data-dc-tpl="1136"><span data-dc-tpl="1137" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo --tui <span data-dc-tpl="1138" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">interactive TUI</span></span></div>
-              <div data-dc-tpl="1139"><span data-dc-tpl="1140" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo --html demo.html <span data-dc-tpl="1141" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">HTML dashboard</span></span></div>
+            <div data-dc-tpl="1128" data-tech-only="" data-cta-view="ci">
+              <div data-dc-tpl="1129" data-cta-tabs="" style="display: flex; gap: 8px; margin-bottom: 12px;"><button data-dc-tpl="1130" type="button" data-cta-tab="try" aria-pressed="false"><span class="sc-interp">Try it</span></button><button data-dc-tpl="1131" type="button" data-cta-tab="ci" aria-pressed="true"><span class="sc-interp">In CI</span></button></div>
+              <div data-dc-tpl="1132" data-cta-panel="ci">
+                <div data-dc-tpl="1133" data-term="" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: rgb(224, 244, 237); background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(224, 244, 237, 0.14); border-radius: 10px; padding: 15px 18px; line-height: 2; max-width: 100%; overflow-x: auto;">
+                  <div data-dc-tpl="1134" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">1. the traces of your integration tests</span></div>
+                  <div data-dc-tpl="1135"><span data-dc-tpl="1136" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">capture</span> <span style="white-space: nowrap;">-o</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--</span> <span style="white-space: nowrap;">mvn</span> <span style="white-space: nowrap;">verify</span></div>
+                  <div data-dc-tpl="1137" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">2. the gate: exit code 1 when a threshold is crossed</span></div>
+                  <div data-dc-tpl="1138"><span data-dc-tpl="1139" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">analyze</span> <span style="white-space: nowrap;">--input</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--ci</span></div>
+                  <div data-dc-tpl="1140" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">3. the findings in Code scanning (SARIF)</span></div>
+                  <div data-dc-tpl="1141"><span data-dc-tpl="1142" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">analyze</span> <span style="white-space: nowrap;">--input</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--format</span> <span style="white-space: nowrap;">sarif</span> <span style="white-space: nowrap;">&gt;</span> <span style="white-space: nowrap;">findings.sarif</span></div>
+                </div>
+              <a data-dc-tpl="1143" data-plain="" href="/docs/CI" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-size: 14px; font-weight: 600; color: rgb(224, 244, 237);"><span data-dc-tpl="1144" data-ltext=""><span class="sc-interp">GitHub Actions, GitLab CI and Jenkins templates</span></span><span data-dc-tpl="1145" data-arrow=""> →</span></a>
+              </div>
+              <div data-dc-tpl="1146" data-cta-panel="try">
+              <div data-dc-tpl="1147" data-term="" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: rgb(224, 244, 237); background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(224, 244, 237, 0.14); border-radius: 10px; padding: 15px 18px; line-height: 2; max-width: 100%; overflow-x: auto;">
+                <div data-dc-tpl="1148" class="ps-l1"><span data-dc-tpl="1149"><span data-dc-tpl="1150" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">cargo</span> <span style="white-space: nowrap;">install</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">--locked</span></span><button data-dc-tpl="1151" type="button" data-copy="cargo install perf-sentinel --locked" data-copied="Copied" aria-live="polite"><span class="sc-interp">Copy</span></button></div>
+                <div data-dc-tpl="1152"><span data-dc-tpl="1153" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo <span data-dc-tpl="1154" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">terminal report</span></span></div>
+                <div data-dc-tpl="1155"><span data-dc-tpl="1156" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo --tui <span data-dc-tpl="1157" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">interactive TUI</span></span></div>
+                <div data-dc-tpl="1158"><span data-dc-tpl="1159" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo --html demo.html <span data-dc-tpl="1160" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">HTML dashboard</span></span></div>
+              </div>
+              <a data-dc-tpl="1161" data-plain="" href="/guide#install" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-size: 14px; font-weight: 600; color: rgb(224, 244, 237);"><span data-dc-tpl="1162" data-ltext=""><span class="sc-interp">Prebuilt binaries, Docker image and Helm chart in the guide</span></span><span data-dc-tpl="1163" data-arrow=""> →</span></a>
+              </div>
             </div>
-            <a data-dc-tpl="1142" data-plain="" data-tech-only="" href="/guide#install" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-size: 14px; font-weight: 600; color: rgb(224, 244, 237);"><span data-dc-tpl="1143" data-ltext=""><span class="sc-interp">Prebuilt binaries, Docker image and Helm chart in the guide</span></span><span data-dc-tpl="1144" data-arrow=""> →</span></a>
-            <div data-dc-tpl="1145" data-nontech-only="" style="display: flex; gap: 12px; flex-wrap: wrap;">
-              <a data-dc-tpl="1146" data-plain="" href="#modes" class="scp7" style="font-size: 15px; font-weight: 600; color: rgb(11, 82, 58); background: rgb(224, 244, 237); border-radius: 9px; padding: 13px 22px;"><span class="sc-interp">How it works</span></a>
-              <a data-dc-tpl="1147" data-plain="" href="#greenops" class="scp8" style="font-size: 15px; font-weight: 600; color: rgb(224, 244, 237); background: transparent; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; padding: 13px 22px;"><span class="sc-interp">The carbon side</span></a>
+            <div data-dc-tpl="1164" data-nontech-only="" style="display: flex; gap: 12px; flex-wrap: wrap;">
+              <a data-dc-tpl="1165" data-plain="" href="#modes" class="scp7" style="font-size: 15px; font-weight: 600; color: rgb(11, 82, 58); background: rgb(224, 244, 237); border-radius: 9px; padding: 13px 22px;"><span class="sc-interp">How it works</span></a>
+              <a data-dc-tpl="1166" data-plain="" href="#greenops" class="scp8" style="font-size: 15px; font-weight: 600; color: rgb(224, 244, 237); background: transparent; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; padding: 13px 22px;"><span class="sc-interp">The carbon side</span></a>
             </div>
           </div>
         </div>
 
-        <div data-dc-tpl="1148" data-stars-row="" style="position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 30px; padding-top: 24px; border-top: 1px solid rgba(224, 244, 237, 0.14);"><span data-dc-tpl="1149" style="font-size: 14px; color: rgb(169, 216, 198); margin-right: 6px;"><span class="sc-interp">Find it useful? A star helps others discover it.</span></span><a data-dc-tpl="1150" data-plain="" data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" target="_blank" rel="noopener" aria-label="Star Perf Sentinel on GitHub, 25 stars" class="scp8" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0px 16px; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; color: rgb(224, 244, 237); font-size: 14px; font-weight: 600;"><svg data-dc-tpl="1151" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon data-dc-tpl="1152" points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span data-dc-tpl="1153"><span class="sc-interp">Perf Sentinel</span></span><span data-dc-tpl="1154" data-stars="" data-n="25" style="padding-left: 9px; border-left: 1px solid rgba(224, 244, 237, 0.3); font-variant-numeric: tabular-nums; color: rgb(169, 216, 198);"><span class="sc-interp">25</span></span></a><a data-dc-tpl="1155" data-plain="" data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub" target="_blank" rel="noopener" aria-label="Star Perf Sentinel Hub on GitHub" class="scp8" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0px 16px; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; color: rgb(224, 244, 237); font-size: 14px; font-weight: 600;"><svg data-dc-tpl="1156" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon data-dc-tpl="1157" points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span data-dc-tpl="1158"><span class="sc-interp">Perf Sentinel Hub</span></span><span data-dc-tpl="1159" data-stars="" data-n="" style="padding-left: 9px; border-left: 1px solid rgba(224, 244, 237, 0.3); font-variant-numeric: tabular-nums; color: rgb(169, 216, 198);"><span class="sc-interp"></span></span></a></div>
+        <div data-dc-tpl="1167" data-stars-row="" style="position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 30px; padding-top: 24px; border-top: 1px solid rgba(224, 244, 237, 0.14);"><span data-dc-tpl="1168" style="font-size: 14px; color: rgb(169, 216, 198); margin-right: 6px;"><span class="sc-interp">Find it useful? A star helps others discover it.</span></span><a data-dc-tpl="1169" data-plain="" data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" target="_blank" rel="noopener" aria-label="Star Perf Sentinel on GitHub, 25 stars" class="scp8" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0px 16px; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; color: rgb(224, 244, 237); font-size: 14px; font-weight: 600;"><svg data-dc-tpl="1170" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon data-dc-tpl="1171" points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span data-dc-tpl="1172"><span class="sc-interp">Perf Sentinel</span></span><span data-dc-tpl="1173" data-stars="" data-n="25" style="padding-left: 9px; border-left: 1px solid rgba(224, 244, 237, 0.3); font-variant-numeric: tabular-nums; color: rgb(169, 216, 198);"><span class="sc-interp">25</span></span></a><a data-dc-tpl="1174" data-plain="" data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub" target="_blank" rel="noopener" aria-label="Star Perf Sentinel Hub on GitHub" class="scp8" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0px 16px; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; color: rgb(224, 244, 237); font-size: 14px; font-weight: 600;"><svg data-dc-tpl="1175" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon data-dc-tpl="1176" points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span data-dc-tpl="1177"><span class="sc-interp">Perf Sentinel Hub</span></span><span data-dc-tpl="1178" data-stars="" data-n="" style="padding-left: 9px; border-left: 1px solid rgba(224, 244, 237, 0.3); font-variant-numeric: tabular-nums; color: rgb(169, 216, 198);"><span class="sc-interp"></span></span></a></div>
       </div>
     </section>
 
     
-    <section data-dc-tpl="1160" data-screen-label="Governance">
-      <div data-dc-tpl="1161" data-gov="" style="display: grid; grid-template-columns: minmax(0px, 180px) minmax(0px, 1fr); gap: 32px; align-items: center; border-top: 1px solid var(--border); padding-top: 32px;">
-        <a data-dc-tpl="1162" data-plain="" href="https://institutnr.org/" target="_blank" rel="noopener" style="display: block;"><img data-dc-tpl="1163" data-logo="light" src="assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width: 100%; height: auto;"><img data-dc-tpl="1164" data-logo="dark" src="assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width: 100%; height: auto;"></a>
-        <div data-dc-tpl="1165">
-          <div data-dc-tpl="1166" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: var(--accent); letter-spacing: 0.04em;"><span class="sc-interp">// governance</span></div>
-          <h2 data-dc-tpl="1167" style="margin: 12px 0px 0px; font-size: clamp(24px, 2.7vw, 31px); font-weight: 700; letter-spacing: -0.018em; color: var(--text); text-wrap: balance;"><span class="sc-interp">Stewarded by the </span><span data-dc-tpl="1168" style="color: var(--accent-strong);"><span class="sc-interp">Institut du Numérique Responsable</span></span></h2>
-          <p data-dc-tpl="1169" style="margin: 12px 0px 0px; font-size: 15px; line-height: 1.6; color: var(--text-2); max-width: 62ch;"><span class="sc-interp">Started as a personal project, Perf Sentinel has joined the INR, a French non-profit that grew out of the Club Green IT. Its creator, </span><a data-dc-tpl="1170" href="https://github.com/robintra" target="_blank" rel="noopener" style="color: var(--accent-strong); font-weight: 600;">Robin Trassard</a><span class="sc-interp">, still leads it within the institute. Also a full-stack developer at Onepoint, back-end leaning and specialized in performance and eco-design, Robin built Perf Sentinel on personal time. The code stays under AGPL-3.0 and is developed in the open on the INR GitHub.</span></p>
-          <div data-dc-tpl="1171" data-links="" style="margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px 22px;"><a data-dc-tpl="1172" data-plain="" href="https://institutnr.org/" target="_blank" rel="noopener" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--accent-strong);"><span data-dc-tpl="1173" data-ltext="">institutnr.org</span><span data-dc-tpl="1174" data-arrow="ext"> ↗</span></a><a data-dc-tpl="1175" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable" target="_blank" rel="noopener" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--accent-strong);"><span data-dc-tpl="1176" data-ltext=""><span class="sc-interp">INR on GitHub</span></span><span data-dc-tpl="1177" data-arrow="ext"> ↗</span></a></div>
+    <section data-dc-tpl="1179" data-screen-label="Governance">
+      <div data-dc-tpl="1180" data-gov="" style="display: grid; grid-template-columns: minmax(0px, 180px) minmax(0px, 1fr); gap: 32px; align-items: center; border-top: 1px solid var(--border); padding-top: 32px;">
+        <a data-dc-tpl="1181" data-plain="" href="https://institutnr.org/" target="_blank" rel="noopener" style="display: block;"><img data-dc-tpl="1182" data-logo="light" src="assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width: 100%; height: auto;"><img data-dc-tpl="1183" data-logo="dark" src="assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width: 100%; height: auto;"></a>
+        <div data-dc-tpl="1184">
+          <div data-dc-tpl="1185" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: var(--accent); letter-spacing: 0.04em;"><span class="sc-interp">// governance</span></div>
+          <h2 data-dc-tpl="1186" style="margin: 12px 0px 0px; font-size: clamp(24px, 2.7vw, 31px); font-weight: 700; letter-spacing: -0.018em; color: var(--text); text-wrap: balance;"><span class="sc-interp">Stewarded by the </span><span data-dc-tpl="1187" style="color: var(--accent-strong);"><span class="sc-interp">Institut du Numérique Responsable</span></span></h2>
+          <p data-dc-tpl="1188" style="margin: 12px 0px 0px; font-size: 15px; line-height: 1.6; color: var(--text-2); max-width: 62ch;"><span class="sc-interp">Started as a personal project, Perf Sentinel has joined the INR, a French non-profit that grew out of the Club Green IT. Its creator, </span><a data-dc-tpl="1189" href="https://github.com/robintra" target="_blank" rel="noopener" style="color: var(--accent-strong); font-weight: 600;">Robin Trassard</a><span class="sc-interp">, still leads it within the institute. Also a full-stack developer at Onepoint, back-end leaning and specialized in performance and eco-design, Robin built Perf Sentinel on personal time. The code stays under AGPL-3.0 and is developed in the open on the INR GitHub.</span></p>
+          <div data-dc-tpl="1190" data-links="" style="margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px 22px;"><a data-dc-tpl="1191" data-plain="" href="https://institutnr.org/" target="_blank" rel="noopener" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--accent-strong);"><span data-dc-tpl="1192" data-ltext="">institutnr.org</span><span data-dc-tpl="1193" data-arrow="ext"> ↗</span></a><a data-dc-tpl="1194" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable" target="_blank" rel="noopener" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--accent-strong);"><span data-dc-tpl="1195" data-ltext=""><span class="sc-interp">INR on GitHub</span></span><span data-dc-tpl="1196" data-arrow="ext"> ↗</span></a></div>
         </div>
       </div>
     </section>
@@ -944,47 +960,47 @@
   </main>
 
   
-  <footer data-dc-tpl="1178" style="border-top: 1px solid var(--border); background: var(--surface-2);">
-    <div data-dc-tpl="1179" style="max-width: 1120px; margin: 0px auto; padding: 48px 28px 36px;">
-      <div data-dc-tpl="1180" data-grid="ftcols" style="display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px;">
-        <div data-dc-tpl="1181">
-          <img data-dc-tpl="1182" data-logo="light" src="assets/logo-h-light.svg" alt="Perf Sentinel" style="height: 40px; width: auto;"><img data-dc-tpl="1183" data-logo="dark" src="assets/logo-h-dark.svg" alt="Perf Sentinel" style="height: 40px; width: auto;">
-          <p data-dc-tpl="1184" style="margin: 16px 0px 0px; font-size: 13.5px; color: var(--text-2); max-width: 240px; line-height: 1.55;"><span class="sc-interp">Protocol-level I/O anti-pattern detector, self-hostable and carbon-aware.</span></p>
-        </div>
-        <div data-dc-tpl="1185">
-          <div data-dc-tpl="1186" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Product</span></div>
-          <div data-dc-tpl="1187" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
-            <a data-dc-tpl="1188" href="/#detection" data-tech-only="" class="scp9"><span class="sc-interp">Detection</span></a>
-            <a data-dc-tpl="1189" href="/#modes" data-tech-only="" class="scp9"><span class="sc-interp">Deploy</span></a>
-            <a data-dc-tpl="1190" href="/#perf" data-tech-only="" class="scp9"><span class="sc-interp">Performance</span></a>
-            <a data-dc-tpl="1191" href="/#greenops" class="scp9"><span class="sc-interp">GreenOps</span></a>
-            <a data-dc-tpl="1192" href="/#comparatif" class="scp9"><span class="sc-interp">Comparison</span></a>
-          </div>
-        </div>
-        <div data-dc-tpl="1193">
-          <div data-dc-tpl="1194" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Documentation</span></div>
-          <div data-dc-tpl="1195" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
-            <a data-dc-tpl="1196" href="/guide#quickstart" class="scp9"><span class="sc-interp">Quickstart</span></a>
-            <a data-dc-tpl="1197" href="/guide#cli" class="scp9"><span class="sc-interp">CLI reference</span></a>
-            <a data-dc-tpl="1198" href="/guide#config" class="scp9"><span class="sc-interp">Configuration</span></a>
-            <a data-dc-tpl="1199" href="/guide#metrics" class="scp9"><span class="sc-interp">GreenOps methodology</span></a>
-          </div>
-        </div>
+  <footer data-dc-tpl="1197" style="border-top: 1px solid var(--border); background: var(--surface-2);">
+    <div data-dc-tpl="1198" style="max-width: 1120px; margin: 0px auto; padding: 48px 28px 36px;">
+      <div data-dc-tpl="1199" data-grid="ftcols" style="display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px;">
         <div data-dc-tpl="1200">
-          <div data-dc-tpl="1201" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Project</span></div>
-          <div data-dc-tpl="1202" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
-            <a data-dc-tpl="1203" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" class="scp9">GitHub</a>
-            <a data-dc-tpl="1204" href="https://crates.io/crates/perf-sentinel" class="scp9">crates.io</a>
-            <a data-dc-tpl="1205" href="https://docs.rs/perf-sentinel-core" class="scp9">docs.rs</a>
-            <a data-dc-tpl="1206" href="/#license" data-hide-rse="" class="scp9"><span class="sc-interp">AGPL-3.0 license</span></a>
-            <a data-dc-tpl="1207" href="/#security" class="scp9"><span class="sc-interp">Security</span></a>
+          <img data-dc-tpl="1201" data-logo="light" src="assets/logo-h-light.svg" alt="Perf Sentinel" style="height: 40px; width: auto;"><img data-dc-tpl="1202" data-logo="dark" src="assets/logo-h-dark.svg" alt="Perf Sentinel" style="height: 40px; width: auto;">
+          <p data-dc-tpl="1203" style="margin: 16px 0px 0px; font-size: 13.5px; color: var(--text-2); max-width: 240px; line-height: 1.55;"><span class="sc-interp">Protocol-level I/O anti-pattern detector, self-hostable and carbon-aware.</span></p>
+        </div>
+        <div data-dc-tpl="1204">
+          <div data-dc-tpl="1205" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Product</span></div>
+          <div data-dc-tpl="1206" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
+            <a data-dc-tpl="1207" href="/#detection" data-tech-only="" class="scp9"><span class="sc-interp">Detection</span></a>
+            <a data-dc-tpl="1208" href="/#modes" data-tech-only="" class="scp9"><span class="sc-interp">Deploy</span></a>
+            <a data-dc-tpl="1209" href="/#perf" data-tech-only="" class="scp9"><span class="sc-interp">Performance</span></a>
+            <a data-dc-tpl="1210" href="/#greenops" class="scp9"><span class="sc-interp">GreenOps</span></a>
+            <a data-dc-tpl="1211" href="/#comparatif" class="scp9"><span class="sc-interp">Comparison</span></a>
+          </div>
+        </div>
+        <div data-dc-tpl="1212">
+          <div data-dc-tpl="1213" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Documentation</span></div>
+          <div data-dc-tpl="1214" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
+            <a data-dc-tpl="1215" href="/guide#quickstart" class="scp9"><span class="sc-interp">Quickstart</span></a>
+            <a data-dc-tpl="1216" href="/guide#cli" class="scp9"><span class="sc-interp">CLI reference</span></a>
+            <a data-dc-tpl="1217" href="/guide#config" class="scp9"><span class="sc-interp">Configuration</span></a>
+            <a data-dc-tpl="1218" href="/guide#metrics" class="scp9"><span class="sc-interp">GreenOps methodology</span></a>
+          </div>
+        </div>
+        <div data-dc-tpl="1219">
+          <div data-dc-tpl="1220" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Project</span></div>
+          <div data-dc-tpl="1221" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
+            <a data-dc-tpl="1222" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" class="scp9">GitHub</a>
+            <a data-dc-tpl="1223" href="https://crates.io/crates/perf-sentinel" class="scp9">crates.io</a>
+            <a data-dc-tpl="1224" href="https://docs.rs/perf-sentinel-core" class="scp9">docs.rs</a>
+            <a data-dc-tpl="1225" href="/#license" data-hide-rse="" class="scp9"><span class="sc-interp">AGPL-3.0 license</span></a>
+            <a data-dc-tpl="1226" href="/#security" class="scp9"><span class="sc-interp">Security</span></a>
           </div>
         </div>
       </div>
 
-      <div data-dc-tpl="1208" style="display: flex; justify-content: space-between; gap: 18px; margin-top: 26px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2);">
-        <div data-dc-tpl="1209" style="display: flex; flex-direction: column; gap: 6px;"><span data-dc-tpl="1210"><span class="sc-interp">© 2026 Robin Trassard and contributors · Institut du Numérique Responsable · AGPL-3.0 · Eco-designed page, no tracking script</span></span><span data-dc-tpl="1211" style="display: flex; gap: 14px;"><a data-dc-tpl="1212" href="/legal-notice"><span class="sc-interp">Legal notice</span></a><a data-dc-tpl="1213" href="/privacy-policy"><span class="sc-interp">Privacy</span></a></span></div>
-        <span data-dc-tpl="1214"><span class="sc-interp">Logo &amp; banner, </span><a data-dc-tpl="1215" href="https://www.linkedin.com/in/gwendoline-meignen-b0224873/" target="_blank" rel="noopener">Gwendoline Meignen</a></span>
+      <div data-dc-tpl="1227" style="display: flex; justify-content: space-between; gap: 18px; margin-top: 26px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2);">
+        <div data-dc-tpl="1228" style="display: flex; flex-direction: column; gap: 6px;"><span data-dc-tpl="1229"><span class="sc-interp">© 2026 Robin Trassard and contributors · Institut du Numérique Responsable · AGPL-3.0 · Eco-designed page, no tracking script</span></span><span data-dc-tpl="1230" style="display: flex; gap: 14px;"><a data-dc-tpl="1231" href="/legal-notice"><span class="sc-interp">Legal notice</span></a><a data-dc-tpl="1232" href="/privacy-policy"><span class="sc-interp">Privacy</span></a></span></div>
+        <span data-dc-tpl="1233"><span class="sc-interp">Logo &amp; banner, </span><a data-dc-tpl="1234" href="https://www.linkedin.com/in/gwendoline-meignen-b0224873/" target="_blank" rel="noopener">Gwendoline Meignen</a></span>
       </div>
     </div>
   </footer>
