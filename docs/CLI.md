@@ -223,11 +223,25 @@ daemon config), the CLI resolves it in priority order:
 3. Interactive `rpassword` prompt (no echo) if the daemon returns 401
    and stdin is a TTY. The pasted value is capped at 1 KiB.
 
-`query inspect`, `query monitor` and `query incidents` take the same
-`--api-key-file <PATH>` and resolve it the same way (steps 1 and 2, no
-prompt). The read key `[daemon] read_api_key` suffices for `query
-monitor` and `query incidents`. `ack` and `query inspect` need the ack
-key.
+`query` takes the same `--api-key-file <PATH>` once, before or after
+its subcommand, and resolves it the same way (steps 1 and 2, no prompt).
+Every `query` subcommand sends the key on each request, so a daemon with
+`[daemon] require_read_key = true`, which refuses every read without a
+key, answers `findings`, `explain`, `correlations` and `status` too. A
+refused read exits 1 and names the 401. The read key `[daemon]
+read_api_key` suffices for every `query` read. `ack`, and acknowledging
+from `query inspect`, need the ack key. Every other reader of such a
+daemon needs the key too: PerfSentinelHub, Grafana datasources, `curl
+…/api/export/report | perf-sentinel report`, the live HTML report and
+the JetBrains plugin. Do not turn the switch on for a daemon developers'
+IDEs read until the JetBrains plugin installed there sends a
+per-endpoint credential: earlier releases send none and get `401` on
+every refresh. See [QUERY-API.md](QUERY-API.md#read-gate).
+
+```bash
+perf-sentinel query --api-key-file ~/.config/perf-sentinel/read.key findings
+perf-sentinel query explain --trace-id abc123 --api-key-file ~/.config/perf-sentinel/read.key
+```
 
 There is no `--api-key <SECRET>` flag because passing secrets on the
 command line leaks them via the process list and shell history.
@@ -277,8 +291,8 @@ to one value each. `--limit` defaults to 50 and the daemon caps it
 at 100. `--offset` pages past the newest. A 401 (pass the key), a 503
 (`[daemon.incidents] enabled = false`) and a 404 (daemon older than
 0.20.0) each exit 1 with their cause named. `query monitor
---api-key-file <PATH>` hands the same key to the monitor's Incidents
-tab, see [`INSPECT.md`](./INSPECT.md).
+--api-key-file <PATH>` hands the same key to every monitor poll, the
+Incidents tab included, see [`INSPECT.md`](./INSPECT.md).
 
 For now, see `perf-sentinel <subcommand> --help` for the exhaustive
 option lists of `analyze`, `watch`, `query`, `report`, `diff`,

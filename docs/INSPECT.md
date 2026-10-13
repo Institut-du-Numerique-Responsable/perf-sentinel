@@ -44,9 +44,10 @@ since 0.20.0). The tabs auto-refresh from the daemon every `--refresh`
 seconds (default 5).
 When the daemon becomes unreachable, the last good snapshot stays on
 screen with a stale indicator. Read-only: no acknowledgments. No API
-key is needed except for the Incidents tab, which takes
-`--api-key-file` (or `PERF_SENTINEL_DAEMON_API_KEY`) and accepts the
-read-only `[daemon] read_api_key`.
+key is needed except for the Incidents tab, or for every tab on a
+daemon with `[daemon] require_read_key = true`. Pass `--api-key-file`
+(or `PERF_SENTINEL_DAEMON_API_KEY`), the read-only `[daemon]
+read_api_key` suffices, and the monitor sends it on every poll.
 
 ![all-in-one TUI: Analyze drills into Inspect then Explain, Esc walks back up](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/demo.gif)
 
@@ -332,7 +333,8 @@ bounded-label rule keeps it off Prometheus `/metrics`.
   row shows its type, severity, endpoint, window tally and whether it
   fired `before` or `after` the restart, that marker leading the row so
   a narrow terminal never clips it. This is the one tab that needs an
-  API key: pass `--api-key-file <PATH>` (or set
+  API key unless the daemon runs with `[daemon] require_read_key = true`,
+  which needs it on every tab: pass `--api-key-file <PATH>` (or set
   `PERF_SENTINEL_DAEMON_API_KEY`), and the read-only
   `[daemon] read_api_key` suffices. Without a key the tab names the 401
   and how to pass one. A daemon running with

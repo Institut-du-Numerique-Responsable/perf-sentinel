@@ -359,6 +359,10 @@ If you expose Perf Sentinel to a network:
 
 Never expose Perf Sentinel directly to untrusted networks without at minimum TLS enabled and network-level access controls in place.
 
+### The read gate is one shared key
+
+`[daemon] require_read_key = true` puts every read of the query API behind `[daemon] read_api_key` (or the write key a route already takes), see [QUERY-API.md](QUERY-API.md#read-gate). It is a single shared secret, not an identity: whoever holds it reads every service's findings, traces and reports, and the daemon cannot tell one reader from another or scope one to a team. Per-person or per-team reads belong to a proxy in front, or to PerfSentinelHub. The gate covers the query API alone: OTLP ingest, `/metrics`, `/health` and the JSON socket stay as before. Every reader then needs the key, and a JetBrains plugin release that sends no per-endpoint credential gets `401` on every refresh, so do not turn the switch on for a daemon developers' IDEs read before the plugin installed there can send one.
+
 ### JSON socket hardening
 
 The Unix-domain JSON socket (`[daemon] json_socket`) defends against local-user attacks on a multi-tenant host with two mechanisms:
@@ -824,7 +828,7 @@ Limitations:
 
 ## Daemon query API
 
-The `perf-sentinel query` subcommand and the `/api/*` HTTP endpoints expose the daemon's internal state. The query API has no built-in authentication or authorization. Access control must be handled externally via network policies or a reverse proxy, same as the OTLP ingestion endpoints. See "No authentication" above.
+The `perf-sentinel query` subcommand and the `/api/*` HTTP endpoints expose the daemon's internal state. The query API has no per-identity authentication or authorization: shared keys gate the writes, the acks listing and the incidents, and every read once `[daemon] require_read_key = true` (see [QUERY-API.md](QUERY-API.md#read-gate)). Any other access control must be handled externally via network policies or a reverse proxy, same as the OTLP ingestion endpoints. See "No authentication" above.
 
 - **Kill-switch.** Setting `[daemon] api_enabled = false` disables all `/api/*` routes while keeping OTLP ingestion and `/metrics` active. Use this when the daemon runs in an environment where even loopback exposure of findings is unacceptable. `/metrics` still exposes finding counts via `perf_sentinel_findings_total` and related counters, so the query API flag does not remove all observable output.
 - **Memory is not reclaimed by `api_enabled = false` alone.** The `FindingsStore` ring buffer is still populated each tick even when the API is disabled, because detection runs before the API check. To reclaim that memory, set `[daemon] max_retained_findings = 0`. This short-circuits the store's `push_batch` and keeps the daemon's RSS minimal when the query API is off.
@@ -868,7 +872,7 @@ Perf Sentinel never stores secrets in config output. For scrapers that need cred
 
 The daemon never writes secrets to stdout/stderr: all scraper error paths use `redact_endpoint` to strip userinfo from any URL before logging.
 
-When the daemon runs with `api_enabled = true`, the query API exposes findings (not secrets) but has no authentication. Restrict loopback access via network policies or a reverse proxy or set `api_enabled = false` to disable the API surface entirely.
+When the daemon runs with `api_enabled = true`, the query API exposes findings (not secrets) with no per-identity authentication, and with no key at all unless `[daemon] require_read_key = true`. Restrict loopback access via network policies or a reverse proxy or set `api_enabled = false` to disable the API surface entirely.
 
 ## Electricity Maps API
 

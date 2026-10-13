@@ -300,11 +300,26 @@ the daemon on cleartext HTTP.
 
 1. Boot: GET `/api/status` to determine connectivity. The status
    endpoint is unauthenticated (read-only, no secrets), so the badge
-   in the top bar reaches `Connected` without a key.
+   in the top bar reaches `Connected` without a key. A daemon with
+   `[daemon] require_read_key = true` answers it `401` instead: the
+   auth modal opens once, and the key it gets retries the refresh. The
+   read key suffices. `Cancel`, the close button or Escape closes it
+   for the rest of the tab, the badge stays `Authentication required`,
+   and the page stays a readable static report. A reload asks again.
+   Every other reader of that daemon needs the key too: PerfSentinelHub,
+   Grafana datasources, `perf-sentinel query`, `curl …/api/export/report
+   | perf-sentinel report` and the JetBrains plugin. Do not turn the
+   switch on for a daemon developers' IDEs read until the JetBrains
+   plugin installed there sends a per-endpoint credential: earlier
+   releases send none and get `401` on every refresh. See
+   [QUERY-API.md](QUERY-API.md#read-gate).
 2. First `Ack`/`Revoke` click: POST or DELETE on `/api/findings/<sig>/ack`.
    On 401, the auth modal opens with a password input (no echo). The
    key is stored in `sessionStorage` under
-   `perf-sentinel.daemon.api-key` and the failed request retries.
+   `perf-sentinel.daemon.api-key` and the failed request retries. A key
+   the daemon still accepts for reads, the read key under
+   `require_read_key`, stays stored: the modal asks for the ack key
+   instead of calling it invalid.
 3. Subsequent calls: every authenticated request reads the key from
    `sessionStorage` and sets `X-API-Key`.
 4. Tab close: `sessionStorage` clears, the next reload re-prompts on
@@ -319,7 +334,7 @@ the daemon on cleartext HTTP.
 | Per-row `Ack` / `Revoke` buttons | Live | Hidden in static mode via CSS, revealed under `body.ps-live`                                                |
 | `Show acknowledged` toggle       | Live | Filters the static findings list against the live `/api/acks` set                                           |
 | Acknowledgments panel            | Live | New tab `Acks` listing the daemon-side acks (paginated at 1000, daemon cap)                                 |
-| Authentication modal             | Live | Triggered by the first 401 on a write call, never on `/api/status`                                          |
+| Authentication modal             | Live | Triggered by the first 401 on a write call, or on `/api/status` under `require_read_key` until declined     |
 | Acknowledgment modal             | Live | Triggered by `Ack`. Form fields: reason (required), expires (Never / 24h / 7d / 30d), by (optional)         |
 
 ### Limitations

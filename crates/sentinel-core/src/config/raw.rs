@@ -273,6 +273,7 @@ pub(super) struct DaemonSection {
     memory_high_water_pct: Option<u8>,
     api_enabled: Option<bool>,
     read_api_key: Option<String>,
+    require_read_key: Option<bool>,
     correlation: CorrelationSection,
     ack: DaemonAckSection,
     incidents: DaemonIncidentsSection,
@@ -627,6 +628,10 @@ impl From<RawConfig> for Config {
                 read_api_key: resolve_ack_api_key(raw.daemon.read_api_key, || {
                     std::env::var("PERF_SENTINEL_READ_API_KEY").ok()
                 }),
+                require_read_key: raw
+                    .daemon
+                    .require_read_key
+                    .unwrap_or(daemon_defaults.require_read_key),
                 tls: DaemonTlsConfig {
                     cert_path: raw.daemon.tls_cert_path,
                     key_path: raw.daemon.tls_key_path,

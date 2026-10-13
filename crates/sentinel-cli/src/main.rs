@@ -348,11 +348,15 @@ async fn dispatch_command(command: Commands) {
             .await;
         }
         #[cfg(feature = "daemon")]
-        Commands::Query { daemon, action } => {
+        Commands::Query {
+            daemon,
+            api_key_file,
+            action,
+        } => {
             // `main` is `#[tokio::main]`, so await the async command
             // directly. A nested `Runtime::new().block_on(...)` here
             // panics with "Cannot start a runtime from within a runtime."
-            query::cmd_query(&daemon, action).await;
+            query::cmd_query(&daemon, api_key_file.as_deref(), action).await;
         }
         #[cfg(feature = "daemon")]
         Commands::Ack { daemon, action } => {

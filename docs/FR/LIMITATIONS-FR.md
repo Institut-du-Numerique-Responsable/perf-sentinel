@@ -368,6 +368,10 @@ Si vous exposez Perf Sentinel sur un réseau :
 
 N'exposez jamais Perf Sentinel directement sur des réseaux non fiables sans au minimum le TLS activé et des contrôles d'accès réseau en place.
 
+### La porte de lecture est une clé partagée
+
+`[daemon] require_read_key = true` met chaque lecture de l'API de requête derrière `[daemon] read_api_key` (ou la clé d'écriture qu'une route prend déjà), voir [QUERY-API-FR.md](QUERY-API-FR.md#porte-de-lecture). C'est un secret partagé unique, pas une identité : qui le détient lit les findings, traces et rapports de chaque service, et le daemon ne distingue pas un lecteur d'un autre ni ne restreint l'un d'eux à une équipe. Les lectures par personne ou par équipe relèvent d'un proxy en frontal, ou de PerfSentinelHub. La porte couvre la seule API de requête : l'ingestion OTLP, `/metrics`, `/health` et la socket JSON restent comme avant. Chaque lecteur a alors besoin de la clé, et une version du plugin JetBrains qui n'envoie pas de secret par endpoint reçoit `401` à chaque rafraîchissement, donc n'activez pas l'interrupteur sur un daemon que lisent les IDE des développeurs avant que le plugin qui y est installé puisse en envoyer un.
+
 ### Durcissement du socket JSON
 
 Le socket unix JSON (`[daemon] json_socket`) se défend contre les attaques locales sur un hôte multi-utilisateurs avec deux mécanismes :
@@ -833,7 +837,7 @@ Limitations :
 
 ## API de requêtage du daemon
 
-La sous-commande `perf-sentinel query` et les endpoints HTTP `/api/*` exposent l'état interne du daemon. L'API de requêtage n'a pas d'authentification ni d'autorisation intégrée. Le contrôle d'accès doit être géré extérieurement via des politiques réseau ou un reverse proxy, comme pour les endpoints d'ingestion OTLP. Voir "Pas d'authentification" ci-dessus.
+La sous-commande `perf-sentinel query` et les endpoints HTTP `/api/*` exposent l'état interne du daemon. L'API de requêtage n'a pas d'authentification ni d'autorisation par identité : des clés partagées protègent les écritures, la liste des acks et les incidents, et chaque lecture dès que `[daemon] require_read_key = true` (voir [QUERY-API-FR.md](QUERY-API-FR.md#porte-de-lecture)). Tout autre contrôle d'accès doit être géré extérieurement via des politiques réseau ou un reverse proxy, comme pour les endpoints d'ingestion OTLP. Voir "Pas d'authentification" ci-dessus.
 
 - **Kill-switch.** Mettre `[daemon] api_enabled = false` désactive toutes les routes `/api/*` tout en conservant l'ingestion OTLP et `/metrics`. Utilisez cette option quand le daemon tourne dans un environnement où même l'exposition en loopback des findings est inacceptable. `/metrics` expose toujours les compteurs de findings via `perf_sentinel_findings_total` et métriques associées : le flag de l'API ne supprime donc pas toute sortie observable.
 - **La mémoire n'est pas libérée par `api_enabled = false` seul.** Le buffer circulaire `FindingsStore` est toujours peuplé à chaque tick même quand l'API est désactivée, car la détection tourne avant la vérification de l'API. Pour libérer cette mémoire, mettez `[daemon] max_retained_findings = 0`. Cela court-circuite le `push_batch` du store et garde le RSS du daemon minimal quand l'API de requêtage est désactivée.
@@ -877,7 +881,7 @@ Perf Sentinel ne stocke jamais de secrets dans sa sortie de config. Pour les scr
 
 Le daemon n'écrit jamais de secrets sur stdout/stderr : tous les chemins d'erreur des scrapers utilisent `redact_endpoint` pour retirer les userinfo de toute URL avant de journaliser.
 
-Quand le daemon tourne avec `api_enabled = true`, l'API de requêtage expose les findings (pas les secrets) mais sans authentification. Restreignez l'accès loopback via des politiques réseau ou un reverse proxy ou mettez `api_enabled = false` pour désactiver toute la surface API.
+Quand le daemon tourne avec `api_enabled = true`, l'API de requêtage expose les findings (pas les secrets) sans authentification par identité, et sans aucune clé sauf si `[daemon] require_read_key = true`. Restreignez l'accès loopback via des politiques réseau ou un reverse proxy ou mettez `api_enabled = false` pour désactiver toute la surface API.
 
 ## API Electricity Maps
 

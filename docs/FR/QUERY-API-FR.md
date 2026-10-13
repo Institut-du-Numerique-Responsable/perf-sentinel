@@ -13,6 +13,7 @@ surface produit de premier plan, avec un contrat de stabilité.
 ## Sommaire
 
 - [Vue d'ensemble des endpoints](#vue-densemble-des-endpoints) : description en une ligne par endpoint.
+- [Porte de lecture](#porte-de-lecture) : `[daemon] require_read_key` met chaque lecture derrière une clé.
 - [Restreindre les écritures en production](#restreindre-les-écritures-en-production-reverse-proxy) : réserver les acks et l'export de rapport à un groupe via un reverse proxy.
 - [Endpoints](#endpoints) : référence complète par endpoint avec requête, réponse et exemples concrets.
 - [Réponses d'erreur](#réponses-derreur) : codes de statut et formes du corps.
@@ -46,7 +47,9 @@ sans le pouvoir d'écrire, donc un dashboard ne détient jamais une clé
 capable d'acquitter ou de fabriquer un incident. Le Hub lit lui aussi
 avec cette clé. Seul un Hub configuré pour relayer les acks (Hub 0.3.0
 et suivants, une clé d'ack par source) détient en plus `[daemon.ack]
-api_key` pour ce daemon, et ne l'envoie que sur ces écritures. Le daemon
+api_key` pour ce daemon, et ne l'envoie que sur ces écritures.
+`[daemon] require_read_key = true` met aussi chaque autre `GET` derrière
+ces clés, voir [Porte de lecture](#porte-de-lecture). Le daemon
 écoute sur `127.0.0.1` par défaut
 (voir `[daemon] listen_address` dans `docs/FR/CONFIGURATION-FR.md`), donc
 l'API n'est joignable que depuis l'hôte qui exécute le daemon, sauf si
@@ -76,6 +79,63 @@ rapport officiel aux architectes ou au DevOps, voir
   évince les plus anciennes entrées une fois plein) des findings est bornée par
   `[daemon] max_retained_findings` (défaut `10000`). Les findings plus
   anciens sont évincés en FIFO.
+
+## Porte de lecture
+
+Par défaut les lectures sont ouvertes à quiconque atteint le port, sauf
+`GET /api/acks` et `GET /api/incidents`, qui suivent leur clé d'écriture,
+et `[daemon] read_api_key` n'ajoute jamais de porte. `[daemon]
+require_read_key = true` met chaque `GET` (et `HEAD`) de l'API de requête
+derrière une clé. Désactivé, rien ne change sur cette page.
+
+| Route                                                                                                                                                                      | Clés acceptées                                                                   |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------|
+| `GET /api/findings`, `/api/findings/{trace_id}`, `/api/explain/{trace_id}`, `/api/correlations`, `/api/export/report`, `/api/acks`, `/api/status`, `/api/config`, `/api/energy` | `[daemon] read_api_key` ou `[daemon.ack] api_key`                                |
+| `GET /api/incidents`                                                                                                                                                       | `[daemon] read_api_key` ou `[daemon.incidents] api_key`, jamais la clé d'ack     |
+| `POST` et `DELETE`                                                                                                                                                         | inchangés : leur propre clé d'écriture, jamais la clé de lecture                 |
+
+- Chaque route accepte ce que son handler accepte, donc aucune clé ne
+  franchit la porte pour être refusée derrière.
+- La clé passe en `X-API-Key` ou en `Authorization: Bearer <clé>`.
+- Une clé que le daemon n'a pas configurée n'ouvre rien.
+- Une lecture refusée répond `401` avec `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`,
+  et seul un `GET /api/incidents` refusé est compté, dans
+  `perf_sentinel_incidents_rejected_total{reason="unauthorized"}`, comme son
+  handler le compte déjà.
+- Un chemin inconnu reste en `404`, et la couche CORS répond aux requêtes
+  preflight avant la porte.
+- `/metrics`, `/health`, l'ingestion OTLP et la socket JSON ne font pas
+  partie de l'API de requête et restent ouverts.
+- L'interrupteur exige `read_api_key` (ou `PERF_SENTINEL_READ_API_KEY`), et
+  refuse `[daemon.cors] allowed_origins = ["*"]`.
+
+```bash
+curl -H "X-API-Key: $PERF_SENTINEL_READ_API_KEY" "http://localhost:4318/api/findings?limit=10"
+curl -H "Authorization: Bearer $PERF_SENTINEL_READ_API_KEY" http://localhost:4318/api/status
+curl -s -H "X-API-Key: $PERF_SENTINEL_READ_API_KEY" http://localhost:4318/api/export/report \
+    | perf-sentinel report --input - --output report.html
+```
+
+Une fois l'interrupteur actif, chaque lecteur a besoin de la clé :
+
+- **PerfSentinelHub.** La source porte `AuthHeaderName=X-API-Key` et
+  `AuthHeaderValue=<read_api_key>`. Sans elles le poll reçoit `401` et la
+  source apparaît injoignable, et les acks et la lecture des incidents
+  affichent `unauthorized`.
+- **Les datasources Grafana** sur le daemon.
+  `examples/grafana-infinity-datasource.yaml` envoie déjà la clé de lecture
+  sur chaque requête.
+- **`perf-sentinel query`**, chaque sous-commande, `monitor` et `inspect`
+  compris : `--api-key-file <PATH>` ou `PERF_SENTINEL_DAEMON_API_KEY`.
+- **`curl …/api/export/report | perf-sentinel report`** et tout script sur
+  l'API.
+- **Le rapport HTML live** (`report --daemon-url`), qui demande la clé une
+  fois par onglet, voir [HTML-REPORT-FR.md](HTML-REPORT-FR.md).
+- **Le plugin JetBrains.** N'activez pas l'interrupteur sur un daemon que
+  lisent les IDE des développeurs tant que le plugin qui y est installé
+  n'envoie pas de secret par endpoint (`Authorization: Bearer`). Les
+  versions antérieures n'en envoient aucun, et chaque rafraîchissement
+  reçoit `401`.
 
 ## Restreindre les écritures en production (reverse proxy)
 
@@ -1265,6 +1325,7 @@ findings acquittés même dans le chemin par défaut.
 | `/api/export/report` sur daemon cold-start        | 200    | enveloppe Report vide avec `warnings: ["daemon has not yet processed any events"]` (avant 0.5.16 : 503) |
 | Paramètre de requête malformé (ex. `limit=abc`)   | 400    | erreur en texte brut générée par axum                                                                   |
 | Chemin inconnu (ex. `/api/does-not-exist`)        | 404    | corps vide                                                                                              |
+| Clé absente ou fausse sur une route gardée         | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                    |
 | Méthode autre que GET                             | 405    | erreur en texte brut générée par axum                                                                   |
 
 L'API n'émet pas de 5xx en fonctionnement normal. Un crash du processus

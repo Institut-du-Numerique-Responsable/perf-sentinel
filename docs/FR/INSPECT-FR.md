@@ -47,9 +47,10 @@ l'alerting, chacun avec les findings figés de sa fenêtre, depuis
 `--refresh` secondes (défaut 5). Quand le daemon devient injoignable, le
 dernier instantané valide reste affiché avec un indicateur
 d'obsolescence. Lecture seule : pas d'acquittement. Aucune clé d'API
-n'est requise sauf pour l'onglet Incidents, qui prend `--api-key-file`
-(ou `PERF_SENTINEL_DAEMON_API_KEY`) et accepte la clé en lecture seule
-`[daemon] read_api_key`.
+n'est requise sauf pour l'onglet Incidents, ou pour chaque onglet sur un
+daemon avec `[daemon] require_read_key = true`. Passez `--api-key-file`
+(ou `PERF_SENTINEL_DAEMON_API_KEY`), la clé en lecture seule `[daemon]
+read_api_key` suffit, et le moniteur l'envoie à chaque interrogation.
 
 ![TUI tout-en-un : Analyze descend vers Inspect puis Explain, Esc remonte](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/tui/demo.gif)
 
@@ -349,7 +350,8 @@ cardinalité, donc la règle des labels bornés les garde hors du
   son endpoint, son décompte sur la fenêtre et s'il s'est déclenché
   `before` ou `after` le redémarrage, ce marqueur ouvrant la ligne pour
   qu'un terminal étroit ne le coupe jamais. C'est le seul onglet qui
-  demande une clé d'API : passez `--api-key-file <PATH>` (ou posez
+  demande une clé d'API, sauf si le daemon tourne avec `[daemon]
+  require_read_key = true`, qui la demande sur chaque onglet : passez `--api-key-file <PATH>` (ou posez
   `PERF_SENTINEL_DAEMON_API_KEY`), et la clé en lecture seule
   `[daemon] read_api_key` suffit. Sans clé l'onglet nomme le 401 et
   comment en passer une. Un daemon qui tourne avec

@@ -154,7 +154,7 @@ impl EnergyBackendsConfigured {
 
 /// Build the query API router.
 pub fn query_api_router(state: Arc<QueryApiState>) -> Router {
-    Router::new()
+    let mut router = Router::new()
         .route("/api/findings", get(handle_findings))
         .route("/api/findings/{trace_id}", get(handle_findings_by_trace))
         .route("/api/explain/{trace_id}", get(handle_explain))
@@ -171,8 +171,59 @@ pub fn query_api_router(state: Arc<QueryApiState>) -> Router {
         .route(
             "/api/incidents",
             post(handle_post_incidents).get(handle_list_incidents),
+        );
+    // `route_layer`, not `layer`: an unknown path keeps its 404, and the
+    // CORS layer `listeners.rs` wraps around the router answers preflight first.
+    if state.daemon_config.require_read_key {
+        router = router.route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            require_read_key,
+        ));
+    }
+    router.with_state(state)
+}
+
+/// `[daemon] require_read_key`: every `GET` (and `HEAD`) needs
+/// `[daemon] read_api_key` or the write key its handler already accepts,
+/// so no key passes here only to be refused behind. That is the
+/// incidents key on `/api/incidents`, the ack key everywhere else. Only
+/// configured keys are tried, since `check_ack_auth` lets anything
+/// through an unset one. Writes pass on to their own key checks.
+async fn require_read_key(
+    State(state): State<Arc<QueryApiState>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    use axum::http::Method;
+    if req.method() != Method::GET && req.method() != Method::HEAD {
+        return next.run(req).await;
+    }
+    let incidents = req.uri().path() == "/api/incidents";
+    let write = if incidents {
+        state.daemon_config.incidents.api_key.as_deref()
+    } else {
+        state.ack_api_key.as_deref()
+    };
+    let accepted = [state.daemon_config.read_api_key.as_deref(), write]
+        .into_iter()
+        .flatten()
+        .any(|key| check_ack_auth(req.headers(), Some(key)).is_ok());
+    if accepted {
+        next.run(req).await
+    } else {
+        // `check_incident_preconditions` counts a refused incidents read:
+        // refusing it here first must not silence that counter.
+        if incidents {
+            state
+                .metrics
+                .record_incident_rejections(IncidentRejection::Unauthorized, 1);
+        }
+        ErrorResponse::new(
+            StatusCode::UNAUTHORIZED,
+            "missing or invalid X-API-Key or Authorization: Bearer",
         )
-        .with_state(state)
+        .into_response()
+    }
 }
 
 // ── Query parameters ──────────────────────────────────────────────

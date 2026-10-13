@@ -489,7 +489,9 @@ extraEnvFrom:
 
 La variable d'environnement `PERF_SENTINEL_ACK_API_KEY` surcharge le champ de config `[daemon.ack] api_key`, donc la clé vient du Secret et jamais de la ConfigMap. Un Secret monté vide est rejeté au chargement de la config. La clé protège aussi `GET /api/acks` (la piste d'audit), pas seulement les écritures. Le plancher de 12 caractères s'applique toujours, et 16 sont recommandés.
 
-*Les lecteurs qui ne doivent jamais écrire (Grafana, le Hub).* Donnez-leur `[daemon] read_api_key` par son propre Secret, `PERF_SENTINEL_READ_API_KEY` dans la même liste `extraEnvFrom`. Elle ouvre `GET /api/acks` et `GET /api/incidents` et rien d'autre, et le daemon refuse au démarrage une clé de lecture égale à une clé d'écriture, donc une configuration de dashboard qui fuit ne peut ni acquitter un finding ni fabriquer un incident.
+*Les lecteurs qui ne doivent jamais écrire (Grafana, le Hub).* Donnez-leur `[daemon] read_api_key` par son propre Secret, `PERF_SENTINEL_READ_API_KEY` dans la même liste `extraEnvFrom`. Elle ouvre `GET /api/acks` et `GET /api/incidents` et rien d'autre, et le daemon refuse au démarrage une clé de lecture égale à une clé d'écriture, donc une configuration de dashboard qui fuit ne peut ni acquitter un finding ni fabriquer un incident. Toutes les autres lectures restent ouvertes.
+
+*Chaque lecture derrière la clé.* Ajoutez `require_read_key = true` à `[daemon]` dans `config.toml` et chaque `GET` de l'API de requête répond `401` sans `[daemon] read_api_key` (ou la clé d'écriture que la route prend déjà), voir [QUERY-API-FR.md](QUERY-API-FR.md#porte-de-lecture). Le Secret de la clé de lecture ci-dessus devient alors obligatoire : le daemon refuse de démarrer avec l'interrupteur actif et sans clé de lecture. Chaque lecteur a besoin de la clé, le Hub (`AuthHeaderName=X-API-Key`), la datasource Grafana ci-dessous, `perf-sentinel query`, le rapport HTML live et le plugin JetBrains. Ne l'activez pas sur un daemon que lisent les IDE des développeurs tant que le plugin qui y est installé n'envoie pas de secret par endpoint : les versions antérieures n'en envoient aucun et reçoivent `401` à chaque rafraîchissement. `/metrics` et `/health` restent ouverts, donc le ServiceMonitor et les sondes n'ont besoin de rien.
 
 **Les acks runtime ont besoin d'un PVC pour exister tout court.** Sans lui, le chemin de stockage par défaut ne peut pas être résolu dans l'image scratch et les routes d'écriture d'ack renvoient 503. Basculez en mode `StatefulSet` avec `persistence.enabled: true` (cf. ci-dessus), ce qui câble `[daemon.ack] storage_path` sur le PVC pour vous.
 
@@ -1013,8 +1015,9 @@ jamais la clé d'écriture de `[daemon.incidents]` : un dossier Grafana ne
 doit pas pouvoir fabriquer un incident, et le daemon refuse au démarrage
 une clé de lecture égale à une clé d'écriture. Le même en-tête ouvre
 `GET /api/acks` pour la table des acquittements dès que `[daemon.ack]
-api_key` est renseignée, et les routes non protégées l'ignorent, une
-seule datasource sert donc tous les panneaux. Avec un en-tête
+api_key` est renseignée, chaque route dès que `[daemon] require_read_key
+= true`, et les routes non protégées l'ignorent, une seule datasource sert
+donc tous les panneaux. Avec un en-tête
 configuré, Infinity exige `allowedHosts`, que le fichier épingle déjà
 sur l'URL du daemon.
 

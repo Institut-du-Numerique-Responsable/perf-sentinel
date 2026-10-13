@@ -469,13 +469,6 @@ fn header_tail_sheds_the_url_then_the_cadence_when_narrow() {
     assert_eq!(header_tail("http://localhost:4318", 5, "12s ago", 2), "");
 }
 
-#[test]
-fn auth_header_for_wraps_the_key_and_refuses_an_unsendable_one() {
-    assert!(auth_header_for(None).unwrap().is_none());
-    assert!(auth_header_for(Some("read-key-123456")).unwrap().is_some());
-    assert!(auth_header_for(Some("bad\nkey")).is_err());
-}
-
 fn full_config() -> ConfigSlim {
     // All-default config: nothing should read as "modified".
     let d = DaemonConfig::default();

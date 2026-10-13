@@ -507,7 +507,7 @@ fn build_http_router(
 /// origins (HTTP-wise unparseable as `HeaderValue`) are dropped with a
 /// `warn!` log rather than a panic, so a typo at the end of a long list
 /// does not take the daemon down at startup.
-fn build_cors_layer(origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
+pub(super) fn build_cors_layer(origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
     use axum::http::{HeaderName, Method, header::CONTENT_TYPE};
     use tower_http::cors::{AllowOrigin, CorsLayer};
 

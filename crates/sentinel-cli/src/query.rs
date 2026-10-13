@@ -13,7 +13,11 @@ use crate::render::{AnsiColors, LOCAL_TIME_FORMAT, ansi_colors, fmt_local_iso};
 /// Entry point for the `query` subcommand. Validates the daemon URL,
 /// dispatches to the per-action handler and exits with a clear error if
 /// the daemon is unreachable.
-pub(crate) async fn cmd_query(daemon_url: &str, action: QueryAction) {
+pub(crate) async fn cmd_query(
+    daemon_url: &str,
+    api_key_file: Option<&std::path::Path>,
+    action: QueryAction,
+) {
     let client = sentinel_core::http_client::build_client();
     let timeout = std::time::Duration::from_secs(10);
 
@@ -26,6 +30,13 @@ pub(crate) async fn cmd_query(daemon_url: &str, action: QueryAction) {
         eprintln!("{e}");
         std::process::exit(1);
     });
+    // One key for every request: a daemon with `[daemon] require_read_key`
+    // refuses each read without it.
+    let api_key = resolve_api_key_or_exit(api_key_file);
+    let auth = auth_header_for(api_key.as_deref()).unwrap_or_else(|e| {
+        eprintln!("Invalid daemon API key: {e}");
+        std::process::exit(1);
+    });
 
     let fetch = |path: &str| {
         let uri: sentinel_core::http_client::Uri =
@@ -34,17 +45,23 @@ pub(crate) async fn cmd_query(daemon_url: &str, action: QueryAction) {
                 std::process::exit(1);
             });
         let client = &client;
+        let auth = auth.as_ref();
+        let refused = read_refusal(path);
         async move {
             match sentinel_core::http_client::fetch_get(
                 client,
                 &uri,
                 "perf-sentinel-query",
                 timeout,
-                None,
+                auth,
             )
             .await
             {
                 Ok(body) => body,
+                Err(sentinel_core::http_client::FetchError::HttpStatus(401)) => {
+                    eprintln!("{refused}");
+                    std::process::exit(1);
+                }
                 Err(e) => {
                     eprintln!(
                         "Failed to connect to daemon at {daemon_url}: {e}\n\
@@ -79,8 +96,7 @@ pub(crate) async fn cmd_query(daemon_url: &str, action: QueryAction) {
             render_explain_response(&body, format);
         }
         #[cfg(feature = "tui")]
-        QueryAction::Inspect { api_key_file, sort } => {
-            let api_key = resolve_api_key_or_exit(api_key_file.as_deref());
+        QueryAction::Inspect { sort } => {
             // include_acked=true so FindingResponse carries
             // `acknowledged_by` per finding, which the TUI uses to
             // render the `[acked by ...]` indicator and to populate
@@ -88,15 +104,20 @@ pub(crate) async fn cmd_query(daemon_url: &str, action: QueryAction) {
             let limit = crate::ack::FINDINGS_FETCH_LIMIT;
             let path = format!("/api/findings?limit={limit}&include_acked=true");
             let body = fetch(&path).await;
-            run_inspect_action(&body, &client, &trimmed, timeout, api_key, sort).await;
+            run_inspect_action(
+                &body,
+                &client,
+                &trimmed,
+                timeout,
+                api_key,
+                auth.as_ref(),
+                sort,
+            )
+            .await;
         }
         #[cfg(feature = "tui")]
-        QueryAction::Monitor {
-            refresh,
-            api_key_file,
-        } => {
-            let api_key = resolve_api_key_or_exit(api_key_file.as_deref());
-            crate::monitor::cmd_monitor(&trimmed, refresh, api_key.as_deref());
+        QueryAction::Monitor { refresh } => {
+            crate::monitor::cmd_monitor(&trimmed, refresh, auth);
         }
         QueryAction::Correlations { format } => {
             let body = fetch("/api/correlations").await;
@@ -112,9 +133,7 @@ pub(crate) async fn cmd_query(daemon_url: &str, action: QueryAction) {
             offset,
             limit,
             format,
-            api_key_file,
         } => {
-            let api_key = resolve_api_key_or_exit(api_key_file.as_deref());
             let path =
                 build_incidents_path(offset, limit, service.as_deref(), namespace.as_deref());
             let body = fetch_incidents_body(&trimmed, &path, api_key.as_deref()).await;
@@ -130,6 +149,33 @@ fn resolve_api_key_or_exit(file: Option<&std::path::Path>) -> Option<String> {
         eprintln!("{e}");
         std::process::exit(1);
     })
+}
+
+/// The `X-API-Key` header every request carries, built once from the
+/// resolved key. `AuthHeader::parse` is the one constructor reachable
+/// from this crate and it rejects a key that cannot travel in a header
+/// (CR, LF, non-visible ASCII).
+pub(crate) fn auth_header_for(
+    api_key: Option<&str>,
+) -> Result<Option<sentinel_core::ingest::auth_header::AuthHeader>, &'static str> {
+    api_key
+        .map(|key| {
+            sentinel_core::ingest::auth_header::AuthHeader::parse(&format!(
+                "{}: {key}",
+                sentinel_core::http_client::API_KEY_HEADER
+            ))
+        })
+        .transpose()
+}
+
+/// A read the daemon refused: the key is missing or wrong, not the
+/// daemon down. `[daemon] require_read_key` gates every read this way.
+fn read_refusal(path: &str) -> String {
+    format!(
+        "GET {path} refused (401): pass --api-key-file or set \
+         PERF_SENTINEL_DAEMON_API_KEY (the env var wins when both are set), \
+         the read key [daemon] read_api_key suffices"
+    )
 }
 
 fn build_findings_path(
@@ -567,8 +613,9 @@ fn build_incidents_path(
 /// GET `/api/incidents` with the key as `X-API-Key`: the body on
 /// success, the named cause and exit 1 on a refusal. Goes through
 /// `ack::http_call` rather than the `fetch` closure of `cmd_query`
-/// because that path sends no header and folds every status into the
-/// "is the daemon running" hint, wrong for a 401.
+/// because it keeps the status code, so `incidents_refusal` names a 503
+/// and a 404 as well as a 401, and an oversized body gets the paging
+/// hint instead of the "is the daemon running" one.
 async fn fetch_incidents_body(base_url: &str, path: &str, api_key: Option<&str>) -> bytes::Bytes {
     let client = sentinel_core::http_client::build_client_with_body();
     let url = format!("{base_url}{path}");
@@ -727,6 +774,7 @@ async fn fetch_explain_trees(
     timeout: std::time::Duration,
     trace_ids: &std::collections::BTreeSet<String>,
     concurrency: usize,
+    auth: Option<&sentinel_core::ingest::auth_header::AuthHeader>,
 ) -> std::collections::HashMap<String, String> {
     use tokio::task::JoinSet;
 
@@ -738,7 +786,7 @@ async fn fetch_explain_trees(
     // `by_ref().take(concurrency)` stops cleanly when either the budget
     // or the trace_ids iterator is exhausted, whichever comes first.
     for tid in iter.by_ref().take(concurrency) {
-        spawn_explain_fetch(&mut set, client, &base_url, timeout, tid.clone());
+        spawn_explain_fetch(&mut set, client, &base_url, timeout, tid.clone(), auth);
     }
 
     while let Some(join_result) = set.join_next().await {
@@ -750,7 +798,7 @@ async fn fetch_explain_trees(
         // Maintain the concurrency window by launching the next pending
         // fetch as soon as one completes.
         if let Some(tid) = iter.next() {
-            spawn_explain_fetch(&mut set, client, &base_url, timeout, tid.clone());
+            spawn_explain_fetch(&mut set, client, &base_url, timeout, tid.clone(), auth);
         }
     }
 
@@ -764,9 +812,11 @@ fn spawn_explain_fetch(
     base_url: &str,
     timeout: std::time::Duration,
     trace_id: String,
+    auth: Option<&sentinel_core::ingest::auth_header::AuthHeader>,
 ) {
     let client = client.clone();
     let base = base_url.to_string();
+    let auth = auth.cloned();
     set.spawn(async move {
         let Ok(uri) =
             format!("{base}/api/explain/{trace_id}").parse::<sentinel_core::http_client::Uri>()
@@ -778,7 +828,7 @@ fn spawn_explain_fetch(
             &uri,
             "perf-sentinel-query",
             timeout,
-            None,
+            auth.as_ref(),
         )
         .await
         else {
@@ -798,6 +848,7 @@ async fn run_inspect_action(
     base_url: &str,
     timeout: std::time::Duration,
     api_key: Option<String>,
+    auth: Option<&sentinel_core::ingest::auth_header::AuthHeader>,
     sort: Option<crate::render::FindingsSort>,
 ) {
     let responses: Vec<sentinel_core::daemon::query_api::FindingResponse> =
@@ -832,9 +883,9 @@ async fn run_inspect_action(
     // degrades gracefully (empty / None) on an older or unreachable
     // daemon, so the corresponding panel shows its hint.
     let (pre_rendered_trees, correlations, report) = tokio::join!(
-        fetch_explain_trees(client, base_url.to_string(), timeout, &trace_ids, 16),
-        fetch_correlations(client, base_url, timeout),
-        fetch_report(client, base_url, timeout),
+        fetch_explain_trees(client, base_url.to_string(), timeout, &trace_ids, 16, auth),
+        fetch_correlations(client, base_url, timeout, auth),
+        fetch_report(client, base_url, timeout, auth),
     );
     let traces: Vec<sentinel_core::correlate::Trace> = trace_ids
         .into_iter()
@@ -937,8 +988,9 @@ async fn fetch_correlations(
     client: &sentinel_core::http_client::HttpClient,
     base_url: &str,
     timeout: std::time::Duration,
+    auth: Option<&sentinel_core::ingest::auth_header::AuthHeader>,
 ) -> Vec<sentinel_core::detect::correlate_cross::CrossTraceCorrelation> {
-    fetch_json(client, base_url, "/api/correlations", timeout, None)
+    fetch_json(client, base_url, "/api/correlations", timeout, auth)
         .await
         .unwrap_or_default()
 }
@@ -952,14 +1004,22 @@ async fn fetch_report(
     client: &sentinel_core::http_client::HttpClient,
     base_url: &str,
     timeout: std::time::Duration,
+    auth: Option<&sentinel_core::ingest::auth_header::AuthHeader>,
 ) -> Option<sentinel_core::report::Report> {
-    fetch_json(client, base_url, "/api/export/report", timeout, None).await
+    fetch_json(client, base_url, "/api/export/report", timeout, auth).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use sentinel_core::daemon::findings_store::StoredFinding;
+
+    #[test]
+    fn auth_header_for_wraps_the_key_and_refuses_an_unsendable_one() {
+        assert!(auth_header_for(None).unwrap().is_none());
+        assert!(auth_header_for(Some("read-key-123456")).unwrap().is_some());
+        assert!(auth_header_for(Some("bad\nkey")).is_err());
+    }
 
     fn stored(severity: &str, seen: u64, ops: usize) -> StoredFinding {
         serde_json::from_value(serde_json::json!({
@@ -1174,5 +1234,69 @@ mod tests {
         assert_eq!(finding_count_label(0), "0 findings");
         assert_eq!(finding_count_label(1), "1 finding");
         assert_eq!(finding_count_label(2), "2 findings");
+    }
+
+    /// Answers `[]` to `count` requests on `127.0.0.1:0`, recording each
+    /// request's path and `X-API-Key`.
+    #[cfg(feature = "tui")]
+    fn spawn_key_recorder(count: usize) -> (String, std::sync::mpsc::Receiver<(String, String)>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(count) {
+                let mut stream = stream.unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let path = line.split(' ').nth(1).unwrap_or_default().to_string();
+                let mut key = String::new();
+                loop {
+                    line.clear();
+                    if reader.read_line(&mut line).unwrap() == 0 || line.trim().is_empty() {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("x-api-key:") {
+                        key = v.trim().to_string();
+                    }
+                }
+                tx.send((path, key)).unwrap();
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]",
+                );
+            }
+        });
+        (base, rx)
+    }
+
+    #[cfg(feature = "tui")]
+    #[tokio::test]
+    async fn inspect_startup_fetches_send_the_key() {
+        // They degrade to empty on any error, so a dropped key would only
+        // show as empty trees, correlations and Analyze view.
+        let (base, seen) = spawn_key_recorder(4);
+        let client = sentinel_core::http_client::build_client();
+        let timeout = std::time::Duration::from_secs(5);
+        let auth = auth_header_for(Some("read-key-123456")).unwrap();
+        let traces = std::collections::BTreeSet::from(["t1".to_string(), "t2".to_string()]);
+        fetch_explain_trees(&client, base.clone(), timeout, &traces, 2, auth.as_ref()).await;
+        fetch_correlations(&client, &base, timeout, auth.as_ref()).await;
+        fetch_report(&client, &base, timeout, auth.as_ref()).await;
+        let mut seen: Vec<(String, String)> = seen.try_iter().collect();
+        seen.sort();
+        let paths: Vec<&str> = seen.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "/api/correlations",
+                "/api/explain/t1",
+                "/api/explain/t2",
+                "/api/export/report"
+            ]
+        );
+        for (path, key) in &seen {
+            assert_eq!(key, "read-key-123456", "{path}");
+        }
     }
 }

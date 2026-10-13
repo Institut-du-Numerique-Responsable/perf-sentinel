@@ -3196,3 +3196,263 @@ async fn a_read_key_alone_gates_nothing() {
         "no incidents key and no store: no 401 appears in front of the 503"
     );
 }
+
+/// Every `GET` of the query router, the set `[daemon] require_read_key`
+/// gates. A route added to `query_api_router` belongs here too.
+const GATED_GETS: [&str; 10] = [
+    "/api/findings",
+    "/api/findings/trace-1",
+    "/api/explain/trace-1",
+    "/api/correlations",
+    "/api/export/report",
+    "/api/acks",
+    "/api/incidents",
+    "/api/status",
+    "/api/config",
+    "/api/energy",
+];
+
+const READ_KEY: &str = "read-key-long-enough";
+const ACK_KEY: &str = "ack-key-long-enough";
+const INCIDENTS_KEY: &str = "incidents-key-long-enough";
+
+/// The switch on, with `read`, `ack` and `incidents` as the three keys.
+fn read_gated_state(
+    read: Option<&str>,
+    ack: Option<&str>,
+    incidents: Option<&str>,
+) -> QueryApiState {
+    let mut state = make_state().clone_for_test();
+    state.daemon_config.require_read_key = true;
+    state.daemon_config.read_api_key = read.map(str::to_string);
+    state.ack_api_key = ack.map(str::to_string);
+    state.daemon_config.incidents.api_key = incidents.map(str::to_string);
+    state
+}
+
+#[tokio::test]
+async fn require_read_key_refuses_every_get_without_a_key() {
+    let app = query_api_router(Arc::new(read_gated_state(
+        Some(READ_KEY),
+        Some(ACK_KEY),
+        Some(INCIDENTS_KEY),
+    )));
+    for path in GATED_GETS {
+        let resp = app.clone().oneshot(get_request(path)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{path}");
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(body["error"].is_string(), "{path}: the usual 401 body");
+        let head = Request::builder()
+            .method("HEAD")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            status_of(&app, head).await,
+            StatusCode::UNAUTHORIZED,
+            "HEAD {path}"
+        );
+        assert_eq!(
+            status_of(
+                &app,
+                keyed(get_request(path), Some("wrong-key-long-enough"))
+            )
+            .await,
+            StatusCode::UNAUTHORIZED,
+            "{path} with a wrong key"
+        );
+    }
+    assert_eq!(
+        status_of(&app, get_request("/api/no-such-route")).await,
+        StatusCode::NOT_FOUND,
+        "an unknown path stays a 404"
+    );
+}
+
+#[tokio::test]
+async fn require_read_key_opens_every_get_to_the_read_key_and_all_but_incidents_to_the_ack_key() {
+    let app = query_api_router(Arc::new(read_gated_state(
+        Some(READ_KEY),
+        Some(ACK_KEY),
+        Some(INCIDENTS_KEY),
+    )));
+    for path in GATED_GETS {
+        assert_eq!(
+            status_of(&app, keyed(get_request(path), Some(READ_KEY))).await,
+            StatusCode::OK,
+            "{path} with the read key"
+        );
+        assert_eq!(
+            status_of(
+                &app,
+                authorized(get_request(path), &format!("Bearer {READ_KEY}"))
+            )
+            .await,
+            StatusCode::OK,
+            "{path} with the read key as a bearer token"
+        );
+        if path == "/api/incidents" {
+            continue;
+        }
+        assert_eq!(
+            status_of(&app, keyed(get_request(path), Some(ACK_KEY))).await,
+            StatusCode::OK,
+            "{path} with the ack key"
+        );
+    }
+}
+
+#[tokio::test]
+async fn require_read_key_on_incidents_takes_the_incidents_key_never_the_ack_key() {
+    let app = query_api_router(Arc::new(read_gated_state(
+        Some(READ_KEY),
+        Some(ACK_KEY),
+        Some(INCIDENTS_KEY),
+    )));
+    let incidents = || get_request("/api/incidents");
+    assert_eq!(
+        status_of(&app, keyed(incidents(), Some(INCIDENTS_KEY))).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status_of(&app, keyed(incidents(), Some(ACK_KEY))).await,
+        StatusCode::UNAUTHORIZED,
+        "the handler refuses the ack key, so the gate does too"
+    );
+    assert_eq!(
+        status_of(
+            &app,
+            keyed(get_request("/api/findings"), Some(INCIDENTS_KEY))
+        )
+        .await,
+        StatusCode::UNAUTHORIZED,
+        "and the incidents key opens incidents alone"
+    );
+}
+
+#[tokio::test]
+async fn require_read_key_never_opens_on_an_unconfigured_key() {
+    // `check_ack_auth(headers, None)` answers Ok: a gate that tested an
+    // unset write key would open every route to a request with no key.
+    let app = query_api_router(Arc::new(read_gated_state(Some(READ_KEY), None, None)));
+    for path in GATED_GETS {
+        assert_eq!(
+            status_of(&app, get_request(path)).await,
+            StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
+        assert_eq!(
+            status_of(&app, keyed(get_request(path), Some(READ_KEY))).await,
+            StatusCode::OK,
+            "{path} with the read key"
+        );
+    }
+}
+
+#[tokio::test]
+async fn require_read_key_leaves_the_writes_to_their_own_keys() {
+    let (_dir, store) = fresh_ack_store().await;
+    let mut gated = read_gated_state(Some(READ_KEY), Some(ACK_KEY), Some(INCIDENTS_KEY));
+    gated.ack_store = Some(store);
+    let state = Arc::new(gated);
+    let sig = seed_finding(&state, "order-svc").await;
+    let app = query_api_router(Arc::clone(&state));
+    let empty = serde_json::json!([]);
+
+    assert_eq!(
+        status_of(&app, keyed(post_ack_request(&sig), Some(READ_KEY))).await,
+        StatusCode::UNAUTHORIZED,
+        "the read key still never acks"
+    );
+    assert_eq!(
+        status_of(&app, keyed(post_ack_request(&sig), Some(ACK_KEY))).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        status_of(&app, keyed(delete_ack_request(&sig), Some(ACK_KEY))).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        status_of(
+            &app,
+            keyed(post_incidents_request(&empty), Some(INCIDENTS_KEY))
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status_of(&app, keyed(post_incidents_request(&empty), Some(READ_KEY))).await,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn require_read_key_off_leaves_the_reads_open() {
+    let mut open = read_gated_state(Some(READ_KEY), None, None);
+    open.daemon_config.require_read_key = false;
+    let app = query_api_router(Arc::new(open));
+    for path in GATED_GETS {
+        assert_eq!(
+            status_of(&app, get_request(path)).await,
+            StatusCode::OK,
+            "{path}: a read key alone gates nothing"
+        );
+    }
+}
+
+#[tokio::test]
+async fn require_read_key_leaves_preflight_open_and_its_401_readable_cross_origin() {
+    // The live HTML report reads the daemon cross-origin: the preflight
+    // must pass without a key, and the 401 must carry the CORS headers or
+    // the browser reports an unreachable daemon instead of asking for one.
+    use axum::http::header;
+    let origin = "https://reports.example.com";
+    let cors = crate::daemon::listeners::build_cors_layer(&[origin.to_string()]).unwrap();
+    let app = query_api_router(Arc::new(read_gated_state(Some(READ_KEY), None, None))).layer(cors);
+    let preflight = Request::builder()
+        .method("OPTIONS")
+        .uri("/api/status")
+        .header(header::ORIGIN, origin)
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+        .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "x-api-key")
+        .body(Body::empty())
+        .unwrap();
+    assert!(status_of(&app, preflight).await.is_success());
+    let refused = Request::builder()
+        .uri("/api/status")
+        .header(header::ORIGIN, origin)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(refused).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        resp.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+        origin,
+        "the browser must be able to read the 401"
+    );
+}
+
+#[tokio::test]
+async fn require_read_key_counts_a_refused_incidents_read_like_the_handler_does() {
+    // `incidents_rejected_total{reason="unauthorized"}` covers a refused
+    // `GET /api/incidents` too: the gate refusing first must not silence it.
+    let state = Arc::new(read_gated_state(
+        Some(READ_KEY),
+        Some(ACK_KEY),
+        Some(INCIDENTS_KEY),
+    ));
+    let unauthorized = || {
+        state
+            .metrics
+            .incidents_rejected_total
+            .with_label_values(&["unauthorized"])
+            .get()
+    };
+    let app = query_api_router(Arc::clone(&state));
+    status_of(&app, get_request("/api/incidents")).await;
+    status_of(&app, keyed(get_request("/api/incidents"), Some(ACK_KEY))).await;
+    assert_eq!(unauthorized(), 2);
+    status_of(&app, get_request("/api/findings")).await;
+    assert_eq!(unauthorized(), 2, "a refused findings read is no incident");
+}
