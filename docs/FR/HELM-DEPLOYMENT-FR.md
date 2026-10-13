@@ -1026,7 +1026,10 @@ durée, donc le sélecteur de temps ne peut pas remonter. Là où un
 déployé (0.3.0 et suivants), la rangée repliée `History (Hub)` lit le Hub
 à la place. Elle appelle le `GET /api/findings` du Hub avec la plage du
 sélecteur (`from`, `to`), la variable `Environment`, et les filtres
-`Service` et `Finding type` de la table en direct. `Findings history`
+`Grouping`, `Service` et `Finding type` de la table en direct. La
+signature ne porte pas de regroupement, donc le Hub compare `Grouping` à
+chaque regroupement où il a vu le finding, et un Hub antérieur à ce
+filtre l'ignore. `Findings history`
 liste une ligne par problème que le Hub a vu dans cet environnement un
 jour de la plage, à l'horloge du Hub en UTC, avec `First seen`,
 `Last seen` et `Status` calculés pour ce seul environnement. Elle n'a

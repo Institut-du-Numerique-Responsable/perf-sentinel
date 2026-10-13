@@ -6,6 +6,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Changed
 
+- The findings dashboard's `Findings history` table follows `Grouping`, as the live tables do. It sends the variable to the Hub's `GET /api/findings` as `grouping`, which PerfSentinelHub matches against every grouping a source saw the finding in, since the signature carries none, so a namespace picked above narrows the history too. A Hub that predates the filter ignores it and lists every grouping, as before. The `Grouping` variable and the table descriptions say so. Dashboard `version` 14. `docs/HELM-DEPLOYMENT.md` and its French mirror describe it, and the French variant is regenerated.
+
 - The daemon image and the Helm chart move to `ghcr.io/institut-du-numerique-responsable/perf-sentinel` and `oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel`, following the repository to the Institut du Numérique Responsable. Every version already published under `ghcr.io/robintra` was copied there with its signature, and the old namespace receives no new releases. The Docker Hub image keeps its name, `robintrassard/perf-sentinel`.
 
 ## [0.26.2] - 2026-10-09

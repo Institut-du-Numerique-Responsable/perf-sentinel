@@ -110,7 +110,7 @@
         },
         "options": [],
         "hide": 0,
-        "description": "Effective grouping of the analysed traffic: the first attribute present from [detection] grouping_attributes (k8s.namespace.name, then service.namespace, by default), so on Kubernetes the namespace the workloads run in. Listed from the grouping label of perf_sentinel_findings_total, so it offers exactly what the overview dashboard filters on. Sent to the API as an exact match. All sends a single space, which the API reads as no filter: Grafana ignores an empty allValue, so a blank is the only value that reaches the request. The Prometheus datasource serves this list and the Service list, nothing else. grouping=\"_other\" is the metrics' fold bucket for pairs past the per-run caps, not a value a finding carries: picking it yields an empty table, the rows it stands for sit under their real grouping."
+        "description": "Effective grouping of the analysed traffic: the first attribute present from [detection] grouping_attributes (k8s.namespace.name, then service.namespace, by default), so on Kubernetes the namespace the workloads run in. Listed from the grouping label of perf_sentinel_findings_total, so it offers exactly what the overview dashboard filters on. Sent to the API, and to the Hub's for the History (Hub) row, as an exact match. All sends a single space, which the API reads as no filter: Grafana ignores an empty allValue, so a blank is the only value that reaches the request. The Prometheus datasource serves this list and the Service list, nothing else. grouping=\"_other\" is the metrics' fold bucket for pairs past the per-run caps, not a value a finding carries: picking it yields an empty table, the rows it stands for sit under their real grouping."
       },
       {
         "name": "service",
@@ -2422,7 +2422,7 @@
           "type": "table",
           "id": 101,
           "title": "Findings history",
-          "description": "One row per problem the Hub saw in the chosen environment inside the dashboard's time range, read from the Hub rather than from the daemon's ring. A day counts when the Hub observed the finding that day, on the Hub's clock in UTC.\n\n'First seen', 'Last seen' and 'Status' describe the chosen environment alone, the whole fleet on All. There are no occurrence columns: the daemon's counts are relative to its ring and do not add up over months. 'Code' is the call site as the Findings table above shows it, at the last observation.\n\n'Acked on' and 'Acked by' come from the Hub's mirror of each daemon's acks, 'Acked via' is the daemon's own annotation at the last observation. The Ack link opens the Hub's ack page for that signature, once Hub URL is set.\n\nNeeds PerfSentinelHub 0.3.0: an older Hub ignores the range and the environment and answers its latest state.",
+          "description": "One row per problem the Hub saw in the chosen environment inside the dashboard's time range, read from the Hub rather than from the daemon's ring. A day counts when the Hub observed the finding that day, on the Hub's clock in UTC.\n\n'First seen', 'Last seen' and 'Status' describe the chosen environment alone, the whole fleet on All. There are no occurrence columns: the daemon's counts are relative to its ring and do not add up over months. 'Code' is the call site as the Findings table above shows it, at the last observation.\n\n'Acked on' and 'Acked by' come from the Hub's mirror of each daemon's acks, 'Acked via' is the daemon's own annotation at the last observation. The Ack link opens the Hub's ack page for that signature, once Hub URL is set.\n\nGrouping matches every grouping the Hub saw the finding in, since its signature does not carry one.\n\nNeeds PerfSentinelHub 0.3.0: an older Hub ignores the range and the environment and answers its latest state, and a Hub without the grouping filter ignores Grouping.",
           "datasource": {
             "type": "yesoreyeram-infinity-datasource",
             "uid": "${DS_HUB}"
@@ -2444,7 +2444,7 @@
               "source": "url",
               "parser": "backend",
               "format": "table",
-              "url": "/api/findings?environment=${environment}&from=${__from}&to=${__to}&limit=${limit}&offset=${hub_offset}&service=${service}&finding_type=${type}&include_acked=${include_acked}",
+              "url": "/api/findings?environment=${environment}&from=${__from}&to=${__to}&limit=${limit}&offset=${hub_offset}&grouping=${grouping}&service=${service}&finding_type=${type}&include_acked=${include_acked}",
               "url_options": {
                 "method": "GET"
               },
@@ -2847,5 +2847,5 @@
     }
   ],
   "timezone": "browser",
-  "version": 13
+  "version": 14
 }
