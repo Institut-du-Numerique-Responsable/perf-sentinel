@@ -1119,3 +1119,138 @@ test("43. the acks table shows expiry in the viewer's local time", async ({ page
   await expect(page.locator("#acks-table")).toContainText("2026-05-09 11:14:22");
   await expect(page.locator("#acks-table")).toContainText("never");
 });
+
+const READ_KEY = "read-key-123456";
+const ACK_KEY = "ack-ack-ack-ack";
+
+/**
+ * Serves the demo dashboard behind a mock of `[daemon] require_read_key = true`:
+ * /api/status and /api/acks answer 401 without the read or the ack key, an ack
+ * write answers 401 without the ack key. Wrapped after the demo mock, which
+ * answers what the gate lets through. `__authPrompts` counts the auth modal's
+ * `showModal` calls.
+ */
+async function serveReadGatedDemo(page: Page): Promise<() => Promise<number>> {
+  const gate = `<script>(function () {
+    var inner = window.fetch;
+    window.fetch = function (input, init) {
+      var url = typeof input === "string" ? input : (input && input.url) || "";
+      var method = ((init && init.method) || "GET").toUpperCase();
+      var key = init && init.headers && init.headers["X-API-Key"];
+      var read = url.indexOf("/api/status") !== -1 || url.indexOf("/api/acks") !== -1;
+      var refused = method === "GET"
+        ? read && key !== "${READ_KEY}" && key !== "${ACK_KEY}"
+        : url.indexOf("/ack") !== -1 && key !== "${ACK_KEY}";
+      if (refused) return Promise.resolve(new Response(null, { status: 401 }));
+      return inner(input, init);
+    };
+    window.__authPrompts = 0;
+    var show = HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal = function () {
+      if (this.id === "auth-modal") window.__authPrompts++;
+      return show.call(this);
+    };
+  })();</script>`;
+  await page.route("**/dashboard-demo.html", async (route) => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(
+      '<script id="report-data"', gate + '<script id="report-data"');
+    await route.fulfill({ response, body });
+  });
+  return () => page.evaluate(() => (window as any).__authPrompts as number);
+}
+
+test("44. a daemon gating its reads prompts for the key once, and not again after Cancel or Escape", async ({ page }) => {
+  const prompts = await serveReadGatedDemo(page);
+  const modal = page.locator("#auth-modal");
+  const status = page.locator("#ps-daemon-status-text");
+  const refresh = async () => {
+    await page.locator("#ps-refresh-btn").click();
+    await expect(page.locator("#ps-refresh-btn")).toBeEnabled();
+  };
+
+  await page.goto("/dashboard-demo.html#findings");
+  await page.waitForSelector("[role=tablist]");
+  test.skip(await page.locator("#ps-daemon-status").isVisible() === false, "not live mode");
+  await expect(modal).toBeVisible();
+  expect(await prompts()).toBe(1);
+
+  // Cancel leaves a readable static report, and a refresh does not ask again.
+  await page.locator("#auth-modal-cancel").click();
+  await expect(modal).toBeHidden();
+  await refresh();
+  await expect(status).toHaveText("Authentication required");
+  expect(await prompts()).toBe(1);
+  await expect(modal).toBeHidden();
+  await expect(page.locator("#findings-list")).not.toBeEmpty();
+
+  // Escape is a keyboard Cancel: it declines the prompt the same way.
+  await page.reload();
+  await page.waitForSelector("[role=tablist]");
+  await expect(modal).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(modal).toBeHidden();
+  await refresh();
+  expect(await prompts()).toBe(1);
+  await expect(modal).toBeHidden();
+
+  // A new page load asks again, and the key it gets opens the reads.
+  await page.reload();
+  await page.waitForSelector("[role=tablist]");
+  await expect(modal).toBeVisible();
+  await page.locator("#auth-modal-key").fill(READ_KEY);
+  await page.locator("#auth-modal-submit").click();
+  await expect(status).toHaveText("Connected");
+  await expect(modal).toBeHidden();
+  expect(await prompts()).toBe(1);
+});
+
+test("45. a read key refused on an ack stays stored, and the prompt then takes the ack key", async ({ page }) => {
+  const prompts = await serveReadGatedDemo(page);
+  const modal = page.locator("#auth-modal");
+  const error = page.locator("#auth-modal-error");
+  const status = page.locator("#ps-daemon-status-text");
+  const storedKey = () => page.evaluate(() => sessionStorage.getItem("perf-sentinel.daemon.api-key"));
+  const ack = async () => {
+    await page.locator("#findings-list .ps-fin-action-btn").first().click();
+    await page.locator("#ack-modal-reason").fill("tracked in ops/1234");
+    await page.locator("#ack-modal-submit").click();
+  };
+
+  await page.goto("/dashboard-demo.html#findings");
+  await page.waitForSelector("[role=tablist]");
+  test.skip(await page.locator("#findings-list .ps-fin-action-btn").count() === 0,
+    "demo fixture is not in live mode");
+  await page.locator("#auth-modal-key").fill(READ_KEY);
+  await page.locator("#auth-modal-submit").click();
+  await expect(status).toHaveText("Connected");
+
+  // The read key is valid, only read-only: say so, and keep it.
+  await ack();
+  await expect(modal).toBeVisible();
+  await expect(error).toContainText("can read but not acknowledge");
+  expect(await prompts()).toBe(2);
+  await page.locator("#auth-modal-cancel").click();
+  await page.locator("#ack-modal-cancel").click();
+  expect(await storedKey()).toBe(READ_KEY);
+  await page.locator("#ps-refresh-btn").click();
+  await expect(status).toHaveText("Connected");
+  expect(await prompts()).toBe(2);
+
+  // A wrong key fails the read and the write at once: one prompt, which
+  // keeps its error.
+  await ack();
+  await expect(error).toContainText("can read but not acknowledge");
+  await page.locator("#auth-modal-key").fill("wrong-key-123456");
+  await page.locator("#auth-modal-submit").click();
+  await expect(modal).toBeVisible();
+  await expect(error).toHaveText("Invalid API key, please try again.");
+  expect(await prompts()).toBe(4);
+
+  // The ack key reads and writes: the pending ack goes through.
+  await page.locator("#auth-modal-key").fill(ACK_KEY);
+  await page.locator("#auth-modal-submit").click();
+  await expect(page.locator("#ack-modal")).toBeHidden();
+  await expect(status).toHaveText("Connected");
+  expect(await storedKey()).toBe(ACK_KEY);
+});

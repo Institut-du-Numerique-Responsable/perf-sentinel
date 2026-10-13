@@ -253,6 +253,11 @@ api_enabled = true                 # default true
 # `[daemon.ack]` key as a second, separate credential.
 # read_api_key = "a-long-random-string"            # default unset, 12 chars min, 16 recommended
 #                                                  # PERF_SENTINEL_READ_API_KEY wins over this line
+# require_read_key = true                         # default false. Every GET of the query API then needs
+#                                                  # read_api_key (or the route's write key). Every reader
+#                                                  # needs it too, the JetBrains plugin included: leave it
+#                                                  # off while IDEs read this daemon with a plugin that
+#                                                  # sends no per-endpoint credential
 
 # -------------------------------------------------------------------------- #
 #        /!\ Change these only if you know what you are doing /!\            #

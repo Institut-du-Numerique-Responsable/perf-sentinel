@@ -280,3 +280,91 @@ fn cli_query_incidents_refuses_a_limit_of_zero() {
     assert_eq!(output.status.code(), Some(2), "stderr:\n{stderr}");
     assert!(stderr.contains("--limit"), "stderr:\n{stderr}");
 }
+
+/// A key file holding `key`, removed with the returned directory.
+fn key_file(key: &str) -> (tempfile::TempDir, String) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("daemon.key");
+    std::fs::write(&path, format!("{key}\n")).expect("write key file");
+    (dir, path.to_string_lossy().into_owned())
+}
+
+/// `perf-sentinel <args>` with no key in the environment.
+fn run_cli(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(args)
+        .stdin(Stdio::null())
+        .env_remove("PERF_SENTINEL_DAEMON_API_KEY")
+        .env_remove("PERF_SENTINEL_DAEMON_URL")
+        .output()
+        .expect("failed to execute perf-sentinel")
+}
+
+#[test]
+fn cli_query_api_key_file_before_the_subaction_reaches_findings() {
+    // A daemon with `[daemon] require_read_key = true` refuses every GET
+    // without the key, so `findings` needs it as much as `incidents`.
+    let (port, seen) = spawn_mock(200, "OK", "[]");
+    let (_dir, path) = key_file("read-key-123456");
+    let url = format!("http://127.0.0.1:{port}");
+    let output = run_cli(&[
+        "query",
+        "--api-key-file",
+        &path,
+        "--daemon",
+        &url,
+        "findings",
+    ]);
+    let seen = seen
+        .recv_timeout(Duration::from_secs(5))
+        .expect("mock saw the request");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
+    assert!(seen.request_line.starts_with("GET /api/findings?"));
+    assert_eq!(seen.api_key.as_deref(), Some("read-key-123456"));
+}
+
+#[test]
+fn cli_query_api_key_file_after_the_subaction_reaches_explain() {
+    let (port, seen) = spawn_mock(200, "OK", r#"{"error":"trace not found in daemon memory"}"#);
+    let (_dir, path) = key_file("read-key-123456");
+    let url = format!("http://127.0.0.1:{port}");
+    let _ = run_cli(&[
+        "query",
+        "--daemon",
+        &url,
+        "explain",
+        "--trace-id",
+        "abc123",
+        "--api-key-file",
+        &path,
+    ]);
+    let seen = seen
+        .recv_timeout(Duration::from_secs(5))
+        .expect("mock saw the request");
+    assert!(
+        seen.request_line.starts_with("GET /api/explain/abc123 "),
+        "request line: {}",
+        seen.request_line
+    );
+    assert_eq!(seen.api_key.as_deref(), Some("read-key-123456"));
+}
+
+#[test]
+fn cli_query_findings_names_a_401() {
+    let (port, _seen) = spawn_mock(
+        401,
+        "Unauthorized",
+        r#"{"error":"missing or invalid X-API-Key or Authorization: Bearer"}"#,
+    );
+    let url = format!("http://127.0.0.1:{port}");
+    let output = run_cli(&["query", "--daemon", &url, "findings"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "stderr:\n{stderr}");
+    assert!(stderr.contains("(401)"), "stderr:\n{stderr}");
+    assert!(stderr.contains("--api-key-file"), "stderr:\n{stderr}");
+    assert!(
+        !stderr.contains("Is `perf-sentinel watch` running?"),
+        "a refusal is not an unreachable daemon:\n{stderr}"
+    );
+}

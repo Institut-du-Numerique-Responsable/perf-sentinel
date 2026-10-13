@@ -871,7 +871,8 @@ When the daemon is configured with an API key
 (`[daemon.ack] api_key`), add `-H "X-API-Key: <secret>"` to `POST` and
 `DELETE` calls. That key also gates `GET /api/acks`, which since 0.20.0
 takes `[daemon] read_api_key` as well. `GET /api/findings` stays
-unauthenticated (loopback reads).
+unauthenticated (loopback reads) unless `[daemon] require_read_key =
+true`, which puts every read behind the read key.
 
 The runtime store is JSONL append-only at
 `~/.local/share/perf-sentinel/acks.jsonl` by default. Tail it for a

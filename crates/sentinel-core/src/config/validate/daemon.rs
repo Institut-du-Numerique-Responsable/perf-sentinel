@@ -45,7 +45,8 @@ fn check_api_key(field: &str, key: &str) -> Result<(), String> {
 ///   `[daemon.incidents] api_key`) lets any browser origin replay a captured
 ///   `X-API-Key` header (header-based auth, not blocked by
 ///   `allow_credentials = false`). Reject the combination. A lone
-///   `[daemon] read_api_key` is never compared, so it is not a replay target.
+///   `[daemon] read_api_key` is never compared, so it is not a replay target,
+///   until `[daemon] require_read_key` compares it on every GET.
 fn validate_cors_wildcard_mode(
     has_wildcard: bool,
     origin_count: usize,
@@ -61,7 +62,8 @@ fn validate_cors_wildcard_mode(
     if has_wildcard && has_api_key {
         return Err(
             "[daemon.cors] allowed_origins = [\"*\"] is incompatible with a daemon \
-             write api_key ([daemon.ack] or [daemon.incidents]), since X-API-Key \
+             write api_key ([daemon.ack] or [daemon.incidents]) or with \
+             [daemon] require_read_key, since X-API-Key \
              is sent on every cross-origin request and would be replayable from \
              any browser tab. Use an explicit origin list or unset the keys for \
              development"
@@ -163,7 +165,9 @@ impl Config {
         validate_cors_wildcard_mode(
             has_wildcard,
             self.daemon.cors.allowed_origins.len(),
-            self.daemon.ack.api_key.is_some() || self.daemon.incidents.api_key.is_some(),
+            self.daemon.ack.api_key.is_some()
+                || self.daemon.incidents.api_key.is_some()
+                || self.daemon.require_read_key,
         )?;
         for origin in &self.daemon.cors.allowed_origins {
             validate_cors_origin(origin)?;
@@ -194,6 +198,13 @@ impl Config {
     /// write keys: equal to one of them, it is that key.
     pub(super) fn validate_daemon_read_key(&self) -> Result<(), String> {
         let Some(key) = &self.daemon.read_api_key else {
+            if self.daemon.require_read_key {
+                return Err(
+                    "[daemon] require_read_key = true needs [daemon] read_api_key \
+                     (or PERF_SENTINEL_READ_API_KEY)"
+                        .to_string(),
+                );
+            }
             return Ok(());
         };
         check_api_key("[daemon] read_api_key", key)?;

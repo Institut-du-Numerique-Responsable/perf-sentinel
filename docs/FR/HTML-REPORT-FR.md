@@ -320,12 +320,27 @@ tourner le daemon en HTTP en clair.
 1. Démarrage : GET `/api/status` pour déterminer la connectivité.
    L'endpoint status n'est pas authentifié (lecture seule, pas de
    secrets), donc le badge de la barre du haut atteint `Connected`
-   sans clé.
+   sans clé. Un daemon avec `[daemon] require_read_key = true` y
+   répond `401` : la modale d'authentification s'ouvre une fois, et la
+   clé saisie relance le rafraîchissement. La clé de lecture suffit.
+   `Cancel`, le bouton de fermeture ou Échap la ferme pour le reste de
+   l'onglet, le badge reste `Authentication required`, et la page
+   reste un rapport statique lisible. Un rechargement la redemande.
+   Chaque autre lecteur de ce daemon a aussi besoin de la clé :
+   PerfSentinelHub, les datasources Grafana, `perf-sentinel query`,
+   `curl …/api/export/report | perf-sentinel report` et le plugin
+   JetBrains. N'activez pas l'interrupteur sur un daemon que lisent les
+   IDE des développeurs tant que le plugin JetBrains installé n'envoie
+   pas de secret par endpoint : les versions antérieures n'en envoient
+   aucun et reçoivent `401` à chaque rafraîchissement. Voir
+   [QUERY-API-FR.md](QUERY-API-FR.md#porte-de-lecture).
 2. Premier clic `Ack`/`Revoke` : POST ou DELETE sur
    `/api/findings/<sig>/ack`. Sur un 401, la modale d'auth s'ouvre
    avec un champ mot de passe (sans écho). La clé est stockée en
    `sessionStorage` sous `perf-sentinel.daemon.api-key` et la requête
-   échouée est retentée.
+   échouée est retentée. Une clé que le daemon accepte encore en
+   lecture, la clé de lecture sous `require_read_key`, reste stockée :
+   la modale demande la clé d'ack au lieu de la déclarer invalide.
 3. Appels suivants : chaque requête authentifiée lit la clé depuis
    `sessionStorage` et fixe l'en-tête `X-API-Key`.
 4. Fermeture de l'onglet : `sessionStorage` est purgé, le prochain
@@ -340,7 +355,7 @@ tourner le daemon en HTTP en clair.
 | Boutons par ligne `Ack` / `Revoke`               | Live | Cachés en mode statique via CSS, révélés sous `body.ps-live`                                                 |
 | Bascule `Show acknowledged`                      | Live | Filtre la liste statique des findings contre l'ensemble live `/api/acks`                                     |
 | Panneau Acknowledgments                          | Live | Nouvel onglet `Acks` listant les acks daemon (paginé à 1000, plafond du daemon)                              |
-| Modale d'authentification                        | Live | Déclenchée par le premier 401 sur un appel en écriture, jamais sur `/api/status`                             |
+| Modale d'authentification                        | Live | Déclenchée par le premier 401 sur un appel en écriture, ou sur `/api/status` sous `require_read_key` jusqu'au refus |
 | Modale d'acquittement                            | Live | Déclenchée par `Ack`. Champs : reason (requis), expires (Never / 24h / 7d / 30d), by (optionnel)             |
 
 ### Limitations

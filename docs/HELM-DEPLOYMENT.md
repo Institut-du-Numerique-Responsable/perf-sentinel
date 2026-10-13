@@ -671,7 +671,20 @@ read_api_key` through its own Secret, `PERF_SENTINEL_READ_API_KEY` in the
 same `extraEnvFrom` list. It opens `GET /api/acks` and `GET /api/incidents`
 and nothing else, and the daemon refuses a read key equal to a write key at
 startup, so a leaked dashboard configuration cannot ack a finding or
-fabricate an incident.
+fabricate an incident. Every other read stays open.
+
+*Every read behind the key.* Add `require_read_key = true` to `[daemon]`
+in `config.toml` and every `GET` of the query API answers `401` without
+`[daemon] read_api_key` (or the write key the route already takes), see
+[QUERY-API.md](QUERY-API.md#read-gate). The read-key Secret above then
+becomes mandatory: the daemon refuses to start with the switch on and no
+read key. Every reader needs the key, the Hub
+(`AuthHeaderName=X-API-Key`), the Grafana datasource below, `perf-sentinel
+query`, the live HTML report and the JetBrains plugin. Do not turn it on
+for a daemon developers' IDEs read until the plugin installed there sends
+a per-endpoint credential: earlier releases send none and get `401` on
+every refresh. `/metrics` and `/health` stay open, so the ServiceMonitor
+and the probes need nothing.
 
 **Runtime acks need a PVC to exist at all.** Without one the default
 storage path cannot be resolved inside the scratch image and the ack
@@ -1247,8 +1260,8 @@ never the `[daemon.incidents]` write key: a Grafana folder must not be
 able to fabricate an incident, and the daemon refuses a read key equal
 to a write key at startup. The same header opens
 `GET /api/acks` for the acknowledgments table once `[daemon.ack]
-api_key` is set, and the ungated routes ignore it, so one datasource
-serves every panel. With a header configured Infinity requires
+api_key` is set, every route once `[daemon] require_read_key = true`,
+and the ungated routes ignore it, so one datasource serves every panel. With a header configured Infinity requires
 `allowedHosts`, which the file already pins to the daemon's URL.
 
 #### History and acks through the Hub (since 0.24.0)

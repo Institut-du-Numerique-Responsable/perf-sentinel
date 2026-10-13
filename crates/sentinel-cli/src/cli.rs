@@ -572,6 +572,16 @@ pub(crate) enum Commands {
         /// Daemon HTTP endpoint.
         #[arg(long, default_value = "http://localhost:4318")]
         daemon: String,
+        /// Path to a file containing the daemon API key, sent as the
+        /// X-API-Key header on every request.
+        /// `PERF_SENTINEL_DAEMON_API_KEY` wins over it when set. The
+        /// read-only `[daemon] read_api_key` suffices for every read,
+        /// `incidents` and the monitor's Incidents tab included, and a
+        /// daemon with `[daemon] require_read_key = true` refuses every
+        /// read without it. Acknowledging from `inspect` takes
+        /// `[daemon.ack] api_key`.
+        #[arg(long, value_name = "PATH", global = true)]
+        api_key_file: Option<PathBuf>,
         #[command(subcommand)]
         action: QueryAction,
     },
@@ -1053,12 +1063,6 @@ pub(crate) enum QueryAction {
     /// must have `[daemon.ack] enabled = true` (the default).
     #[cfg(feature = "tui")]
     Inspect {
-        /// Path to a file containing the daemon API key (X-API-Key
-        /// header). `PERF_SENTINEL_DAEMON_API_KEY` wins over it when
-        /// set. Required when the daemon is configured with
-        /// `[daemon.ack] api_key`.
-        #[arg(long, value_name = "PATH")]
-        api_key_file: Option<PathBuf>,
         /// Open the trace and finding lists in this order: impact
         /// (highest aggregate avoidable I/O first) or severity (worst
         /// first). Same keys as `analyze --sort`. Omit to open on
@@ -1076,12 +1080,6 @@ pub(crate) enum QueryAction {
         /// Refresh interval in seconds.
         #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=3600))]
         refresh: u64,
-        /// Path to a file containing the daemon API key (X-API-Key
-        /// header). `PERF_SENTINEL_DAEMON_API_KEY` wins over it when
-        /// set. Only the Incidents tab needs it, and the read-only
-        /// `[daemon] read_api_key` suffices there.
-        #[arg(long, value_name = "PATH")]
-        api_key_file: Option<PathBuf>,
     },
     /// Show active cross-trace correlations.
     Correlations {
@@ -1123,11 +1121,6 @@ pub(crate) enum QueryAction {
         /// Output format: text (colored, default) or json.
         #[arg(long, value_enum, default_value = "text")]
         format: QueryOutputFormat,
-        /// Path to a file containing the daemon API key (X-API-Key
-        /// header). `PERF_SENTINEL_DAEMON_API_KEY` wins over it when
-        /// set. The read-only `[daemon] read_api_key` suffices.
-        #[arg(long, value_name = "PATH")]
-        api_key_file: Option<PathBuf>,
     },
 }
 

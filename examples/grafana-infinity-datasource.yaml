@@ -65,8 +65,9 @@ datasources:
       # One header on every request: X-API-Key carrying the READ key of the
       # daemon (`[daemon] read_api_key`, see secureJsonData below). Ungated
       # routes ignore it. GET /api/incidents needs it, and GET /api/acks takes
-      # it too once `[daemon.ack] api_key` is set, so one datasource serves
-      # every panel. Keys per the plugin's provisioning schema (Infinity 4.x):
+      # it too once `[daemon.ack] api_key` is set, as does every route once
+      # `[daemon] require_read_key = true`, so one datasource serves every
+      # panel. Keys per the plugin's provisioning schema (Infinity 4.x):
       # auth_method apiKey, apiKeyKey the header name, apiKeyType header.
       auth_method: apiKey
       apiKeyKey: X-API-Key

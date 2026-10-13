@@ -234,11 +234,27 @@ configuration du daemon), le CLI la résout dans cet ordre :
 3. Invite interactive `rpassword` (sans écho) si le daemon retourne
    401 et stdin est un TTY. La valeur collée est plafonnée à 1 KiB.
 
-`query inspect`, `query monitor` et `query incidents` prennent le même
-`--api-key-file <PATH>` et le résolvent de la même façon (étapes 1 et
-2, pas d'invite). La clé de lecture `[daemon] read_api_key` suffit pour
-`query monitor` et `query incidents`. `ack` et `query inspect` ont
-besoin de la clé d'ack.
+`query` prend le même `--api-key-file <PATH>` une fois, avant ou après
+sa sous-commande, et le résout de la même façon (étapes 1 et 2, pas
+d'invite). Chaque sous-commande `query` envoie la clé sur chaque
+requête, donc un daemon avec `[daemon] require_read_key = true`, qui
+refuse toute lecture sans clé, répond aussi à `findings`, `explain`,
+`correlations` et `status`. Une lecture refusée sort en 1 et nomme le
+401. La clé de lecture `[daemon] read_api_key` suffit pour chaque
+lecture de `query`. `ack`, et l'acquittement depuis `query inspect`,
+ont besoin de la clé d'ack. Chaque autre lecteur d'un tel daemon a
+aussi besoin de la clé : PerfSentinelHub, les datasources Grafana,
+`curl …/api/export/report | perf-sentinel report`, le rapport HTML live
+et le plugin JetBrains. N'activez pas l'interrupteur sur un daemon que
+lisent les IDE des développeurs tant que le plugin JetBrains installé
+n'envoie pas de secret par endpoint : les versions antérieures n'en
+envoient aucun et reçoivent `401` à chaque rafraîchissement. Voir
+[QUERY-API-FR.md](QUERY-API-FR.md#porte-de-lecture).
+
+```bash
+perf-sentinel query --api-key-file ~/.config/perf-sentinel/read.key findings
+perf-sentinel query explain --trace-id abc123 --api-key-file ~/.config/perf-sentinel/read.key
+```
 
 Il n'y a pas de flag `--api-key <SECRET>` direct, car passer des
 secrets en ligne de commande les expose via la liste des processus et
@@ -291,8 +307,9 @@ une valeur chacun. `--limit` vaut 50 par défaut et le daemon le plafonne
 à 100. `--offset` pagine au-delà des plus récents. Un 401 (passez la
 clé), un 503 (`[daemon.incidents] enabled = false`) et un 404 (daemon
 antérieur à 0.20.0) sortent chacun en 1 avec leur cause nommée.
-`query monitor --api-key-file <PATH>` remet la même clé à l'onglet
-Incidents du moniteur, voir [`INSPECT-FR.md`](./INSPECT-FR.md).
+`query monitor --api-key-file <PATH>` remet la même clé à chaque
+interrogation du moniteur, onglet Incidents compris, voir
+[`INSPECT-FR.md`](./INSPECT-FR.md).
 
 Pour l'instant, voir `perf-sentinel <subcommand> --help` pour la
 liste complète des options de `analyze`, `watch`, `query`, `report`,

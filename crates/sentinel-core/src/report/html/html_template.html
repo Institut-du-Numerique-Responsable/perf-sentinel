@@ -6246,6 +6246,11 @@
     acks: [],
     acksBySig: Object.create(null),
     pendingAuthRetry: null,
+    // Set when the viewer cancels the prompt a refused read opened, so a
+    // refresh never asks again in this tab.
+    statusPromptDeclined: false,
+    // The open auth prompt also asks for a refused read.
+    statusPromptOpen: false,
     activeFindingsAbort: null
   };
 
@@ -6300,8 +6305,9 @@
       });
     }
     headers["Accept"] = "application/json";
-    if (liveState.apiKey) {
-      headers["X-API-Key"] = liveState.apiKey;
+    var key = "key" in options ? options.key : liveState.apiKey;
+    if (key) {
+      headers["X-API-Key"] = key;
     }
     // Bound every request with an AbortController so a hung daemon
     // does not leave a request pending until the browser's default
@@ -6393,11 +6399,20 @@
         // stored. Drop the cached value so the next write call opens
         // the auth modal cleanly instead of retrying with the bad
         // key.
-        if (liveState.apiKey) {
+        var hadKey = !!liveState.apiKey;
+        if (hadKey) {
           clearApiKey();
           syncLogoutButtonVisibility();
         }
         setDaemonStatus("unauthorized", "Authentication required");
+        // `[daemon] require_read_key` refuses every read without the key:
+        // ask for it, once. A prompt already open for a write keeps its
+        // retry, which the submit runs after this ping anyway.
+        if (!liveState.statusPromptDeclined) {
+          liveState.statusPromptOpen = true;
+          if (!liveState.pendingAuthRetry) liveState.pendingAuthRetry = refreshLiveState;
+          openAuthModal(hadKey ? "Invalid API key, please try again." : null);
+        }
         return false;
       }
       setDaemonStatus("disconnected", "HTTP " + r.status);
@@ -6641,15 +6656,26 @@
       liveState.pendingAuthRetry = retry;
       // Tell apart the first 401 (no key cached) from a retry-after-
       // wrong-key 401 so the user gets feedback on the second attempt.
-      // Drop the bad key on the way so the next request goes out
-      // unauthenticated and the auth flow restarts cleanly.
       var hadKey = liveState.apiKey !== null && liveState.apiKey !== "";
-      if (hadKey) {
-        clearApiKey();
-        syncLogoutButtonVisibility();
+      if (!hadKey) {
+        openAuthModal(null);
+        return;
       }
-      openAuthModal(hadKey ? "Invalid API key, please try again." : null);
-      return;
+      // Under `[daemon] require_read_key` the key may be the read key,
+      // valid for reads only: keep it then, or the page loses its reads
+      // too. Otherwise drop the bad key so the next request goes out
+      // unauthenticated and the auth flow restarts cleanly.
+      return Promise.all([fetchWithAuth("/api/status"), fetchWithAuth("/api/status", { key: null })])
+        .then(function (rs) { return rs[0].ok && rs[1].status === 401; }, function () { return false; })
+        .then(function (readOnly) {
+          if (readOnly) {
+            openAuthModal("This key can read but not acknowledge: enter the ack key.");
+            return;
+          }
+          clearApiKey();
+          syncLogoutButtonVisibility();
+          openAuthModal("Invalid API key, please try again.");
+        });
     }
     var msg = "HTTP " + response.status + " on " + opLabel;
     if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
@@ -6661,7 +6687,9 @@
     var keyInput = document.getElementById("auth-modal-key");
     var err = document.getElementById("auth-modal-error");
     if (!dlg) return;
-    if (keyInput) keyInput.value = "";
+    // A read and a write can both answer 401: the open prompt serves both,
+    // so it keeps what it shows unless there is a new error to add.
+    if (dlg.open && !errorMessage) return;
     if (err) {
       if (errorMessage) {
         err.textContent = errorMessage;
@@ -6671,6 +6699,8 @@
         err.textContent = "";
       }
     }
+    if (dlg.open) return;
+    if (keyInput) keyInput.value = "";
     if (typeof dlg.showModal === "function") dlg.showModal();
     if (keyInput) {
       // Defer focus until after the dialog has opened.
@@ -6694,9 +6724,11 @@
     }
     setApiKey(k);
     syncLogoutButtonVisibility();
-    closeAuthModal();
+    // Taken before the close, so its handler sees a submit, not a decline.
     var retry = liveState.pendingAuthRetry;
     liveState.pendingAuthRetry = null;
+    liveState.statusPromptOpen = false;
+    closeAuthModal();
     pingStatus();
     if (typeof retry === "function") retry();
   }
@@ -6780,14 +6812,21 @@
     var form = document.getElementById("auth-modal-form");
     var cancel = document.getElementById("auth-modal-cancel");
     var close = document.getElementById("auth-modal-close");
+    var dlg = document.getElementById("auth-modal");
     if (form) form.addEventListener("submit", submitAuthModal);
     if (cancel) cancel.addEventListener("click", function () {
       closeAuthModal();
-      liveState.pendingAuthRetry = null;
       setDaemonStatus("unauthorized", "Authentication required");
     });
-    if (close) close.addEventListener("click", function () {
-      closeAuthModal();
+    if (close) close.addEventListener("click", closeAuthModal);
+    // Cancel, X and Escape all land here. Without a key the page stays a
+    // readable static report, so a declined read prompt stays declined for
+    // the tab; a declined write prompt does not.
+    if (dlg) dlg.addEventListener("close", function () {
+      // The event is queued: a 401 may have reopened the prompt since.
+      if (dlg.open) return;
+      if (liveState.statusPromptOpen) liveState.statusPromptDeclined = true;
+      liveState.statusPromptOpen = false;
       liveState.pendingAuthRetry = null;
     });
   }

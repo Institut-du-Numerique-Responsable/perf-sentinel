@@ -12,7 +12,7 @@ Perf Sentinel est un binaire unique, auto-hébergé, qui analyse des traces Open
 | Ports entrants | OTLP gRPC `4317`, OTLP HTTP `4318`. L'API de requête, `/metrics` et `/health` partagent le `4318` | HTTP `8080` |
 | Adresse d'écoute par défaut | `127.0.0.1` pour le binaire, `0.0.0.0` dans le chart Helm | Toutes les interfaces |
 | TLS | Optionnel (`tls_cert_path` et `tls_key_path` dans `[daemon]`), sans certificat client | Aucun dans le processus, à terminer sur l'ingress |
-| Authentification | L'ingestion, `/metrics`, `/health` et les endpoints de lecture ne sont jamais authentifiés. Les écritures d'acquittement demandent une clé dès qu'elle est posée | L'envoi de findings demande une clé par source. L'interface est ouverte par défaut, avec une connexion OAuth2 optionnelle |
+| Authentification | L'ingestion, `/metrics` et `/health` ne sont jamais authentifiés, et les endpoints de lecture seulement sous `[daemon] require_read_key`. Les écritures d'acquittement demandent une clé dès qu'elle est posée | L'envoi de findings demande une clé par source. L'interface est ouverte par défaut, avec une connexion OAuth2 optionnelle |
 | Appels sortants par défaut | Aucun | Une vérification quotidienne des dernières versions sur l'API GitHub, qu'un réglage désactive |
 | Données au repos | Le journal des acquittements, plus une archive NDJSON optionnelle. Jamais de spans bruts | Base SQLite, findings gardés 180 jours |
 | Image | `FROM scratch`, UID 65534 | Ubuntu chiselée, sans shell, UID 1654 |
@@ -77,7 +77,8 @@ La commande `capture` fait exception par conception : elle écrit les spans brut
 Ne sont jamais authentifiés, quelle que soit la configuration :
 - L'ingestion OTLP, gRPC et HTTP.
 - `/metrics` et `/health`.
-- Les endpoints de lecture `/api/findings`, `/api/findings/{trace_id}`, `/api/explain/{id}`, `/api/correlations`, `/api/status`, `/api/config`, `/api/energy` et `/api/export/report`.
+
+Les endpoints de lecture `/api/findings`, `/api/findings/{trace_id}`, `/api/explain/{id}`, `/api/correlations`, `/api/status`, `/api/config`, `/api/energy` et `/api/export/report` sont ouverts par défaut. `[daemon] require_read_key = true` les met, avec chaque autre `GET` de l'API de requête, derrière `[daemon] read_api_key` ou la clé d'écriture que le handler de la route accepte ([Porte de lecture](QUERY-API-FR.md#porte-de-lecture)). Chaque lecteur a alors besoin de la clé, le Hub, Grafana, `perf-sentinel query`, le rapport HTML live et le plugin JetBrains parmi eux, donc ne l'activez pas sur un daemon que lisent les IDE des développeurs avant que le plugin qui y est installé n'envoie un secret par endpoint.
 
 Le daemon fait confiance à ses émetteurs de traces. C'est le modèle de menace annoncé : [Pas d'authentification](LIMITATIONS-FR.md#pas-dauthentification-tls-disponible-auth-non-intégrée).
 
@@ -88,7 +89,7 @@ Routes protégées par une clé :
 
 Les clés passent par `X-API-Key` ou `Authorization: Bearer` et sont comparées en temps constant. L'auteur d'un acquittement (`by`) est déclaré par l'appelant, pas authentifié.
 
-Le CORS est désactivé par défaut, et une origine joker combinée à une clé d'écriture est refusée au démarrage. Le TLS couvre les deux listeners OTLP quand `tls_cert_path` et `tls_key_path` sont posés dans `[daemon]`. Les certificats clients (mTLS) ne sont pas pris en charge.
+Le CORS est désactivé par défaut, et une origine joker combinée à une clé d'écriture ou à `require_read_key` est refusée au démarrage. Le TLS couvre les deux listeners OTLP quand `tls_cert_path` et `tls_key_path` sont posés dans `[daemon]`. Les certificats clients (mTLS) ne sont pas pris en charge.
 
 ### Hub
 

@@ -39,7 +39,7 @@ use ratatui::widgets::{Axis, Block, Borders, Chart, Clear, Dataset, GraphType, P
 use sentinel_core::config::DaemonConfig;
 use sentinel_core::daemon::findings_store::StoredFinding;
 use sentinel_core::daemon::query_api::EnergyStatusResponse;
-use sentinel_core::http_client::{API_KEY_HEADER, FetchError};
+use sentinel_core::http_client::FetchError;
 use sentinel_core::ingest::auth_header::AuthHeader;
 use sentinel_core::report::{GreenSummary, Warning};
 use sentinel_core::score::carbon::IntensitySource;
@@ -560,11 +560,7 @@ impl MonitorState {
 /// aborts the poller on exit. Synchronous but must be called inside the
 /// multi-thread tokio runtime: `tokio::spawn` needs a runtime and
 /// `block_in_place` panics on the `current_thread` flavor.
-pub(crate) fn cmd_monitor(base_url: &str, refresh_secs: u64, api_key: Option<&str>) {
-    let auth = auth_header_for(api_key).unwrap_or_else(|e| {
-        eprintln!("Invalid daemon API key: {e}");
-        std::process::exit(1);
-    });
+pub(crate) fn cmd_monitor(base_url: &str, refresh_secs: u64, auth: Option<AuthHeader>) {
     // Bounded: only the newest snapshot matters, and the UI thread can
     // stall on terminal writes (hung SSH peer). An unbounded queue
     // would then grow by one boxed snapshot per tick without limit.
@@ -584,16 +580,6 @@ pub(crate) fn cmd_monitor(base_url: &str, refresh_secs: u64, api_key: Option<&st
         eprintln!("TUI error: {e}");
         std::process::exit(1);
     }
-}
-
-/// The `X-API-Key` header the poller attaches to every request, built
-/// once from the resolved key. `AuthHeader::parse` is the one
-/// constructor reachable from this crate and it rejects a key that
-/// cannot travel in a header (CR, LF, non-visible ASCII).
-fn auth_header_for(api_key: Option<&str>) -> Result<Option<AuthHeader>, &'static str> {
-    api_key
-        .map(|key| AuthHeader::parse(&format!("{API_KEY_HEADER}: {key}")))
-        .transpose()
 }
 
 /// Background poller: fetch, push, sleep, repeat. Exits when the UI side

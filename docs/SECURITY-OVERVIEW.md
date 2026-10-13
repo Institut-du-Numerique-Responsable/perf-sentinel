@@ -12,7 +12,7 @@ Perf Sentinel is a single self-hosted binary that analyzes OpenTelemetry traces,
 | Inbound ports | OTLP gRPC `4317`, OTLP HTTP `4318`. The query API, `/metrics` and `/health` share `4318` | HTTP `8080` |
 | Default bind | `127.0.0.1` for the binary, `0.0.0.0` in the Helm chart | All interfaces |
 | TLS | Opt-in (`tls_cert_path` and `tls_key_path` in `[daemon]`), no client certificates | None in the process, terminate it at the ingress |
-| Authentication | Ingest, `/metrics`, `/health` and the read endpoints are never authenticated. Ack writes need a key once one is set | The findings push needs a per-source key. The UI is open by default, with an optional OAuth2 sign-in |
+| Authentication | Ingest, `/metrics` and `/health` are never authenticated, and the read endpoints only under `[daemon] require_read_key`. Ack writes need a key once one is set | The findings push needs a per-source key. The UI is open by default, with an optional OAuth2 sign-in |
 | Outbound calls by default | None | A daily check of the latest releases on the GitHub API, one setting turns it off |
 | Data at rest | The ack log, plus an opt-in NDJSON archive. Never raw spans | SQLite database, findings kept 180 days |
 | Image | `FROM scratch`, UID 65534 | Chiseled Ubuntu, no shell, UID 1654 |
@@ -77,7 +77,8 @@ The `capture` command is the exception by design: it writes the raw spans it rec
 These are never authenticated, whatever the configuration:
 - OTLP ingest, gRPC and HTTP.
 - `/metrics` and `/health`.
-- The read endpoints `/api/findings`, `/api/findings/{trace_id}`, `/api/explain/{id}`, `/api/correlations`, `/api/status`, `/api/config`, `/api/energy` and `/api/export/report`.
+
+The read endpoints `/api/findings`, `/api/findings/{trace_id}`, `/api/explain/{id}`, `/api/correlations`, `/api/status`, `/api/config`, `/api/energy` and `/api/export/report` are open by default. `[daemon] require_read_key = true` puts them, and every other `GET` of the query API, behind `[daemon] read_api_key` or the write key the route's handler accepts ([Read gate](QUERY-API.md#read-gate)). Every reader then needs the key, the Hub, Grafana, `perf-sentinel query`, the live HTML report and the JetBrains plugin among them, so do not turn it on for a daemon developers' IDEs read before the plugin installed there sends a per-endpoint credential.
 
 The daemon trusts its trace senders. This is the stated threat model: [No authentication](LIMITATIONS.md#no-authentication-tls-available-auth-not-built-in).
 
@@ -88,7 +89,7 @@ Key-protected routes:
 
 Keys travel in `X-API-Key` or `Authorization: Bearer` and are compared in constant time. The ack author (`by`) is declared by the caller, not authenticated.
 
-CORS is off by default, and a wildcard origin combined with a write key is refused at startup. TLS covers both OTLP listeners when `tls_cert_path` and `tls_key_path` are set in `[daemon]`. Client certificates (mTLS) are not supported.
+CORS is off by default, and a wildcard origin combined with a write key or with `require_read_key` is refused at startup. TLS covers both OTLP listeners when `tls_cert_path` and `tls_key_path` are set in `[daemon]`. Client certificates (mTLS) are not supported.
 
 ### Hub
 

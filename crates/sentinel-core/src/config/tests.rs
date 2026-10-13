@@ -4516,6 +4516,40 @@ api_key = \"a-long-enough-write-key\"
     );
 }
 
+#[test]
+fn require_read_key_defaults_off_and_needs_a_read_key() {
+    assert!(!Config::default().daemon.require_read_key);
+    let msg = format!(
+        "{}",
+        load_from_str("[daemon]\nrequire_read_key = true").unwrap_err()
+    );
+    assert!(
+        msg.contains(
+            "[daemon] require_read_key = true needs [daemon] read_api_key \
+             (or PERF_SENTINEL_READ_API_KEY)"
+        ),
+        "{msg}"
+    );
+    let cfg = load_from_str(
+        "[daemon]\nrequire_read_key = true\nread_api_key = \"a-long-enough-read-key\"",
+    )
+    .unwrap();
+    assert!(cfg.daemon.require_read_key);
+}
+
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn require_read_key_makes_the_read_key_a_cors_replay_target() {
+    // A lone read key is never compared, so wildcard CORS stays allowed
+    // with it. The switch makes the daemon compare it on every GET.
+    let mut cfg = Config::default();
+    cfg.cors_wildcard_with_lone_read_key();
+    assert!(cfg.validate_daemon_cors().is_ok());
+    cfg.daemon.require_read_key = true;
+    let err = cfg.validate_daemon_cors().unwrap_err();
+    assert!(err.contains("require_read_key"), "{err}");
+}
+
 impl Config {
     fn cors_wildcard_with_lone_read_key(&mut self) {
         self.daemon.cors.allowed_origins = vec!["*".to_string()];

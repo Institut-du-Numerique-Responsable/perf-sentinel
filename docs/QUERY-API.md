@@ -11,6 +11,7 @@ first-class product surface with a stability contract.
 ## Contents
 
 - [Endpoint overview](#endpoint-overview): one-line description per endpoint.
+- [Read gate](#read-gate): `[daemon] require_read_key` puts every read behind a key.
 - [Restricting writes in production](#restricting-writes-in-production-reverse-proxy): reserve acks and report export to a group with a reverse proxy.
 - [Endpoints](#endpoints): full per-endpoint reference with request, response and worked examples.
 - [Error responses](#error-responses): status codes and body shapes.
@@ -44,7 +45,8 @@ write, so a dashboard never holds a key that can ack or fabricate an
 incident. The Hub reads with that key too. Only a Hub configured to
 relay acks (Hub 0.3.0 and later, one ack credential per source) also
 holds `[daemon.ack] api_key` for that daemon, and sends it on those
-writes alone. The daemon listens on `127.0.0.1` by default (see
+writes alone. `[daemon] require_read_key = true` puts every other `GET`
+behind these keys too, see [Read gate](#read-gate). The daemon listens on `127.0.0.1` by default (see
 `[daemon] listen_address`
 in `docs/CONFIGURATION.md`), so the API is reachable only from the host
 running the daemon unless you explicitly widen the bind address. Widening
@@ -71,6 +73,62 @@ writes (acks) and the official report export to architects or DevOps, see
 - The findings **ring buffer** (a fixed-size circular store that evicts oldest entries when full) is bounded by
   `[daemon] max_retained_findings` (default `10000`). Older findings are
   evicted FIFO.
+
+## Read gate
+
+By default the reads are open to whoever reaches the port, except
+`GET /api/acks` and `GET /api/incidents`, which follow their write key,
+and `[daemon] read_api_key` never adds a gate. `[daemon] require_read_key
+= true` puts every `GET` (and `HEAD`) of the query API behind a key. Off,
+nothing on this page changes.
+
+| Route                                                                                                                                                                      | Accepted keys                                                                |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
+| `GET /api/findings`, `/api/findings/{trace_id}`, `/api/explain/{trace_id}`, `/api/correlations`, `/api/export/report`, `/api/acks`, `/api/status`, `/api/config`, `/api/energy` | `[daemon] read_api_key` or `[daemon.ack] api_key`                            |
+| `GET /api/incidents`                                                                                                                                                       | `[daemon] read_api_key` or `[daemon.incidents] api_key`, never the ack key   |
+| `POST` and `DELETE`                                                                                                                                                        | unchanged: their own write key, never the read key                           |
+
+- Each route accepts what its handler accepts, so no key gets through the
+  gate only to be refused behind it.
+- The key travels as `X-API-Key` or `Authorization: Bearer <key>`.
+- A key the daemon does not have configured opens nothing.
+- A refused read answers `401` with `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`,
+  and only a refused `GET /api/incidents` is counted, in
+  `perf_sentinel_incidents_rejected_total{reason="unauthorized"}`, as its
+  handler already counts it.
+- An unknown path stays `404`, and the CORS layer answers preflight
+  requests before the gate.
+- `/metrics`, `/health`, OTLP ingest and the JSON socket are not part of
+  the query API and stay open.
+- The switch needs `read_api_key` (or `PERF_SENTINEL_READ_API_KEY`), and
+  refuses `[daemon.cors] allowed_origins = ["*"]`.
+
+```bash
+curl -H "X-API-Key: $PERF_SENTINEL_READ_API_KEY" "http://localhost:4318/api/findings?limit=10"
+curl -H "Authorization: Bearer $PERF_SENTINEL_READ_API_KEY" http://localhost:4318/api/status
+curl -s -H "X-API-Key: $PERF_SENTINEL_READ_API_KEY" http://localhost:4318/api/export/report \
+    | perf-sentinel report --input - --output report.html
+```
+
+Once the switch is on, every reader needs the key:
+
+- **PerfSentinelHub.** The source carries `AuthHeaderName=X-API-Key` and
+  `AuthHeaderValue=<read_api_key>`. Without them the poll gets `401` and
+  the source shows unreachable, and acks and incident reads show
+  `unauthorized`.
+- **Grafana datasources** on the daemon.
+  `examples/grafana-infinity-datasource.yaml` already sends the read key
+  on every request.
+- **`perf-sentinel query`**, every subcommand, `monitor` and `inspect`
+  included: `--api-key-file <PATH>` or `PERF_SENTINEL_DAEMON_API_KEY`.
+- **`curl …/api/export/report | perf-sentinel report`** and any script on
+  the API.
+- **The live HTML report** (`report --daemon-url`), which asks for the key
+  once per tab, see [HTML-REPORT.md](HTML-REPORT.md).
+- **The JetBrains plugin.** Do not turn the switch on for a daemon
+  developers' IDEs read until the plugin installed there sends a
+  per-endpoint credential (`Authorization: Bearer`). Earlier releases
+  send none, and every refresh gets `401`.
 
 ## Restricting writes in production (reverse proxy)
 
@@ -1218,6 +1276,7 @@ path.
 | `/api/export/report` on cold-start daemon        | 200    | empty Report envelope with `warnings: ["daemon has not yet processed any events"]` (pre-0.5.16: 503) |
 | Malformed query parameter (e.g. `limit=abc`)     | 400    | axum-generated plain-text error                                                                      |
 | Unknown path (e.g. `/api/does-not-exist`)        | 404    | empty body                                                                                           |
+| Missing or wrong key on a gated route            | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                 |
 | Method other than GET                            | 405    | axum-generated plain-text error                                                                      |
 
 The API does not emit 5xx on normal operation. A process crash returns
