@@ -1258,8 +1258,11 @@ time, so the time picker cannot reach back. Where a
 [PerfSentinelHub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub) is
 deployed (0.3.0 and later), the collapsed `History (Hub)` row reads the
 Hub instead. It calls the Hub's `GET /api/findings` with the picker's
-range (`from`, `to`), the `Environment` variable, and the `Service` and
-`Finding type` filters of the live table. `Findings history` lists one
+range (`from`, `to`), the `Environment` variable, and the `Grouping`,
+`Service` and `Finding type` filters of the live table. The signature
+carries no grouping, so the Hub matches `Grouping` against every grouping
+it saw the finding in, and a Hub that predates that filter ignores it.
+`Findings history` lists one
 row per problem the Hub saw in that environment on a day inside the
 range, on the Hub's clock in UTC, with `First seen`, `Last seen` and
 `Status` computed for that environment alone. It has no occurrence
