@@ -10,6 +10,32 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.27.0]
+
+### Added
+
+- **`appVersion` moves to `0.27.0`.** `[daemon] require_read_key = true`
+  puts every `GET` and `HEAD` of the query API behind `[daemon]
+  read_api_key` (`PERF_SENTINEL_READ_API_KEY`) or the write key the route
+  already accepts. It is off by default, so a release that does not set it
+  behaves as before. With it on, every reader must send the key: the Hub
+  source (`AuthHeaderName=X-API-Key`, `AuthHeaderValue=<read_api_key>`,
+  without which the source shows unreachable), Grafana datasources,
+  `perf-sentinel query`, the live HTML report and the JetBrains plugin,
+  whose earlier releases send no key. `/metrics`, `/health` and OTLP
+  ingest stay outside the gate, so probes and scraping keep working. The
+  switch without a read key, or with `[daemon.cors] allowed_origins =
+  ["*"]`, fails the config load and the pod does not start.
+
+### Changed
+
+- The `values.yaml` comments on the ingress and on the readers of
+  `config.toml` describe `require_read_key`. The second sits inside the
+  default `config.toml`, so the rendered ConfigMap, and with it the
+  `checksum/config` annotation, changes.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.26.3]
 
 ### Changed

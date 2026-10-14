@@ -206,7 +206,8 @@ service:
 # Only the SSO path gives a per-person audit `by` on acknowledgments. The
 # shared-key option (PERF_SENTINEL_ACK_API_KEY) gates ack writes and the acks
 # listing, and since 0.20.0 [daemon] read_api_key opens that listing and
-# GET /api/incidents without the power to write. Every other read stays open.
+# GET /api/incidents without the power to write. Every other read stays open
+# unless [daemon] require_read_key = true puts every GET behind that key.
 # Terminate TLS at the controller: the daemon speaks plaintext HTTP unless
 # you set tls_cert_path and tls_key_path in [daemon], and the chart does not
 # wire certificates here.
@@ -394,7 +395,11 @@ config:
     #   - readers that must never write (Grafana, the Hub): a second Secret
     #     entry, PERF_SENTINEL_READ_API_KEY, sets [daemon] read_api_key, which
     #     opens GET /api/acks and GET /api/incidents alone and is refused when
-    #     equal to a write key.
+    #     equal to a write key. Every other read stays open.
+    #   - every read behind that key: add require_read_key = true here. Each
+    #     reader then sends it, the Hub, Grafana, `perf-sentinel query`, the
+    #     live HTML report and the JetBrains plugin (only its releases that
+    #     send a per-endpoint credential can). See docs/CONFIGURATION.md.
     # To have your alerting record incidents, each with the findings of the
     # window before it frozen on the spot, add a [daemon.incidents] table with
     # enabled = true at the end of this file. Pass its write key through a
