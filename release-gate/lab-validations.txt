@@ -494,3 +494,30 @@ v0.25.5	2cfc61f	2026-10-03	PASS
 # families. The release touches none of the Hub, the resilience paths, the
 # detectors or the CI templates.
 v0.26.0	c8b06d6	2026-10-04	PASS
+# v0.27.0, 2026-10-14. Targeted pass, not verify-all-scenarios.
+# Full pass of 15 scenarios on 2026-10-14 against perf-sentinel main
+# 9f6db14d (daemon image perf-sentinel:0.26.2-9f6db14d built locally, CLI
+# from target/release): appsec-hardening, incident-window-capture,
+# incident-namespace-scope, findings-page-filters, hub-ingestion,
+# hub-derived-status, hub-lineage-mutation, hub-retention-purge,
+# hub-plugin-contract, hub-access-control, hub-source-reachability,
+# hub-incidents-mirror, grafana-dashboard, query-monitor-api,
+# daemon-ack-workflow, all green.
+# Rerun on daemon image perf-sentinel:0.27.0-68c9152d built from
+# release/0.27.0, /api/status answering 0.27.0, local CLI 0.27.0:
+# validate-findings 12/12, appsec-hardening (legs A to F, F being
+# require_read_key and query --api-key-file), hub-access-control (legs A
+# to G: device flow, token file, machine tokens, the daemon read gate seen
+# by a polling Hub).
+# Hub perf-sentinel-hub:0.3.8-b03f2ce; JetBrains plugin wire and token-file
+# contracts against plugin main dd7888a. The lab ran at 20ff4ab with local,
+# uncommitted image pins in the daemon and Hub manifests.
+# Lab defects found and fixed, none in the product: findings-page-filters
+# compared against a 0.20.2 fold baseline that predates the 0.26.2 tie-break
+# changes (lab #167), and hub-incidents-mirror expected an empty incident
+# ring after a restart although the daemon reloads it from the archive
+# since 0.24.0 (lab #168).
+# Not run: the limit-*, failure-mode-*, template-*, ci-e2e-* and energy
+# families. The release touches none of the detectors, the resilience
+# paths, the CI templates beyond the version pin, or the energy backends.
+v0.27.0	20ff4ab	2026-10-14	PASS
