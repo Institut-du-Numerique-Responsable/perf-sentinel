@@ -4,7 +4,7 @@
 # so both branches are checked out. Only build-reference runs here: the SEO
 # prerender (build-prerender.mjs) covers the two landing pages and needs a
 # browser, so it stays a manual step.
-# ponytail: serialized via concurrency, no rebase-retry. A manual gh-pages push
+# Serialized via concurrency, no rebase-retry. A manual gh-pages push
 # racing a run would fail the push visibly, just rerun the workflow if so.
 name: site-docs
 

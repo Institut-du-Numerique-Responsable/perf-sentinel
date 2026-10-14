@@ -517,7 +517,7 @@
         },
         "options": [],
         "hide": 0,
-        "description": "Environment of the History (Hub) row, one of the environments the Hub's sources declare, listed from the environment label of perf_sentinel_hub_findings, so Prometheus has to scrape the Hub. All sends a single space, which the Hub reads as the whole fleet. The Hub answers 400 to an environment it does not know."
+        "description": "Environment of the History (Hub) row, one of the environments the Hub's sources declare, listed from the environment label of perf_sentinel_hub_findings, so Prometheus has to scrape the Hub. All sends a single space, which the Hub reads as the whole fleet, or with its access control on, every finding the datasource's token reaches. The Hub answers 400 to an environment it does not know and, with its access control on, to one where the datasource's token reaches no source."
       },
       {
         "name": "hub_offset",

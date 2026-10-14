@@ -1289,13 +1289,30 @@ needs:
 
 - A second Infinity datasource pointed at the Hub, the second block of
   `examples/grafana-infinity-datasource.yaml`. The Hub's
-  `GET /api/findings` takes no key, so keep it on the cluster network.
-  The `perf-sentinel Hub` variable only offers datasources whose name
+  `GET /api/findings` takes no key unless the Hub's access control is
+  on (`hub.access.enabled`), so without it keep the Hub on the cluster
+  network. With it the route needs a machine token with `findings.read`,
+  declared in the Hub's `hub.access.machineTokens` with its value in a
+  Secret (the Hub's `docs/ACCESS-CONTROL.md`), which the datasource sends
+  as `Authorization: Bearer` from `PERF_SENTINEL_HUB_TOKEN` in Grafana's
+  environment. Without the token every panel of the row answers `401`,
+  and `403` when no grant gives the token's group `findings.read`, while
+  a token whose group is in `hub.access.adminGroups` reads everything.
+  A Hub without access control ignores the header, so the same block
+  serves both. Everyone who can query the datasource reads what its
+  token reaches, so give it one team's token, granted only that team's
+  projects. The
+  `perf-sentinel Hub` variable only offers datasources whose name
   carries `Hub`, so the row never binds to the daemon by accident. Left
   unbound, the row errors when opened and nothing else changes.
 - Prometheus scraping the Hub's `/metrics`: the `Environment` variable
   lists the `environment` label of `perf_sentinel_hub_findings`. `All`
-  reads the whole fleet.
+  reads the whole fleet, or with access control on, every finding the
+  token reaches. Access control requires `hub.metricsPort`, and `/metrics`
+  then answers on that port alone, so the scrape config must target it
+  or the variable lists nothing. The variable lists every environment
+  the Hub knows, not only the token's: one where the token reaches no
+  source answers `400`.
 - The `Hub URL` variable, the origin of the Hub's launcher as your
   browser reaches it.
 

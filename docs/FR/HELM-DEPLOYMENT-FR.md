@@ -1046,14 +1046,33 @@ La rangée a besoin de trois choses, dont le reste du dashboard se passe :
 
 - Une seconde datasource Infinity pointée sur le Hub, le second bloc de
   `examples/grafana-infinity-datasource.yaml`. Le `GET /api/findings` du
-  Hub ne prend pas de clé, gardez-le donc sur le réseau du cluster. La
-  variable `perf-sentinel Hub` ne propose que les datasources dont le nom
-  contient `Hub`, pour que la rangée ne se lie jamais au daemon par
-  accident. Sans datasource, la rangée est en erreur quand on l'ouvre et
-  rien d'autre ne change.
+  Hub ne prend pas de clé sauf si le contrôle d'accès du Hub est actif
+  (`hub.access.enabled`), donc sans lui gardez le Hub sur le réseau du
+  cluster. Avec lui, la route exige un jeton machine portant
+  `findings.read`, déclaré dans `hub.access.machineTokens` du Hub avec sa
+  valeur dans un Secret (le `docs/ACCESS-CONTROL.md` du Hub), que la
+  datasource envoie en `Authorization: Bearer` depuis
+  `PERF_SENTINEL_HUB_TOKEN` dans l'environnement de Grafana. Sans le
+  jeton, chaque panneau de la rangée répond `401`, et `403` quand aucun
+  grant ne donne `findings.read` au groupe du jeton, alors qu'un jeton
+  dont le groupe figure dans `hub.access.adminGroups` lit tout. Un Hub
+  sans contrôle d'accès ignore l'en-tête, donc le même bloc sert dans
+  les deux cas. Quiconque peut
+  interroger la datasource lit ce que son jeton atteint : donnez-lui le
+  jeton d'une seule équipe, autorisé sur les seuls projets de cette
+  équipe. La variable `perf-sentinel Hub` ne propose que les datasources
+  dont le nom contient `Hub`, pour que la rangée ne se lie jamais au
+  daemon par accident. Sans datasource, la rangée est en erreur quand on
+  l'ouvre et rien d'autre ne change.
 - Un Prometheus qui scrape le `/metrics` du Hub : la variable
   `Environment` liste le label `environment` de
-  `perf_sentinel_hub_findings`. `All` lit toute la flotte.
+  `perf_sentinel_hub_findings`. `All` lit toute la flotte, ou, avec le
+  contrôle d'accès actif, chaque finding que le jeton atteint. Le contrôle
+  d'accès exige `hub.metricsPort`, et `/metrics` ne répond alors que sur
+  ce port : la configuration de scrape doit le viser, sinon la variable
+  ne liste rien. La variable liste chaque environnement que le Hub
+  connaît, pas seulement ceux du jeton : un environnement où le jeton
+  n'atteint aucune source répond `400`.
 - La variable `Hub URL`, l'origine du lanceur du Hub telle que votre
   navigateur l'atteint.
 

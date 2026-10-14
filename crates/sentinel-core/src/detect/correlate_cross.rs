@@ -385,7 +385,7 @@ struct FindingOccurrence {
 pub struct CrossTraceCorrelator {
     occurrences: VecDeque<FindingOccurrence>,
     pair_counts: HashMap<PairKey, PairState>,
-    // ponytail: uncapped, bounded by distinct endpoints seen per window; cap like pairs if it ever dominates RSS
+    // Uncapped, bounded by distinct endpoints seen per window; cap like pairs if it ever dominates RSS
     endpoints: HashMap<Arc<CorrelationEndpoint>, HalfWindowCount>,
     /// Current index on the global half-window grid, never decreasing.
     now_idx: u64,
@@ -522,7 +522,7 @@ impl CrossTraceCorrelator {
     ) {
         let lag_threshold_ms = self.config.lag_threshold_ms;
         let max_tracked_pairs = self.config.max_tracked_pairs;
-        // ponytail: linear scan over the horizon; index by event-time slot if trace_ttl_ms reaches tens of minutes
+        // Linear scan over the horizon; index by event-time slot if trace_ttl_ms reaches tens of minutes
         for occ in &mut self.occurrences {
             let delta = occ.event_ms.abs_diff(incoming.event_ms);
             if delta > lag_threshold_ms || !pairable(&occ.endpoint, &incoming.endpoint) {

@@ -95,11 +95,12 @@ Le CORS est désactivé par défaut, et une origine joker combinée à une clé 
 
 - **Envoi de findings :** exige la clé `X-API-Key` de la source (au moins 32 caractères, liée à sa source, comparée en temps constant). Une source sans clé ne peut pas envoyer.
 - **Interface et API :** ouvertes par défaut.
-- **Connexion :** avec `hub.auth.enabled`, l'interface exige une session obtenue par OAuth2 authorization code avec PKCE auprès de votre fournisseur d'identité (Keycloak, Entra ID, Google, GitLab et d'autres). Le cookie de session est `Secure`, `SameSite=Lax`, glissant sur 8 heures. Ce n'est pas un OpenID Connect complet : l'identité vient de l'endpoint userinfo, l'ID token n'est pas validé et il n'y a pas de rôles.
-- **Routes ouvertes même avec la connexion :** `/api/findings`, `/api/findings/{traceId}`, la route d'import (qui a sa propre clé), `/health` et `/metrics`. Gardez-les sur un réseau interne.
+- **Connexion :** avec `hub.auth.enabled`, l'interface exige une session obtenue par OAuth2 authorization code avec PKCE auprès de votre fournisseur d'identité (Keycloak, Entra ID, Google, GitLab et d'autres). Le cookie de session est `Secure`, `SameSite=Lax`, glissant sur 8 heures. Ce n'est pas un OpenID Connect complet : l'identité vient de l'endpoint userinfo, l'ID token n'est pas validé et les rôles ne viennent qu'avec le contrôle d'accès, ci-dessous.
+- **Contrôle d'accès :** avec `hub.access.enabled`, qui exige la connexion et `hub.metricsPort`, chaque appelant n'atteint que ce que couvrent ses grants, par équipe, sur des sources, des services ou des attributs de regroupement. Les jobs CI et les dashboards lisent avec des jetons machine déclarés dans la configuration du Hub, leurs valeurs dans un Secret, envoyés en `Authorization: Bearer` et portant au plus `findings.read`. Une session prend alors fin 8 heures après la connexion. Un jeton machine dans un outil partagé comme Grafana sert toute sa portée à chaque utilisateur de cet outil, donc donnez à chaque équipe le sien.
+- **Routes ouvertes même avec la connexion :** `/api/findings` et `/api/findings/{traceId}` sauf si le contrôle d'accès est actif, la route d'import (qui a sa propre clé), `/health` et `/metrics` (sur le seul `hub.metricsPort` quand il est défini). Gardez-les sur un réseau interne.
 - **Lanceur :** il exécute le binaire moteur embarqué en sous-processus avec une liste d'arguments, sans shell. Le chemin du binaire et les endpoints de traces viennent de la configuration seulement. Les saisies de l'utilisateur sont validées, et une exécution s'arrête après 300 s par défaut.
 
-Détails : [authentification du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/FR/AUTHENTICATION-FR.md), [limites du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/FR/LIMITATIONS-FR.md).
+Détails : [authentification du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/FR/AUTHENTICATION-FR.md), [contrôle d'accès du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/FR/ACCESS-CONTROL-FR.md), [limites du Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/FR/LIMITATIONS-FR.md).
 
 ## Durcissement
 
@@ -124,7 +125,7 @@ Détails : [authentification du Hub](https://github.com/Institut-du-Numerique-Re
 - .NET 10 compilé en NativeAOT, références nullables, avertissements traités comme des erreurs.
 - Deux paquets à l'exécution (`Microsoft.Data.Sqlite`, `SQLitePCLRaw`) et du SQL paramétré.
 - Les corps de requête sont plafonnés à 2 Mio (import, analyses) et 8 Kio (acquittement), et des verrous de concurrence répondent `503` avec `Retry-After`.
-- Le Hub ne pose aucun en-tête de sécurité (CSP, HSTS, `X-Frame-Options`) : ajoutez-les sur l'ingress.
+- Le Hub ne pose aucun en-tête de sécurité (CSP, HSTS, `X-Frame-Options`) hormis `Content-Security-Policy: frame-ancestors 'self'` avec le contrôle d'accès actif : ajoutez le reste sur l'ingress.
 
 **Conteneurs et Helm.** Les deux charts :
 - tournent sans root, avec un système de fichiers racine en lecture seule
