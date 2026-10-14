@@ -1,6 +1,6 @@
 # A disclosure archive that holds a period
 
-Status: proposal, awaiting approval. No product code is written yet.
+Status: approved on 2026-10-14. The implementation plan is `docs/superpowers/plans/2026-10-14-disclosure-daily-rollups.md`.
 
 ## Problem
 
@@ -53,23 +53,23 @@ Only the chain counters and the drop-counter baseline describe how archive lines
 
 **B. Project and compress the window line.** Archive the projected line instead of the full `Report`, and gzip rotated files. 30 to 40 times smaller, roughly 300 times with gzip. A quarter fits in 20 to 60 MB. It keeps the window-level granularity and the per-file chain. Cost: the archive is no longer a `Report`, so anything else reading it (none in the repository besides `disclose` and its TUI preview) must follow, and the chain still resets per file, so pruning stays undetectable.
 
-**C. Daily rollups, recommended.** The daemon keeps an in-memory accumulator for the current UTC day, the same partial state the aggregator builds, and appends one rollup line per day to `rollups.ndjson`. A quarter is 92 lines, a few MB at most. Details below.
+**C. Daily rollups, recommended.** The daemon keeps an in-memory accumulator for the current UTC day, the same partial state the aggregator builds, and appends one rollup line per day to a monthly file beside the window archive. A quarter is 92 lines, a few MB at most. Details below.
 
 ## Recommended design: daily rollups
 
-**Shared fold.** Move the window fold out of `aggregator.rs` into a core `report/periodic/rollup.rs`: a serializable `PeriodState` with `fold_window(&Report, ts)` and `merge(&PeriodState)`. `aggregate_from_paths` becomes "fold windows into a state, merge rollups into the state, finalize". A property test asserts `finalize(fold(windows)) == finalize(merge(rollup_per_day(windows)))` on generated archives, and the existing `disclose` scenarios keep their figures.
+**Shared fold.** Split the measuring half of the aggregator's `Builder` into a serializable `PeriodState` with `fold_window(&Report, ts)` and `merge(PeriodState)`. It stays in `aggregator.rs`, so the fold keeps its history and SonarCloud does not count it as new code. The line format and the day accumulator go to a new `report/periodic/rollup.rs`. `aggregate_from_paths` becomes "fold windows into a state, merge rollups into the state, finalize". A property test asserts `finalize(fold(windows)) == finalize(merge(rollup_per_day(windows)))` on generated archives, and the existing `disclose` scenarios keep their figures.
 
-**Daemon writer.** The archive task already receives every window (`archive::try_send`). It folds each window into the day's state and, at the first window of a new UTC day and on graceful shutdown, writes the closed day as one line `{day, first_window_ts, last_window_ts, windows, drops, state, prev, seq, hash}`. Every few minutes it also overwrites `rollup-partial.json` atomically (temp file and rename, as the ack store does) and reloads it at start, so a crash loses minutes, not the day.
+**Daemon writer.** The archive task already receives every window (`archive::try_send`). It folds each window into the day's state, keyed on the window's own timestamp. At the first window of a new UTC day it writes the closed day as one line `{format, ts, day, last_ts, state, prev, seq, drops, hash}`, `ts` being the day's first window. Graceful shutdown writes the day so far the same way. A day can therefore own several lines, which merge, since the state is additive. Every 20 windows it also overwrites a partial snapshot atomically. At start, a snapshot the last line does not already cover is appended once, so a crash loses at most 20 windows, never the day and never twice.
 
-**One chain, never reset.** Rollup lines chain across files and restarts: `resume_chain` reads the last line at start, rotation keeps `prev` and `seq`. A pruned or deleted day then shows as a `seq` gap or a `prev` mismatch, which today's per-file chain cannot reveal. `disclose` reports rollup days verified and gaps under `integrity.trace_integrity_chain` as it does for windows.
+**One chain, never reset.** Rollup lines chain across their monthly files and across restarts: the writer resumes from the last line of the newest file. A pruned or deleted day then shows as a `seq` gap or a `prev` mismatch, which today's per-file chain cannot reveal. `disclose` reports rollup days verified and gaps under `integrity.trace_integrity_chain` as it does for windows.
 
-**Retention by age.** `[daemon.archive] rollup_retention_days`, default 400 (a year plus a quarter). A daily line is small enough that count-based rotation is not needed.
+**Retention by age.** Rollups go to `<stem>-daily-YYYY-MM.ndjson` beside `[daemon.archive] path`. A monthly file is deleted whole once its last day is more than `rollup_retention_days` (default 400, a year plus a quarter) before the newest closed day. The reader adopts the first surviving line as the chain's start, so retention is not a break, and the 0.28.0 reach check still refuses a period the rollups no longer reach.
 
-**Raw windows become optional.** `[daemon.archive] path` keeps writing window lines for drill-down when set. Rollups need only `[daemon.archive] rollup_path`. The chart, with persistence on, writes both under the PVC and can lower the default window retention.
+**Raw windows become optional.** `[daemon.archive] windows = false` stops the window lines and keeps the rollups. The default stays `true`. Rollups have no switch and no path of their own: they are always written beside `path`, so the chart's PVC holds both with no chart change.
 
 **Mixed inputs.** `disclose --input` accepts window files and rollup files together. A day present as a rollup wins over that day's windows, so a period that spans the upgrade aggregates once. The 0.28.0 reach check uses the oldest day across both.
 
-**Horizon signal.** `/api/status` gains `disclosure_archive: {oldest_day, days, last_closed_day}` and `/metrics` a bounded gauge `perf_sentinel_archive_oldest_day_timestamp_seconds`, so an operator sees the horizon shrink before a quarter closes, and the Hub can show it per source.
+**Horizon signal.** `/api/status` gains `disclosure_archive: {oldest_day, days, last_closed_day}`, backed by three label-free gauges, `perf_sentinel_archive_oldest_day_timestamp_seconds`, `perf_sentinel_archive_rollup_days` and `perf_sentinel_archive_last_closed_day_timestamp_seconds`. An operator sees the horizon shrink before a quarter closes, and the Hub can later show it per source.
 
 **Schema.** The published `PeriodicReport` does not change: rollups are an input format. `report_metadata.generated_by` keeps its values. The rollup line format is versioned (`"format": "perf-sentinel-rollup/v1"`) so the fold can evolve.
 
@@ -78,12 +78,14 @@ Only the chain counters and the drop-counter baseline describe how archive lines
 1. Core: `PeriodState` with fold, merge, serde, and the equivalence property test. `aggregate_from_paths` rebuilt on it, figures unchanged.
 2. Daemon: day accumulator, rollup writer with its never-reset chain, partial snapshot and resume, retention by age, status field and gauge. Feature `daemon`.
 3. `disclose` reads rollups and mixed inputs, reports rollup chain verification, TUI preview included.
-4. Chart defaults and comments, `docs/REPORTING.md`, `docs/CONFIGURATION.md`, `docs/design/08-PERIODIC-DISCLOSURE.md`, French mirrors, and a lab scenario that runs a daemon across a simulated day boundary and compares `disclose` over windows and over rollups.
+4. `docs/REPORTING.md`, `docs/CONFIGURATION.md`, `docs/design/08-PERIODIC-DISCLOSURE.md`, French mirrors, and a lab scenario that runs a daemon across a simulated day boundary and compares `disclose` over windows and over rollups.
 
 Option B's projection can ship first as a smaller step if the rollups take longer, since it reuses the window format's reading path.
 
-## Questions for the owner
+## Decisions
 
-- Default `rollup_retention_days`: 400, or tied to the declared `[reporting] disclose_period`?
-- Keep raw window archiving on by default once rollups exist, or make it opt-in?
-- Chart: turn persistence on by default for the archive, or keep it opt-in with a louder warning?
+Approved on 2026-10-14.
+
+- `rollup_retention_days` defaults to 400.
+- Raw window archiving stays on by default once rollups exist.
+- The chart's persistence default does not change.
