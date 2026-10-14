@@ -323,6 +323,9 @@ cosign sign-blob \
 #    de "hash-only" à "signed" (ou "signed-with-attestation" si le
 #    binaire producteur porte une provenance SLSA). Une future
 #    sous-commande `perf-sentinel sign` automatisera cette étape.
+#    L'attestation désigne le content hash canonique du rapport, qui
+#    laisse ces deux champs de côté, donc cette modification ne rompt
+#    pas le lien entre la signature et les chiffres.
 
 # 4. Publier report.json, attestation.intoto.jsonl, bundle.sig à
 #    votre URL de transparence.
@@ -592,21 +595,31 @@ Voir [Vérification d'identité](#vérification-didentité) plus bas pour
 les trois modes et leur sémantique. Réservez `--no-identity-check` à
 une auto-vérification interne avant publication.
 
-`verify-hash` chaîne trois vérifications : recalcul déterministe
-du content hash (Rust pur, toujours lancé), signature Sigstore
-(`cosign verify-blob`), et provenance SLSA du binaire
-(résumé des métadonnées plus une commande `gh attestation verify` qui
-pointe vers le binaire dans `integrity.binary_verification_url`).
+`verify-hash` chaîne quatre vérifications : recalcul déterministe
+du content hash (Rust pur, toujours lancé), l'attestation qui désigne
+ce content hash (Rust pur, lancée quand une attestation est fournie),
+signature Sigstore sur l'attestation (`cosign verify-blob`), et
+provenance SLSA du binaire (résumé des métadonnées plus une commande
+`gh attestation verify` qui pointe vers le binaire dans
+`integrity.binary_verification_url`). La signature porte sur
+l'attestation, pas sur le rapport : c'est la deuxième vérification qui
+relie une signature valide aux chiffres en main. Une attestation qui
+désigne un autre content hash, typiquement après des chiffres modifiés
+et un hash recalculé, rend le verdict UNTRUSTED. Une attestation écrite
+par perf-sentinel 0.27.0 ou antérieur fixait plutôt les octets du
+fichier rapport, et ne reste liée que tant que ces octets n'ont pas
+bougé. Une fois
+`integrity.signature` renseigné, elle plafonne le verdict à PARTIAL.
 
 Codes de sortie :
 
-| Code | Signification                                                                                                                                                         |
-|------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `0`  | TRUSTED (content hash correspondant ET signature vérifiée ok, et l'attestation binaire pas laissée non vérifiée quand le rapport porte des métadonnées d'attestation) |
-| `1`  | UNTRUSTED (une vérification a retourné un échec dur : hash non concordant, signature invalide, attestation invalide, identité non-conforme)                           |
-| `2`  | PARTIAL (pas d'échec dur mais au moins une vérification n'a pas pu aboutir : cosign absent, `gh` CLI absent, métadonnée de signature absente, sidecars manquants)     |
-| `3`  | INPUT_ERROR (fichier rapport illisible, JSON invalide, ou `--report` / `--url` manquant)                                                                              |
-| `4`  | NETWORK_ERROR (mode `--url` uniquement : récupération HTTP échouée, schéma refusé, corps de réponse au-delà de la limite de taille)                                   |
+| Code | Signification                                                                                                                                                                                                      |
+|------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | TRUSTED (content hash correspondant, l'attestation le désigne, la signature sur l'attestation vérifiée ok, et l'attestation binaire pas laissée non vérifiée quand le rapport porte des métadonnées d'attestation) |
+| `1`  | UNTRUSTED (une vérification a retourné un échec dur : hash non concordant, attestation désignant d'autres chiffres, signature invalide, attestation invalide, identité non-conforme)                               |
+| `2`  | PARTIAL (pas d'échec dur mais au moins une vérification n'a pas pu aboutir : cosign absent, `gh` CLI absent, métadonnée de signature absente, sidecars manquants)                                                  |
+| `3`  | INPUT_ERROR (fichier rapport illisible, JSON invalide, ou `--report` / `--url` manquant)                                                                                                                           |
+| `4`  | NETWORK_ERROR (mode `--url` uniquement : récupération HTTP échouée, schéma refusé, corps de réponse au-delà de la limite de taille)                                                                                |
 
 Un gate scripté `verify-hash && deploy` bloque sur tout code
 non-zéro et rejette donc PARTIAL aussi. Un script d'encapsulation

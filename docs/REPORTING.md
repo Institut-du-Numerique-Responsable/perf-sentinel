@@ -313,7 +313,9 @@ cosign sign-blob \
 #    Then bump report_metadata.integrity_level from "hash-only" to
 #    "signed" (or "signed-with-attestation" if the producing binary
 #    carries SLSA provenance). A future `perf-sentinel sign`
-#    subcommand will automate this step.
+#    subcommand will automate this step. The attestation names the
+#    report's canonical content hash, which leaves both fields out, so
+#    this edit does not break the tie between signature and figures.
 
 # 4. Publish report.json, attestation.intoto.jsonl, bundle.sig at
 #    your transparency URL.
@@ -573,21 +575,30 @@ invoke cosign and returns `Status::Fail` on the signature slot. See
 modes and their semantics. Reserve `--no-identity-check` for an
 internal self-check before publication.
 
-`verify-hash` chains three checks: deterministic content hash
-recompute (pure Rust, always run), Sigstore signature
-(`cosign verify-blob`), and SLSA binary provenance
-(metadata summary plus a `gh attestation verify` command pointing at
-the binary in `integrity.binary_verification_url`).
+`verify-hash` chains four checks: deterministic content hash
+recompute (pure Rust, always run), the attestation naming that
+content hash (pure Rust, run when an attestation is supplied),
+Sigstore signature over the attestation (`cosign verify-blob`), and
+SLSA binary provenance (metadata summary plus a `gh attestation
+verify` command pointing at the binary in
+`integrity.binary_verification_url`). The signature covers the
+attestation, not the report, so the second check is what ties a valid
+signature to the figures in hand: an attestation that names another
+content hash, typically after figures were edited and the hash
+re-baked, makes the verdict UNTRUSTED. An attestation written by
+perf-sentinel 0.27.0 or earlier pinned the report file bytes instead,
+and stays bound only while those bytes are untouched. Once `integrity.signature` has been
+patched in, it caps the verdict at PARTIAL.
 
 Exit codes:
 
-| Code | Meaning                                                                                                                                           |
-|------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `0`  | TRUSTED (content hash matched AND signature verified ok, and binary attestation not left unverified when the report carries attestation metadata) |
-| `1`  | UNTRUSTED (a check returned a hard failure: hash mismatch, signature invalid, attestation invalid, identity mismatch)                             |
-| `2`  | PARTIAL (no hard failure but at least one check could not complete: cosign absent, `gh` CLI absent, signature metadata absent, sidecars missing)  |
-| `3`  | INPUT_ERROR (report file unreadable, JSON invalid, missing `--report` or `--url`)                                                                 |
-| `4`  | NETWORK_ERROR (only `--url` mode: HTTP fetch failed, scheme rejected, body over the size cap)                                                     |
+| Code | Meaning                                                                                                                                                                                           |
+|------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | TRUSTED (content hash matched, the attestation names it, the signature over the attestation verified ok, and binary attestation not left unverified when the report carries attestation metadata) |
+| `1`  | UNTRUSTED (a check returned a hard failure: hash mismatch, attestation naming other figures, signature invalid, attestation invalid, identity mismatch)                                           |
+| `2`  | PARTIAL (no hard failure but at least one check could not complete: cosign absent, `gh` CLI absent, signature metadata absent, sidecars missing)                                                  |
+| `3`  | INPUT_ERROR (report file unreadable, JSON invalid, missing `--report` or `--url`)                                                                                                                 |
+| `4`  | NETWORK_ERROR (only `--url` mode: HTTP fetch failed, scheme rejected, body over the size cap)                                                                                                     |
 
 A scripted `verify-hash && deploy` gate blocks on any non-zero code
 and so still rejects PARTIAL, but a wrapper that distinguishes

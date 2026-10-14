@@ -954,10 +954,10 @@ pub(crate) enum Commands {
         /// Default is to bucket them under `_unattributed`.
         #[arg(long)]
         strict_attribution: bool,
-        /// Optional path for a sidecar in-toto v1 attestation that pins
-        /// the report's SHA-256 digest. When set, `disclose` writes a
-        /// second JSON file at this path. Designed to feed `cosign
-        /// attest` for signed disclosures.
+        /// Optional path for a sidecar in-toto v1 attestation whose
+        /// subject is the report's canonical content hash. When set,
+        /// `disclose` writes a second JSON file at this path, to sign
+        /// with `cosign sign-blob` for signed disclosures.
         #[arg(long, value_name = "PATH")]
         emit_attestation: Option<PathBuf>,
         /// Launch the read-only preview TUI: tune the period (month /
@@ -970,7 +970,8 @@ pub(crate) enum Commands {
     },
     /// Verify the integrity of a published periodic disclosure report.
     ///
-    /// Recomputes the canonical `content_hash` and, when the report
+    /// Recomputes the canonical `content_hash`, checks that the in-toto
+    /// attestation, when supplied, names it and, when the report
     /// carries signature/attestation metadata and the operator points
     /// at the matching sidecar files, delegates signature verification
     /// to `cosign verify-blob` and SLSA verification to
@@ -985,7 +986,8 @@ pub(crate) enum Commands {
         #[arg(long, value_name = "URL", conflicts_with = "report")]
         url: Option<String>,
         /// Local in-toto v1 attestation file. When omitted in
-        /// `--report` mode, signature verification is skipped.
+        /// `--report` mode, the attestation binding and signature
+        /// checks are skipped.
         #[arg(long, value_name = "PATH")]
         attestation: Option<PathBuf>,
         /// Local cosign bundle file. When omitted in `--report` mode,

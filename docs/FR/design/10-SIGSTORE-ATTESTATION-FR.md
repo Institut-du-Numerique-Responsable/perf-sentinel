@@ -55,9 +55,8 @@ est :
    --output report.json --emit-attestation attestation.intoto.jsonl`
    produit deux fichiers. Le `integrity.content_hash` du rapport
    reçoit le SHA-256 canonique. L'attestation est un statement
-   in-toto v1 dont le `subject.digest.sha256` fixe le SHA-256 du
-   fichier rapport sur disque (pas le hash canonique, qui vide un
-   champ).
+   in-toto v1 dont le `subject.digest.sha256` est ce même hash
+   canonique, sans son préfixe `sha256:`.
 3. **Signer** : l'opérateur lance `cosign sign-blob --bundle
    bundle.sig --new-bundle-format attestation.intoto.jsonl` contre
    Sigstore public. La signature est envoyée automatiquement à
@@ -97,7 +96,7 @@ document in-toto v1 à statement unique. Forme :
   "subject": [
     {
       "name": "report.json",
-      "digest": { "sha256": "<64-hex>" }
+      "digest": { "sha256": "<64-hex content_hash>" }
     }
   ],
   "predicate": {
@@ -120,7 +119,8 @@ document in-toto v1 à statement unique. Forme :
       "enabled_patterns_count": 10,
       "disabled_patterns_count": 0,
       "core_patterns_hash": "<64-hex SHA-256>"
-    }
+    },
+    "subject_binding": "content_hash"
   }
 }
 ```
@@ -131,12 +131,22 @@ aujourd'hui. Cette convention est la pratique standard pour les
 predicates in-toto personnalisés. Les vérifieurs identifient le
 predicate par correspondance exacte de chaîne.
 
-Le `subject.digest.sha256` est le SHA-256 du fichier rapport tel
-qu'écrit sur disque, pas le champ `content_hash` canonique. Les
-deux servent des buts différents : le hash canonique est
-déterministe (clés triées, un champ vidé) et vit dans le
-document. Le subject digest est le hash des octets du fichier et
-vit dans l'attestation.
+Le `subject.digest.sha256` est le `content_hash` canonique du
+rapport, pas le SHA-256 des octets du fichier. L'étape 4 modifie
+`report.json` après la signature du statement, ce qui change ses
+octets mais pas le hash canonique, puisque le localisateur de
+signature et le niveau d'intégrité sont vidés avant le calcul. Le
+statement signé continue donc de désigner les chiffres publiés, et
+`verify-hash` vérifie qu'il le fait. `predicate.subject_binding` le
+déclare : `"content_hash"` sur chaque statement écrit par
+`disclose`.
+
+Les statements écrits avant l'apparition de `subject_binding`
+fixaient le SHA-256 du fichier rapport au moment du `disclose`, puis
+l'étape 4 changeait ces octets. Rien ne reliait alors une signature
+valide aux chiffres avec lesquels elle était publiée. `verify-hash`
+accepte encore un tel statement quand les octets du rapport n'ont pas
+bougé, et le déclare impossible à relier sinon.
 
 Les trois champs de comptage (`core_patterns_count`,
 `enabled_patterns_count`, `disabled_patterns_count`) permettent à un
@@ -213,16 +223,23 @@ une propriété du format, pas une option.
 
 ## Flux de vérification
 
-`perf-sentinel verify-hash` chaîne jusqu'à trois vérifications :
+`perf-sentinel verify-hash` chaîne jusqu'à quatre vérifications :
 
 1. **Content hash** (Rust pur, toujours lancé). Recalcule le
    SHA-256 canonique du rapport et compare à
    `integrity.content_hash`.
-2. **Signature** (déléguée à `cosign verify-blob`). Lancée
+2. **Liaison de l'attestation** (Rust pur, lancée quand une
+   attestation est fournie). Vérifie que le `_type`, le
+   `predicateType` et le `predicate.report_uuid` du statement
+   correspondent au rapport, et que son subject est le content hash
+   recalculé. La signature porte sur le statement, pas sur le
+   rapport : c'est ce contrôle qui relie une signature valide à ces
+   chiffres.
+3. **Signature** (déléguée à `cosign verify-blob`). Lancée
    quand `integrity.signature` est présent dans le rapport et que
    l'opérateur passe `--attestation` et `--bundle` (ou que le mode
    `--url` les récupère automatiquement).
-3. **Attestation binaire** (déléguée à `gh attestation verify` à
+4. **Attestation binaire** (déléguée à `gh attestation verify` à
    partir de v0.7.1, `slsa-verifier verify-artifact` sur l'ancienne
    release v0.7.0). La sortie verify-hash affiche un résumé des
    métadonnées et la commande de vérification exacte à lancer contre
@@ -280,6 +297,17 @@ Ce qu'un consommateur doit conclure quand chaque vérification échoue :
 
 - **Content hash FAIL** : le fichier est corrompu ou a été
   trafiqué après publication. Non fiable.
+- **Attestation binding FAIL** avec content_hash valide :
+  l'attestation désigne d'autres chiffres, un autre rapport, ou n'est
+  pas un statement perf-sentinel. Le cas typique est un rapport dont
+  les chiffres ont été modifiés et le hash recalculé après la
+  signature. Une signature valide sur cette attestation ne garantit
+  que les chiffres d'origine. Non fiable.
+- **Attestation binding SKIP** : le statement est antérieur aux
+  subjects en content hash et fixe des octets du rapport qui ont
+  changé depuis, en général quand le localisateur de signature a été
+  ajouté. Rien ne le relie à ces chiffres. Produire l'attestation à
+  nouveau avec un `disclose` récent et la signer à nouveau.
 - **Signature FAIL** avec content_hash valide : le rapport
   lui-même est intact mais n'a plus de preuve Sigstore valide.
   Il est probable que le bundle ait été remplacé, que l'entrée
@@ -300,9 +328,9 @@ Ce qu'un consommateur doit conclure quand chaque vérification échoue :
   l'attestation SLSA, ou le source-uri ne correspond pas à
   `github.com/Institut-du-Numerique-Responsable/perf-sentinel`. Traiter comme non fiable.
 
-Le verdict global apparaît comme `TRUSTED` (content hash +
-signature OK), `PARTIAL` (content hash OK mais signature
-NotProvided ou Skip), ou `UNTRUSTED` (un FAIL).
+Le verdict global apparaît comme `TRUSTED` (content hash, liaison de
+l'attestation et signature OK), `PARTIAL` (aucun FAIL, mais l'un
+d'eux NotProvided ou Skip), ou `UNTRUSTED` (un FAIL).
 
 ## Outillage : `hash-bake`
 

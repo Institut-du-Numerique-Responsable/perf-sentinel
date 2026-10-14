@@ -240,7 +240,7 @@ fn write_optional_attestation(
         .file_name()
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("perf-sentinel-report.json");
-    if let Err(err) = write_attestation(report, output, att_path, subject_name) {
+    if let Err(err) = write_attestation(report, att_path, subject_name) {
         eprintln!(
             "Error: failed to write attestation {}: {err}",
             att_path.display()
@@ -298,12 +298,10 @@ fn non_fatal_warnings(
 
 fn write_attestation(
     report: &PeriodicReport,
-    report_path: &Path,
     attestation_path: &Path,
     subject_name: &str,
 ) -> std::io::Result<()> {
     use sentinel_core::report::periodic::attestation::build_in_toto_statement_named;
-    use sentinel_core::report::periodic::compute_file_sha256_hex;
 
     // Refuse to truncate a symlink, same posture as write_pretty_json.
     if let Ok(meta) = std::fs::symlink_metadata(attestation_path)
@@ -317,8 +315,16 @@ fn write_attestation(
             ),
         ));
     }
-    let digest = compute_file_sha256_hex(report_path)?;
-    let statement = build_in_toto_statement_named(report, &digest, subject_name);
+    // The content hash, not the file bytes: the signature locator is patched
+    // into report.json after signing, which changes its bytes but not this
+    // hash, so the signed statement keeps naming the published figures.
+    let Some(digest) = report.integrity.content_hash.strip_prefix("sha256:") else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "report carries no sha256 content hash to attest",
+        ));
+    };
+    let statement = build_in_toto_statement_named(report, digest, subject_name);
     // Compact single-line JSON matches the `.intoto.jsonl` convention
     // (one self-contained JSON value per line) used by cosign tooling,
     // with a trailing newline so concatenating multiple statements
@@ -830,41 +836,63 @@ mod tests {
     }
 
     #[test]
-    fn emit_attestation_produces_statement_with_matching_digest() {
+    fn emit_attestation_names_the_content_hash() {
         use sentinel_core::report::periodic::attestation::{
             IN_TOTO_STATEMENT_TYPE, InTotoStatement, PERF_SENTINEL_PREDICATE_TYPE,
+            SUBJECT_BINDING_CONTENT_HASH,
         };
-        use sentinel_core::report::periodic::compute_file_sha256_hex;
+        use sentinel_core::report::periodic::compute_content_hash;
 
         let example = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
             .join("docs/schemas/examples/example-official-public-G2.json");
-        let report: PeriodicReport =
+        let mut report: PeriodicReport =
             serde_json::from_str(&std::fs::read_to_string(&example).unwrap()).unwrap();
+        report.integrity.content_hash = compute_content_hash(&report).unwrap();
 
-        let tmp = std::env::temp_dir().join(format!(
-            "perf-sentinel-attestation-test-{}.json",
+        let att = std::env::temp_dir().join(format!(
+            "perf-sentinel-attestation-test-{}.intoto.jsonl",
             std::process::id()
         ));
-        let att = tmp.with_extension("intoto.jsonl");
-        std::fs::write(&tmp, std::fs::read(&example).unwrap()).unwrap();
-
-        write_attestation(&report, &tmp, &att, "subject.json").expect("write attestation");
+        write_attestation(&report, &att, "subject.json").expect("write attestation");
 
         let statement_json = std::fs::read_to_string(&att).unwrap();
         let statement: InTotoStatement = serde_json::from_str(&statement_json).unwrap();
         assert_eq!(statement.statement_type, IN_TOTO_STATEMENT_TYPE);
         assert_eq!(statement.predicate_type, PERF_SENTINEL_PREDICATE_TYPE);
         assert_eq!(statement.subject[0].name, "subject.json");
-        let expected_digest = compute_file_sha256_hex(&tmp).unwrap();
         assert_eq!(
-            statement.subject[0].digest.get("sha256").unwrap(),
-            &expected_digest
+            format!(
+                "sha256:{}",
+                statement.subject[0].digest.get("sha256").unwrap()
+            ),
+            report.integrity.content_hash
+        );
+        assert_eq!(
+            statement.predicate.subject_binding.as_deref(),
+            Some(SUBJECT_BINDING_CONTENT_HASH)
         );
 
-        let _ = std::fs::remove_file(&tmp);
         let _ = std::fs::remove_file(&att);
+    }
+
+    #[test]
+    fn emit_attestation_refuses_a_report_without_content_hash() {
+        let example = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("docs/schemas/examples/example-official-public-G2.json");
+        let mut report: PeriodicReport =
+            serde_json::from_str(&std::fs::read_to_string(&example).unwrap()).unwrap();
+        report.integrity.content_hash = String::new();
+        let att = std::env::temp_dir().join(format!(
+            "perf-sentinel-attestation-nohash-{}.intoto.jsonl",
+            std::process::id()
+        ));
+        let err = write_attestation(&report, &att, "subject.json").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(!att.exists());
     }
 
     #[test]

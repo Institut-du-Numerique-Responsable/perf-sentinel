@@ -50,9 +50,8 @@ For an `intent = "official"` disclosure, the operator workflow is:
    --output report.json --emit-attestation attestation.intoto.jsonl`
    produces two files. The report's `integrity.content_hash` is
    filled with the canonical SHA-256. The attestation is an in-toto
-   v1 statement whose `subject.digest.sha256` pins the SHA-256 of the
-   report file on disk (not the canonical hash, which blanks one
-   field).
+   v1 statement whose `subject.digest.sha256` is that same canonical
+   hash, without its `sha256:` prefix.
 3. **Sign**: the operator runs `cosign sign-blob --bundle bundle.sig
    --new-bundle-format attestation.intoto.jsonl` against Sigstore
    public. The signature is uploaded to Rekor automatically (the
@@ -89,7 +88,7 @@ single-statement in-toto v1 document. Shape:
   "subject": [
     {
       "name": "report.json",
-      "digest": { "sha256": "<64-hex>" }
+      "digest": { "sha256": "<64-hex content_hash>" }
     }
   ],
   "predicate": {
@@ -112,7 +111,8 @@ single-statement in-toto v1 document. Shape:
       "enabled_patterns_count": 10,
       "disabled_patterns_count": 0,
       "core_patterns_hash": "<64-hex SHA-256>"
-    }
+    },
+    "subject_binding": "content_hash"
   }
 }
 ```
@@ -122,12 +122,20 @@ The project does not formally own the host today. This convention is
 the standard practice for custom in-toto predicates. Verifiers
 identify the predicate by exact string match.
 
-The `subject.digest.sha256` is the SHA-256 of the report file as
-written on disk, not the canonical `content_hash` field. The two
-serve different purposes: the canonical hash is deterministic
-(sorted keys, one field blanked) and lives inside the document.
-The subject digest is the file's byte-level hash and lives in the
-attestation.
+The `subject.digest.sha256` is the report's canonical
+`content_hash`, not the SHA-256 of the file's bytes. Step 4 edits
+`report.json` after the statement is signed, which changes its bytes
+but not the canonical hash, since the signature locator and the
+integrity level are blanked before hashing. The signed statement
+therefore keeps naming the published figures, and `verify-hash`
+checks that it does. `predicate.subject_binding` declares this:
+`"content_hash"` on every statement `disclose` writes.
+
+Statements written before `subject_binding` existed pinned the
+SHA-256 of the report file at disclose time, and step 4 then changed
+those bytes, so nothing tied a valid signature to the figures it was
+published with. `verify-hash` still accepts such a statement when the
+report bytes are untouched, and reports it as unbindable otherwise.
 
 The three count fields (`core_patterns_count`,
 `enabled_patterns_count`, `disabled_patterns_count`) let a consumer
@@ -199,16 +207,22 @@ an opt-in.
 
 ## Verification flow
 
-`perf-sentinel verify-hash` chains up to three checks:
+`perf-sentinel verify-hash` chains up to four checks:
 
 1. **Content hash** (pure Rust, always runs). Recomputes the
    canonical SHA-256 of the report and compares to
    `integrity.content_hash`.
-2. **Signature** (delegated to `cosign verify-blob`). Runs
+2. **Attestation binding** (pure Rust, runs when an attestation is
+   supplied). Checks that the statement's `_type`, `predicateType`
+   and `predicate.report_uuid` match the report and that its subject
+   is the recomputed content hash. The signature covers the
+   statement, not the report, so this is what ties a valid signature
+   to these figures.
+3. **Signature** (delegated to `cosign verify-blob`). Runs
    when `integrity.signature` is present in the report and the
    operator passes `--attestation` and `--bundle` (or `--url` mode
    pulls them automatically).
-3. **Binary attestation** (delegated to `gh attestation verify`
+4. **Binary attestation** (delegated to `gh attestation verify`
    from v0.7.1 onward, `slsa-verifier verify-artifact` on the
    legacy v0.7.0 release). The verify-hash output prints a metadata
    summary and the exact verification command to run against the
@@ -262,6 +276,17 @@ What a consumer should conclude when each check fails:
 
 - **Content hash FAIL**: the file is corrupted or has been
   tampered with after publication. Untrusted.
+- **Attestation binding FAIL** with valid content_hash: the
+  attestation names other figures, another report, or is not a
+  perf-sentinel statement. The typical case is a report whose figures
+  were edited and whose hash was re-baked after signing. A valid
+  signature over that attestation vouches for the original figures
+  only. Untrusted.
+- **Attestation binding SKIP**: the statement predates content-hash
+  subjects and pins report bytes that changed since, usually when the
+  signature locator was patched in. Nothing ties it to these figures.
+  Emit the attestation again with a current `disclose` and sign it
+  again.
 - **Signature FAIL** with valid content_hash: the report itself is
   intact but no longer has a valid Sigstore proof. Likely the
   bundle was replaced, the Rekor entry was revoked, or the
@@ -281,9 +306,9 @@ What a consumer should conclude when each check fails:
   attestation, or the source-uri does not match
   `github.com/Institut-du-Numerique-Responsable/perf-sentinel`. Treat as untrusted.
 
-The overall verdict surfaces as one of `TRUSTED` (content hash +
-signature both OK), `PARTIAL` (content hash OK but signature
-NotProvided or Skip), or `UNTRUSTED` (any FAIL).
+The overall verdict surfaces as one of `TRUSTED` (content hash,
+attestation binding and signature all OK), `PARTIAL` (no FAIL, but
+one of them NotProvided or Skip), or `UNTRUSTED` (any FAIL).
 
 ## Tooling: `hash-bake`
 

@@ -39,9 +39,10 @@ pub use aggregator::{
     aggregate_from_paths,
 };
 pub use attestation::{
-    IN_TOTO_STATEMENT_TYPE, InTotoStatement, InTotoSubject, MethodologySummary,
+    AttestationBinding, IN_TOTO_STATEMENT_TYPE, InTotoStatement, InTotoSubject, MethodologySummary,
     OrganisationSummary, PERF_SENTINEL_PREDICATE_TYPE, PerfSentinelPredicate, PeriodSummary,
-    build_in_toto_statement, build_in_toto_statement_named, hash_core_patterns,
+    SUBJECT_BINDING_CONTENT_HASH, build_in_toto_statement, build_in_toto_statement_named,
+    check_attestation_binding, hash_core_patterns,
 };
 pub use errors::{AggregationError, HashError, ValidationError};
 pub use hasher::{binary_hash, compute_content_hash, compute_file_sha256_hex};
