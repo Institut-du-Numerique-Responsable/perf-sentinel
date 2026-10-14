@@ -30,6 +30,14 @@ the chart version, to know which daemon image ships.
   weeks of a busy daemon, not a quarter, and how to size it for quarterly
   disclosures. Comment only, the rendered manifests do not change.
 
+### Security
+
+- The daemon image picks up `rustls` 0.23.46 against RUSTSEC-2026-0346 to
+  RUSTSEC-2026-0349. Of the four, only the unauthenticated ServerHello that
+  could steer later connections to classical key exchange applies, to the
+  shared outbound HTTP client. Nothing in the chart changes, the fixed
+  library ships with the new `appVersion`.
+
 No `values.yaml` key is added or removed, and no template changes.
 
 ## [0.27.0]
