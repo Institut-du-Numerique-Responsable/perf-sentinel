@@ -110,10 +110,68 @@ button {
     color: var(--text-3);
 }
 
+/* The tabs scroll inside their own row rather than pushing the page sideways: below
+   760px they take a row of their own, and a phone sees the last tab by swiping it. */
 .shell-tabs {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.shell-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+/* Between a phone and a wide screen the bar keeps one row by dropping what the words
+   already say: the tab icons, and the theme's label, which a reader still hears. */
+@media (min-width: 761px) and (max-width: 1400px) {
+    .shell-tab svg {
+        display: none;
+    }
+
+    .shell-tab {
+        padding: 0 12px;
+    }
+
+    .shell-cluster .shell-theme {
+        width: 34px;
+    }
+
+    #theme-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+}
+
+@media (max-width: 760px) {
+    .shell-topbar {
+        padding: 9px 16px;
+    }
+
+    .shell-tabs {
+        order: 3;
+        flex: 1 0 100%;
+    }
+
+    .shell-topbar .shell-cluster {
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        min-width: 0;
+    }
+    /* On a phone a long chip breaks rather than pushing the page sideways. */
+    .shell-main .code-inline {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
 }
 
 .shell-tab {
@@ -158,7 +216,7 @@ button {
     background: var(--crit-bg);
     color: var(--crit-fg);
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 600;
 }
 
@@ -253,6 +311,23 @@ button {
 .shell-identity svg {
     width: 13px;
     height: 13px;
+}
+
+/* With access on the chip is the way to one's own access: it reads as a link only on hover. */
+a.shell-identity[href] {
+    padding: 4px 8px;
+    border-radius: 999px;
+    color: var(--text-2);
+}
+
+a.shell-identity[href]:hover {
+    background: color-mix(in srgb, var(--brand) 16%, transparent);
+    text-decoration: none;
+}
+
+a.shell-identity[aria-current="page"] {
+    background: var(--accent-bg);
+    color: var(--brand-text);
 }
 
 .shell-theme {
@@ -370,6 +445,12 @@ button {
     letter-spacing: .14em;
     text-transform: uppercase;
     color: var(--text-3);
+}
+
+/* A screen's heading takes the focus on a route change, for a reader to hear where they
+   are. The page already shows it: no ring. */
+.page-title[tabindex="-1"]:focus {
+    outline: none;
 }
 
 /* The prototype's own heading scale: 18px, not the 25px its prose names. */
@@ -872,7 +953,7 @@ button {
 
 .source-version {
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-3);
 }
 
@@ -1485,7 +1566,7 @@ button {
     position: relative;
     margin-bottom: 11px;
     font-family: var(--font-mono);
-    font-size: 9.5px;
+    font-size: 11px;
     letter-spacing: .06em;
     text-transform: uppercase;
     color: var(--text-3);
@@ -1730,7 +1811,7 @@ button {
 
 .cost-note {
     margin: 0;
-    font-size: 10.5px;
+    font-size: 11px;
     line-height: 1.4;
     color: var(--text-3);
 }
@@ -1866,7 +1947,7 @@ body[data-screen="report"] .shell-footer {
 .field-gloss {
     font-family: var(--font-mono);
     font-weight: 400;
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-3);
 }
 
@@ -2150,7 +2231,7 @@ body[data-screen="report"] .shell-footer {
     display: block;
     margin-bottom: 5px;
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 11px;
     letter-spacing: .6px;
     text-transform: uppercase;
     color: var(--text-3);
@@ -2478,7 +2559,7 @@ body[data-screen="report"] .shell-footer {
 .count-l {
     display: block;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 500;
     letter-spacing: .1em;
     text-transform: uppercase;
@@ -2697,7 +2778,7 @@ section > .banner + .banner,
 
 .fact-k {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: .08em;
     text-transform: uppercase;
     color: var(--text-3);
@@ -2744,7 +2825,7 @@ section > .banner + .banner,
 }
 
 .sink-sub {
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-3);
 }
 
@@ -2854,7 +2935,7 @@ section > .banner + .banner,
 
 .knob-default {
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-3);
 }
 
@@ -3737,4 +3818,202 @@ section > .banner + .banner,
     select.input-knob option {
         color: var(--text);
     }
+}
+
+/* The access page: read-only blocks, one card each, every table in its own
+   scroller. The subject is selected whole, since it is copied to an admin. */
+.access-card {
+    margin-top: 16px;
+    padding: 18px 18px 8px;
+}
+
+/* The copy blocks on the access screens stand between cards, spaced like them. */
+.access-screen > .terminal {
+    margin-top: 16px;
+}
+
+/* A heading for a reader, the overline for the eye. */
+.access-card-title {
+    margin: 0 0 12px;
+}
+
+.access-card-title:focus {
+    outline: none;
+}
+
+.access-card-title:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 4px;
+}
+
+.access-status:empty {
+    display: none;
+}
+
+.access-status .banner {
+    margin: 0 0 12px;
+}
+
+.access-pointer {
+    margin: 16px 2px 0;
+    font-size: 13px;
+    color: var(--text-2);
+}
+
+/* The configuration, one fold per part, each summary carrying its count. */
+.access-part {
+    border-top: 1px solid var(--border);
+}
+
+.access-part > summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 2px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.access-part > summary:hover .access-part-title {
+    color: var(--brand-text);
+}
+
+.access-part-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+.access-part[open] > summary {
+    padding-bottom: 8px;
+}
+
+.access-part > p {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.access-pairs {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 18px;
+    margin: 0 0 14px;
+    font-size: 13px;
+}
+
+.access-pairs dt {
+    color: var(--text-3);
+}
+
+.access-pairs dd {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.pill-button[data-armed="true"] {
+    border-color: var(--crit-bd);
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+}
+
+.source-locked {
+    display: block;
+    margin-top: 2px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+.access-card > p {
+    margin: 0 0 10px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--text-2);
+}
+
+.access-card .sources-wrap {
+    margin-bottom: 14px;
+}
+
+.access-table {
+    min-width: 560px;
+}
+
+.access-card > .access-muted {
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.access-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 10px;
+    padding: 0;
+    list-style: none;
+}
+
+.access-subject {
+    font-family: var(--font-mono);
+    user-select: all;
+    overflow-wrap: anywhere;
+}
+
+/* The terminal sign-in page, GET /device: one narrow column, the code typed in capitals. */
+.device-main {
+    max-width: 560px;
+}
+
+.device-card {
+    display: grid;
+    gap: 12px;
+    margin-top: 16px;
+    padding: 18px;
+}
+
+.device-card > p {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--text-2);
+}
+
+.device-card .input {
+    letter-spacing: .2em;
+    text-transform: uppercase;
+}
+
+.device-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.device-main > .banner,
+.device-result > .banner {
+    margin-top: 16px;
+}
+
+.device-result:focus {
+    outline: none;
+}
+
+.device-brand {
+    margin-bottom: 26px;
+}
+
+.device-card > .device-hint {
+    margin: -6px 0 0;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+#device-request:focus {
+    outline: none;
 }

@@ -5,7 +5,7 @@
 
 :root {
     --font-ui: 'DM Sans', system-ui, -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     /* Legacy aliases kept so any un-migrated rule still resolves. */
     --font-sans: var(--font-ui);
     --r: 16px;

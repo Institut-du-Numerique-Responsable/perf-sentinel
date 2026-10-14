@@ -27,8 +27,19 @@
         themePosition: document.documentElement.getAttribute('data-theme-position') || 'auto',
         screen: 'new',
         status: null,
+        // The HTTP status /api/status failed with, which tells "no grant" from "down".
+        statusError: undefined,
         sources: null,
         sourcesError: false,
+        // GET /api/access, null when access is off (the route answers 404) or failed.
+        access: null,
+        // GET /api/tokens, read only with access on; null until it answers or when it failed.
+        tokens: null,
+        tokensFailed: false,
+        // What the last Revoke did, {card, ok, text}, shown in the card it was pressed in.
+        tokensNotice: null,
+        // Set once the first screen has drawn: from then on a route change moves the focus.
+        routed: false,
         loading: true,
         run: null,
         runError: false,
@@ -219,7 +230,11 @@
             method: method,
             headers: {accept: 'application/json'}
         }).then(signInOn401).then(function (response) {
-            if (!response.ok) throw new Error(path + ' answered ' + response.status);
+            if (!response.ok) {
+                const error = new Error(path + ' answered ' + response.status);
+                error.status = response.status;
+                throw error;
+            }
             return response.json();
         });
     }
@@ -235,31 +250,52 @@
 
     function loadShell() {
         return Promise.all([
-            getJson('/api/status').catch(function () {
+            getJson('/api/status').catch(function (error) {
+                state.statusError = error.status;
                 return null;
             }),
             getJson('/api/sources').catch(function () {
                 return 'error';
+            }),
+            // A 404 is a Hub with access off: the tab stays hidden.
+            getJson('/api/access').catch(function () {
+                return null;
             })
         ]).then(function (results) {
             state.status = results[0];
             state.sourcesError = results[1] === 'error';
             state.sources = state.sourcesError ? null : results[1];
+            state.access = results[2];
             state.loading = false;
-            if (state.sources && state.form.sourceId === null) {
+            if (state.access) loadTokens();
+            const runnable = runSources();
+            if (runnable.length > 0 && state.form.sourceId === null) {
                 // The one they were on last, if it is still configured. Falling back to
                 // the first reachable one is what a first visit gets.
                 const remembered = rememberedSource();
-                const kept = state.sources.find(function (source) {
+                const kept = runnable.find(function (source) {
                     return source.id === remembered;
                 });
-                const usable = state.sources.find(function (source) {
+                const usable = runnable.find(function (source) {
                     return source.reachable;
                 });
-                state.form.sourceId = (kept || usable || state.sources[0] || {}).id || null;
+                state.form.sourceId = (kept || usable || runnable[0]).id;
             }
             renderShell();
             onRoute();
+        });
+    }
+
+    /** The terminal tokens the access page lists: the caller's own, or everyone's for an admin. */
+    function loadTokens() {
+        return getJson('/api/tokens').then(function (tokens) {
+            state.tokens = tokens;
+            state.tokensFailed = false;
+        }).catch(function () {
+            state.tokens = null;
+            state.tokensFailed = true;
+        }).then(function () {
+            if (state.screen === 'access' || state.screen === 'coverage') render();
         });
     }
 
@@ -365,20 +401,34 @@
 
     function renderShell() {
         const status = state.status;
+        // Without a status there is no version to show, and "unknown" read as a broken Hub.
+        // A caller no grant reaches gets no tab either: every one of them leads to a refusal.
+        document.getElementById('version-chip').hidden = !status;
+        document.querySelector('.shell-tabs').hidden = !status && !!PSL.shellBanner(state.statusError);
         document.getElementById('version-hub').textContent = status ? status.version : 'unknown';
         document.getElementById('version-engine').textContent =
             status && status.engine_version ? status.engine_version : 'none';
         if (status) PSL.setVersions(status.version, status.engine_version);
         renderUpdates();
 
-        // The identity comes from the reverse proxy. With no proxy in front there
-        // is nothing to show, and an empty chip is better than a fake name.
+        // The identity comes from the Hub's sign-in or the reverse proxy. With neither
+        // there is nothing to show, and an empty chip is better than a fake name. With
+        // access on it is the way to one's own access, refused callers included.
         const identity = document.getElementById('identity');
-        identity.hidden = !status || !status.identity;
-        document.getElementById('identity-name').textContent = status && status.identity ? status.identity : '';
+        const access = state.access;
+        const name = (status && status.identity) || (access && (access.identity || access.subject)) || '';
+        identity.hidden = !name;
+        document.getElementById('identity-name').textContent = name;
+        if (access) {
+            identity.setAttribute('href', '#/access');
+            identity.title = 'Your access: who you are, your groups and what you reach.';
+        } else {
+            identity.removeAttribute('href');
+        }
 
         renderFleetSkew();
         renderSourcesBadge();
+        document.querySelector('.shell-tab[data-screen="coverage"]').hidden = !(state.access && state.access.admin);
     }
 
     /** Takes a chip segment out along with the separator that was added for it. */
@@ -475,12 +525,7 @@
     // ------------------------------------------------------------ navigation
 
     function currentScreen() {
-        // The query a handoff link carries is the form's, not the route's.
-        const hash = (location.hash || '#/new').replace('#/', '').split('?')[0];
-        if (hash.indexOf('run/') === 0) return 'run';
-        if (hash.indexOf('report/') === 0) return 'report';
-        // `ack` has no tab: it is reached by link only.
-        return ['new', 'recent', 'sources', 'incidents', 'ack'].indexOf(hash) >= 0 ? hash : 'new';
+        return PSL.screenOf(location.hash, !!state.access, !!(state.access && state.access.admin));
     }
 
     function currentRunId() {
@@ -539,6 +584,9 @@
             if (tab.getAttribute('data-screen') === state.screen) tab.setAttribute('aria-current', 'page');
             else tab.removeAttribute('aria-current');
         });
+        const identity = document.getElementById('identity');
+        if (state.screen === 'access') identity.setAttribute('aria-current', 'page');
+        else identity.removeAttribute('aria-current');
 
         const main = document.getElementById('main');
         document.body.setAttribute('data-screen', state.screen);
@@ -550,10 +598,15 @@
         // Without it there is nothing truthful to draw, and reaching for it would
         // throw on the first field.
         if (!state.status) {
-            main.replaceChildren(hubUnreachableBanner());
+            const noGrant = PSL.shellBanner(state.statusError);
+            // A caller no grant reaches still reads who they are, to ask an administrator.
+            if (noGrant && state.access) main.replaceChildren(renderAccessScreen(noGrant));
+            else main.replaceChildren(noGrant ? noGrantBanner(noGrant) : hubUnreachableBanner());
             return;
         }
-        if (state.screen === 'sources') main.replaceChildren(renderSourcesScreen());
+        if (state.screen === 'access') main.replaceChildren(renderAccessScreen(null));
+        else if (state.screen === 'coverage') main.replaceChildren(renderCoverageScreen());
+        else if (state.screen === 'sources') main.replaceChildren(renderSourcesScreen());
         else if (state.screen === 'incidents') main.replaceChildren(renderIncidentsScreen());
         else if (state.screen === 'ack') main.replaceChildren(renderAckScreen());
         else if (state.screen === 'new') main.replaceChildren(renderNewScreen());
@@ -561,6 +614,23 @@
         else if (state.screen === 'report') main.replaceChildren(renderReportScreen(currentRunId()));
         else main.replaceChildren(renderRecentScreen());
         startDurationTicker();
+    }
+
+    /**
+     * Names the screen in the tab title and, on every route change after the first screen,
+     * moves the focus to its heading, as a page load would. A reader of a single-page app
+     * otherwise hears nothing when a tab is followed.
+     */
+    function announceRoute() {
+        const heading = document.querySelector('#main h1');
+        document.title = heading ? heading.textContent + ' · Perf Sentinel Hub' : 'Perf Sentinel Hub';
+        if (!state.routed) {
+            state.routed = true;
+            return;
+        }
+        if (!heading) return;
+        heading.setAttribute('tabindex', '-1');
+        heading.focus();
     }
 
     /** The label with a rule running out to its right, as every screen head has. */
@@ -1025,6 +1095,7 @@
         clearTimeout(state.noteTimer);
         render();
         if (state.loading) return;
+        announceRoute();
         // Both screens read the runs list: recent renders it, the launcher
         // shows what past runs weighed. Reloaded on every entry, not once, so
         // coming back from a run that just finished shows its weight.
@@ -1161,9 +1232,17 @@
     function sourceRow(source, index) {
         const now = Date.now();
         const row = el('tr', source.reachable ? {} : {'data-unreachable': 'true'});
-        // Only a daemon has something to unfold, so only a daemon gets a control.
-        if (source.kind === 'daemon') row.appendChild(daemonNameCell(source, index));
-        else row.appendChild(el('td', {class: 'table-strong', text: source.name}));
+        // Only a daemon has something to unfold, so only a daemon gets a control, and
+        // with access on only where the caller holds sources.read, which its view needs.
+        const unfolds = source.kind === 'daemon' && PSL.permits(source, 'sources.read');
+        if (unfolds) row.appendChild(daemonNameCell(source, index));
+        else if (source.kind === 'daemon') {
+            // Said, not left as a row that simply stops opening.
+            row.appendChild(el('td', {class: 'table-strong'}, [
+                el('span', {text: source.name}),
+                el('span', {class: 'source-locked', text: 'details need sources.read'})
+            ]));
+        } else row.appendChild(el('td', {class: 'table-strong', text: source.name}));
         row.appendChild(el('td', {}, [el('span', {class: 'chip', text: PSL.KIND_LABEL[source.kind] || source.kind})]));
         row.appendChild(el('td', {}, [el('span', {class: 'chip chip-declared', text: source.environment})]));
         row.appendChild(el('td', {}, [healthCell(source, now)]));
@@ -1177,7 +1256,7 @@
         }));
         row.appendChild(producerCell(source));
         row.appendChild(el('td', {class: 'table-mono', text: source.last_error_code || '—'}));
-        if (source.kind !== 'daemon') return [row];
+        if (!unfolds) return [row];
 
         // Spanning the header count and not the literal 8: adding a column must
         // not be able to break the detail row.
@@ -1513,11 +1592,7 @@
                     + 'to off and the command drops `--refresh`, leaving the engine its own default of '
                     + 'five seconds.',
                     engineNote(),
-                    source.auth_header_name
-                        ? 'This daemon is behind an `' + source.auth_header_name + '` header. '
-                        + '`query monitor` takes no such flag, so this command works only from somewhere '
-                        + 'that reaches the daemon without it.'
-                        : null
+                    PSL.monitorKeyHint(source)
                 ]
             }),
             settingsDisclosure(source, view)
@@ -2224,9 +2299,16 @@
     ];
 
     function selectedSource() {
-        return (state.sources || []).find(function (source) {
+        return runSources().find(function (source) {
             return source.id === state.form.sourceId;
         }) || null;
+    }
+
+    /** What the form offers: with access on, only where the caller holds analyses.run. */
+    function runSources() {
+        return (state.sources || []).filter(function (source) {
+            return PSL.permits(source, 'analyses.run');
+        });
     }
 
     /** Changing source clears both acknowledgements and closes the picker: they
@@ -2332,6 +2414,14 @@
         }
         if (!state.sources || state.sources.length === 0) {
             section.appendChild(el('div', {class: 'empty-state', text: 'This Hub has no configured source.'}));
+            return section;
+        }
+        if (runSources().length === 0) {
+            section.appendChild(el('div', {
+                class: 'empty-state',
+                text: 'No grant lets you start an analysis on this Hub. An administrator grants access in the '
+                    + 'Hub\'s configuration.'
+            }));
             return section;
         }
 
@@ -2466,6 +2556,11 @@
         return panels;
     }
 
+    /** Hub:Access found no grant for this caller: the Hub answers, it reaches nothing. */
+    function noGrantBanner(text) {
+        return el('div', {class: 'banner', 'data-tone': 'warn'}, [el('div', {text: text})]);
+    }
+
     function hubUnreachableBanner() {
         return el('div', {class: 'banner', 'data-tone': 'crit'}, [
             critGlyph(16),
@@ -2515,7 +2610,10 @@
         return el('div', {class: 'card source-panel'}, [
             el('div', {class: 'panel-head'}, [
                 el('span', {class: 'overline', text: '// source'}),
-                el('span', {class: 'panel-head-source', text: state.sources.length + ' configured'})
+                el('span', {
+                    class: 'panel-head-source',
+                    text: PSL.sourceCountLabel(runSources().length, (state.sources || []).length)
+                })
             ]),
             el('div', {class: 'source-list', role: 'radiogroup', 'aria-label': 'Source'},
                 sourceRows()),
@@ -2533,8 +2631,9 @@
     // polled and pushes on its own, a trace backend is only read when a run asks.
     // The fleet table groups on the same rule, from the same helper.
     function sourceRows() {
-        const kinds = PSL.splitByKind(state.sources);
-        if (!kinds.split) return state.sources.map(sourceRadio);
+        const sources = runSources();
+        const kinds = PSL.splitByKind(sources);
+        if (!kinds.split) return sources.map(sourceRadio);
         const radios = function (group) {
             return group.map(function (entry) {
                 return sourceRadio(entry.source);
@@ -2630,7 +2729,7 @@
                     text: 'There is no command line for this either. What this daemon is configured with, '
                         + 'and what it is holding at this moment, is on the Sources screen, on its own row.'
                 }),
-                sourcesRowLink()
+                selectedSource() && PSL.permits(selectedSource(), 'sources.read') ? sourcesRowLink() : null
             ])
         ]);
     }
@@ -4968,6 +5067,336 @@
     }
 
     // ---------------------------------------------------- screen: recent runs
+
+    // --------------------------------------------------------- screen: access
+
+    /**
+     * Who the caller is and what they reach, from /api/access, reached from the identity
+     * chip. Read-only but for revoking their own terminal tokens: rights live in the Hub's
+     * configuration alone. `banner` is the no-grant text when /api/status refused the
+     * caller, who then gets what to send an administrator instead of an empty reach.
+     */
+    function renderAccessScreen(banner) {
+        const access = state.access;
+        const signedIn = PSL.accessSignedIn(access, Date.now());
+        const section = el('section', {class: 'access-screen'}, [
+            ruledOverline('// access'),
+            el('h1', {class: 'page-title', text: 'Your access'}),
+            el('p', {
+                class: 'page-sub',
+                text: 'Rights are declared in the Hub\'s configuration, not on this page. Its one action '
+                    + 'revokes a terminal token you approved.'
+            })
+        ]);
+        if (banner) section.appendChild(noGrantBanner(banner));
+
+        section.appendChild(accessCard('signed in as', [
+            el('p', {text: signedIn.line}),
+            signedIn.note ? el('p', {class: 'access-muted', text: signedIn.note}) : null,
+            el('p', {}, [
+                el('span', {text: signedIn.subjectLabel}),
+                el('code', {class: 'access-subject', text: signedIn.subject})
+            ])
+        ]));
+        section.appendChild(accessCard('your groups', [
+            access.groups.length === 0
+                ? el('p', {class: 'access-muted', text: 'No group.'})
+                : el('ul', {class: 'access-chips', 'aria-label': 'Your groups'}, access.groups.map(function (group) {
+                    return el('li', {
+                        class: 'chip',
+                        'data-origin': group.origin,
+                        text: group.name + ' · ' + group.origin
+                    });
+                }))
+        ]));
+        if (banner) {
+            // The banner already says nothing is reached. What helps now is the request.
+            section.appendChild(terminalBlock({
+                head: '// send this to an administrator',
+                sub: 'Your name, the id an administrator lists, and the groups a grant can name.',
+                text: PSL.accessRequestText(access),
+                copyLabel: 'Copy the access request'
+            }));
+        } else {
+            const reach = PSL.accessReachRows(access);
+            section.appendChild(accessCard('what you reach', [
+                reach.length === 0
+                    ? el('p', {text: PSL.ACCESS_NO_REACH})
+                    : accessTable('What your grants give you', ['Project', 'Group', 'Role', 'Permissions'],
+                        reach.map(function (row) {
+                            return [row.project, row.group, row.role, row.permissions];
+                        }))
+            ]));
+        }
+        if (state.tokens || state.tokensFailed) {
+            section.appendChild(tokensCard((state.tokens || []).filter(function (token) {
+                return token.subject === access.subject;
+            }), 'your terminal tokens', 'tokens-own'));
+        }
+        if (access.admin) {
+            section.appendChild(el('p', {class: 'access-pointer'}, [
+                el('span', {text: 'You administer this Hub. '}),
+                el('a', {href: '#/coverage', text: 'Coverage'}),
+                el('span', {text: ' lists what no project covers, everyone\'s terminal tokens and the whole configuration.'})
+            ]));
+        } else if (access.projects.length > 0) {
+            section.appendChild(accessCard('projects you reach', [projectsTable(access.projects)]));
+        }
+        return section;
+    }
+
+    /**
+     * The administrator's screen: what no project covers first, since that is the one list
+     * to act on, then everyone's terminal tokens, then the configuration folded by part.
+     */
+    function renderCoverageScreen() {
+        const access = state.access;
+        const section = el('section', {class: 'access-screen'}, [
+            ruledOverline('// coverage'),
+            el('h1', {class: 'page-title', text: 'What access control covers'}),
+            el('p', {
+                class: 'page-sub',
+                text: 'Findings no project covers are read only by grants on "*". Rights change in the Helm '
+                    + 'values hub.access and apply at the next restart.'
+            })
+        ]);
+        if (access.unmatched) section.appendChild(attentionCard(access.unmatched));
+        const snippet = access.unmatched ? PSL.coverageSnippet(access.unmatched) : null;
+        if (snippet) {
+            section.appendChild(terminalBlock({
+                head: '// patterns to paste',
+                sub: 'One line per uncovered service, attribute and source.',
+                text: snippet,
+                copyLabel: 'Copy the patterns'
+            }));
+        }
+        if (access.conflicts) section.appendChild(conflictsCard(access.conflicts));
+        if (state.tokens || state.tokensFailed) {
+            section.appendChild(tokensCard(state.tokens || [], 'terminal tokens, everyone\'s', 'tokens-all'));
+        }
+        if (access.configuration) section.appendChild(configurationCard(access.configuration));
+        return section;
+    }
+
+    /** A card whose title is a heading, the slashes kept for the eye and hidden from a reader. */
+    function accessCard(title, children, headingId) {
+        return el('section', {class: 'card access-card'}, [
+            el('h2', {class: 'overline access-card-title', id: headingId, tabindex: headingId ? '-1' : null}, [
+                el('span', {'aria-hidden': 'true', text: '// '}),
+                el('span', {text: title})
+            ])
+        ].concat(children));
+    }
+
+    /** Every cell a text node. `rows` holds strings, or arrays of strings for one line each. */
+    function accessTable(caption, headings, rows) {
+        return el('div', {class: 'sources-wrap'}, [
+            el('table', {class: 'table access-table'}, [
+                el('caption', {class: 'visually-hidden', text: caption}),
+                el('thead', {}, [el('tr', {}, headings.map(function (heading) {
+                    return el('th', {scope: 'col', text: heading});
+                }))]),
+                el('tbody', {}, rows.map(function (row) {
+                    return el('tr', {}, row.map(function (cell) {
+                        if (cell instanceof Node) return el('td', {}, [cell]);
+                        return Array.isArray(cell)
+                            ? el('td', {}, cell.map(function (line) {
+                                return el('div', {text: line});
+                            }))
+                            : el('td', {text: cell});
+                    }));
+                }))
+            ])
+        ]);
+    }
+
+    /** A source's display name, its id when the Hub no longer lists it. */
+    function sourceName(id) {
+        const source = (state.sources || []).find(function (candidate) {
+            return candidate.id === id;
+        });
+        return source ? source.name : id;
+    }
+
+    /**
+     * The terminal tokens `perf-sentinel login` obtained, each with a Revoke that asks once
+     * more before it acts. Revoking takes effect on the token's next request, and the
+     * outcome is announced in the card, which takes the focus once the list is redrawn.
+     */
+    function tokensCard(tokens, title, headingId) {
+        const rows = PSL.tokenRows(tokens);
+        const notice = state.tokensNotice && state.tokensNotice.card === headingId ? state.tokensNotice : null;
+        return accessCard(title, [
+            el('p', {
+                text: 'perf-sentinel login gets a terminal token once its code is approved. It carries the '
+                    + 'approver\'s access, never admin, until the session that approved it ends.'
+            }),
+            el('div', {role: 'status', class: 'access-status'}, notice ? [el('div', {
+                class: 'banner',
+                'data-tone': notice.ok ? 'ok' : 'crit'
+            }, [el('div', {text: notice.text})])] : []),
+            state.tokensFailed
+                ? el('div', {class: 'banner', 'data-tone': 'crit'}, [
+                    el('div', {text: 'The Hub did not list the terminal tokens. Reload the page to try again.'})
+                ])
+                : rows.length === 0
+                ? el('p', {class: 'access-muted', text: 'No terminal token.'})
+                : accessTable('Terminal tokens', ['Owner', 'Requested from', 'Created', 'Expires', 'Last used', ''],
+                    rows.map(function (row) {
+                        return [row.owner, row.from, row.created, row.expires, row.lastUsed, revokeButton(row, headingId)];
+                    }))
+        ], headingId);
+    }
+
+    function revokeButton(row, card) {
+        const label = 'Revoke the token of ' + row.owner + ' created ' + row.created;
+        const button = el('button', {type: 'button', class: 'pill-button', text: 'Revoke', 'aria-label': label});
+        let armed = false;
+        const disarm = function () {
+            armed = false;
+            button.textContent = 'Revoke';
+            button.setAttribute('aria-label', label);
+            button.removeAttribute('data-armed');
+        };
+        // Leaving the button puts it back: a second click is a decision, not a stray one.
+        button.addEventListener('blur', disarm);
+        button.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') disarm();
+        });
+        button.addEventListener('click', function () {
+            if (!armed) {
+                armed = true;
+                button.textContent = 'Confirm revoke';
+                button.setAttribute('aria-label', 'Confirm: ' + label + '. Its terminal stops working.');
+                button.setAttribute('data-armed', 'true');
+                return;
+            }
+            button.disabled = true;
+            const request = PSL.tokenRevokeRequest(row.id);
+            fetch(request.path, request.init).then(signInOn401).then(function (response) {
+                return response.status;
+            }, function () {
+                return 0;
+            }).then(function (status) {
+                state.tokensNotice = Object.assign({card: card}, PSL.revokeOutcome(status, row));
+                return loadTokens();
+            }).then(function () {
+                const heading = document.getElementById(card);
+                if (heading) heading.focus();
+            });
+        });
+        return button;
+    }
+
+    function projectsTable(projects) {
+        return accessTable('Projects and their patterns', ['Project', 'Patterns'], projects.map(function (project) {
+            return [project.name, project.patterns.map(PSL.describePattern)];
+        }));
+    }
+
+    /** One folded part of the configuration, its count in the summary so a closed fold still says something. */
+    function configurationPart(title, count, body) {
+        return el('details', {class: 'access-part'}, [
+            el('summary', {}, [
+                el('span', {class: 'access-part-title', text: title}),
+                el('span', {class: 'access-part-count', text: count == null ? '' : String(count)})
+            ]),
+            count === 0 ? el('p', {class: 'access-muted', text: 'None declared.'}) : body
+        ]);
+    }
+
+    function configurationCard(configuration) {
+        const now = Date.now();
+        return accessCard('configuration', [
+            el('p', {class: 'access-muted', text: 'As the Hub loaded it from hub.access at its last start.'}),
+            configurationPart('Projects', configuration.projects.length, projectsTable(configuration.projects)),
+            configurationPart('Roles', configuration.roles.length,
+                accessTable('Roles', ['Role', 'Permissions'], configuration.roles.map(function (role) {
+                    return [role.built_in ? role.name + ' (built-in)' : role.name, role.permissions.join(', ')];
+                }))),
+            configurationPart('Grants', configuration.grants.length,
+                accessTable('Grants', ['Group', 'Project', 'Role'], configuration.grants.map(function (grant) {
+                    return [grant.group, grant.project, grant.role];
+                }))),
+            configurationPart('Internal groups', configuration.internal_groups.length,
+                accessTable('Internal groups', ['Internal group', 'Members'], configuration.internal_groups.map(function (group) {
+                    return ['internal:' + group.name, group.members.length === 0 ? 'no member' : group.members];
+                }))),
+            configurationPart('Admins', configuration.admins.length + configuration.admin_groups.length,
+                el('dl', {class: 'access-pairs'}, [
+                    el('dt', {text: 'By id'}),
+                    el('dd', {text: configuration.admins.length === 0 ? 'none' : configuration.admins.join(', ')}),
+                    el('dt', {text: 'By group'}),
+                    el('dd', {text: configuration.admin_groups.length === 0 ? 'none' : configuration.admin_groups.join(', ')})
+                ])),
+            configurationPart('Machine tokens', configuration.machine_tokens.length,
+                accessTable('Machine tokens', ['Machine token', 'Group', 'Expires'], configuration.machine_tokens.map(function (token) {
+                    return [token.name, token.group, PSL.accessExpiry(token.expires_at_ms, now)];
+                }))),
+            configurationPart('Local accounts', configuration.local_accounts.length,
+                accessTable('Local accounts', ['Local account', 'Signs in as'], configuration.local_accounts.map(function (name) {
+                    return [name, 'local:' + name];
+                })))
+        ]);
+    }
+
+    /** What no project covers, the one part of the screen that asks for a change. */
+    function attentionCard(unmatched) {
+        const count = unmatched.services.length + unmatched.attributes.length + unmatched.sources.length;
+        if (count === 0) {
+            return accessCard('needs attention', [
+                el('p', {text: 'Every finding the Hub holds belongs to a project. Nothing to assign.'})
+            ]);
+        }
+        const parts = [el('p', {
+            text: count + (count === 1 ? ' entry is' : ' entries are') + ' read by no project. Add a pattern that '
+                + 'names it to the project of the team that owns it.'
+        })];
+        if (unmatched.services.length > 0) {
+            parts.push(accessTable('Services no project covers', ['Service', 'Seen at', 'Findings'],
+                unmatched.services.map(function (row) {
+                    return [row.service == null ? '(no service)' : row.service,
+                        row.source_ids.map(sourceName).join(', '), String(row.findings)];
+                })));
+        }
+        if (unmatched.attributes.length > 0) {
+            parts.push(accessTable('Attributes no project covers', ['Attribute', 'Findings'],
+                unmatched.attributes.map(function (row) {
+                    return [row.key + '=' + row.value, String(row.findings)];
+                })));
+        }
+        if (unmatched.sources.length > 0) {
+            parts.push(accessTable('Sources no project names', ['Source no project names', 'Findings'],
+                unmatched.sources.map(function (row) {
+                    // A trace backend stores no finding of its own: its runs are read live.
+                    return [sourceName(row.source_id), row.findings == null ? 'none stored, trace backend' : String(row.findings)];
+                })));
+        }
+        if (unmatched.truncated) {
+            parts.push(el('p', {class: 'access-muted', text: 'Each list stops at its first 200 entries.'}));
+        }
+        return accessCard('needs attention', parts);
+    }
+
+    function conflictsCard(conflicts) {
+        return accessCard('deployments that disagree on a project attribute', [
+            el('p', {
+                text: 'A project\'s attribute pattern reads these copies but cannot write them: the copy carries two '
+                    + 'values of the key, or was also seen under a grouping without it. An acknowledgment through an '
+                    + 'attribute grant is refused on them. A source or service grant for the team that owns the service '
+                    + 'can acknowledge them.'
+            }),
+            conflicts.copies.length === 0
+                ? el('p', {class: 'access-muted', text: 'None.'})
+                : accessTable('Findings whose deployments disagree',
+                    ['Source', 'Signature', 'Service', 'Key', 'Values', 'Groupings missing the key'],
+                    conflicts.copies.map(function (row) {
+                        return [sourceName(row.source_id), row.signature, row.service || '(no service)', row.key,
+                            row.values.join(', '), String(row.identities_without_key)];
+                    })),
+            conflicts.truncated ? el('p', {class: 'access-muted', text: 'Only the first 200 are listed.'}) : null
+        ]);
+    }
 
     function renderRecentScreen() {
         const section = el('section', {}, [

@@ -609,6 +609,24 @@
     }
 
     /**
+     * The line printed under the monitor command of a daemon behind a header. The
+     * monitor sends `PERF_SENTINEL_DAEMON_API_KEY` as `X-API-Key` and nothing else,
+     * so only that header gets the key hint, as prose since no shell quotes it. Any
+     * other, an Ingress's own for one, is named as a header the command cannot send.
+     *
+     * @param {any} source
+     * @returns {string | null}
+     */
+    function monitorKeyHint(source) {
+        const header = source.auth_header_name;
+        if (!header) return null;
+        return header.toLowerCase() === 'x-api-key'
+            ? 'Set `PERF_SENTINEL_DAEMON_API_KEY` to this daemon\'s read key first.'
+            : 'This daemon is behind an `' + header + '` header. `query monitor` takes no such flag, '
+            + 'so this command works only from somewhere that reaches the daemon without it.';
+    }
+
+    /**
      * The overridden thresholds as the file `-c` expects. Only the ones a run
      * actually changed: a value equal to the engine's own default is dropped
      * before it reaches here, so every key present is a real departure. A
@@ -704,14 +722,14 @@
         return to - from;
     }
 
-    const ENGINE_REPOSITORY = 'https://github.com/robintra/perf-sentinel';
-    const HUB_REPOSITORY = 'https://github.com/robintra/PerfSentinelHub';
+    const ENGINE_REPOSITORY = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel';
+    const HUB_REPOSITORY = 'https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub';
     /* Every chart version with the engine version it ships, which a release tag
        cannot give: a chart-only fix bumps the chart and not the appVersion. */
     const CHART_PAGE = 'https://artifacthub.io/packages/helm/perf-sentinel/perf-sentinel';
     /* Not a link. safeHttpsHref would refuse the scheme, and it is a coordinate
        to paste into helm rather than a page to open. */
-    const CHART_COORDINATE = 'oci://ghcr.io/robintra/charts/perf-sentinel';
+    const CHART_COORDINATE = 'oci://ghcr.io/institut-du-numerique-responsable/charts/perf-sentinel';
 
     /**
      * Where to get the engine a printed command needs. Pinned to the version
@@ -1230,6 +1248,274 @@
         });
     }
 
+    /**
+     * What the shell says when `/api/status` fails. Hub:Access answers 403 to a
+     * signed-in caller no grant reaches: the Hub is up, and only an administrator
+     * can change that. Any other failure is the Hub itself, and null leaves the
+     * page to its unreachable banner.
+     * @param {number | undefined} status
+     * @returns {string | null}
+     */
+    function shellBanner(status) {
+        return status === 403
+            ? 'No grant on this Hub reaches you. An administrator grants access in the Hub\'s configuration.'
+            : null;
+    }
+
+    /**
+     * Whether a source's own list allows a permission. A source without a list is
+     * a Hub with access off, where nothing is withheld.
+     * @param {{permissions?: string[] | null}} source
+     * @param {string} permission
+     * @returns {boolean}
+     */
+    function permits(source, permission) {
+        return !source.permissions || source.permissions.indexOf(permission) >= 0;
+    }
+
+    /**
+     * A project pattern as the access page writes it: only the parts it sets.
+     * @param {{source?: string | null, service?: string | null, attribute?: string | null}} pattern
+     * @returns {string}
+     */
+    function describePattern(pattern) {
+        return [['source', pattern.source], ['service', pattern.service], ['attribute', pattern.attribute]]
+            .filter(part => part[1] != null)
+            .map(part => part[0] + ' ' + part[1])
+            .join(' · ');
+    }
+
+    /**
+     * The screen a hash names. `#/access` is one only on a Hub that answered
+     * /api/access: with access off, or that read failed, it reads as New, as any
+     * unknown route always has. `#/coverage` is an administrator's, and a member who
+     * follows a shared link to it lands on their own access instead.
+     * @param {string | null | undefined} hash
+     * @param {boolean} accessOn
+     * @param {boolean} admin
+     * @returns {string}
+     */
+    function screenOf(hash, accessOn, admin) {
+        // The query a handoff link carries is the form's, not the route's.
+        const route = (hash || '#/new').replace('#/', '').split('?')[0];
+        if (route.indexOf('run/') === 0) return 'run';
+        if (route.indexOf('report/') === 0) return 'report';
+        if (route === 'coverage' && accessOn) return admin ? 'coverage' : 'access';
+        if (route === 'access' || route === 'coverage') return accessOn ? 'access' : 'new';
+        // `ack` has no tab: it is reached by link only.
+        return ['new', 'recent', 'sources', 'incidents', 'ack'].indexOf(route) >= 0 ? route : 'new';
+    }
+
+    /**
+     * A machine token's expiry, in whole days left.
+     * @param {number} expiresAtMs
+     * @param {number} nowMs
+     * @returns {string}
+     */
+    function accessExpiry(expiresAtMs, nowMs) {
+        if (expiresAtMs <= nowMs) return 'expired';
+        const days = Math.floor((expiresAtMs - nowMs) / 86400000);
+        if (days === 0) return 'in less than a day';
+        return days === 1 ? 'in 1 day' : 'in ' + days + ' days';
+    }
+
+    const ACCESS_CALLER = {
+        session: 'a browser session', terminal_token: 'a terminal token', machine_token: 'a machine token'
+    };
+
+    /**
+     * The access page's first block. A session ends within the day, so its time is
+     * enough; a token's date is not.
+     * @param {{identity: string | null, subject: string, caller: string, expires_at_ms: number | null}} access
+     * @param {number} nowMs
+     * @returns {{line: string, note: string | null, subjectLabel: string, subject: string}}
+     */
+    function accessSignedIn(access, nowMs) {
+        const expires = access.expires_at_ms;
+        const until = expires == null ? ''
+            : ', until ' + (expires - nowMs < 86400000 ? dtHuman(expires).slice(11) : dtHuman(expires));
+        return {
+            line: 'Signed in as ' + (access.identity || access.subject) + ', through '
+                + (ACCESS_CALLER[/** @type {keyof typeof ACCESS_CALLER} */ (access.caller)] || access.caller)
+                + until + '.',
+            // A machine token's group is configuration, read on every request.
+            note: access.caller === 'machine_token'
+                ? null
+                : 'A group change at your provider applies at your next sign-in.',
+            subjectLabel: 'Your id, for an administrator: ',
+            subject: access.subject
+        };
+    }
+
+    const ACCESS_NO_REACH =
+        'No grant reaches your groups. An administrator grants access in the Hub\'s configuration.';
+
+    /**
+     * The "What you reach" table. A grant on `*` covers more than every project, and
+     * an entry with no group is Admins, which names the caller's id.
+     * @param {{reach: {group: string | null, project: string, role: string, permissions: string[]}[]}} access
+     * @returns {{project: string, group: string, role: string, permissions: string}[]}
+     */
+    function accessReachRows(access) {
+        return access.reach.map(entry => ({
+            project: entry.project === '*' ? 'Everything, including records no project covers' : entry.project,
+            group: entry.group == null ? 'your id, in Admins' : entry.group,
+            role: entry.role,
+            permissions: entry.permissions.join(', ')
+        }));
+    }
+
+    /**
+     * The patterns that would cover what no project covers, one YAML flow mapping per line,
+     * ready to paste under a project's patterns. Values are JSON-quoted, which YAML reads as
+     * double-quoted strings, so a `*` or a `=` cannot change their meaning. Null when nothing
+     * is left uncovered. A finding with no service has no service pattern to offer.
+     * @param {{services: {service: string | null}[], attributes: {key: string, value: string}[],
+     *          sources: {source_id: string}[]}} unmatched
+     * @returns {string | null}
+     */
+    function coverageSnippet(unmatched) {
+        const lines = []
+            .concat(unmatched.services.filter(row => row.service != null)
+                .map(row => '- { service: ' + JSON.stringify(row.service) + ' }'))
+            .concat(unmatched.attributes.map(row => '- { attribute: ' + JSON.stringify(row.key + '=' + row.value) + ' }'))
+            .concat(unmatched.sources.map(row => '- { source: ' + JSON.stringify(row.source_id) + ' }'));
+        if (lines.length === 0) return null;
+        return ['# Add the lines a team owns to the patterns of its project in hub.access.projects,',
+            '# then restart the Hub. A finding without a service needs a source or attribute pattern.']
+            .concat(lines).join('\n');
+    }
+
+    /**
+     * What a caller no grant reaches sends an administrator: the name, the id an
+     * administrator lists, and the groups a grant can name, with where each comes from.
+     * @param {{identity: string | null, subject: string, groups: {name: string, origin: string}[]}} access
+     * @returns {string}
+     */
+    function accessRequestText(access) {
+        const groups = access.groups.length === 0
+            ? 'none'
+            : access.groups.map(group => group.name + ' (' + group.origin + ')').join(', ');
+        return 'Please grant access to the Perf Sentinel Hub.\nname: ' + (access.identity || access.subject)
+            + '\nid: ' + access.subject + '\ngroups: ' + groups;
+    }
+
+    /**
+     * The source panel's count. With access on a source the caller may not run on is left
+     * out of the list, and the count says so rather than quietly shrinking.
+     * @param {number} runnable
+     * @param {number} total
+     * @returns {string}
+     */
+    function sourceCountLabel(runnable, total) {
+        if (runnable === total) return total + ' configured';
+        const missing = total - runnable;
+        return runnable + ' of ' + total + ' configured · ' + missing
+            + (missing === 1 ? ' needs' : ' need') + ' analyses.run';
+    }
+
+    /**
+     * What the tokens card says after a Revoke. A 404 is a token already gone. Status 0
+     * stands for no answer at all.
+     * @param {number} status
+     * @param {{owner: string, created: string}} row
+     * @returns {{ok: boolean, text: string}}
+     */
+    function revokeOutcome(status, row) {
+        const which = 'the token of ' + row.owner + ' created ' + row.created;
+        if (status === 204) {
+            return {ok: true, text: 'Revoked ' + which + '. That terminal gets a 401 on its next request.'};
+        }
+        if (status === 404) return {ok: true, text: 'The ' + which.slice(4) + ' was already gone.'};
+        return {
+            ok: false,
+            text: status === 0
+                ? 'The Hub did not answer. The token is still valid. Try again in a moment.'
+                : 'The Hub could not revoke this token (status ' + status + '). It is still valid. Try again in a moment.'
+        };
+    }
+
+    /**
+     * The access page's terminal token table, one row per token: who owns it, where it was
+     * approved for, and when it was made, expires and was last used (to five minutes).
+     * @param {{id: string, identity: string, client_address: string | null, created_at_ms: number,
+     *          expires_at_ms: number, last_used_at_ms: number | null}[]} tokens
+     * @returns {{id: string, owner: string, from: string, created: string, expires: string, lastUsed: string}[]}
+     */
+    function tokenRows(tokens) {
+        return tokens.map(token => ({
+            id: token.id,
+            owner: token.identity,
+            from: token.client_address || 'unknown',
+            created: dtHuman(token.created_at_ms),
+            expires: dtHuman(token.expires_at_ms),
+            lastUsed: token.last_used_at_ms == null ? 'never' : dtHuman(token.last_used_at_ms)
+        }));
+    }
+
+    /**
+     * The revoke request. JSON even with no body: the Hub refuses any other write from a page.
+     * @param {string} id
+     * @returns {{path: string, init: {method: string, headers: Record<string, string>}}}
+     */
+    function tokenRevokeRequest(id) {
+        return {
+            path: '/api/tokens/' + encodeURIComponent(id),
+            init: {method: 'DELETE', headers: {'content-type': 'application/json'}}
+        };
+    }
+
+    /**
+     * The approval page's first line, with the session's end once known.
+     * @param {number | null} expiresAtMs
+     * @returns {string}
+     */
+    function deviceIntro(expiresAtMs) {
+        return 'Enter the code your terminal shows. Only enter a code from a perf-sentinel login you started '
+            + 'yourself, just now: approving gives that terminal your access until '
+            + (expiresAtMs == null ? 'your session ends' : dtHuman(expiresAtMs).slice(11)) + '.';
+    }
+
+    /**
+     * Where and when a code was requested, who approves it and until when the token holds.
+     * @param {{client_address: string, requested_at_ms: number, identity: string | null,
+     *          token_expires_at_ms: number | null}} verify
+     * @param {number} nowMs
+     * @returns {string}
+     */
+    function deviceRequestLine(verify, nowMs) {
+        const minutes = Math.floor((nowMs - verify.requested_at_ms) / 60000);
+        const ago = minutes < 1 ? 'less than a minute ago' : minutes === 1 ? '1 minute ago' : minutes + ' minutes ago';
+        return 'Requested from ' + verify.client_address + ' at ' + clock(verify.requested_at_ms).slice(0, 8)
+            + ' (' + ago + '). You are signed in as ' + (verify.identity || 'unknown') + '. The token expires at '
+            + (verify.token_expires_at_ms == null ? 'the end of your session' : dtHuman(verify.token_expires_at_ms).slice(11))
+            + '.';
+    }
+
+    /**
+     * The warning shown above the buttons when the code came from another network than this
+     * browser, the one cheap signal that tells a remote phish from a login on this machine.
+     * @param {{client_address: string, same_network: boolean}} verify
+     * @returns {string | null}
+     */
+    function deviceNetworkAlert(verify) {
+        return verify.same_network
+            ? null
+            : 'This code was requested from another network than this browser (' + verify.client_address
+            + '). Approve only if you started that sign-in yourself on that machine.';
+    }
+
+    /**
+     * What a click on Approve does: send, or first turn into "Approve anyway" when the code
+     * came from another network.
+     * @param {boolean} sameNetwork
+     * @param {boolean} armed
+     * @returns {'send' | 'arm'}
+     */
+    function deviceApproveStep(sameNetwork, armed) {
+        return sameNetwork || armed ? 'send' : 'arm';
+    }
+
     global.PSL = {
         setVersions,
         get ENGINE() {
@@ -1242,12 +1528,15 @@
         dur, durPrecise, durMinutes, durParts, splitByKind, clock, parseDur, humanDur, dtLocal, dtHuman, bytes,
         vparts, vcmp, versionGap, skew, detector, statusKey, argsLine, weightBand,
         shq, psq, SHELLS, shellById, defaultShell, exportLine,
-        analysisCommand, monitorCommand, detectionToml, quotedForShell,
+        analysisCommand, monitorCommand, monitorKeyHint, detectionToml, quotedForShell,
         lightState, mergeableView, mergeLight, refreshPlan, releaseUrl, openFolds,
         hubReleaseUrl, updateState, knownShell, CHART_PAGE, CHART_COORDINATE,
         gaugeTone, gaugeMove,
         INCIDENT_KIND_LABEL, FINDING_TYPE_LABEL, incidentCapture, findingPhase, INCIDENT_READ_STATE, incidentsCopy,
         incidentHandoffHash, readHandoff,
-        ackRouteHash, ackEntryHash, readAckRoute, ackRows, ackExpiry, ackChecked, ackPlan, ackBody, ackSummary
+        ackRouteHash, ackEntryHash, readAckRoute, ackRows, ackExpiry, ackChecked, ackPlan, ackBody, ackSummary,
+        shellBanner, screenOf, permits, describePattern, accessExpiry, accessSignedIn, ACCESS_NO_REACH, accessReachRows,
+        coverageSnippet, accessRequestText, sourceCountLabel, revokeOutcome,
+        tokenRows, tokenRevokeRequest, deviceIntro, deviceRequestLine, deviceNetworkAlert, deviceApproveStep
     };
 })(globalThis);
