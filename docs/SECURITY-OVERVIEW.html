@@ -181,11 +181,12 @@
 <ul>
 <li><strong>Findings push:</strong> requires the source's <code class="ps-ic">X-API-Key</code> (at least 32 characters, bound to its source, compared in constant time). A source without a key cannot push.</li>
 <li><strong>UI and API:</strong> open by default.</li>
-<li><strong>Sign-in:</strong> with <code class="ps-ic">hub.auth.enabled</code>, the UI requires a session obtained through OAuth2 authorization code with PKCE against your identity provider (Keycloak, Entra ID, Google, GitLab and others). The session cookie is <code class="ps-ic">Secure</code>, <code class="ps-ic">SameSite=Lax</code>, 8 hours sliding. This is not full OpenID Connect: the identity comes from the userinfo endpoint, the ID token is not validated, and there are no roles.</li>
-<li><strong>Routes open even with sign-in:</strong> <code class="ps-ic">/api/findings</code>, <code class="ps-ic">/api/findings/{traceId}</code>, the import route (which has its own key), <code class="ps-ic">/health</code> and <code class="ps-ic">/metrics</code>. Keep them on an internal network.</li>
+<li><strong>Sign-in:</strong> with <code class="ps-ic">hub.auth.enabled</code>, the UI requires a session obtained through OAuth2 authorization code with PKCE against your identity provider (Keycloak, Entra ID, Google, GitLab and others). The session cookie is <code class="ps-ic">Secure</code>, <code class="ps-ic">SameSite=Lax</code>, 8 hours sliding. This is not full OpenID Connect: the identity comes from the userinfo endpoint, the ID token is not validated, and roles come only with access control, below.</li>
+<li><strong>Access control:</strong> with <code class="ps-ic">hub.access.enabled</code>, which needs sign-in and <code class="ps-ic">hub.metricsPort</code>, each caller reaches only what its grants cover, per team, on sources, services or grouping attributes. CI jobs and dashboards read with machine tokens declared in the Hub's configuration, their values in a Secret, sent as <code class="ps-ic">Authorization: Bearer</code> and holding <code class="ps-ic">findings.read</code> at most. A session then ends 8 hours after sign-in. A machine token in a shared tool such as Grafana serves its whole scope to every user of that tool, so give each team its own.</li>
+<li><strong>Routes open even with sign-in:</strong> <code class="ps-ic">/api/findings</code> and <code class="ps-ic">/api/findings/{traceId}</code> unless access control is on, the import route (which has its own key), <code class="ps-ic">/health</code> and <code class="ps-ic">/metrics</code> (on <code class="ps-ic">hub.metricsPort</code> alone when it is set). Keep them on an internal network.</li>
 <li><strong>Launcher:</strong> it runs the bundled engine binary as a subprocess with an argument list, without a shell. The binary path and the trace endpoints come from the configuration only. User inputs are validated, and a run stops after 300 s by default.</li>
 </ul>
-<p class="ps-p">Details: <a href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/AUTHENTICATION.md" target="_blank" rel="noopener" class="ps-ext">Hub authentication</a>, <a href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LIMITATIONS.md" target="_blank" rel="noopener" class="ps-ext">Hub limitations</a>.</p>
+<p class="ps-p">Details: <a href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/AUTHENTICATION.md" target="_blank" rel="noopener" class="ps-ext">Hub authentication</a>, <a href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/ACCESS-CONTROL.md" target="_blank" rel="noopener" class="ps-ext">Hub access control</a>, <a href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LIMITATIONS.md" target="_blank" rel="noopener" class="ps-ext">Hub limitations</a>.</p>
 <h2 id="hardening" class="ps-h2">Hardening</h2>
 <p class="ps-p"><strong>Engine code.</strong></p>
 <ul>
@@ -210,7 +211,7 @@
 <li>.NET 10 compiled with NativeAOT, nullable references, warnings as errors.</li>
 <li>Two runtime packages (<code class="ps-ic">Microsoft.Data.Sqlite</code>, <code class="ps-ic">SQLitePCLRaw</code>) and parameterized SQL.</li>
 <li>Request bodies are capped at 2 MiB (import, analyses) and 8 KiB (ack), and concurrency gates return <code class="ps-ic">503</code> with <code class="ps-ic">Retry-After</code>.</li>
-<li>The Hub sets no security header (CSP, HSTS, <code class="ps-ic">X-Frame-Options</code>): add them at the ingress.</li>
+<li>The Hub sets no security header (CSP, HSTS, <code class="ps-ic">X-Frame-Options</code>) besides <code class="ps-ic">Content-Security-Policy: frame-ancestors 'self'</code> with access control on: add the rest at the ingress.</li>
 </ul>
 <p class="ps-p"><strong>Containers and Helm.</strong> Both charts:</p>
 <ul>
