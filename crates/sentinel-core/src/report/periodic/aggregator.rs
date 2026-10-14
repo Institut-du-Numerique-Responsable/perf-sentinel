@@ -174,7 +174,7 @@ pub fn aggregate_from_paths(
         builder.process_file(path, period, strict_attribution)?;
     }
 
-    if builder.windows_aggregated == 0 {
+    if builder.state.windows_aggregated == 0 {
         return Err(AggregationError::NoWindowsInPeriod);
     }
 
@@ -333,8 +333,11 @@ struct DbWasteAccumulator {
     windows_with_carbon: u64,
 }
 
+/// What the windows of a period measured, independent of how they were
+/// read. Folded window by window, and merged whole when a daily rollup
+/// carries it, see `rollup.rs`.
 #[derive(Default)]
-struct Builder {
+pub(crate) struct PeriodState {
     per_service: BTreeMap<String, ServiceAccumulator>,
     windows_aggregated: u64,
     malformed_lines_skipped: u64,
@@ -369,24 +372,6 @@ struct Builder {
     /// Set when at least one window's `energy_model` carried the `+cal`
     /// suffix, indicating operator calibration was active for that window.
     calibration_applied: bool,
-    /// Archive lines whose hash chain checked out, carried no chain at
-    /// all (pre-chaining archives), or failed to verify.
-    chain_verified: u64,
-    chain_unchained: u64,
-    chain_breaks: u64,
-    chain_breaks_outside: u64,
-    /// Sum of in-period deltas of the cumulative `drops` counter, and
-    /// whether any line carried it at all (pre-v1.7 archives carry none,
-    /// and `0` must stay distinguishable from "not measured").
-    windows_dropped: u64,
-    drop_counter_resets: u64,
-    drops_observed: bool,
-    /// Previous cumulative `drops` value per archive family, keyed by
-    /// the family stem. The counter is daemon-lifetime, so the baseline
-    /// must survive a rotation, and it must NOT cross into an unrelated
-    /// archive: `disclose` takes a list of paths, and diffing one host's
-    /// counter against another's would invent resets.
-    last_drops: BTreeMap<String, u64>,
     /// SCI methodology tags observed, bounded by `MAX_ENERGY_MODELS`.
     carbon_methodologies: BTreeSet<String>,
     /// Distinct coefficient sets observed, as `"key=value"` strings. A
@@ -411,6 +396,29 @@ struct Builder {
     /// by the period length (<= 366 for a calendar year), no cap needed.
     /// Drives the v1.2 temporal-coverage continuity signal.
     observed_days: BTreeSet<NaiveDate>,
+}
+
+#[derive(Default)]
+struct Builder {
+    state: PeriodState,
+    /// Archive lines whose hash chain checked out, carried no chain at
+    /// all (pre-chaining archives), or failed to verify.
+    chain_verified: u64,
+    chain_unchained: u64,
+    chain_breaks: u64,
+    chain_breaks_outside: u64,
+    /// Sum of in-period deltas of the cumulative `drops` counter, and
+    /// whether any line carried it at all (pre-v1.7 archives carry none,
+    /// and `0` must stay distinguishable from "not measured").
+    windows_dropped: u64,
+    drop_counter_resets: u64,
+    drops_observed: bool,
+    /// Previous cumulative `drops` value per archive family, keyed by
+    /// the family stem. The counter is daemon-lifetime, so the baseline
+    /// must survive a rotation, and it must NOT cross into an unrelated
+    /// archive: `disclose` takes a list of paths, and diffing one host's
+    /// counter against another's would invent resets.
+    last_drops: BTreeMap<String, u64>,
     /// Oldest well-formed window across every input line, period or not.
     earliest_archived: Option<DateTime<Utc>>,
 }
@@ -596,7 +604,7 @@ impl Builder {
         let envelope = match typed {
             Ok(envelope) => envelope,
             Err(err) => {
-                self.malformed_lines_skipped += 1;
+                self.state.malformed_lines_skipped += 1;
                 tracing::warn!(
                     path = %step.path.display(),
                     line = step.line_no + 1,
@@ -613,7 +621,9 @@ impl Builder {
         if !in_period(envelope.ts, step.period) {
             return Ok(());
         }
-        let used_fallback = self.process_window(envelope, step.strict)?;
+        let used_fallback =
+            self.state
+                .process_window(&envelope.report, envelope.ts, step.strict)?;
         if used_fallback && !*step.warned_fallback {
             *step.warned_fallback = true;
             tracing::warn!(
@@ -668,16 +678,16 @@ impl Builder {
             self.chain_breaks_outside += 1;
         }
     }
+}
 
-    fn process_window(
+impl PeriodState {
+    pub(crate) fn process_window(
         &mut self,
-        envelope: ArchivedReport,
+        report: &Report,
+        ts: DateTime<Utc>,
         strict: bool,
     ) -> Result<bool, AggregationError> {
-        let ts = envelope.ts;
-        let report = envelope.report;
-
-        let Some(m) = self.compute_window_metrics(&report, ts) else {
+        let Some(m) = self.compute_window_metrics(report, ts) else {
             return Ok(false);
         };
 
@@ -686,7 +696,7 @@ impl Builder {
         // non-finite-carbon guard), keeping observed_days aligned with
         // windows_aggregated.
         self.observed_days.insert(ts.date_naive());
-        self.fold_disclosure_waste(&report, &m);
+        self.fold_disclosure_waste(report, &m);
         self.fold_binary_version(&report.binary_version);
         self.fold_window_energy_model(
             &report.green_summary.energy_model,
@@ -709,7 +719,7 @@ impl Builder {
             });
         }
 
-        self.attribute_window(&report, &m, &per_service_io, unattributed);
+        self.attribute_window(report, &m, &per_service_io, unattributed);
         self.route_findings(&report.findings, ts, unattributed);
 
         Ok(!m.runtime_attribution)
@@ -1125,29 +1135,32 @@ impl Builder {
             self.per_service.values().map(|s| s.energy_kwh).sum()
         }
     }
+}
 
+impl Builder {
     fn finalize(self, source_files: Vec<String>, period: &Period) -> AggregateInputs {
-        let total_requests = self.total_requests;
-        let total_energy_kwh = self.total_energy_kwh();
-        let total_carbon = self.total_carbon_kgco2eq;
+        let total_energy_kwh = self.state.total_energy_kwh();
+        let state = self.state;
+        let total_requests = state.total_requests;
+        let total_carbon = state.total_carbon_kgco2eq;
         // Flat avoidable fields alias the canonical (non-manipulable) tier.
-        let canonical_waste = make_waste_tier(&self.canonical_waste, self.total_io_ops);
-        let operational_waste = make_waste_tier(&self.operational_waste, self.total_io_ops);
-        let anti_patterns_count: u64 = self
+        let canonical_waste = make_waste_tier(&state.canonical_waste, state.total_io_ops);
+        let operational_waste = make_waste_tier(&state.operational_waste, state.total_io_ops);
+        let anti_patterns_count: u64 = state
             .per_service
             .values()
             .flat_map(|s| s.anti_patterns.values())
             .map(|ap| ap.occurrences)
             .sum();
 
-        let total_windows = self.runtime_windows + self.fallback_windows;
+        let total_windows = state.runtime_windows + state.fallback_windows;
         let period_coverage = if total_windows == 0 {
             1.0
         } else {
-            self.runtime_windows as f64 / total_windows as f64
+            state.runtime_windows as f64 / total_windows as f64
         };
 
-        let temporal_coverage = compute_temporal_coverage(&self.observed_days, period);
+        let temporal_coverage = compute_temporal_coverage(&state.observed_days, period);
         let earliest_archived_window = self.earliest_archived;
 
         AggregateInputs {
@@ -1156,12 +1169,12 @@ impl Builder {
                 total_energy_kwh,
                 total_carbon_kgco2eq: total_carbon,
                 carbon_breakdown: build_carbon_breakdown(
-                    self.operational_gco2_total,
-                    self.embodied_gco2_total,
-                    self.transport_gco2_total,
-                    self.db_waste.energy_g,
-                    self.msg_waste.energy_g,
-                    !self.transport_coefficient_uncertain,
+                    state.operational_gco2_total,
+                    state.embodied_gco2_total,
+                    state.transport_gco2_total,
+                    state.db_waste.energy_g,
+                    state.msg_waste.energy_g,
+                    !state.transport_coefficient_uncertain,
                 ),
                 aggregate_efficiency_score: canonical_waste.efficiency_score,
                 aggregate_waste_ratio: canonical_waste.waste_ratio,
@@ -1170,27 +1183,27 @@ impl Builder {
                 canonical_waste,
                 operational_waste,
                 period_coverage,
-                binary_versions: self.binary_versions,
-                runtime_windows_count: self.runtime_windows,
-                fallback_windows_count: self.fallback_windows,
-                database_waste: (self.db_waste.windows > 0).then(|| DatabaseWasteAggregate {
-                    energy_kwh: self.db_waste.energy_kwh,
-                    measured_energy_kwh: self.db_waste.measured_energy_kwh,
-                    declared_energy_kwh: self.db_waste.declared_energy_kwh,
-                    models: self.db_waste.models,
-                    windows_with_figure: self.db_waste.windows,
-                    measured_windows: self.db_waste.measured_windows,
-                    declared_windows: self.db_waste.declared_windows,
-                    estimated_windows: self.db_waste.estimated_windows,
-                    windows_with_carbon: self.db_waste.windows_with_carbon,
-                    operational_waste_kwh: self.db_waste.operational_kwh,
-                    operational_waste_kgco2eq: self.db_waste.operational_g.map(|g| g / 1000.0),
-                    canonical_waste_kwh: self.db_waste.canonical_kwh,
-                    canonical_waste_kgco2eq: self.db_waste.canonical_g.map(|g| g / 1000.0),
+                binary_versions: state.binary_versions,
+                runtime_windows_count: state.runtime_windows,
+                fallback_windows_count: state.fallback_windows,
+                database_waste: (state.db_waste.windows > 0).then(|| DatabaseWasteAggregate {
+                    energy_kwh: state.db_waste.energy_kwh,
+                    measured_energy_kwh: state.db_waste.measured_energy_kwh,
+                    declared_energy_kwh: state.db_waste.declared_energy_kwh,
+                    models: state.db_waste.models,
+                    windows_with_figure: state.db_waste.windows,
+                    measured_windows: state.db_waste.measured_windows,
+                    declared_windows: state.db_waste.declared_windows,
+                    estimated_windows: state.db_waste.estimated_windows,
+                    windows_with_carbon: state.db_waste.windows_with_carbon,
+                    operational_waste_kwh: state.db_waste.operational_kwh,
+                    operational_waste_kgco2eq: state.db_waste.operational_g.map(|g| g / 1000.0),
+                    canonical_waste_kwh: state.db_waste.canonical_kwh,
+                    canonical_waste_kgco2eq: state.db_waste.canonical_g.map(|g| g / 1000.0),
                 }),
-                messaging_waste: messaging_waste_aggregate(self.msg_waste),
-                per_service_energy_models: self.per_service_energy_models,
-                per_service_measured_ratio: self
+                messaging_waste: messaging_waste_aggregate(state.msg_waste),
+                per_service_energy_models: state.per_service_energy_models,
+                per_service_measured_ratio: state
                     .per_service_measured_ratio_sums
                     .into_iter()
                     .map(|(svc, (sum, count))| {
@@ -1204,28 +1217,28 @@ impl Builder {
                     .collect(),
                 temporal_coverage,
             },
-            per_service: self.per_service,
-            windows_aggregated: self.windows_aggregated,
+            per_service: state.per_service,
+            windows_aggregated: state.windows_aggregated,
             source_files,
-            malformed_lines_skipped: self.malformed_lines_skipped,
-            legacy_waste_windows: self.legacy_waste_windows,
-            first_seen: self.first_seen,
-            last_seen: self.last_seen,
-            energy_source_models: self.energy_source_models,
-            runtime_windows: self.runtime_windows,
-            fallback_windows: self.fallback_windows,
-            calibration_applied: self.calibration_applied,
+            malformed_lines_skipped: state.malformed_lines_skipped,
+            legacy_waste_windows: state.legacy_waste_windows,
+            first_seen: state.first_seen,
+            last_seen: state.last_seen,
+            energy_source_models: state.energy_source_models,
+            runtime_windows: state.runtime_windows,
+            fallback_windows: state.fallback_windows,
+            calibration_applied: state.calibration_applied,
             windows_dropped: self.drops_observed.then_some(self.windows_dropped),
             drop_counter_resets: self.drops_observed.then_some(self.drop_counter_resets),
             chain_verified: self.chain_verified,
             chain_unchained: self.chain_unchained,
             chain_breaks: self.chain_breaks,
             chain_breaks_outside: self.chain_breaks_outside,
-            carbon_methodologies: self.carbon_methodologies,
-            scoring_coefficients: self.scoring_coefficients,
-            embodied_gco2_total: self.embodied_gco2_total,
-            operational_gco2_total: self.operational_gco2_total,
-            transport_gco2_total: self.transport_gco2_total,
+            carbon_methodologies: state.carbon_methodologies,
+            scoring_coefficients: state.scoring_coefficients,
+            embodied_gco2_total: state.embodied_gco2_total,
+            operational_gco2_total: state.operational_gco2_total,
+            transport_gco2_total: state.transport_gco2_total,
             earliest_archived_window,
         }
     }

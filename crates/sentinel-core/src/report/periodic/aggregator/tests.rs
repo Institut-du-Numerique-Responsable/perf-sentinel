@@ -690,7 +690,7 @@ fn transport_bracket_needs_every_window_to_declare_the_fixed_coefficient() {
     };
 
     // A window declaring the fixed coefficient keeps the bracket.
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(
         Some(&with_transport(4.0)),
         Some(&coefficient(Some(DEFAULT_NETWORK_ENERGY_PER_BYTE_KWH))),
@@ -698,21 +698,21 @@ fn transport_bracket_needs_every_window_to_declare_the_fixed_coefficient() {
     assert!(!acc.transport_coefficient_uncertain);
 
     // A custom one disqualifies the period.
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(Some(&with_transport(4.0)), Some(&coefficient(Some(5e-10))));
     assert!(acc.transport_coefficient_uncertain);
 
     // So does an absent one: pre-0.9.25 windows record no coefficient
     // and could have been scored with anything.
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(Some(&with_transport(4.0)), Some(&coefficient(None)));
     assert!(acc.transport_coefficient_uncertain);
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(Some(&with_transport(4.0)), None);
     assert!(acc.transport_coefficient_uncertain);
 
     // A window that contributed no transport says nothing either way.
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(Some(&with_transport(0.0)), None);
     assert!(!acc.transport_coefficient_uncertain);
 
