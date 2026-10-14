@@ -650,7 +650,7 @@ async fn logout() -> Result<(), String> {
             return Ok(());
         }
         Err(e) => {
-            let _ = std::fs::remove_file(&path);
+            let _ = tokio::fs::remove_file(&path).await;
             return Err(format!(
                 "{e} It was deleted without being revoked: a token in it stays valid on the \
                  Hub until it expires."
@@ -665,7 +665,8 @@ async fn logout() -> Result<(), String> {
         );
     }
     let revoked = revoke(&stored).await;
-    std::fs::remove_file(&path)
+    tokio::fs::remove_file(&path)
+        .await
         .map_err(|e| format!("Cannot delete the Hub token file {}: {e}", path.display()))?;
     match revoked {
         Ok(base) => println!("Signed out of {base}."),
@@ -966,7 +967,8 @@ async fn analyze(
     )
     .await?;
     let path = output.unwrap_or_else(|| PathBuf::from(format!("hub-report-{id}.html")));
-    std::fs::write(&path, &report)
+    tokio::fs::write(&path, &report)
+        .await
         .map_err(|e| format!("Cannot write the report to {}: {e}", path.display()))?;
     println!("Report of run {id} written to {}.", path.display());
     Ok(())
