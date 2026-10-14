@@ -403,22 +403,62 @@ pub async fn fetch_with_body(
     api_key: Option<&str>,
     body: bytes::Bytes,
 ) -> Result<(hyper::StatusCode, bytes::Bytes), FetchError> {
+    use hyper::header::{CONTENT_TYPE, HeaderName, HeaderValue};
+
+    let mut headers = vec![(CONTENT_TYPE, HeaderValue::from_static("application/json"))];
+    if let Some(key) = api_key {
+        // Flagged sensitive: hyper redacts sensitive values from Debug
+        // output and HPACK tables, mirroring the AuthHeader pattern used
+        // by [`fetch_get`].
+        let mut value =
+            HeaderValue::from_str(key).map_err(|e| FetchError::RequestBuild(e.into()))?;
+        value.set_sensitive(true);
+        let name =
+            HeaderName::try_from(API_KEY_HEADER).map_err(|e| FetchError::RequestBuild(e.into()))?;
+        headers.push((name, value));
+    }
+    send(
+        client,
+        method,
+        uri,
+        user_agent,
+        timeout,
+        &headers,
+        body,
+        MAX_BODY_BYTES,
+    )
+    .await
+}
+
+/// [`fetch_with_body`] without its fixed headers: the request carries
+/// `User-Agent` and exactly `headers`, in order, and the response body is
+/// capped at `max_bytes`. Non-2xx statuses are returned, not errors, and
+/// no redirect is followed. A credential in `headers` should be marked
+/// sensitive by the caller.
+///
+/// # Errors
+///
+/// Same as [`fetch_with_body`], with [`FetchError::BodyTooLarge`] carrying
+/// `max_bytes`.
+#[allow(clippy::too_many_arguments)] // one request, spelled out: a builder would add a type for one caller
+pub async fn send(
+    client: &HttpClientWithBody,
+    method: hyper::Method,
+    uri: &Uri,
+    user_agent: &str,
+    timeout: std::time::Duration,
+    headers: &[(hyper::header::HeaderName, hyper::header::HeaderValue)],
+    body: bytes::Bytes,
+    max_bytes: usize,
+) -> Result<(hyper::StatusCode, bytes::Bytes), FetchError> {
     use http_body_util::{BodyExt, Full, Limited};
 
     let mut builder = hyper::Request::builder()
         .method(method)
         .uri(uri.clone())
-        .header(hyper::header::USER_AGENT, user_agent)
-        .header(hyper::header::CONTENT_TYPE, "application/json");
-    if let Some(key) = api_key {
-        // Build the header value explicitly so we can flag it
-        // sensitive: hyper redacts sensitive values from Debug output
-        // and HPACK tables, mirroring the AuthHeader pattern used by
-        // [`fetch_get`].
-        let mut value = hyper::header::HeaderValue::from_str(key)
-            .map_err(|e| FetchError::RequestBuild(e.into()))?;
-        value.set_sensitive(true);
-        builder = builder.header(API_KEY_HEADER, value);
+        .header(hyper::header::USER_AGENT, user_agent);
+    for (name, value) in headers {
+        builder = builder.header(name, value.clone());
     }
     let req = builder
         .body(Full::new(body))
@@ -430,11 +470,11 @@ pub async fn fetch_with_body(
         .map_err(FetchError::Transport)?;
 
     let status = response.status();
-    let limited = Limited::new(response.into_body(), MAX_BODY_BYTES);
+    let limited = Limited::new(response.into_body(), max_bytes);
     let collected = limited
         .collect()
         .await
-        .map_err(|e| classify_body_error(e.as_ref(), MAX_BODY_BYTES))?;
+        .map_err(|e| classify_body_error(e.as_ref(), max_bytes))?;
     Ok((status, collected.to_bytes()))
 }
 
@@ -1107,6 +1147,71 @@ WVrpkH89K3zaMAoGCCqGSM49BAMCA0gAMEUCIG+tlfC0Ghm/gLmhPlD3+TsQphYO
             text.contains(r#"{"by":"alice","reason":"deferred"}"#),
             "request body missing, got:\n{text}"
         );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_carries_only_the_given_headers() {
+        let response = crate::test_helpers::http_status(200, "OK");
+        let (endpoint, mut rx, server) = crate::test_helpers::spawn_capture_server(response).await;
+        let client = build_client_with_body();
+        let uri: Uri = format!("{endpoint}/auth/device").parse().unwrap();
+        let mut bearer = hyper::header::HeaderValue::from_static("Bearer pshub_x");
+        bearer.set_sensitive(true);
+        let (status, _) = send(
+            &client,
+            hyper::Method::POST,
+            &uri,
+            "perf-sentinel-test",
+            std::time::Duration::from_secs(5),
+            &[
+                (
+                    hyper::header::CONTENT_TYPE,
+                    hyper::header::HeaderValue::from_static("application/x-www-form-urlencoded"),
+                ),
+                (hyper::header::AUTHORIZATION, bearer),
+            ],
+            bytes::Bytes::from_static(b"client_id=perf-sentinel"),
+            MAX_BODY_BYTES,
+        )
+        .await
+        .expect("call must succeed");
+        assert_eq!(status.as_u16(), 200);
+
+        let captured = rx.recv().await.expect("captured request");
+        let text = std::str::from_utf8(&captured).unwrap().to_ascii_lowercase();
+        assert!(
+            text.contains("content-type: application/x-www-form-urlencoded"),
+            "{text}"
+        );
+        assert!(!text.contains("application/json"), "{text}");
+        assert!(!text.contains("x-api-key"), "{text}");
+        assert!(text.contains("authorization: bearer pshub_x"), "{text}");
+        assert!(text.ends_with("client_id=perf-sentinel"), "{text}");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_enforces_its_own_cap() {
+        let response =
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789"
+                .to_vec();
+        let (endpoint, _rx, server) = crate::test_helpers::spawn_capture_server(response).await;
+        let client = build_client_with_body();
+        let uri: Uri = format!("{endpoint}/").parse().unwrap();
+        let err = send(
+            &client,
+            hyper::Method::GET,
+            &uri,
+            "perf-sentinel-test",
+            std::time::Duration::from_secs(5),
+            &[],
+            bytes::Bytes::new(),
+            4,
+        )
+        .await
+        .expect_err("a body over the cap must fail");
+        assert!(matches!(err, FetchError::BodyTooLarge(4)), "{err:?}");
         server.await.unwrap();
     }
 

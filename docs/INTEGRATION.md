@@ -18,6 +18,7 @@ Perf Sentinel accepts OpenTelemetry traces via OTLP (gRPC on 4317, HTTP on 4318)
 - [SARIF export](#sarif-export): SARIF v2.1.0 output for GitHub or GitLab code scanning.
 - [Finding confidence field](#finding-confidence-field): JSON / SARIF `confidence` field for downstream consumers.
 - [Daemon query API](#daemon-query-api): HTTP API on the OTLP HTTP port, see also [QUERY-API.md](./QUERY-API.md) for the full reference.
+- [Reading a Perf Sentinel Hub from CI](#reading-a-perf-sentinel-hub-from-ci): `perf-sentinel hub` with a machine token in `PERF_SENTINEL_HUB_TOKEN`.
 - [Advanced carbon scoring setup](#advanced-carbon-scoring-setup): multi-region scoring, Scaphandre, cloud-native energy, Electricity Maps, calibration.
 - [Tempo integration](#tempo-integration): query a Grafana Tempo backend directly with `perf-sentinel tempo`.
 - [Jaeger query API integration](#jaeger-query-api-integration-jaeger-and-victoria-traces): Jaeger upstream and Victoria Traces via a single subcommand.
@@ -408,6 +409,28 @@ curl -sS "http://127.0.0.1:4318/api/findings?severity=critical&limit=10"
 ```
 
 See [`docs/QUERY-API.md`](./QUERY-API.md) for the full per-endpoint reference, real captured response examples, use cases (Prometheus alerting, Grafana dashboard, SRE runbook) and the stability contract.
+
+---
+
+## Reading a Perf Sentinel Hub from CI
+
+A CI job reads a [Perf Sentinel Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub)
+with `perf-sentinel hub` and a machine token in `PERF_SENTINEL_HUB_TOKEN`,
+taken from the CI secret store. A Hub whose access control is off needs no
+token.
+
+```bash
+export PERF_SENTINEL_HUB_URL=https://hub.example.com
+export PERF_SENTINEL_HUB_TOKEN="$HUB_TOKEN"   # from the CI secret store
+perf-sentinel hub findings --environment production --status active --severity critical --format json
+```
+
+The token is sent as `Authorization: Bearer`, only over `https` (or plain
+`http` to loopback), and never on the command line. A machine token only
+reads: `hub ack`, `hub unack` and `hub analyze` need a person's
+`perf-sentinel login`. A token whose group no grant gives `findings.read`
+gets `403`, and the command exits 1, so the job fails rather than reading
+an empty list. See [`CLI.md`](./CLI.md#hub-login-logout-hub).
 
 ---
 

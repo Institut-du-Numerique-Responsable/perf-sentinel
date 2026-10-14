@@ -27,6 +27,8 @@ mod config_load;
 mod demo;
 mod disclose;
 mod hash_bake;
+#[cfg(feature = "daemon")]
+mod hub;
 mod limits;
 #[cfg(all(feature = "daemon", feature = "tui"))]
 mod monitor;
@@ -362,6 +364,14 @@ async fn dispatch_command(command: Commands) {
         Commands::Ack { daemon, action } => {
             let exit_code = ack::cmd_ack(&daemon, action).await;
             std::process::exit(exit_code);
+        }
+        #[cfg(feature = "daemon")]
+        Commands::Login { hub } => std::process::exit(hub::cmd_login(&hub).await),
+        #[cfg(feature = "daemon")]
+        Commands::Logout => std::process::exit(hub::cmd_logout().await),
+        #[cfg(feature = "daemon")]
+        Commands::Hub { hub, action } => {
+            std::process::exit(hub::cmd_hub(hub.as_deref(), action).await);
         }
         Commands::Diff {
             before,

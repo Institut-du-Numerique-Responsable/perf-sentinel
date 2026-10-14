@@ -172,6 +172,7 @@ Test fixtures live in `tests/fixtures/`. Group by purpose:
 - **End-to-end demo**: `demo.json` (10 findings across all detectors, drives `tapes/demo.tape`), `report_realistic.json` (5 findings, drives `crates/sentinel-cli/tests/browser/` Playwright stills), `report_minimal.json`, `report_three_estimation_states.json`.
 - **External formats**: `jaeger_export.json`, `zipkin_export.json`, `otlp_export.json`, `otlp_export.ndjson` (all auto-detected by `analyze --input`).
 - **Diff baseline**: `baseline_report.json` (consumed by `analyze --before`).
+- **Hub answers**: `hub_findings.json`, `hub_incidents.json`, `hub_incident.json` (PerfSentinelHub envelopes served by the mock Hub of `crates/sentinel-cli/tests/e2e/hub.rs`).
 - **`pg_stat`**: `pg_stat_statements.csv`, `pg_stat_statements.json`.
 - **`mysql_stat`**: `mysql_perf_schema.csv`, `mysql_perf_schema.json` (consumed by `perf-sentinel mysql-stat`).
 - **Carbon calibration**: `demo-energy.csv` (consumed by `perf-sentinel calibrate`).

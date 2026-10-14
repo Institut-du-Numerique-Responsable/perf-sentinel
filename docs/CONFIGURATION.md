@@ -1067,20 +1067,22 @@ Loading a 0.5.x file on 0.6.0 returns a `ConfigError::Validation` whose message 
 
 Configuration files must never contain secrets. For sensitive values (API keys, tokens), use environment variables in your deployment tooling. Perf Sentinel reads a fixed list of them, each one overriding the matching config field when set and trimmed of a trailing newline, so a Kubernetes Secret can feed it directly:
 
-| Variable                          | Overrides                                                                             | Read by                  |
-|-----------------------------------|---------------------------------------------------------------------------------------|--------------------------|
-| `PERF_SENTINEL_EMAPS_TOKEN`       | the Electricity Maps `api_key`                                                        | daemon and batch         |
-| `PERF_SENTINEL_ACK_API_KEY`       | `[daemon.ack] api_key`                                                                | daemon and batch         |
-| `PERF_SENTINEL_INCIDENTS_API_KEY` | `[daemon.incidents] api_key`                                                          | daemon and batch         |
-| `PERF_SENTINEL_READ_API_KEY`      | `[daemon] read_api_key`                                                               | daemon and batch         |
-| `PERF_SENTINEL_DAEMON_API_KEY`    | the `--api-key-file` of `ack` and of every `query` subcommand                         | CLI, sent as `X-API-Key` |
-| `PERF_SENTINEL_DAEMON_URL`        | the `--daemon` URL of the `ack` and `query` commands                                  | CLI                      |
+| Variable                          | Overrides                                                     | Read by                              |
+|-----------------------------------|---------------------------------------------------------------|--------------------------------------|
+| `PERF_SENTINEL_EMAPS_TOKEN`       | the Electricity Maps `api_key`                                | daemon and batch                     |
+| `PERF_SENTINEL_ACK_API_KEY`       | `[daemon.ack] api_key`                                        | daemon and batch                     |
+| `PERF_SENTINEL_INCIDENTS_API_KEY` | `[daemon.incidents] api_key`                                  | daemon and batch                     |
+| `PERF_SENTINEL_READ_API_KEY`      | `[daemon] read_api_key`                                       | daemon and batch                     |
+| `PERF_SENTINEL_DAEMON_API_KEY`    | the `--api-key-file` of `ack` and of every `query` subcommand | CLI, sent as `X-API-Key`             |
+| `PERF_SENTINEL_DAEMON_URL`        | the `--daemon` URL of the `ack` and `query` commands          | CLI                                  |
+| `PERF_SENTINEL_HUB_TOKEN`         | the token `login` stored, for `hub`                           | CLI, sent as `Authorization: Bearer` |
+| `PERF_SENTINEL_HUB_URL`           | the `--hub` URL of `login` and `hub`                          | CLI                                  |
 
 The overrides apply on every run, batch commands and a run without any config file included, so a job that inherits the daemon's Secret must carry valid values too (the incidents key only counts once `[daemon.incidents] enabled` is set). A variable set to an empty string counts as set: an empty key is rejected at config load rather than silently ignored, so a Secret mounted empty fails every command that loads it, the daemon included, instead of opening the route.
 
 ### Outbound proxy and private CA
 
-Four more variables shape every outbound HTTPS call, from the daemon (energy scrapers, Electricity Maps, the Hub export) and from the CLI (`tempo`, `jaeger-query`, `pg-stat` and `mysql-stat` with `--prometheus`, `report` with a Prometheus source, `query`, `ack`, `verify-hash --url`):
+Four more variables shape every outbound HTTPS call, from the daemon (energy scrapers, Electricity Maps, the Hub export) and from the CLI (`tempo`, `jaeger-query`, `pg-stat` and `mysql-stat` with `--prometheus`, `report` with a Prometheus source, `query`, `ack`, `login`, `logout`, `hub`, `verify-hash --url`):
 
 | Variable                     | Effect                                                                                                                                                                                         |
 |------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
