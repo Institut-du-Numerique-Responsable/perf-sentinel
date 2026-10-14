@@ -1888,3 +1888,88 @@ fn a_window_on_the_first_day_reaches_the_period_start() {
     assert!(!archive_reaches_period_start(Some(second_day), &period));
     assert!(!archive_reaches_period_start(None, &period));
 }
+
+fn folded(lines: &[(DateTime<Utc>, Report)]) -> PeriodState {
+    let mut state = PeriodState::default();
+    for (ts, report) in lines {
+        state.process_window(report, *ts, false).unwrap();
+    }
+    state
+}
+
+fn day(d: u32, h: u32) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 1, d, h, 0, 0).unwrap()
+}
+
+#[test]
+fn a_state_survives_a_json_round_trip() {
+    let finding = make_finding("svc-a", FindingType::NPlusOneSql, "SELECT ?");
+    let state = folded(&[(
+        day(10, 9),
+        make_report(10, 100, 10, &[("svc-a", "/api", 100)], vec![finding]),
+    )]);
+    let json = serde_json::to_string(&state).unwrap();
+    let back: PeriodState = serde_json::from_str(&json).unwrap();
+    assert_eq!(serde_json::to_string(&back).unwrap(), json);
+}
+
+#[test]
+fn merging_two_days_counts_like_folding_them() {
+    let a = (day(10, 9), plain_window());
+    let b = (day(11, 9), plain_window());
+    let mut merged = folded(std::slice::from_ref(&a));
+    merged.merge(folded(std::slice::from_ref(&b)));
+    let whole = folded(&[a, b]);
+    assert_eq!(merged.windows_aggregated, whole.windows_aggregated);
+    assert_eq!(merged.total_io_ops, whole.total_io_ops);
+    assert_eq!(merged.observed_days, whole.observed_days);
+    assert_eq!(
+        merged.per_service["svc-a"].total_requests,
+        whole.per_service["svc-a"].total_requests
+    );
+}
+
+#[test]
+fn merge_drops_unknown_patterns_and_sanitizes_figures() {
+    let mut incoming = folded(&[(day(10, 9), plain_window())]);
+    let bucket = incoming.per_service.get_mut("svc-a").unwrap();
+    bucket.energy_kwh = f64::NAN;
+    bucket.anti_patterns.insert(
+        "not_a_pattern".to_string(),
+        AntiPatternAccumulator::default(),
+    );
+    incoming
+        .first_seen
+        .insert(("svc-a".into(), "not_a_pattern".into()), day(10, 9));
+    incoming.binary_versions.insert("bad version!".to_string());
+    incoming.total_carbon_kgco2eq = f64::INFINITY;
+
+    let mut state = PeriodState::default();
+    state.merge(incoming);
+    let svc = &state.per_service["svc-a"];
+    assert!(svc.energy_kwh.is_finite());
+    assert!(!svc.anti_patterns.contains_key("not_a_pattern"));
+    assert!(state.first_seen.is_empty());
+    assert!(state.binary_versions.is_empty());
+    assert!(state.total_carbon_kgco2eq.is_finite());
+}
+
+#[test]
+fn merge_honours_the_service_cap() {
+    let mut incoming = PeriodState::default();
+    for i in 0..(MAX_SERVICES + 10) {
+        incoming
+            .per_service
+            .insert(format!("svc-{i}"), ServiceAccumulator::default());
+    }
+    let mut state = PeriodState::default();
+    state.merge(incoming);
+    assert_eq!(state.per_service.len(), MAX_SERVICES);
+}
+
+#[test]
+fn an_unattributed_window_is_remembered_for_strict_mode() {
+    let empty = make_report(10, 100, 10, &[], vec![]);
+    let state = folded(&[(day(12, 8), empty.clone()), (day(10, 8), empty)]);
+    assert_eq!(state.first_unattributed(), Some(day(10, 8)));
+}

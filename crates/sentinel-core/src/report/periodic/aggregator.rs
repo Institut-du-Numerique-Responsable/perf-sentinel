@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::detect::Finding;
 use crate::report::Report;
@@ -119,7 +119,7 @@ pub struct AggregateInputs {
     pub transport_gco2_total: f64,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ServiceAccumulator {
     pub total_requests: u64,
     pub total_io_ops: u64,
@@ -129,7 +129,7 @@ pub struct ServiceAccumulator {
     pub endpoints_seen: BTreeSet<String>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AntiPatternAccumulator {
     pub occurrences: u64,
     /// Estimated avoidable I/O ops attributed to this pattern. For
@@ -244,7 +244,7 @@ struct WindowMetrics {
 
 /// Period-summed avoidable energy/carbon for one N+1 threshold tier.
 /// `threshold` reconciled by `max` across windows. `avoidable_kg` in kg.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct WasteTierAccumulator {
     n_plus_one_threshold: u32,
     avoidable_io_ops: u64,
@@ -312,7 +312,7 @@ fn fold_waste_block(acc: &mut DbWasteAccumulator, block: &crate::report::Disclos
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct DbWasteAccumulator {
     energy_kwh: f64,
     measured_energy_kwh: f64,
@@ -336,13 +336,16 @@ struct DbWasteAccumulator {
 /// What the windows of a period measured, independent of how they were
 /// read. Folded window by window, and merged whole when a daily rollup
 /// carries it, see `rollup.rs`.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct PeriodState {
     per_service: BTreeMap<String, ServiceAccumulator>,
     windows_aggregated: u64,
     malformed_lines_skipped: u64,
     legacy_waste_windows: u64,
+    #[serde(with = "pair_key_map")]
     first_seen: BTreeMap<(String, String), DateTime<Utc>>,
+    #[serde(with = "pair_key_map")]
     last_seen: BTreeMap<(String, String), DateTime<Utc>>,
     total_requests: u64,
     total_io_ops: u64,
@@ -396,6 +399,10 @@ pub(crate) struct PeriodState {
     /// by the period length (<= 366 for a calendar year), no cap needed.
     /// Drives the v1.2 temporal-coverage continuity signal.
     observed_days: BTreeSet<NaiveDate>,
+    /// Earliest window folded into the unattributed bucket. A rollup is
+    /// folded without `--strict-attribution`, so the reader needs this to
+    /// refuse it later when the flag is set.
+    first_unattributed: Option<DateTime<Utc>>,
 }
 
 #[derive(Default)]
@@ -717,6 +724,9 @@ impl PeriodState {
             return Err(AggregationError::UnattributedWindow {
                 ts: ts.to_rfc3339(),
             });
+        }
+        if unattributed {
+            self.first_unattributed = Some(self.first_unattributed.map_or(ts, |seen| seen.min(ts)));
         }
 
         self.attribute_window(report, &m, &per_service_io, unattributed);
@@ -1134,6 +1144,272 @@ impl PeriodState {
         } else {
             self.per_service.values().map(|s| s.energy_kwh).sum()
         }
+    }
+}
+
+impl PeriodState {
+    pub(crate) fn first_unattributed(&self) -> Option<DateTime<Utc>> {
+        self.first_unattributed
+    }
+
+    /// Fold another state in. Each field merges by the operation its
+    /// window fold uses, and every guard that path applies to untrusted
+    /// archive input applies again: a rollup line is read from a file.
+    pub(crate) fn merge(&mut self, other: PeriodState) {
+        let PeriodState {
+            per_service,
+            windows_aggregated,
+            malformed_lines_skipped,
+            legacy_waste_windows,
+            first_seen,
+            last_seen,
+            total_requests,
+            total_io_ops,
+            total_carbon_kgco2eq,
+            canonical_waste,
+            operational_waste,
+            db_waste,
+            msg_waste,
+            runtime_energy_kwh,
+            energy_source_models,
+            runtime_windows,
+            fallback_windows,
+            binary_versions,
+            calibration_applied,
+            carbon_methodologies,
+            scoring_coefficients,
+            transport_coefficient_uncertain,
+            embodied_gco2_total,
+            operational_gco2_total,
+            transport_gco2_total,
+            per_service_energy_models,
+            per_service_measured_ratio_sums,
+            observed_days,
+            first_unattributed,
+        } = other;
+        self.windows_aggregated = self.windows_aggregated.saturating_add(windows_aggregated);
+        self.malformed_lines_skipped = self
+            .malformed_lines_skipped
+            .saturating_add(malformed_lines_skipped);
+        self.legacy_waste_windows = self
+            .legacy_waste_windows
+            .saturating_add(legacy_waste_windows);
+        self.total_requests = self.total_requests.saturating_add(total_requests);
+        self.total_io_ops = self.total_io_ops.saturating_add(total_io_ops);
+        self.runtime_windows = self.runtime_windows.saturating_add(runtime_windows);
+        self.fallback_windows = self.fallback_windows.saturating_add(fallback_windows);
+        self.total_carbon_kgco2eq += sanitize_f64(total_carbon_kgco2eq);
+        self.runtime_energy_kwh += sanitize_f64(runtime_energy_kwh);
+        self.embodied_gco2_total += sanitize_f64(embodied_gco2_total);
+        self.operational_gco2_total += sanitize_f64(operational_gco2_total);
+        self.transport_gco2_total += sanitize_f64(transport_gco2_total);
+        self.calibration_applied |= calibration_applied;
+        self.transport_coefficient_uncertain |= transport_coefficient_uncertain;
+        merge_tier(&mut self.canonical_waste, &canonical_waste);
+        merge_tier(&mut self.operational_waste, &operational_waste);
+        merge_waste_block(&mut self.db_waste, db_waste);
+        merge_waste_block(&mut self.msg_waste, msg_waste);
+        self.merge_services(per_service);
+        self.merge_seen(first_seen, last_seen);
+        self.merge_tags(binary_versions, energy_source_models, carbon_methodologies);
+        self.merge_coefficients(scoring_coefficients);
+        self.merge_per_service_maps(per_service_energy_models, per_service_measured_ratio_sums);
+        self.observed_days.extend(observed_days);
+        if let Some(ts) = first_unattributed {
+            self.first_unattributed = Some(self.first_unattributed.map_or(ts, |seen| seen.min(ts)));
+        }
+    }
+
+    fn merge_services(&mut self, incoming: BTreeMap<String, ServiceAccumulator>) {
+        for (service, acc) in incoming {
+            let Some(bucket) = bounded_entry(&mut self.per_service, &service) else {
+                continue;
+            };
+            bucket.total_requests = bucket.total_requests.saturating_add(acc.total_requests);
+            bucket.total_io_ops = bucket.total_io_ops.saturating_add(acc.total_io_ops);
+            bucket.energy_kwh += sanitize_f64(acc.energy_kwh);
+            bucket.carbon_kgco2eq += sanitize_f64(acc.carbon_kgco2eq);
+            bucket.endpoints_seen.extend(acc.endpoints_seen);
+            for (pattern, ap) in acc.anti_patterns {
+                if !is_known_pattern(&pattern) {
+                    continue;
+                }
+                let slot = bucket.anti_patterns.entry(pattern).or_default();
+                slot.occurrences = slot.occurrences.saturating_add(ap.occurrences);
+                slot.avoidable_io_ops = slot.avoidable_io_ops.saturating_add(ap.avoidable_io_ops);
+            }
+        }
+    }
+
+    /// Only rows whose `(service, pattern)` survived `merge_services`, the
+    /// pairing `credit` keeps on the window path.
+    fn merge_seen(
+        &mut self,
+        first: BTreeMap<(String, String), DateTime<Utc>>,
+        last: BTreeMap<(String, String), DateTime<Utc>>,
+    ) {
+        for (key, ts) in first {
+            if self.admits(&key) {
+                let slot = self.first_seen.entry(key).or_insert(ts);
+                *slot = (*slot).min(ts);
+            }
+        }
+        for (key, ts) in last {
+            if self.admits(&key) {
+                let slot = self.last_seen.entry(key).or_insert(ts);
+                *slot = (*slot).max(ts);
+            }
+        }
+    }
+
+    fn admits(&self, (service, pattern): &(String, String)) -> bool {
+        self.per_service
+            .get(service)
+            .is_some_and(|bucket| bucket.anti_patterns.contains_key(pattern))
+    }
+
+    fn merge_tags(
+        &mut self,
+        binary_versions: BTreeSet<String>,
+        energy_models: BTreeSet<String>,
+        methodologies: BTreeSet<String>,
+    ) {
+        for version in binary_versions {
+            self.fold_binary_version(&version);
+        }
+        for model in energy_models {
+            if !model.is_empty() && model.len() <= MAX_ENERGY_MODEL_LEN {
+                insert_capped(&mut self.energy_source_models, model, MAX_ENERGY_MODELS);
+            }
+        }
+        for tag in methodologies {
+            if !tag.is_empty() && tag.len() <= MAX_ENERGY_MODEL_LEN {
+                insert_capped(&mut self.carbon_methodologies, tag, MAX_ENERGY_MODELS);
+            }
+        }
+    }
+
+    fn merge_coefficients(&mut self, coefficients: BTreeSet<String>) {
+        for entry in coefficients {
+            if entry.len() <= MAX_COEFFICIENT_LEN {
+                insert_capped(&mut self.scoring_coefficients, entry, MAX_ENERGY_MODELS);
+            }
+        }
+    }
+
+    fn merge_per_service_maps(
+        &mut self,
+        models: BTreeMap<String, BTreeSet<String>>,
+        ratios: BTreeMap<String, (f64, u32)>,
+    ) {
+        for (service, set) in models {
+            for model in set {
+                if model.is_empty() || model.len() > MAX_ENERGY_MODEL_LEN {
+                    continue;
+                }
+                let known = self.per_service_energy_models.contains_key(&service);
+                if !known && self.per_service_energy_models.len() >= MAX_SERVICES {
+                    break;
+                }
+                let slot = self
+                    .per_service_energy_models
+                    .entry(service.clone())
+                    .or_default();
+                insert_capped(slot, model, MAX_ENERGY_MODELS);
+            }
+        }
+        for (service, (sum, count)) in ratios {
+            let known = self.per_service_measured_ratio_sums.contains_key(&service);
+            if !known && self.per_service_measured_ratio_sums.len() >= MAX_SERVICES {
+                continue;
+            }
+            let slot = self
+                .per_service_measured_ratio_sums
+                .entry(service)
+                .or_insert((0.0, 0));
+            // Each folded ratio is clamped to [0, 1], so a sum above its count is forged.
+            slot.0 += sanitize_f64(sum).min(f64::from(count));
+            slot.1 = slot.1.saturating_add(count);
+        }
+    }
+}
+
+/// Bound on one `key=value` coefficient entry read back from a rollup.
+const MAX_COEFFICIENT_LEN: usize = 128;
+
+fn insert_capped(set: &mut BTreeSet<String>, value: String, cap: usize) {
+    if set.len() < cap || set.contains(&value) {
+        set.insert(value);
+    }
+}
+
+/// A pattern name the window path could have produced: a `FindingType`.
+fn is_known_pattern(name: &str) -> bool {
+    serde_json::from_value::<crate::detect::FindingType>(serde_json::Value::String(
+        name.to_string(),
+    ))
+    .is_ok_and(|ft| ft.as_str() == name)
+}
+
+fn merge_tier(acc: &mut WasteTierAccumulator, other: &WasteTierAccumulator) {
+    acc.n_plus_one_threshold = acc.n_plus_one_threshold.max(other.n_plus_one_threshold);
+    acc.avoidable_io_ops = acc.avoidable_io_ops.saturating_add(other.avoidable_io_ops);
+    acc.avoidable_kwh += sanitize_f64(other.avoidable_kwh);
+    acc.avoidable_kg += sanitize_f64(other.avoidable_kg);
+}
+
+fn merge_waste_block(acc: &mut DbWasteAccumulator, other: DbWasteAccumulator) {
+    let add_opt = |slot: &mut Option<f64>, value: Option<f64>| {
+        if let Some(g) = value {
+            *slot = Some(slot.unwrap_or(0.0) + sanitize_f64(g));
+        }
+    };
+    acc.energy_kwh += sanitize_f64(other.energy_kwh);
+    acc.measured_energy_kwh += sanitize_f64(other.measured_energy_kwh);
+    acc.operational_kwh += sanitize_f64(other.operational_kwh);
+    acc.canonical_kwh += sanitize_f64(other.canonical_kwh);
+    acc.declared_energy_kwh += sanitize_f64(other.declared_energy_kwh);
+    add_opt(&mut acc.operational_g, other.operational_g);
+    add_opt(&mut acc.canonical_g, other.canonical_g);
+    add_opt(&mut acc.energy_g, other.energy_g);
+    acc.windows = acc.windows.saturating_add(other.windows);
+    acc.measured_windows = acc.measured_windows.saturating_add(other.measured_windows);
+    acc.declared_windows = acc.declared_windows.saturating_add(other.declared_windows);
+    acc.estimated_windows = acc
+        .estimated_windows
+        .saturating_add(other.estimated_windows);
+    acc.windows_with_carbon = acc
+        .windows_with_carbon
+        .saturating_add(other.windows_with_carbon);
+    for model in other.models {
+        if super::schema::is_valid_model_tag(&model) {
+            insert_capped(&mut acc.models, model, MAX_BINARY_VERSIONS);
+        }
+    }
+}
+
+/// `(service, pattern) -> ts` as a JSON list of `[service, pattern, ts]`.
+mod pair_key_map {
+    use std::collections::BTreeMap;
+
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    type Map = BTreeMap<(String, String), DateTime<Utc>>;
+
+    pub(super) fn serialize<S: Serializer>(map: &Map, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(
+            map.iter()
+                .map(|((service, pattern), ts)| (service, pattern, ts)),
+        )
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Map, D::Error> {
+        let rows = Vec::<(String, String, DateTime<Utc>)>::deserialize(d)?;
+        Ok(rows
+            .into_iter()
+            .map(|(service, pattern, ts)| ((service, pattern), ts))
+            .collect())
     }
 }
 
