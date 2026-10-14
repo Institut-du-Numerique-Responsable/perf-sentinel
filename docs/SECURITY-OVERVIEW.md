@@ -95,11 +95,12 @@ CORS is off by default, and a wildcard origin combined with a write key or with 
 
 - **Findings push:** requires the source's `X-API-Key` (at least 32 characters, bound to its source, compared in constant time). A source without a key cannot push.
 - **UI and API:** open by default.
-- **Sign-in:** with `hub.auth.enabled`, the UI requires a session obtained through OAuth2 authorization code with PKCE against your identity provider (Keycloak, Entra ID, Google, GitLab and others). The session cookie is `Secure`, `SameSite=Lax`, 8 hours sliding. This is not full OpenID Connect: the identity comes from the userinfo endpoint, the ID token is not validated, and there are no roles.
-- **Routes open even with sign-in:** `/api/findings`, `/api/findings/{traceId}`, the import route (which has its own key), `/health` and `/metrics`. Keep them on an internal network.
+- **Sign-in:** with `hub.auth.enabled`, the UI requires a session obtained through OAuth2 authorization code with PKCE against your identity provider (Keycloak, Entra ID, Google, GitLab and others). The session cookie is `Secure`, `SameSite=Lax`, 8 hours sliding. This is not full OpenID Connect: the identity comes from the userinfo endpoint, the ID token is not validated, and roles come only with access control, below.
+- **Access control:** with `hub.access.enabled`, which needs sign-in and `hub.metricsPort`, each caller reaches only what its grants cover, per team, on sources, services or grouping attributes. CI jobs and dashboards read with machine tokens declared in the Hub's configuration, their values in a Secret, sent as `Authorization: Bearer` and holding `findings.read` at most. A session then ends 8 hours after sign-in. A machine token in a shared tool such as Grafana serves its whole scope to every user of that tool, so give each team its own.
+- **Routes open even with sign-in:** `/api/findings` and `/api/findings/{traceId}` unless access control is on, the import route (which has its own key), `/health` and `/metrics` (on `hub.metricsPort` alone when it is set). Keep them on an internal network.
 - **Launcher:** it runs the bundled engine binary as a subprocess with an argument list, without a shell. The binary path and the trace endpoints come from the configuration only. User inputs are validated, and a run stops after 300 s by default.
 
-Details: [Hub authentication](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/AUTHENTICATION.md), [Hub limitations](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LIMITATIONS.md).
+Details: [Hub authentication](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/AUTHENTICATION.md), [Hub access control](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/ACCESS-CONTROL.md), [Hub limitations](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LIMITATIONS.md).
 
 ## Hardening
 
@@ -124,7 +125,7 @@ Details: [Hub authentication](https://github.com/Institut-du-Numerique-Responsab
 - .NET 10 compiled with NativeAOT, nullable references, warnings as errors.
 - Two runtime packages (`Microsoft.Data.Sqlite`, `SQLitePCLRaw`) and parameterized SQL.
 - Request bodies are capped at 2 MiB (import, analyses) and 8 KiB (ack), and concurrency gates return `503` with `Retry-After`.
-- The Hub sets no security header (CSP, HSTS, `X-Frame-Options`): add them at the ingress.
+- The Hub sets no security header (CSP, HSTS, `X-Frame-Options`) besides `Content-Security-Policy: frame-ancestors 'self'` with access control on: add the rest at the ingress.
 
 **Containers and Helm.** Both charts:
 - run as non-root with a read-only root filesystem

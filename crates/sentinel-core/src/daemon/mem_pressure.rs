@@ -22,7 +22,7 @@ const CGROUP_STAT: &str = "/sys/fs/cgroup/memory.stat";
 
 /// Poll cadence. Fixed: the spike that OOMs the pod develops in seconds
 /// and a sub-second sysfs read is cheap.
-// ponytail: 1s fixed cadence; make it configurable only if a workload needs it
+// 1s fixed cadence; make it configurable only if a workload needs it
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Hysteresis band in percentage points below the high-water mark: the
@@ -66,7 +66,7 @@ fn parse_ratio(current: &str, max: &str, inactive_file: f64) -> Option<f64> {
 /// read/parse failure (non-Linux, cgroup v1, no limit set). A missing
 /// or unparsable `memory.stat` degrades to the raw usage ratio rather
 /// than disabling the guard.
-// ponytail: cgroup v2 only; add a v1 fallback if a cgroup-v1 host ever ships
+// Cgroup v2 only; add a v1 fallback if a cgroup-v1 host ever ships
 fn read_cgroup_usage_ratio() -> Option<f64> {
     let current = std::fs::read_to_string(CGROUP_CURRENT).ok()?;
     let max = std::fs::read_to_string(CGROUP_MAX).ok()?;

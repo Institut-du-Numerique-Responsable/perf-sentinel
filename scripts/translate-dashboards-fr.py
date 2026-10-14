@@ -431,8 +431,8 @@ f("description",
 f("label", "Environment", "Environnement")
 
 f("description",
-  "Environment of the History (Hub) row, one of the environments the Hub's sources declare, listed from the environment label of perf_sentinel_hub_findings, so Prometheus has to scrape the Hub. All sends a single space, which the Hub reads as the whole fleet. The Hub answers 400 to an environment it does not know.",
-  "Environnement de la ligne Historique (Hub), parmi ceux que déclarent les sources du Hub, listés depuis le label environment de perf_sentinel_hub_findings : Prometheus doit donc scraper le Hub. All envoie une simple espace, que le Hub lit comme tout le parc. Le Hub répond 400 à un environnement qu'il ne connaît pas.")
+  "Environment of the History (Hub) row, one of the environments the Hub's sources declare, listed from the environment label of perf_sentinel_hub_findings, so Prometheus has to scrape the Hub. All sends a single space, which the Hub reads as the whole fleet, or with its access control on, every finding the datasource's token reaches. The Hub answers 400 to an environment it does not know and, with its access control on, to one where the datasource's token reaches no source.",
+  "Environnement de la ligne Historique (Hub), parmi ceux que déclarent les sources du Hub, listés depuis le label environment de perf_sentinel_hub_findings : Prometheus doit donc scraper le Hub. All envoie une simple espace, que le Hub lit comme tout le parc ou, avec son contrôle d'accès actif, tous les findings que le jeton de la datasource atteint. Le Hub répond 400 à un environnement qu'il ne connaît pas et, avec son contrôle d'accès actif, à un environnement où le jeton de la datasource n'atteint aucune source.")
 
 f("label", "Hub skip rows", "Lignes Hub à sauter")
 

@@ -108,10 +108,32 @@ datasources:
     access: proxy
     isDefault: false
     jsonData:
-      # No header: GET /api/findings is one of the routes the Hub leaves open
-      # for machines, with or without Hub:Auth. Keep it on the cluster network.
-      # The pin is not required without auth, it is kept so that this
-      # datasource can only ever reach the Hub.
+      # One header on every request: Authorization carrying a Hub machine
+      # token, see secureJsonData below. With the Hub's access control on
+      # (`hub.access.enabled`), GET /api/findings answers 401 without a
+      # token and 403 when no grant gives the token's group findings.read,
+      # while a token whose group is in `hub.access.adminGroups` reads
+      # everything. Without access control the route takes no key and the
+      # Hub ignores the header, so this block works there as is, the
+      # variable unset: keep that Hub on the cluster network. Pinned because Infinity refuses a custom header
+      # without `allowedHosts`, and so that the token only ever goes to the
+      # Hub. Same value as `url`, corrected together. Over this http URL the
+      # token crosses the pod network in clear: where that network is not
+      # trusted, point both at the Hub's https ingress instead.
+      httpHeaderName1: Authorization
       allowedHosts:
         - http://perf-sentinel-hub.<ns>.svc.cluster.local:8080
       timeoutInSeconds: 30
+    secureJsonData:
+      # A machine token declared in the Hub's `hub.access.machineTokens`,
+      # whose value sits in a Secret (the Hub's docs/ACCESS-CONTROL.md). It
+      # holds `findings.read` at most, whatever its group's grants say, so a
+      # leaked dashboard configuration can never ack, start a run or read a
+      # daemon view. Mount that Secret into the Grafana pod (`envValueFrom` in
+      # the Grafana chart, the Secret copied into Grafana's namespace) rather
+      # than writing the token here. ONE TOKEN PER TEAM: everyone who can
+      # query this datasource reads whatever the token reaches, which in
+      # Grafana OSS is every user of the organization, so a token granted on
+      # `*` reopens every team's findings to all of them. Give each team a
+      # token granted only its own projects, in that team's organization.
+      httpHeaderValue1: Bearer $__env{PERF_SENTINEL_HUB_TOKEN}
