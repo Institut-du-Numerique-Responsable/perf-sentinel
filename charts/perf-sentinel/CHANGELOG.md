@@ -10,6 +10,19 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.28.0]
+
+### Fixed
+
+- **`appVersion` moves to `0.28.0`.** The image's `disclose
+  --emit-attestation` now names the report's canonical content hash as the
+  in-toto subject, and `verify-hash` checks that the attestation names the
+  figures it is verifying. A Sigstore signature therefore no longer vouches
+  for figures edited after signing. The daemon's behaviour, its query API
+  and its metrics do not change.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.27.0]
 
 ### Added

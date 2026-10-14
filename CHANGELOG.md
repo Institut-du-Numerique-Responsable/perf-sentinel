@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-14
+
+This release bumps the minor rather than the patch: `sentinel_core::report::periodic::PerfSentinelPredicate`, published on crates.io, gains the public field `subject_binding` and is not `#[non_exhaustive]`, so code that builds it with a literal stops compiling. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The daemon's API, its metrics and the findings it exports do not change. The theme is provenance: the signature on a periodic disclosure now covers the figures it was published with, and `verify-hash` checks that it does.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on `2026 refresh (AWS 2024 global, GCP 2024 fleet, Azure FY25, OVHcloud FY25, Scaleway 2024)`, all four audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.28.0 touches the scoring code.
+
 ### Changed
 
 - `sentinel_core::report::periodic::PerfSentinelPredicate`, published on crates.io, gains the public field `subject_binding` and is not `#[non_exhaustive]`, so code that builds it with a struct literal stops compiling. `build_in_toto_statement` and `build_in_toto_statement_named` keep their signatures, but their digest argument is now the report's canonical content hash without its `sha256:` prefix, and they set `subject_binding`. `check_attestation_binding`, `AttestationBinding` and `SUBJECT_BINDING_CONTENT_HASH` are new.
