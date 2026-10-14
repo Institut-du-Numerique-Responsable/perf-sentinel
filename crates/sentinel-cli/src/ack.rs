@@ -465,7 +465,7 @@ pub(crate) fn validate_url(daemon_url: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
-fn resolve_signature(arg: Option<String>) -> Result<String, String> {
+pub(crate) fn resolve_signature(arg: Option<String>) -> Result<String, String> {
     if let Some(s) = arg {
         let trimmed = s.trim();
         if trimmed.is_empty() {

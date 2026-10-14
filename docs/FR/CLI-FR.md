@@ -291,6 +291,106 @@ qui écoute sur le port standard OTLP/HTTP.
 Les erreurs sont écrites sur stderr avec une cause sur une ligne et
 une indication exploitable le cas échéant.
 
+## Hub : login, logout, hub
+
+`login`, `logout` et `hub` s'adressent à un
+[Perf Sentinel Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub),
+pas à un daemon. La ligne d'aide de chaque action `hub` commence par
+« Through the Hub: », ce qui distingue `hub analyze`, `hub ack` et
+`hub findings` de `analyze`, `ack` et `query findings`.
+
+### `login` et `logout`
+
+```bash
+perf-sentinel login --hub https://hub.example.com
+# Open https://hub.example.com/device in a browser and enter the code BCDF-GHJK (expires in 10 minutes).
+# Signed in to https://hub.example.com until 2026-10-14 18:42:00 (local time).
+```
+
+`login` déroule le device flow du Hub ; à défaut de `--hub`, il lit
+`PERF_SENTINEL_HUB_URL`. Il affiche l'adresse `/device` du
+Hub lui-même et un code, et n'ouvre rien : vous tapez le code sur cette
+page, dans un navigateur connecté au Hub, puis vous approuvez.
+N'approuvez qu'un code issu d'un `login` que vous venez de lancer
+vous-même. La CLI interroge le Hub à l'intervalle qu'il donne, 5 secondes
+plus lentement à chaque réponse `slow_down`, jusqu'à ce que le code soit
+approuvé, refusé ou expiré (code de sortie 1 dans les deux derniers cas).
+Le jeton dure autant que la session navigateur qui l'a approuvé, sans
+rafraîchissement : relancez `login` quand il expire.
+
+Un Hub sans connexion terminal, parce que son contrôle d'accès est
+désactivé, que `TrustedProxyNetworks` n'est pas renseigné ou qu'il est
+antérieur à la fonction, répond à la première requête par une
+redirection, un `401` ou un `404` : `login` affiche alors « This Hub does
+not offer terminal sign-in » et sort en 1.
+
+Le jeton est écrit dans `$XDG_CONFIG_HOME/perf-sentinel/hub-token.json`,
+sinon `~/.config/perf-sentinel/hub-token.json`, ou
+`%APPDATA%\perf-sentinel\hub-token.json` sous Windows, avec l'URL du Hub
+et l'expiration. Un seul Hub à la fois : un `login` vers un autre Hub le
+remplace. Sous Unix, le répertoire est créé en `0700` et le fichier en
+`0600`, écrit à côté de la cible puis renommé par-dessus. Un fichier de
+jeton qui est un lien symbolique, lisible par d'autres utilisateurs
+(`mode & 0o077 != 0`, comme ssh refuse une clé privée) ou expiré est
+refusé avant toute requête ; pour un fichier lisible par d'autres
+utilisateurs, lancez `logout`, qui révoque quand même son jeton.
+
+`logout` révoque le jeton auprès du Hub (`POST /auth/revoke`) et supprime
+le fichier, quelle que soit la réponse du Hub. Quand le Hub est
+injoignable, il prévient que le jeton reste valide jusqu'à son expiration.
+Un fichier lisible par d'autres utilisateurs est révoqué lui aussi, avec un
+avertissement. Un lien symbolique ou un fichier illisible comme JSON est
+supprimé sans révocation, faute de jeton à envoyer, et `logout` sort en 1 :
+un jeton qu'il contenait reste valide sur le Hub jusqu'à son expiration.
+
+### `hub`
+
+```bash
+perf-sentinel hub findings --environment production --status active --severity critical
+perf-sentinel hub incidents --source-id prod-eu
+perf-sentinel hub incidents 0123456789abcdef0123456789abcdef
+perf-sentinel hub ack --source-id prod-eu -s "<signature>" -r "reporté au prochain sprint" --expires 7d
+perf-sentinel hub unack --source-id prod-eu -s "<signature>"
+perf-sentinel hub analyze --source-id tempo --service order-svc --lookback 1h -o report.html
+```
+
+| Action | Appels | Options |
+|---|---|---|
+| `findings` | `GET /api/findings` | `--service`, `--finding-type`, `--severity`, `--status`, `--source-id`, `--environment`, `--limit` (50), `--format text\|json` |
+| `incidents [ID]` | `GET /api/incidents[/{id}]` | `--service`, `--namespace`, `--source-id`, `--environment`, `--offset`, `--limit` (50), `--format` |
+| `ack` | `POST /api/sources/{source_id}/acks` | `--source-id`, `-s/--signature` (stdin s'il est omis), `-r/--reason`, `--expires`. Pas de `--by` : le Hub vous nomme |
+| `unack` | `POST /api/sources/{source_id}/acks/revoke` | `--source-id`, `-s/--signature` |
+| `analyze` | `POST /api/analyses`, `GET /api/analyses/{id}` toutes les 2 s, puis `GET /reports/{id}.html` | `--source-id`, `--service`, `--lookback`, `--from`/`--to` (envoyés en `from_ms`/`to_ms`), `--trace-id`, `--max-traces`, `-o/--output` (par défaut `hub-report-<id>.html`) |
+
+La sortie texte reprend les mises en page de `query findings` et
+`query incidents`. Une liste d'incidents ne porte pas leurs findings :
+chacun indique combien il en a figé, et `hub incidents <ID>` les affiche.
+`--format json` imprime la réponse du Hub telle quelle. `analyze` sort en
+1 avec l'`error_code` du run quand celui-ci échoue, est interrompu ou
+expire.
+
+Le justificatif, dans cet ordre :
+
+1. `PERF_SENTINEL_HUB_TOKEN`, un jeton terminal ou machine. Il exige une
+   URL de Hub via `--hub` ou `PERF_SENTINEL_HUB_URL`.
+2. Le jeton enregistré par `login`, dont le Hub devient la valeur par
+   défaut. Un `--hub` qui désigne un autre Hub est refusé (« The stored
+   token was issued by ... »).
+3. Aucun des deux : la requête part sans en-tête `Authorization` et le Hub
+   décide. Un Hub sans contrôle d'accès répond à `GET /api/findings` de
+   façon anonyme.
+
+Un jeton ne circule qu'en `https`, ou en `http` simple vers `localhost`,
+`127.0.0.1` ou `::1` ; toute autre URL `http` est refusée avant la
+requête. Le jeton n'apparaît jamais sur la ligne de commande, dans une
+ligne de log ou dans un message d'erreur. Aucune redirection n'est
+suivie : un `3xx` signifie que le Hub veut une session navigateur, soit
+parce que la route demande `perf-sentinel login`, soit parce que le
+contrôle d'accès du Hub est désactivé et que cette route exige une
+session. Un `401` affiche la commande `login` à lancer, un `403`, `404` ou
+`409` le `detail` du Hub, et un `503` sans détail « Hub busy, retry ».
+Toute erreur sort en 1.
+
 ## Autres sous-commandes
 
 `perf-sentinel query incidents [--service <NAME>] [--namespace <NAME>]
@@ -328,7 +428,8 @@ la page de manuel sont documentées plus bas sur cette page.
 
 Toute heure affichée pour une personne est en heure locale : la ligne
 `Window:` de la sortie texte d'`analyze`, `report` et `diff`, les
-panneaux d'`inspect`, et les sorties d'`ack` et de `query`. JSON,
+panneaux d'`inspect`, et les sorties d'`ack`, de `query`, de `login`, de
+`logout` et de `hub`. JSON,
 SARIF, NDJSON, CSV et l'API du daemon restent en UTC.
 
 Le fuseau vient de `TZ` quand elle est définie, sinon du système. Une

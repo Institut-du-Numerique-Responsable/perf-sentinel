@@ -18,6 +18,7 @@ Perf Sentinel accepte les traces OpenTelemetry via OTLP (gRPC sur 4317, HTTP sur
 - [Export SARIF](#export-sarif) : sortie SARIF v2.1.0 pour le code scanning GitHub ou GitLab.
 - [Champ de confiance sur les findings](#champ-de-confiance-sur-les-findings) : champ `confidence` JSON / SARIF pour les consommateurs aval.
 - [API de requêtage du daemon](#api-de-requêtage-du-daemon) : API HTTP sur le port OTLP HTTP, voir aussi [QUERY-API-FR.md](./QUERY-API-FR.md) pour la référence complète.
+- [Lire un Perf Sentinel Hub depuis la CI](#lire-un-perf-sentinel-hub-depuis-la-ci) : `perf-sentinel hub` avec un jeton machine dans `PERF_SENTINEL_HUB_TOKEN`.
 - [Configuration avancée du scoring carbone](#configuration-avancée-du-scoring-carbone) : scoring multi-région, Scaphandre, énergie cloud-native, Electricity Maps, calibration.
 - [Intégration Tempo](#intégration-tempo) : interroger un backend Grafana Tempo directement avec `perf-sentinel tempo`.
 - [Intégration API Jaeger query](#intégration-api-jaeger-query-jaeger-et-victoria-traces) : Jaeger upstream et Victoria Traces via une seule sous-commande.
@@ -408,6 +409,29 @@ curl -sS "http://127.0.0.1:4318/api/findings?severity=critical&limit=10"
 ```
 
 Voir [`docs/FR/QUERY-API-FR.md`](./QUERY-API-FR.md) pour la référence complète par endpoint, des exemples de réponses réelles capturées, des cas d'usage (alerting Prometheus, dashboard Grafana, runbook SRE) et le contrat de stabilité.
+
+---
+
+## Lire un Perf Sentinel Hub depuis la CI
+
+Un job CI lit un [Perf Sentinel Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub)
+avec `perf-sentinel hub` et un jeton machine dans `PERF_SENTINEL_HUB_TOKEN`,
+tiré du coffre de secrets de la CI. Un Hub dont le contrôle d'accès est
+désactivé n'a besoin d'aucun jeton.
+
+```bash
+export PERF_SENTINEL_HUB_URL=https://hub.example.com
+export PERF_SENTINEL_HUB_TOKEN="$HUB_TOKEN"   # depuis le coffre de secrets de la CI
+perf-sentinel hub findings --environment production --status active --severity critical --format json
+```
+
+Le jeton part en `Authorization: Bearer`, uniquement en `https` (ou en
+`http` simple vers la boucle locale), et jamais sur la ligne de commande.
+Un jeton machine ne fait que lire : `hub ack`, `hub unack` et
+`hub analyze` exigent le `perf-sentinel login` d'une personne. Un jeton
+dont aucun grant ne donne `findings.read` au groupe reçoit `403` et la
+commande sort en 1 : le job échoue au lieu de lire une liste vide. Voir
+[`CLI-FR.md`](./CLI-FR.md#hub--login-logout-hub).
 
 ---
 

@@ -276,6 +276,98 @@ which listens on the OTLP/HTTP standard port.
 Errors are written to stderr with a one-line cause and an actionable
 hint when applicable.
 
+## Hub: login, logout, hub
+
+`login`, `logout` and `hub` talk to a
+[Perf Sentinel Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub),
+not to a daemon. Each `hub` action's help line starts with "Through the
+Hub:", which tells `hub analyze`, `hub ack` and `hub findings` apart from
+`analyze`, `ack` and `query findings`.
+
+### `login` and `logout`
+
+```bash
+perf-sentinel login --hub https://hub.example.com
+# Open https://hub.example.com/device in a browser and enter the code BCDF-GHJK (expires in 10 minutes).
+# Signed in to https://hub.example.com until 2026-10-14 18:42:00 (local time).
+```
+
+`login` runs the Hub's device flow; `--hub` falls back to
+`PERF_SENTINEL_HUB_URL`. It prints the Hub's own `/device`
+address and a code, and opens nothing: you type the code on that page, in
+a browser signed in to the Hub, and approve. Only approve a code from a
+`login` you started yourself, just now. The CLI polls at the interval
+the Hub gives, slower by 5 seconds each time the Hub answers
+`slow_down`, until the code is approved, denied or expires (exit 1 on the
+last two). The token lasts as long as the browser session that approved
+it, and there is no refresh: run `login` again when it expires.
+
+A Hub without terminal sign-in, because its access control is off,
+`TrustedProxyNetworks` is unset or it predates the feature, answers the
+first request with a redirect, a `401` or a `404`: `login` then says
+"This Hub does not offer terminal sign-in" and exits 1.
+
+The token goes to `$XDG_CONFIG_HOME/perf-sentinel/hub-token.json`, else
+`~/.config/perf-sentinel/hub-token.json`, or
+`%APPDATA%\perf-sentinel\hub-token.json` on Windows, with the Hub URL and
+the expiry. One Hub at a time: a `login` to another Hub replaces it. On
+Unix the directory is created `0700` and the file `0600`, written beside
+the target and renamed over it. A token file that is a symlink, that other
+users can read (`mode & 0o077 != 0`, as ssh refuses a private key), or that
+has expired is refused before any request; for a file other users can
+read, run `logout`, which still revokes its token.
+
+`logout` revokes the token on the Hub (`POST /auth/revoke`) and deletes
+the file, whatever the Hub answers. When the Hub is unreachable it warns
+that the token stays valid until its expiry. A file other users can read
+is revoked too, with a warning. A symlink or a file that does not parse
+is deleted without being revoked, since it yields no token to send, and
+`logout` exits 1: a token in it stays valid on the Hub until it expires.
+
+### `hub`
+
+```bash
+perf-sentinel hub findings --environment production --status active --severity critical
+perf-sentinel hub incidents --source-id prod-eu
+perf-sentinel hub incidents 0123456789abcdef0123456789abcdef
+perf-sentinel hub ack --source-id prod-eu -s "<signature>" -r "deferred to next sprint" --expires 7d
+perf-sentinel hub unack --source-id prod-eu -s "<signature>"
+perf-sentinel hub analyze --source-id tempo --service order-svc --lookback 1h -o report.html
+```
+
+| Action | Calls | Flags |
+|---|---|---|
+| `findings` | `GET /api/findings` | `--service`, `--finding-type`, `--severity`, `--status`, `--source-id`, `--environment`, `--limit` (50), `--format text\|json` |
+| `incidents [ID]` | `GET /api/incidents[/{id}]` | `--service`, `--namespace`, `--source-id`, `--environment`, `--offset`, `--limit` (50), `--format` |
+| `ack` | `POST /api/sources/{source_id}/acks` | `--source-id`, `-s/--signature` (stdin when omitted), `-r/--reason`, `--expires`. No `--by`: the Hub names you |
+| `unack` | `POST /api/sources/{source_id}/acks/revoke` | `--source-id`, `-s/--signature` |
+| `analyze` | `POST /api/analyses`, `GET /api/analyses/{id}` every 2 s, then `GET /reports/{id}.html` | `--source-id`, `--service`, `--lookback`, `--from`/`--to` (sent as `from_ms`/`to_ms`), `--trace-id`, `--max-traces`, `-o/--output` (default `hub-report-<id>.html`) |
+
+Text output uses the `query findings` and `query incidents` layouts. A
+listing of incidents carries no findings, so each says how many it froze
+and `hub incidents <ID>` shows them. `--format json` prints the Hub's
+answer unchanged. `analyze` exits 1 with the run's `error_code` when the
+run fails, is interrupted or expires.
+
+The credential, in this order:
+
+1. `PERF_SENTINEL_HUB_TOKEN`, a terminal or machine token. It needs a Hub
+   URL from `--hub` or `PERF_SENTINEL_HUB_URL`.
+2. The token `login` stored, whose Hub is then the default. A `--hub`
+   naming another Hub is refused ("The stored token was issued by ...").
+3. Neither: the request goes out with no `Authorization` header and the
+   Hub decides. A Hub without access control answers `GET /api/findings`
+   anonymously.
+
+A token only travels over `https`, or plain `http` to `localhost`,
+`127.0.0.1` or `::1`; any other `http` URL is refused before a request.
+The token never appears on the command line, in a log line or in an error
+message. No redirect is followed: a `3xx` means the Hub wants a browser
+session, either because the route needs `perf-sentinel login` or because
+the Hub's access control is off and that route needs a session. A `401`
+prints the `login` command to run, a `403`, `404` or `409` the Hub's own
+`detail`, and a `503` without one "Hub busy, retry". Every error exits 1.
+
 ## Other subcommands
 
 `perf-sentinel query incidents [--service <NAME>] [--namespace <NAME>]
@@ -310,7 +402,8 @@ completions and the man page are documented below on this page.
 
 Every time printed for a person is in the local time zone: the
 `Window:` line of `analyze`, `report` and `diff` text output, the
-`inspect` panels, and the `ack` and `query` output. JSON, SARIF,
+`inspect` panels, and the `ack`, `query`, `login`, `logout` and `hub`
+output. JSON, SARIF,
 NDJSON, CSV and the daemon API stay in UTC.
 
 The zone comes from `TZ` when it is set, then from the system. A `TZ`

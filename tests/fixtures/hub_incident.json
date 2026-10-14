@@ -1,0 +1,49 @@
+{
+  "id": "0123456789abcdef0123456789abcdef",
+  "service": "order-svc",
+  "namespace": "shop",
+  "kind": "oom_kill",
+  "at_ms": 1790000400000,
+  "window_from_ms": 1790000100000,
+  "window_to_ms": 1790000460000,
+  "oldest_finding_ms": 1790000050000,
+  "ended_at_ms": null,
+  "source_id": "prod-eu",
+  "source_name": "Production EU",
+  "environment": "production",
+  "first_seen": 1790000401000,
+  "last_seen": 1790000401000,
+  "finding_count": 1,
+  "capture": "complete",
+  "findings": [
+    {
+      "finding": {
+        "type": "n_plus_one_sql",
+        "severity": "critical",
+        "trace_id": "trace-hub-1",
+        "service": "order-svc",
+        "grouping": [
+          {
+            "key": "k8s.namespace.name",
+            "value": "shop"
+          }
+        ],
+        "source_endpoint": "GET /orders",
+        "pattern": {
+          "template": "SELECT * FROM order_item WHERE order_id = ?",
+          "occurrences": 12,
+          "window_ms": 200,
+          "distinct_params": 12
+        },
+        "suggestion": "Batch the lookups into one query",
+        "first_timestamp": "2026-10-01T10:00:00Z",
+        "last_timestamp": "2026-10-01T10:00:01Z",
+        "confidence": "daemon_production",
+        "signature": "n_plus_one_sql:order-svc:get_orders:0123456789abcdef"
+      },
+      "stored_at_ms": 1790000005000,
+      "first_seen_ms": 1790000000000,
+      "seen_count": 4
+    }
+  ]
+}

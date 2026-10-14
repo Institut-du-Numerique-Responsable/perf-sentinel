@@ -208,7 +208,7 @@ fn print_pretty_json(body: &[u8]) {
     );
 }
 
-fn render_findings_response(
+pub(crate) fn render_findings_response(
     body: &[u8],
     format: QueryOutputFormat,
     daemon_url: &str,
@@ -502,6 +502,10 @@ pub(crate) struct IncidentSlim {
     pub(crate) oldest_finding_ms: Option<u64>,
     #[serde(default)]
     pub(crate) findings: Vec<sentinel_core::daemon::findings_store::StoredFinding>,
+    /// Set by a Hub listing, which leaves the findings out. A daemon
+    /// never sends it.
+    #[serde(default)]
+    pub(crate) finding_count: Option<usize>,
 }
 
 impl IncidentSlim {
@@ -650,7 +654,7 @@ async fn fetch_incidents_body(base_url: &str, path: &str, api_key: Option<&str>)
     std::process::exit(1);
 }
 
-fn render_incidents_response(body: &[u8], format: QueryOutputFormat, daemon_url: &str) {
+pub(crate) fn render_incidents_response(body: &[u8], format: QueryOutputFormat, daemon_url: &str) {
     match format {
         QueryOutputFormat::Json => print_pretty_json(body),
         QueryOutputFormat::Text => print_incidents_text(body, daemon_url),
@@ -682,7 +686,11 @@ fn print_incidents_text(body: &[u8], daemon_url: &str) {
     for (i, incident) in incidents.iter().enumerate() {
         print!("{}", incident_header_block(i, incident, colors));
         if incident.findings.is_empty() {
-            println!("    {dim}No findings in the window.{reset}");
+            if incident.finding_count.is_some_and(|n| n > 0) {
+                println!("    {dim}Findings not listed: show this incident by its id.{reset}");
+            } else {
+                println!("    {dim}No findings in the window.{reset}");
+            }
             println!();
             continue;
         }
@@ -736,7 +744,7 @@ fn incident_header_block(index: usize, inc: &IncidentSlim, colors: AnsiColors) -
         fmt_local_time(inc.window_from_ms),
         fmt_local_time(inc.window_to_ms),
         inc.capture_marker(),
-        finding_count_label(inc.findings.len())
+        finding_count_label(inc.finding_count.unwrap_or(inc.findings.len()))
     );
     let after = inc.fired_after_restart();
     if after > 0 {

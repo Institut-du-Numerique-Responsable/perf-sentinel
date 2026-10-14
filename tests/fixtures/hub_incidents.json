@@ -1,0 +1,20 @@
+[
+  {
+    "id": "0123456789abcdef0123456789abcdef",
+    "service": "order-svc",
+    "namespace": "shop",
+    "kind": "oom_kill",
+    "at_ms": 1790000400000,
+    "window_from_ms": 1790000100000,
+    "window_to_ms": 1790000460000,
+    "oldest_finding_ms": 1790000050000,
+    "ended_at_ms": null,
+    "source_id": "prod-eu",
+    "source_name": "Production EU",
+    "environment": "production",
+    "first_seen": 1790000401000,
+    "last_seen": 1790000401000,
+    "finding_count": 1,
+    "capture": "complete"
+  }
+]

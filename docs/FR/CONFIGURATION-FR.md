@@ -1097,20 +1097,22 @@ Le chargement d'un fichier 0.5.x sur 0.6.0 retourne une `ConfigError::Validation
 
 Les fichiers de configuration ne doivent jamais contenir de secrets. Pour les valeurs sensibles (clés API, tokens), utilisez des variables d'environnement dans vos outils de déploiement. Perf Sentinel en lit une liste fixe, chacune surchargeant le champ de config correspondant quand elle est définie et nettoyée d'un saut de ligne final, donc un Secret Kubernetes peut l'alimenter directement :
 
-| Variable                          | Surcharge                                                                           | Lue par                     |
-|-----------------------------------|-------------------------------------------------------------------------------------|-----------------------------|
-| `PERF_SENTINEL_EMAPS_TOKEN`       | l'`api_key` Electricity Maps                                                        | daemon et batch             |
-| `PERF_SENTINEL_ACK_API_KEY`       | `[daemon.ack] api_key`                                                              | daemon et batch             |
-| `PERF_SENTINEL_INCIDENTS_API_KEY` | `[daemon.incidents] api_key`                                                        | daemon et batch             |
-| `PERF_SENTINEL_READ_API_KEY`      | `[daemon] read_api_key`                                                             | daemon et batch             |
-| `PERF_SENTINEL_DAEMON_API_KEY`    | le `--api-key-file` de `ack` et de chaque sous-commande `query`                     | CLI, envoyée en `X-API-Key` |
-| `PERF_SENTINEL_DAEMON_URL`        | l'URL `--daemon` des commandes `ack` et `query`                                     | CLI                         |
+| Variable                          | Surcharge                                                       | Lue par                                 |
+|-----------------------------------|-----------------------------------------------------------------|-----------------------------------------|
+| `PERF_SENTINEL_EMAPS_TOKEN`       | l'`api_key` Electricity Maps                                    | daemon et batch                         |
+| `PERF_SENTINEL_ACK_API_KEY`       | `[daemon.ack] api_key`                                          | daemon et batch                         |
+| `PERF_SENTINEL_INCIDENTS_API_KEY` | `[daemon.incidents] api_key`                                    | daemon et batch                         |
+| `PERF_SENTINEL_READ_API_KEY`      | `[daemon] read_api_key`                                         | daemon et batch                         |
+| `PERF_SENTINEL_DAEMON_API_KEY`    | le `--api-key-file` de `ack` et de chaque sous-commande `query` | CLI, envoyée en `X-API-Key`             |
+| `PERF_SENTINEL_DAEMON_URL`        | l'URL `--daemon` des commandes `ack` et `query`                 | CLI                                     |
+| `PERF_SENTINEL_HUB_TOKEN`         | le jeton enregistré par `login`, pour `hub`                     | CLI, envoyée en `Authorization: Bearer` |
+| `PERF_SENTINEL_HUB_URL`           | l'URL `--hub` de `login` et `hub`                               | CLI                                     |
 
 Les surcharges s'appliquent à chaque exécution, commandes batch et exécution sans aucun fichier de config comprises, donc un job qui hérite du Secret du daemon doit lui aussi porter des valeurs valides (la clé d'incidents ne compte qu'une fois `[daemon.incidents] enabled` posé). Une variable définie à la chaîne vide compte comme définie : une clé vide est rejetée au chargement de la config plutôt qu'ignorée en silence, donc un Secret monté vide fait échouer toute commande qui la charge, daemon compris, au lieu d'ouvrir la route.
 
 ### Proxy sortant et CA privée
 
-Quatre autres variables régissent chaque appel HTTPS sortant, depuis le daemon (sources d'énergie, Electricity Maps, export vers le Hub) comme depuis la CLI (`tempo`, `jaeger-query`, `pg-stat` et `mysql-stat` avec `--prometheus`, `report` avec une source Prometheus, `query`, `ack`, `verify-hash --url`) :
+Quatre autres variables régissent chaque appel HTTPS sortant, depuis le daemon (sources d'énergie, Electricity Maps, export vers le Hub) comme depuis la CLI (`tempo`, `jaeger-query`, `pg-stat` et `mysql-stat` avec `--prometheus`, `report` avec une source Prometheus, `query`, `ack`, `login`, `logout`, `hub`, `verify-hash --url`) :
 
 | Variable                     | Effet                                                                                                                                                                                                             |
 |------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

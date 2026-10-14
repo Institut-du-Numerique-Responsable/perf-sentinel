@@ -1,7 +1,7 @@
 //! The clap command tree: the `Cli` root, its subcommands and their value enums.
 
 #[cfg(feature = "daemon")]
-use crate::ack;
+use crate::{ack, hub};
 use crate::{disclose, render, verify_hash};
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
@@ -605,6 +605,43 @@ pub(crate) enum Commands {
         daemon: String,
         #[command(subcommand)]
         action: ack::AckAction,
+    },
+
+    /// Sign this terminal in to a Perf Sentinel Hub.
+    ///
+    /// Prints the Hub's `/device` address and a code to type there, in a
+    /// browser signed in to the Hub, then waits for the approval. No link
+    /// is opened and none carries the code. The token is stored owner-only
+    /// in the user's configuration directory, for one Hub at a time, and
+    /// lasts as long as the browser session that approved it.
+    #[cfg(feature = "daemon")]
+    #[command(after_help = help_examples::LOGIN)]
+    Login {
+        /// Hub URL: https, or plain http to localhost, 127.0.0.1 or IPv6 loopback.
+        #[arg(long, value_name = "URL", env = "PERF_SENTINEL_HUB_URL")]
+        hub: String,
+    },
+
+    /// Sign this terminal out of the Hub: revoke the stored token there and
+    /// delete it here. The file is deleted even when the Hub is unreachable.
+    #[cfg(feature = "daemon")]
+    Logout,
+
+    /// Read findings and incidents, acknowledge, and run analyses through
+    /// a Perf Sentinel Hub.
+    ///
+    /// The credential is `PERF_SENTINEL_HUB_TOKEN` (a terminal or machine
+    /// token) when set, otherwise the token `perf-sentinel login` stored,
+    /// whose Hub is then the default. With neither, no credential is sent
+    /// and the Hub decides, which suits a Hub without access control.
+    #[cfg(feature = "daemon")]
+    #[command(after_help = help_examples::HUB)]
+    Hub {
+        /// Hub URL. Defaults to the Hub of the stored token.
+        #[arg(long, value_name = "URL", env = "PERF_SENTINEL_HUB_URL", global = true)]
+        hub: Option<String>,
+        #[command(subcommand)]
+        action: hub::HubAction,
     },
 
     /// Produce a single-file HTML dashboard for post-mortem exploration.
@@ -1247,6 +1284,22 @@ mod help_examples {
 
   # List active daemon acknowledgments
   perf-sentinel ack list";
+
+    #[cfg(feature = "daemon")]
+    pub const LOGIN: &str = "Examples:
+  # Sign in, then type the printed code at https://hub.example.com/device
+  perf-sentinel login --hub https://hub.example.com";
+
+    #[cfg(feature = "daemon")]
+    pub const HUB: &str = "Examples:
+  # Active critical findings of one environment, with the stored sign-in
+  perf-sentinel hub findings --environment production --status active --severity critical
+
+  # From CI, with a machine token
+  PERF_SENTINEL_HUB_TOKEN=... perf-sentinel hub --hub https://hub.example.com findings --format json
+
+  # Run an analysis on a trace backend and save its report
+  perf-sentinel hub analyze --source-id tempo --service order-svc --lookback 1h -o report.html";
 
     pub const DISCLOSE: &str = "Examples:
   # Aggregate a quarter of archived windows into an internal report

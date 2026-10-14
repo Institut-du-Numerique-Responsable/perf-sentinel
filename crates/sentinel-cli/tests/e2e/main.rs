@@ -13,6 +13,8 @@ mod demo;
 mod diff;
 mod disclose;
 mod explain;
+#[cfg(feature = "daemon")]
+mod hub;
 mod jaeger_query;
 mod mysql_stat;
 mod pg_stat;
