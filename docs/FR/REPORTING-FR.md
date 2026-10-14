@@ -22,6 +22,10 @@ Pour l'intent `official`, le validateur refuse également les rapports sous 75% 
 
 Deux vérifications supplémentaires resserrent la cohérence. Le validateur rejette en dur un `days_covered` qui ne vaut pas `(to_date - from_date) + 1` (un rapport produit par disclose le satisfait toujours, donc seul un fichier édité à la main le déclenche) et un `requests_measured` qui dépasse un `total_requests_in_period` déclaré par l'opérateur. Pour l'intent `official`, omettre `total_requests_in_period` dans l'org-config émet un warning, puisque `coverage_percentage` est alors absent du rapport.
 
+### L'archive doit remonter au début de la période (0.28.0)
+
+`disclose` vérifie aussi que l'archive remonte au premier jour de la période : la plus ancienne fenêtre de tous les fichiers d'entrée, dans la période ou hors d'elle, doit tomber ce jour-là ou avant. L'archive du daemon tourne à `max_size_mb` et élague à `max_files` par nombre de fichiers, pas par ancienneté, et un daemon chargé écrit une fenêtre toutes les `trace_ttl_ms / 2` (15 secondes par défaut). Ses 12 fichiers de 100 Mio par défaut ne tiennent donc que quelques semaines, et les fichiers élagués ne laissent aucune trace dans la chaîne de hash, qui repart à chaque fichier. Quand l'archive commence plus tard, un `disclose` `official` sort en code 2 sans écrire de rapport, et un `internal` avertit. Les deux messages donnent le premier jour de l'archive, pour que `--period-type custom --from <ce jour>` publie ce que l'archive couvre encore. Un début de période calme ne déclenche pas ce contrôle tant que des lignes plus anciennes précèdent la période. Dimensionner l'archive pour la période publiée, ou publier des périodes plus courtes.
+
 ## Granularité
 
 Perf Sentinel publie les rapports à deux niveaux de granularité, contrôlés par `--confidentiality`. Le validateur refuse de publier un rapport `confidentiality = public` qui contiendrait des entrées G1, et inversement.

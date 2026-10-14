@@ -20,6 +20,15 @@ the chart version, to know which daemon image ships.
   figures it is verifying. A Sigstore signature therefore no longer vouches
   for figures edited after signing. The daemon's behaviour, its query API
   and its metrics do not change.
+- The image's `disclose` refuses an official period the archive no longer
+  reaches back to, which the archive defaults allow on a busy daemon after
+  a few weeks.
+
+### Changed
+
+- The `persistence.size` comment says the default archive holds a few
+  weeks of a busy daemon, not a quarter, and how to size it for quarterly
+  disclosures. Comment only, the rendered manifests do not change.
 
 No `values.yaml` key is added or removed, and no template changes.
 

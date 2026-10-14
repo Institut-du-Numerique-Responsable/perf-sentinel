@@ -107,6 +107,10 @@ pub struct AggregateInputs {
     /// SCI methodology tags observed. Current windows use the `+transport`
     /// variant. The legacy tag can remain when a period spans older windows.
     pub carbon_methodologies: BTreeSet<String>,
+    /// Oldest window found in the archive files, in or out of the period.
+    /// Later than the period's first day means the archive does not reach
+    /// back to it, see [`archive_reaches_period_start`].
+    pub earliest_archived_window: Option<DateTime<Utc>>,
     /// The three terms whose sum is the published total, in gCO2eq.
     /// Only `operational` carries an avoidable share: embodied hardware
     /// and network transport are irreducible by fixing an anti-pattern.
@@ -407,6 +411,8 @@ struct Builder {
     /// by the period length (<= 366 for a calendar year), no cap needed.
     /// Drives the v1.2 temporal-coverage continuity signal.
     observed_days: BTreeSet<NaiveDate>,
+    /// Oldest well-formed window across every input line, period or not.
+    earliest_archived: Option<DateTime<Utc>>,
 }
 
 /// The chain anchor: the previous line's hash and its sequence number.
@@ -600,6 +606,10 @@ impl Builder {
                 return Ok(());
             }
         };
+        self.earliest_archived = Some(
+            self.earliest_archived
+                .map_or(envelope.ts, |seen| seen.min(envelope.ts)),
+        );
         if !in_period(envelope.ts, step.period) {
             return Ok(());
         }
@@ -1138,6 +1148,7 @@ impl Builder {
         };
 
         let temporal_coverage = compute_temporal_coverage(&self.observed_days, period);
+        let earliest_archived_window = self.earliest_archived;
 
         AggregateInputs {
             aggregate: Aggregate {
@@ -1215,8 +1226,19 @@ impl Builder {
             embodied_gco2_total: self.embodied_gco2_total,
             operational_gco2_total: self.operational_gco2_total,
             transport_gco2_total: self.transport_gco2_total,
+            earliest_archived_window,
         }
     }
+}
+
+/// Whether the archive reaches back to the period's first day. A pruned
+/// archive, or one switched on after the period began, does not: its
+/// oldest surviving window falls later and the windows before it are gone.
+/// A quiet start does not trip it, since older lines still precede the
+/// period.
+#[must_use]
+pub fn archive_reaches_period_start(earliest: Option<DateTime<Utc>>, period: &Period) -> bool {
+    earliest.is_some_and(|ts| ts.date_naive() <= period.from_date)
 }
 
 /// Broker-side waste block, emitted only once a window carried a figure.

@@ -22,6 +22,10 @@ For `official` intent, the validator also rejects reports below 75% runtime-cali
 
 Two further checks tighten consistency. The validator hard-rejects a `days_covered` that does not equal `(to_date - from_date) + 1` (a disclose-produced report always satisfies this, so only a hand-edited file trips it) and a `requests_measured` that exceeds an operator-declared `total_requests_in_period`. For `official` intent, omitting `total_requests_in_period` in the org config emits a warning, since `coverage_percentage` is then absent from the report.
 
+### The archive must reach the period start (0.28.0)
+
+`disclose` also checks that the archive reaches back to the period's first day: the oldest window across every input file, in or out of the period, must fall on that day or earlier. The daemon archive rotates at `max_size_mb` and prunes to `max_files` by count, not by age, and a busy daemon writes one window every `trace_ttl_ms / 2` (15 seconds by default). Its default 12 files of 100 MiB can therefore hold only a few weeks, and the pruned files leave no trace in the hash chain, which restarts with each file. When the archive starts later, an `official` disclosure exits 2 without writing a report, and an `internal` one warns. Both messages name the archive's first day, so `--period-type custom --from <that day>` discloses what the archive still covers. A quiet start does not trip the check as long as older lines precede the period. Size the archive for the period you disclose, or disclose shorter periods.
+
 ## Granularity
 
 Perf Sentinel publishes reports at two granularity levels, controlled by `--confidentiality`. The validator refuses to publish a `confidentiality = public` disclosure that carries G1 entries, and vice versa.

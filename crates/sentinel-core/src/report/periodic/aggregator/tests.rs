@@ -1831,3 +1831,60 @@ fn waste_block(energy: f64, model: &str) -> crate::report::DisclosureDbWaste {
         energy_gco2: Some(energy * 100.0),
     }
 }
+
+#[test]
+fn an_archive_starting_before_the_period_reaches_its_start() {
+    // A quiet first week: no window inside the period before mid-January,
+    // but the archive holds December lines, so nothing was pruned.
+    let (_dir, path) = write_archive(&[
+        (
+            Utc.with_ymd_and_hms(2025, 12, 20, 9, 0, 0).unwrap(),
+            plain_window(),
+        ),
+        (
+            Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap(),
+            plain_window(),
+        ),
+    ]);
+    let period = q1_2026();
+    let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
+    assert_eq!(
+        inputs.earliest_archived_window,
+        Some(Utc.with_ymd_and_hms(2025, 12, 20, 9, 0, 0).unwrap())
+    );
+    assert!(archive_reaches_period_start(
+        inputs.earliest_archived_window,
+        &period
+    ));
+}
+
+#[test]
+fn a_pruned_archive_does_not_reach_the_period_start() {
+    // What rotation leaves after pruning a busy quarter: only its last weeks.
+    let (_dir, path) = write_archive(&[
+        (
+            Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap(),
+            plain_window(),
+        ),
+        (
+            Utc.with_ymd_and_hms(2026, 3, 30, 9, 0, 0).unwrap(),
+            plain_window(),
+        ),
+    ]);
+    let period = q1_2026();
+    let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
+    assert!(!archive_reaches_period_start(
+        inputs.earliest_archived_window,
+        &period
+    ));
+}
+
+#[test]
+fn a_window_on_the_first_day_reaches_the_period_start() {
+    let period = q1_2026();
+    let first_day = Utc.with_ymd_and_hms(2026, 1, 1, 23, 59, 0).unwrap();
+    assert!(archive_reaches_period_start(Some(first_day), &period));
+    let second_day = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
+    assert!(!archive_reaches_period_start(Some(second_day), &period));
+    assert!(!archive_reaches_period_start(None, &period));
+}

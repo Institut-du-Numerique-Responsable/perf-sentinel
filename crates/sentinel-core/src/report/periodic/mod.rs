@@ -36,7 +36,7 @@ pub(crate) fn is_zero_f64(v: &f64) -> bool {
 
 pub use aggregator::{
     AggregateInputs, AntiPatternAccumulator, ServiceAccumulator, UNATTRIBUTED_SERVICE,
-    aggregate_from_paths,
+    aggregate_from_paths, archive_reaches_period_start,
 };
 pub use attestation::{
     AttestationBinding, IN_TOTO_STATEMENT_TYPE, InTotoStatement, InTotoSubject, MethodologySummary,

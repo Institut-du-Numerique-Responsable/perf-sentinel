@@ -11,7 +11,7 @@ use chrono::{NaiveDate, Utc};
 use sentinel_core::detect::FindingType;
 use sentinel_core::report::periodic::aggregator::{
     AggregateInputs, AntiPatternAccumulator, ServiceAccumulator, UNATTRIBUTED_SERVICE,
-    aggregate_from_paths,
+    aggregate_from_paths, archive_reaches_period_start,
 };
 use sentinel_core::report::periodic::org_config::{self, OrgConfig};
 use sentinel_core::report::periodic::schema::{
@@ -148,6 +148,13 @@ pub fn cmd_disclose(
 
     let intent_schema: ReportIntent = intent.into();
     let confidentiality_schema: Confidentiality = confidentiality.into();
+    if let Some(message) = archive_start_gap(&aggregate, &period) {
+        if matches!(intent_schema, ReportIntent::Official) {
+            eprintln!("Error: {message}");
+            return 2;
+        }
+        eprintln!("Warning: {message}");
+    }
     let generated_by = if sentinel_core::pipeline::ci_environment_detected() {
         "ci".to_string()
     } else {
@@ -208,6 +215,26 @@ pub fn cmd_disclose(
         report.applications.len()
     );
     0
+}
+
+// The archive must reach back to the period's first day. Rotation prunes by
+// file count, so a busy daemon can lose the start of a quarter without a
+// trace in the chain, and an official report would then cover its last weeks
+// under the full period's name.
+fn archive_start_gap(aggregate: &AggregateInputs, period: &Period) -> Option<String> {
+    if archive_reaches_period_start(aggregate.earliest_archived_window, period) {
+        return None;
+    }
+    let start = aggregate
+        .earliest_archived_window
+        .map_or_else(|| "nowhere".to_string(), |ts| ts.date_naive().to_string());
+    Some(format!(
+        "the archive starts on {start}, after the period's first day {}. Windows \
+         before it were pruned by rotation ([daemon.archive] max_files, max_size_mb) \
+         or never archived, so this report cannot cover the whole period. Run disclose \
+         with --period-type custom --from {start}, or keep a larger archive.",
+        period.from_date
+    ))
 }
 
 // Official intent is the only one that hard-fails on validation. Prints each
