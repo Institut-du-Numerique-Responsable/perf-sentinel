@@ -21,13 +21,13 @@ the chart version, to know which daemon image ships.
   for figures edited after signing. The daemon's behaviour, its query API
   and its metrics do not change.
 - The image's `disclose` refuses an official period the archive no longer
-  reaches back to, which the archive defaults allow on a busy daemon after
-  a few weeks.
+  reaches back to, which the archive defaults allow on a busy daemon within
+  a day.
 
 ### Changed
 
-- The `persistence.size` comment says the default archive holds a few
-  weeks of a busy daemon, not a quarter, and how to size it for quarterly
+- The `persistence.size` comment says the default archive holds less than
+  a day of a busy daemon, not a quarter, and how to size it for quarterly
   disclosures. Comment only, the rendered manifests do not change.
 
 ### Security
