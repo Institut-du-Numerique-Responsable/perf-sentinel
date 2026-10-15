@@ -254,6 +254,13 @@ of each incident then its findings. See [QUERY-API.md](QUERY-API.md). The ring i
 reloaded at startup from `[daemon.incidents] archive_path` when one is set.
 Without one, scrape that endpoint if the record has to outlive the node.
 
+With the Hub export on and a Hub on PerfSentinelHub 0.5.0 or later, the Hub keeps every
+incident as it is recorded, so once `perf_sentinel_hub_export_incidents_pending` stays near
+0 the ring no longer has to hold a poll interval's worth. A smaller `[daemon.incidents] max_retained`
+then saves memory: one incident can carry a thousand frozen findings, so the default 200
+can pin 200,000 of them in the worst case. Keep it large enough for `query monitor` and
+for the settle pass, which completes an incident about three trace TTLs after it.
+
 **Detecting the moment without an external alert.** The daemon does not judge
 whether a service is alive, but it publishes when it last heard from each one.
 `time() - perf_sentinel_service_last_span_timestamp_seconds{service="cart-svc"} > 120`

@@ -4,6 +4,30 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-15
+
+This release bumps the minor rather than the patch: `sentinel_core::daemon::query_api::QueryApiState` gains a crate-private field and is not `#[non_exhaustive]`, so code that builds it with a literal stops compiling. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The theme is the Hub's long memory: a daemon that exports findings to PerfSentinelHub now exports its incidents as well, so the Hub keeps one even when the daemon's ring evicts it between two polls. Upgrade the Hub to 0.5.0 before the daemons.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.29.0 touches the scoring code.
+
+### Added
+
+- The Hub export pushes incidents too. With `[daemon.hub_export]` and `[daemon.incidents]`
+  both enabled, each incident goes to the Hub's `/api/import/incidents` when it is
+  recorded, closed or completed by the settle pass, so one the ring evicts between two Hub
+  polls is no longer lost. Batches hold at most 10 incidents and 4 MiB, and at most 1,000
+  incidents wait at once. A Hub without the route (404 or 405) stops incident pushes until
+  restart, and findings keep flowing. An older Hub with sign-in on answers 401, which is
+  retried and logged, so upgrade the Hub to PerfSentinelHub 0.5.0 first. New
+  label-free metrics `perf_sentinel_hub_export_incidents_pending` and
+  `perf_sentinel_hub_export_incidents_dropped_total`.
+
+### Changed
+
+- `sentinel_core::daemon::query_api::QueryApiState`, public and not `#[non_exhaustive]`,
+  gains a crate-private field for the incident export, so code outside the crate that
+  builds it with a literal stops compiling.
+
 ## [0.28.0] - 2026-10-14
 
 This release bumps the minor rather than the patch: two public types of `perf-sentinel-core`, published on crates.io and not `#[non_exhaustive]`, gain public fields, so code that builds them with a literal stops compiling. `sentinel_core::report::periodic::PerfSentinelPredicate` gains `subject_binding`, and `sentinel_core::config::DaemonArchiveConfig` gains `windows` and `rollup_retention_days`. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. `/api/status` and `/metrics` only gain fields, and the findings the daemon exports do not change. The theme is periodic disclosure you can stand behind: the signature now covers the figures it was published with, `verify-hash` checks that it does, an official disclosure can no longer claim a period its archive does not cover, and daily rollups let the archive hold a whole quarter on the default settings.

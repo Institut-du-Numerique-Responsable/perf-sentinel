@@ -73,6 +73,7 @@ pub(super) async fn spawn_listeners(
     ack_store: Option<Arc<AckStore>>,
     incident_store: Option<Arc<super::incidents::IncidentStore>>,
     incident_archive: Option<mpsc::Sender<Vec<u8>>>,
+    incident_export: Option<Arc<super::hub_incident_export::IncidentExportBuffer>>,
 ) -> Result<
     (
         tokio::task::JoinHandle<()>,
@@ -126,6 +127,7 @@ pub(super) async fn spawn_listeners(
         ack_store,
         incident_store,
         incident_archive,
+        incident_export,
     );
     let http_handle = spawn_http_listener(http_listener, http_addr, tls_acceptor, http_router);
     let json_socket_handle = spawn_json_socket_listener(config, tx, over_memory);
@@ -407,6 +409,7 @@ fn build_http_router(
     ack_store: Option<Arc<AckStore>>,
     incident_store: Option<Arc<super::incidents::IncidentStore>>,
     incident_archive: Option<mpsc::Sender<Vec<u8>>>,
+    incident_export: Option<Arc<super::hub_incident_export::IncidentExportBuffer>>,
 ) -> axum::Router {
     let metrics_sink: Arc<dyn crate::ingest::otlp::MetricsSink> = metrics.clone();
     let otlp_router = crate::ingest::otlp::otlp_http_router_for_daemon(
@@ -461,6 +464,7 @@ fn build_http_router(
             // Opt-in: no section, no ring, and both routes answer 503.
             incident_store,
             incident_archive,
+            incident_export,
             settle_permits: Arc::new(tokio::sync::Semaphore::new(
                 query_api::MAX_SETTLES_IN_FLIGHT,
             )),

@@ -817,6 +817,22 @@ fusionné et déclenche une nouvelle tentative avec backoff exponentiel et
 jitter. Un redémarrage efface les deux caches. Requêtes et corps JSON sont
 bornés à 100 findings et 2 Mio. Utilisez HTTPS hors réseau privé de confiance.
 
+Avec `[daemon.incidents]` actif aussi, le daemon pousse ses incidents vers
+`/api/import/incidents` à côté d'`endpoint`, avec la même clé et le même identifiant de
+source, depuis 0.29.0. Un incident part quand il est enregistré, quand son alerte se
+résout et quand la passe de consolidation lui ajoute des findings gelés, au plus 10 par
+requête et 4 Mio par corps. Sa table suit celle des findings : le dernier état par
+identifiant d'incident, retentée avec le même backoff sur sa propre horloge, vidée à
+l'arrêt. Elle garde au plus `max_pending` ou 1 000 incidents, le plus petit des deux,
+puisqu'un incident peut porter mille findings gelés. Un incident de plus de 4 Mio à lui seul est abandonné, et le poll horaire du Hub
+peut encore le copier. Un Hub qui répond 404 ou 405 sur cette route la précède : le daemon
+journalise un avertissement et cesse de pousser les incidents jusqu'à son redémarrage,
+tandis que les findings continuent. Un Hub plus ancien avec la connexion active répond 401
+à la place, donc le daemon retente et journalise chaque tentative : mettez le Hub à jour
+d'abord. `perf_sentinel_hub_export_incidents_pending` et
+`perf_sentinel_hub_export_incidents_dropped_total` comptent ce qui attend et ce qui est
+abandonné.
+
 À l'arrêt propre (SIGTERM, `helm upgrade`, redémarrage progressif), l'exporteur
 vide ce qu'il détient encore avant que le processus ne se termine, pendant au
 plus 10 secondes. Ce budget empêche un Hub injoignable de retenir le daemon

@@ -15,6 +15,7 @@ pub mod traces_store;
 
 mod event_loop;
 mod hub_export;
+mod hub_incident_export;
 #[cfg(unix)]
 mod json_socket;
 mod listeners;
@@ -266,6 +267,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         metrics.clone(),
         toml_acks.clone(),
         ack_store.clone(),
+        config.daemon.incidents.enabled,
     )?;
     let hub_export_buffer = hub_export.as_ref().map(hub_export::HubExporter::buffer);
     // Masked span trees for the findings the store keeps, so an exported
@@ -304,6 +306,9 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         ack_store,
         incident_store,
         incident_archive.as_ref().map(|h| h.tx.clone()),
+        hub_export
+            .as_ref()
+            .and_then(hub_export::HubExporter::incident_buffer),
     )
     .await?;
 

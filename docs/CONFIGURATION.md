@@ -798,6 +798,19 @@ retain their coalesced batch and retry with exponential backoff and jitter. A
 daemon restart clears both caches. Requests and JSON bodies are bounded to 100
 findings and 2 MiB. Use HTTPS outside a trusted private network.
 
+With `[daemon.incidents]` enabled too, the daemon pushes its incidents to
+`/api/import/incidents` beside `endpoint`, with the same key and source id, from 0.29.0.
+An incident is sent when it is recorded, when its alert resolves and when the settle pass
+adds frozen findings to it, at most 10 per request and 4 MiB per body. Its table follows
+the findings one: the latest state per incident id, retried with the same backoff on its
+own clock, drained at shutdown. It holds at most `max_pending` or 1,000 incidents,
+whichever is lower, since one incident can carry a thousand frozen findings. An incident larger than 4 MiB alone is
+dropped, and the Hub's hourly poll can still copy it. A Hub that answers 404 or 405 on
+that route predates it: the daemon logs one warning and stops pushing incidents until it
+restarts, while findings keep flowing. An older Hub with sign-in on answers 401 instead,
+so the daemon keeps retrying and logs each retry: upgrade the Hub first. `perf_sentinel_hub_export_incidents_pending` and
+`perf_sentinel_hub_export_incidents_dropped_total` count what waits and what is dropped.
+
 On a graceful shutdown (SIGTERM, `helm upgrade`, a rolling restart) the
 exporter flushes what it still holds before the process exits, for up to
 10 seconds. The budget keeps an unreachable Hub from holding the daemon past

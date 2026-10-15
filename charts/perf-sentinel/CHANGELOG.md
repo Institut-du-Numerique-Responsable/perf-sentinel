@@ -10,6 +10,25 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.29.0]
+
+### Added
+
+- **`appVersion` moves to `0.29.0`.** With `[daemon.hub_export]` and
+  `[daemon.incidents]` both enabled, the image pushes its incidents to
+  PerfSentinelHub's `/api/import/incidents` beside its findings, so an
+  incident the ring evicts between two Hub polls still reaches the Hub.
+  Upgrade the Hub to 0.5.0 first: an older Hub with sign-in on answers 401,
+  which the daemon retries and logs. Two label-free metrics are new,
+  `perf_sentinel_hub_export_incidents_pending` and
+  `perf_sentinel_hub_export_incidents_dropped_total`.
+
+### Changed
+
+- The `values.yaml` comment on `[daemon.hub_export]` says incidents travel
+  through the same block. No `values.yaml` key is added or removed, and no
+  template changes.
+
 ## [0.28.0]
 
 ### Added
