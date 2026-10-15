@@ -822,11 +822,14 @@ Avec `[daemon.incidents]` actif aussi, le daemon pousse ses incidents vers
 source, depuis 0.29.0. Un incident part quand il est enregistré, quand son alerte se
 résout et quand la passe de consolidation lui ajoute des findings gelés, au plus 10 par
 requête et 4 Mio par corps. Sa table suit celle des findings : le dernier état par
-identifiant d'incident, bornée par `max_pending`, retentée avec le même backoff, vidée à
-l'arrêt. Un incident de plus de 4 Mio à lui seul est abandonné, et le poll horaire du Hub
+identifiant d'incident, retentée avec le même backoff sur sa propre horloge, vidée à
+l'arrêt. Elle garde au plus `max_pending` ou 1 000 incidents, le plus petit des deux,
+puisqu'un incident peut porter mille findings gelés. Un incident de plus de 4 Mio à lui seul est abandonné, et le poll horaire du Hub
 peut encore le copier. Un Hub qui répond 404 ou 405 sur cette route la précède : le daemon
 journalise un avertissement et cesse de pousser les incidents jusqu'à son redémarrage,
-tandis que les findings continuent. `perf_sentinel_hub_export_incidents_pending` et
+tandis que les findings continuent. Un Hub plus ancien avec la connexion active répond 401
+à la place, donc le daemon retente et journalise chaque tentative : mettez le Hub à jour
+d'abord. `perf_sentinel_hub_export_incidents_pending` et
 `perf_sentinel_hub_export_incidents_dropped_total` comptent ce qui attend et ce qui est
 abandonné.
 

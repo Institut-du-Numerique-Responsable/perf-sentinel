@@ -9,8 +9,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 - The Hub export pushes incidents too. With `[daemon.hub_export]` and `[daemon.incidents]`
   both enabled, each incident goes to the Hub's `/api/import/incidents` when it is
   recorded, closed or completed by the settle pass, so one the ring evicts between two Hub
-  polls is no longer lost. Batches hold at most 10 incidents and 4 MiB. A Hub without the
-  route (404 or 405) stops incident pushes until restart, and findings keep flowing. New
+  polls is no longer lost. Batches hold at most 10 incidents and 4 MiB, and at most 1,000
+  incidents wait at once. A Hub without the route (404 or 405) stops incident pushes until
+  restart, and findings keep flowing. An older Hub with sign-in on answers 401, which is
+  retried and logged, so upgrade the Hub to PerfSentinelHub 0.5.0 first. New
   label-free metrics `perf_sentinel_hub_export_incidents_pending` and
   `perf_sentinel_hub_export_incidents_dropped_total`.
 

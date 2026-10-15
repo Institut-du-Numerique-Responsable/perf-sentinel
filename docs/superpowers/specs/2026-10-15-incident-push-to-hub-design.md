@@ -140,11 +140,12 @@ Nothing new: a source already carries `importSecretName` and `importSecretKey`.
 
 ## Versions and release order
 
-- perf-sentinel 0.29.0 (new behaviour and metrics, no public struct change), chart in
-  lockstep.
+- perf-sentinel 0.29.0 (new behaviour and metrics, and `QueryApiState` gains a crate-private
+  field, which breaks external struct literals), chart in lockstep.
 - PerfSentinelHub 0.5.0 (new API route), after 0.4.2.
-- Either order works thanks to the 404 handling. Ship the Hub first so a daemon's first
-  push lands, then repin the Hub's embedded engine to 0.29.0.
+- Ship the Hub first. A Hub without the route answers 404 with sign-in off, which the
+  daemon handles by stopping incident pushes, but 401 with sign-in on, which it retries
+  and logs. Then repin the Hub's embedded engine to 0.29.0.
 
 ## Documentation
 
