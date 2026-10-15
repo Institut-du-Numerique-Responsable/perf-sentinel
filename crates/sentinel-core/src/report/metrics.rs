@@ -196,6 +196,13 @@ pub struct MetricsState {
     /// scrape-visible sign that the disclosure archive is incomplete.
     /// Stays at 0 without the daemon feature.
     pub archive_windows_dropped_total: IntCounterVec,
+    /// Oldest UTC day the daily rollups still hold, as epoch seconds at
+    /// 00:00. Zero until a day has closed.
+    pub archive_oldest_day_seconds: IntGauge,
+    /// Distinct days held in the daily rollups.
+    pub archive_rollup_days: IntGauge,
+    /// Newest closed day in the daily rollups, as epoch seconds at 00:00.
+    pub archive_last_closed_day_seconds: IntGauge,
     /// Cross-trace correlator pairs evicted by the `max_tracked_pairs`
     /// cap. A sustained rate means the correlation topology exceeds the
     /// cap and lowest-count pairs are silently recycled, so
@@ -899,6 +906,25 @@ impl MetricsState {
         for reason in &ArchiveDropReason::ALL {
             let _ = archive_windows_dropped_total.with_label_values(&[reason.as_str()]);
         }
+        let rollup_gauge = |name: &str, help: &str| {
+            let gauge = IntGauge::new(name, help).expect("metric creation should not fail");
+            registry
+                .register(Box::new(gauge.clone()))
+                .expect("registration should not fail");
+            gauge
+        };
+        let archive_oldest_day_seconds = rollup_gauge(
+            "perf_sentinel_archive_oldest_day_timestamp_seconds",
+            "Oldest UTC day held in the disclosure archive's daily rollups, epoch seconds at 00:00",
+        );
+        let archive_rollup_days = rollup_gauge(
+            "perf_sentinel_archive_rollup_days",
+            "Distinct UTC days held in the disclosure archive's daily rollups",
+        );
+        let archive_last_closed_day_seconds = rollup_gauge(
+            "perf_sentinel_archive_last_closed_day_timestamp_seconds",
+            "Newest closed UTC day in the disclosure archive's daily rollups, epoch seconds at 00:00",
+        );
 
         let otlp_spans_received_total = IntCounter::new(
             "perf_sentinel_otlp_spans_received_total",
@@ -1143,6 +1169,9 @@ impl MetricsState {
             analysis_shed_batches_total,
             analysis_shed_traces_total,
             archive_windows_dropped_total,
+            archive_oldest_day_seconds,
+            archive_rollup_days,
+            archive_last_closed_day_seconds,
             correlator_pairs_evicted_total,
             slow_window_keys_refused_total,
             service_io_ops_total,

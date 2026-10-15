@@ -7,12 +7,15 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::Deserialize;
 
 use super::aggregator::PeriodState;
+#[cfg(any(feature = "daemon", test))]
 use super::hasher::archive_chain_hash;
+#[cfg(any(feature = "daemon", test))]
 use crate::report::Report;
 
 /// Tag every rollup line carries, inside the hashed body.
 pub(crate) const ROLLUP_FORMAT: &str = "perf-sentinel-rollup/v1";
 
+#[cfg(any(feature = "daemon", test))]
 /// `<stem>-daily-YYYY-MM.ndjson`: one file per month, so retention deletes
 /// whole files and never rewrites a chained one.
 pub(crate) fn rollup_file_name(stem: &str, day: NaiveDate) -> String {
@@ -32,12 +35,14 @@ pub(crate) fn parse_rollup_file_name(name: &str) -> Option<(&str, i32, u32)> {
     (1..=12).contains(&month).then_some((stem, year, month))
 }
 
+#[cfg(any(feature = "daemon", test))]
 /// The crash snapshot of the open day. `.json`, so a directory passed to
 /// `disclose --input` never picks it up.
 pub(crate) fn partial_file_name(stem: &str) -> String {
     format!("{stem}-daily.partial.json")
 }
 
+#[cfg(any(feature = "daemon", test))]
 /// One UTC day's windows, folded.
 pub(crate) struct ClosedDay {
     pub day: NaiveDate,
@@ -46,6 +51,7 @@ pub(crate) struct ClosedDay {
     pub state: PeriodState,
 }
 
+#[cfg(any(feature = "daemon", test))]
 /// Folds windows into the open day and hands the day back once a window
 /// lands on another one.
 #[derive(Default)]
@@ -53,6 +59,7 @@ pub(crate) struct DayAccumulator {
     open: Option<ClosedDay>,
 }
 
+#[cfg(any(feature = "daemon", test))]
 impl DayAccumulator {
     /// Fold one window. A window on another UTC day closes the open one,
     /// in either direction: a clock stepped back across midnight closes it
@@ -86,6 +93,7 @@ impl DayAccumulator {
     }
 }
 
+#[cfg(any(feature = "daemon", test))]
 fn body(day: &ClosedDay) -> serde_json::Value {
     serde_json::json!({
         "format": ROLLUP_FORMAT,
@@ -96,6 +104,7 @@ fn body(day: &ClosedDay) -> serde_json::Value {
     })
 }
 
+#[cfg(any(feature = "daemon", test))]
 /// Serialise one day and chain it to `prev`, the way the window writer
 /// chains a window. `ts` is the day's first window, so the reader's
 /// period and reach checks work on it unchanged.
@@ -118,6 +127,7 @@ pub(crate) fn serialize_rollup(
     serde_json::to_string(&line)
 }
 
+#[cfg(any(feature = "daemon", test))]
 /// The open day, unchained and without the format tag, so it can never
 /// pass for a rollup line.
 pub(crate) fn serialize_partial(day: &ClosedDay) -> Result<String, serde_json::Error> {
@@ -128,13 +138,21 @@ pub(crate) fn serialize_partial(day: &ClosedDay) -> Result<String, serde_json::E
     serde_json::to_string(&snapshot)
 }
 
+#[cfg(any(feature = "daemon", test))]
 pub(crate) fn parse_partial(text: &str) -> Option<ClosedDay> {
-    let line: RollupLine = serde_json::from_str(text).ok()?;
+    #[derive(Deserialize)]
+    struct Snapshot {
+        ts: DateTime<Utc>,
+        day: NaiveDate,
+        last_ts: DateTime<Utc>,
+        state: PeriodState,
+    }
+    let snapshot: Snapshot = serde_json::from_str(text).ok()?;
     Some(ClosedDay {
-        day: line.day,
-        first_ts: line.ts,
-        last_ts: line.last_ts,
-        state: line.state,
+        day: snapshot.day,
+        first_ts: snapshot.ts,
+        last_ts: snapshot.last_ts,
+        state: snapshot.state,
     })
 }
 
@@ -143,12 +161,11 @@ pub(crate) fn is_rollup_value(value: &serde_json::Value) -> bool {
 }
 
 /// The fields the reader folds. `prev`, `seq`, `drops` and `hash` are
-/// read by the chain walk on the raw value.
+/// read by the chain walk on the raw value. `last_ts` is left unread.
 #[derive(Deserialize)]
 pub(crate) struct RollupLine {
     pub ts: DateTime<Utc>,
     pub day: NaiveDate,
-    pub last_ts: DateTime<Utc>,
     pub state: PeriodState,
 }
 

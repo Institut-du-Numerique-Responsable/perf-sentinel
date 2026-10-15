@@ -159,7 +159,7 @@ pub(super) fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
     }
 }
 
-fn open_append(path: &Path) -> Result<File, ArchiveError> {
+pub(super) fn open_append(path: &Path) -> Result<File, ArchiveError> {
     let open_error = |source| ArchiveError::Open {
         path: path.display().to_string(),
         source,
@@ -184,6 +184,20 @@ fn open_append(path: &Path) -> Result<File, ArchiveError> {
         });
     }
     Ok(file)
+}
+
+/// Owner-only, no-follow, truncating open for the rollup snapshot's
+/// temporary file.
+pub(super) fn open_truncate(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    no_follow(&mut options);
+    options.open(path)
 }
 
 /// Bring an existing file back to owner-only, or refuse it.
@@ -387,7 +401,7 @@ fn extract_hash(line: &str) -> Option<String> {
 /// a `BufWriter` would leave a half-written line on an ungraceful death
 /// (SIGKILL, OOM) or hold bytes the caller then cannot account for when a
 /// write fails. Both cases end up published as a chain break.
-fn write_line(file: &mut File, line: &str) -> std::io::Result<()> {
+pub(super) fn write_line(file: &mut File, line: &str) -> std::io::Result<()> {
     let mut record = Vec::with_capacity(line.len() + 1);
     record.extend_from_slice(line.as_bytes());
     record.push(b'\n');
