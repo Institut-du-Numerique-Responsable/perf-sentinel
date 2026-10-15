@@ -103,6 +103,7 @@ pub fn spawn(
             seq,
         })
     } else {
+        probe_rollup_dir(&path)?;
         None
     };
     let retention_days = cfg.rollup_retention_days;
@@ -196,6 +197,20 @@ pub(super) fn open_append(path: &Path) -> Result<File, ArchiveError> {
         });
     }
     Ok(file)
+}
+
+/// With the window lines off nothing else opens a file before the writer
+/// thread runs, so check here that the rollups' directory takes one: the
+/// snapshot's temporary file, created and removed.
+fn probe_rollup_dir(archive_path: &Path) -> Result<(), ArchiveError> {
+    let dir = super::rollup_writer::rollup_dir(archive_path);
+    let probe = dir.join(".perf-sentinel-rollup-probe.tmp");
+    open_truncate(&probe).map_err(|source| ArchiveError::Open {
+        path: dir.display().to_string(),
+        source,
+    })?;
+    let _ = std::fs::remove_file(probe);
+    Ok(())
 }
 
 /// Owner-only, no-follow, truncating open for the rollup snapshot's
@@ -963,5 +978,20 @@ mod tests {
         handle.join.await.unwrap();
         assert!(!dir.path().join("archive.ndjson").exists());
         assert_eq!(daily_files(&dir).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn windows_off_still_refuses_an_unusable_archive_directory() {
+        let dir = TempDir::new().unwrap();
+        let config = DaemonArchiveConfig {
+            path: dir
+                .path()
+                .join("missing/archive.ndjson")
+                .display()
+                .to_string(),
+            windows: false,
+            ..DaemonArchiveConfig::default()
+        };
+        assert!(spawn(&config, test_metrics()).is_err());
     }
 }
