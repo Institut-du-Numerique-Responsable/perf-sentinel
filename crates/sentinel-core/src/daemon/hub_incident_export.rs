@@ -7,10 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use bytes::Bytes;
 use serde::Serialize;
 
-use super::hub_export::{ExportOutcome, bounded_body, classify, evict_by_order, next_delay};
+use super::hub_export::{
+    ExportOutcome, bounded_body, classify, evict_by_order, next_delay, post_batch,
+    snapshot_by_order,
+};
 use super::incidents::Incident;
 use crate::http_client;
 use crate::report::metrics::MetricsState;
@@ -22,7 +24,8 @@ pub(super) const MAX_INCIDENT_BODY_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct PendingIncident {
-    pub(crate) incident: Incident,
+    // Shared, so a snapshot copies pointers rather than frozen findings.
+    pub(crate) incident: Arc<Incident>,
     revision: u64,
 }
 
@@ -55,16 +58,18 @@ impl IncidentExportBuffer {
     /// batch already in flight cannot remove it. Returns how many incidents
     /// were evicted to stay within `max_pending`.
     pub(crate) fn push(&self, incident: &Incident) -> u64 {
+        let mut state = self.lock();
+        // Read under the lock `mark_unsupported` sets it under, so a push
+        // racing a 404 cannot land after the table is cleared.
         if self.is_unsupported() {
             return 0;
         }
-        let mut state = self.lock();
         state.next_revision = state.next_revision.wrapping_add(1);
         let revision = state.next_revision;
         state.entries.insert(
             incident.id.clone(),
             PendingIncident {
-                incident: incident.clone(),
+                incident: Arc::new(incident.clone()),
                 revision,
             },
         );
@@ -76,18 +81,7 @@ impl IncidentExportBuffer {
     /// Up to `limit` pending incidents, least recently changed first.
     pub(crate) fn snapshot(&self, limit: usize) -> Vec<PendingIncident> {
         let state = self.lock();
-        state
-            .order
-            .iter()
-            .filter_map(|(id, revision)| {
-                state
-                    .entries
-                    .get(id)
-                    .filter(|entry| entry.revision == *revision)
-            })
-            .take(limit)
-            .cloned()
-            .collect()
+        snapshot_by_order(&state.entries, &state.order, limit, |entry| entry.revision)
     }
 
     /// Remove what the Hub accepted, unless it changed again meanwhile.
@@ -107,8 +101,8 @@ impl IncidentExportBuffer {
     /// The Hub has no incident route: stop queueing until the daemon
     /// restarts. Returns how many pending incidents this drops.
     pub(crate) fn mark_unsupported(&self) -> u64 {
-        self.unsupported.store(true, Ordering::Relaxed);
         let mut state = self.lock();
+        self.unsupported.store(true, Ordering::Relaxed);
         let dropped = state.entries.len() as u64;
         state.entries.clear();
         state.order.clear();
@@ -196,7 +190,7 @@ impl IncidentExport {
         let Some(body) = bounded_body(&mut batch, MAX_INCIDENT_BODY_BYTES, |pending| {
             serde_json::to_vec(&IncidentPayload {
                 producer_version: env!("CARGO_PKG_VERSION"),
-                incidents: pending.iter().map(|entry| &entry.incident).collect(),
+                incidents: pending.iter().map(|entry| &*entry.incident).collect(),
             })
         }) else {
             // One incident alone over the cap: the poll can still copy it.
@@ -206,24 +200,14 @@ impl IncidentExport {
             self.due = tokio::time::Instant::now();
             return true;
         };
-        let outcome = match http_client::fetch_with_body(
-            client,
-            hyper::Method::POST,
-            &self.uri,
-            "perf-sentinel-hub-export",
-            Duration::from_secs(10),
-            Some(api_key),
-            Bytes::from(body),
-        )
-        .await
-        {
-            Ok((status, _)) if is_missing_route(status) => {
+        let outcome = match post_batch(client, &self.uri, api_key, body).await {
+            Ok(status) if is_missing_route(status) => {
                 self.unsupported(metrics);
                 self.due = tokio::time::Instant::now() + flush_interval;
                 return false;
             }
-            Ok((status, _)) => classify(status),
-            Err(error) => ExportOutcome::Retry(error.to_string()),
+            Ok(status) => classify(status),
+            Err(reason) => ExportOutcome::Retry(reason),
         };
         let delay = self.apply(&outcome, &batch, metrics, flush_interval);
         self.publish(metrics);
@@ -302,11 +286,6 @@ fn is_missing_route(status: hyper::StatusCode) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use crate::http_client;
-    use crate::report::metrics::MetricsState;
 
     pub(crate) type Seen = Arc<Mutex<Vec<(String, Option<String>, Vec<u8>)>>>;
 
@@ -503,7 +482,7 @@ pub(crate) mod tests {
     fn ids(batch: Vec<PendingIncident>) -> Vec<String> {
         batch
             .into_iter()
-            .map(|pending| pending.incident.id)
+            .map(|pending| pending.incident.id.clone())
             .collect()
     }
 

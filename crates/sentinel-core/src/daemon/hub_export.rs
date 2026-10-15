@@ -108,14 +108,9 @@ impl HubExporter {
                 path: key_path.to_string(),
             });
         }
-        let endpoint = format!(
-            "{}?source_id={}",
-            config.endpoint.as_deref().expect("config validation"),
-            config.source_id.as_deref().expect("config validation"),
-        );
-        let uri = endpoint
-            .parse::<http_client::Uri>()
-            .map_err(|_| super::DaemonError::HubExportEndpoint)?;
+        let endpoint = config.endpoint.as_deref().expect("config validation");
+        let source_id = config.source_id.as_deref().expect("config validation");
+        let uri = source_uri(endpoint, source_id)?;
         let buffer = Arc::new(HubExportBuffer::new(config.max_pending));
         let incident_buffer = push_incidents.then(|| {
             Arc::new(IncidentExportBuffer::new(incident_capacity(
@@ -124,7 +119,10 @@ impl HubExporter {
         });
         let incidents = incident_buffer
             .as_ref()
-            .map(|incidents| incident_export(config, incidents))
+            .map(|incidents| {
+                source_uri(&incidents_endpoint(endpoint), source_id)
+                    .map(|uri| IncidentExport::new(incidents.clone(), uri))
+            })
             .transpose()?;
         let shutdown = Arc::new(tokio::sync::Notify::new());
         let handle = tokio::spawn(run_exporter(
@@ -193,20 +191,11 @@ impl HubExporter {
     }
 }
 
-/// Where the incident table goes: the incident import beside the configured
-/// findings one, for the same source.
-fn incident_export(
-    config: &DaemonHubExportConfig,
-    incidents: &Arc<IncidentExportBuffer>,
-) -> Result<IncidentExport, super::DaemonError> {
-    let uri = format!(
-        "{}?source_id={}",
-        incidents_endpoint(config.endpoint.as_deref().expect("config validation")),
-        config.source_id.as_deref().expect("config validation"),
-    )
-    .parse::<http_client::Uri>()
-    .map_err(|_| super::DaemonError::HubExportEndpoint)?;
-    Ok(IncidentExport::new(incidents.clone(), uri))
+/// A Hub import route, scoped to this daemon's source.
+fn source_uri(endpoint: &str, source_id: &str) -> Result<http_client::Uri, super::DaemonError> {
+    format!("{endpoint}?source_id={source_id}")
+        .parse::<http_client::Uri>()
+        .map_err(|_| super::DaemonError::HubExportEndpoint)
 }
 
 impl Drop for HubExporter {
@@ -252,18 +241,7 @@ impl HubExportBuffer {
             .inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state
-            .order
-            .iter()
-            .filter_map(|(signature, revision)| {
-                state
-                    .entries
-                    .get(signature)
-                    .filter(|entry| entry.revision == *revision)
-            })
-            .take(limit)
-            .cloned()
-            .collect()
+        snapshot_by_order(&state.entries, &state.order, limit, |entry| entry.revision)
     }
 
     fn acknowledge(&self, sent: &[PendingExport], acknowledged_at_ms: u64) {
@@ -397,6 +375,22 @@ fn evict_overflow(state: &mut PendingState, max_pending: usize) -> u64 {
     evict_by_order(&mut state.entries, &mut state.order, max_pending, |entry| {
         entry.revision
     })
+}
+
+/// Up to `limit` entries in queueing order, each at its latest place: an
+/// `order` item whose revision no longer matches its entry is skipped.
+pub(super) fn snapshot_by_order<V: Clone>(
+    entries: &HashMap<String, V>,
+    order: &VecDeque<(String, u64)>,
+    limit: usize,
+    revision: impl Fn(&V) -> u64,
+) -> Vec<V> {
+    order
+        .iter()
+        .filter_map(|(key, queued)| entries.get(key).filter(|entry| revision(entry) == *queued))
+        .take(limit)
+        .cloned()
+        .collect()
 }
 
 /// Drop the least recently queued entries until `entries` fits `max`, then
@@ -556,19 +550,9 @@ impl FindingsExport {
         // bounded_payload only pops from the end, so truncating keeps the
         // acknowledgment aligned with what went over the wire.
         batch.truncate(annotated.len());
-        let outcome = match http_client::fetch_with_body(
-            client,
-            hyper::Method::POST,
-            &self.uri,
-            "perf-sentinel-hub-export",
-            Duration::from_secs(10),
-            Some(api_key),
-            Bytes::from(body),
-        )
-        .await
-        {
-            Ok((status, _)) => classify(status),
-            Err(error) => ExportOutcome::Retry(error.to_string()),
+        let outcome = match post_batch(client, &self.uri, api_key, body).await {
+            Ok(status) => classify(status),
+            Err(reason) => ExportOutcome::Retry(reason),
         };
         let delay = apply_outcome(
             &outcome,
@@ -582,6 +566,28 @@ impl FindingsExport {
         self.due = tokio::time::Instant::now() + delay;
         true
     }
+}
+
+/// POST one JSON batch to a Hub import route: the status the Hub answered,
+/// or the transport error.
+pub(super) async fn post_batch(
+    client: &http_client::HttpClientWithBody,
+    uri: &http_client::Uri,
+    api_key: &str,
+    body: Vec<u8>,
+) -> Result<hyper::StatusCode, String> {
+    http_client::fetch_with_body(
+        client,
+        hyper::Method::POST,
+        uri,
+        "perf-sentinel-hub-export",
+        Duration::from_secs(10),
+        Some(api_key),
+        Bytes::from(body),
+    )
+    .await
+    .map(|(status, _)| status)
+    .map_err(|error| error.to_string())
 }
 
 pub(super) fn classify(status: hyper::StatusCode) -> ExportOutcome {
@@ -1222,18 +1228,42 @@ mod tests {
         let (handle, _shutdown) =
             spawn_with_incidents(&base, &findings, &incidents, Duration::from_millis(50));
 
-        for i in 0..30 {
+        // Read in arrival order, so a slow runner only stretches the wait.
+        let mut i = 0;
+        wait_for(|| {
             findings.push_batch(&[finding(&format!("s{i}"), "trace")], unix_time_ms());
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+            i += 1;
+            findings_between_incident_posts(&seen) >= 3
+        })
+        .await;
         handle.abort();
 
-        assert!(count(&seen, "/api/import/findings") >= 3, "findings flow");
-        assert_eq!(
-            1,
-            count(&seen, "/api/import/incidents"),
-            "one try, then its backoff"
+        assert!(
+            findings_between_incident_posts(&seen) >= 3,
+            "findings flow while the incident half backs off"
         );
+    }
+
+    /// Findings posts after the first incident post and before the next.
+    fn findings_between_incident_posts(
+        seen: &crate::daemon::hub_incident_export::tests::Seen,
+    ) -> usize {
+        seen.lock()
+            .expect("lock")
+            .iter()
+            .map(|(uri, _, _)| uri.starts_with("/api/import/incidents"))
+            .skip_while(|incident| !incident)
+            .skip(1)
+            .take_while(|incident| !incident)
+            .count()
+    }
+
+    /// Poll `done` every 20 ms, five seconds at most.
+    async fn wait_for(mut done: impl FnMut() -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !done() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// A Hub without the incident route stops incident pushes, never findings.
@@ -1248,10 +1278,12 @@ mod tests {
         let (handle, _shutdown) =
             spawn_with_incidents(&base, &findings, &incidents, Duration::from_millis(50));
 
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        wait_for(|| incidents.is_unsupported() && count(&seen, "/api/import/findings") == 1).await;
         incidents.push(&tests::incident("b", None));
         findings.push_batch(&[finding("second", "trace")], unix_time_ms());
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        wait_for(|| count(&seen, "/api/import/findings") == 2).await;
+        // A few flush intervals more, for a refused change that leaked.
+        tokio::time::sleep(Duration::from_millis(200)).await;
         handle.abort();
 
         assert_eq!(1, count(&seen, "/api/import/incidents"));
