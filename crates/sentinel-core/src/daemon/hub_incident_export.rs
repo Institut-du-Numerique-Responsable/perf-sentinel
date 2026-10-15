@@ -6,11 +6,24 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use super::hub_export::evict_by_order;
+use bytes::Bytes;
+use serde::Serialize;
+
+use super::hub_export::{
+    ExportOutcome, bounded_body, classify, evict_by_order, jitter_seed, retry_delay,
+};
 use super::incidents::Incident;
+use crate::http_client;
+use crate::report::metrics::MetricsState;
+
+/// Incidents per request. One carries up to a thousand frozen findings.
+pub(super) const MAX_INCIDENT_BATCH: usize = 10;
+/// The Hub's cap on an incident import, the size of one of its poll pages.
+pub(super) const MAX_INCIDENT_BODY_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct PendingIncident {
@@ -122,9 +135,302 @@ impl IncidentExportBuffer {
     }
 }
 
+#[derive(Serialize)]
+struct IncidentPayload<'a> {
+    producer_version: &'static str,
+    incidents: Vec<&'a Incident>,
+}
+
+/// The incident import beside the configured findings import. Config
+/// validation guarantees the suffix, so this only swaps it.
+pub(super) fn incidents_endpoint(findings_endpoint: &str) -> String {
+    format!(
+        "{}/api/import/incidents",
+        findings_endpoint
+            .strip_suffix("/api/import/findings")
+            .unwrap_or(findings_endpoint)
+    )
+}
+
+/// The exporter task's incident half: the table, where it goes, and its own
+/// failure count, so a findings backoff never slows incidents down.
+pub(crate) struct IncidentExport {
+    buffer: Arc<IncidentExportBuffer>,
+    uri: http_client::Uri,
+    failures: u32,
+}
+
+impl IncidentExport {
+    pub(crate) fn new(buffer: Arc<IncidentExportBuffer>, uri: http_client::Uri) -> Self {
+        Self {
+            buffer,
+            uri,
+            failures: 0,
+        }
+    }
+
+    /// Send one batch of what is pending. `None` when nothing was, otherwise
+    /// the delay before the next round, by the findings export's own rules.
+    pub(crate) async fn round(
+        &mut self,
+        client: &http_client::HttpClientWithBody,
+        api_key: &str,
+        metrics: &MetricsState,
+    ) -> Option<Duration> {
+        let mut batch = self.buffer.snapshot(MAX_INCIDENT_BATCH);
+        if batch.is_empty() {
+            return None;
+        }
+        let Some(body) = bounded_body(&mut batch, MAX_INCIDENT_BODY_BYTES, |pending| {
+            serde_json::to_vec(&IncidentPayload {
+                producer_version: env!("CARGO_PKG_VERSION"),
+                incidents: pending.iter().map(|entry| &entry.incident).collect(),
+            })
+        }) else {
+            // One incident alone over the cap: the poll can still copy it.
+            self.buffer.acknowledge(&batch[..1]);
+            metrics.hub_export_incidents_dropped_total.inc();
+            self.publish(metrics);
+            return Some(Duration::ZERO);
+        };
+        let outcome = match http_client::fetch_with_body(
+            client,
+            hyper::Method::POST,
+            &self.uri,
+            "perf-sentinel-hub-export",
+            Duration::from_secs(10),
+            Some(api_key),
+            Bytes::from(body),
+        )
+        .await
+        {
+            Ok((status, _)) if is_missing_route(status) => return self.unsupported(metrics),
+            Ok((status, _)) => classify(status),
+            Err(error) => ExportOutcome::Retry(error.to_string()),
+        };
+        let next = self.apply(&outcome, &batch, metrics);
+        self.publish(metrics);
+        Some(next)
+    }
+
+    fn apply(
+        &mut self,
+        outcome: &ExportOutcome,
+        batch: &[PendingIncident],
+        metrics: &MetricsState,
+    ) -> Duration {
+        match outcome {
+            ExportOutcome::Accepted => {
+                self.buffer.acknowledge(batch);
+                self.failures = 0;
+                Duration::ZERO
+            }
+            ExportOutcome::Rejected(status) => {
+                self.buffer.acknowledge(batch);
+                metrics
+                    .hub_export_incidents_dropped_total
+                    .inc_by(batch.len() as u64);
+                self.failures = 0;
+                tracing::error!(
+                    endpoint = %http_client::redact_endpoint(&self.uri),
+                    status = *status,
+                    dropped = batch.len(),
+                    "PerfSentinelHub rejected the incident batch permanently; dropping it"
+                );
+                Duration::ZERO
+            }
+            ExportOutcome::Busy | ExportOutcome::Retry(_) => {
+                self.failures = self.failures.saturating_add(1);
+                retry_delay(self.failures, jitter_seed())
+            }
+        }
+    }
+
+    fn unsupported(&self, metrics: &MetricsState) -> Option<Duration> {
+        let dropped = self.buffer.mark_unsupported();
+        metrics.hub_export_incidents_dropped_total.inc_by(dropped);
+        self.publish(metrics);
+        tracing::warn!(
+            endpoint = %http_client::redact_endpoint(&self.uri),
+            dropped,
+            "PerfSentinelHub has no incident import route; incidents are not pushed until restart, findings are"
+        );
+        None
+    }
+
+    fn publish(&self, metrics: &MetricsState) {
+        metrics
+            .hub_export_incidents_pending
+            .set(self.buffer.len() as f64);
+    }
+}
+
+/// A Hub that predates the route answers it as any unmapped path.
+fn is_missing_route(status: hyper::StatusCode) -> bool {
+    matches!(
+        status,
+        hyper::StatusCode::NOT_FOUND | hyper::StatusCode::METHOD_NOT_ALLOWED
+    )
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    use crate::http_client;
+    use crate::report::metrics::MetricsState;
+
+    pub(crate) type Seen = Arc<Mutex<Vec<(String, Option<String>, Vec<u8>)>>>;
+
+    /// A Hub that records each request and answers `status`.
+    pub(crate) async fn fake_hub(status: u16) -> (String, Seen) {
+        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+        let store = seen.clone();
+        let app = axum::Router::new().fallback(
+            move |uri: axum::http::Uri, headers: axum::http::HeaderMap, body: axum::body::Bytes| {
+                let store = store.clone();
+                async move {
+                    let key = headers
+                        .get("x-api-key")
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_string);
+                    store
+                        .lock()
+                        .expect("lock")
+                        .push((uri.to_string(), key, body.to_vec()));
+                    axum::http::StatusCode::from_u16(status).expect("status")
+                }
+            },
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        (format!("http://{address}"), seen)
+    }
+
+    fn export(base: &str, buffer: &Arc<IncidentExportBuffer>) -> IncidentExport {
+        IncidentExport::new(
+            buffer.clone(),
+            format!("{base}/api/import/incidents?source_id=lab")
+                .parse()
+                .expect("uri"),
+        )
+    }
+
+    #[test]
+    fn the_incidents_route_sits_beside_the_findings_one() {
+        assert_eq!(
+            "https://hub.example.com/api/import/incidents",
+            incidents_endpoint("https://hub.example.com/api/import/findings")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_round_posts_the_pending_incidents_and_clears_them() {
+        let (base, seen) = fake_hub(200).await;
+        let buffer = Arc::new(IncidentExportBuffer::new(10));
+        buffer.push(&incident("a", None));
+        let metrics = MetricsState::new();
+        let client = http_client::build_client_with_body();
+
+        let next = export(&base, &buffer)
+            .round(&client, &"k".repeat(32), &metrics)
+            .await;
+
+        assert!(next.is_some());
+        assert_eq!(0, buffer.len());
+        let requests = seen.lock().expect("lock");
+        let (uri, key, body) = &requests[0];
+        assert_eq!("/api/import/incidents?source_id=lab", uri);
+        assert_eq!(Some("k".repeat(32)), *key);
+        let body: serde_json::Value = serde_json::from_slice(body).expect("json");
+        assert_eq!(env!("CARGO_PKG_VERSION"), body["producer_version"]);
+        assert_eq!("a", body["incidents"][0]["id"]);
+    }
+
+    #[tokio::test]
+    async fn an_empty_table_sends_nothing() {
+        let (base, seen) = fake_hub(200).await;
+        let buffer = Arc::new(IncidentExportBuffer::new(10));
+        let client = http_client::build_client_with_body();
+
+        let next = export(&base, &buffer)
+            .round(&client, &"k".repeat(32), &MetricsState::new())
+            .await;
+
+        assert!(next.is_none());
+        assert!(seen.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_hub_without_the_route_stops_incident_export_for_good() {
+        let (base, seen) = fake_hub(404).await;
+        let buffer = Arc::new(IncidentExportBuffer::new(10));
+        buffer.push(&incident("a", None));
+        buffer.push(&incident("b", None));
+        let metrics = MetricsState::new();
+        let client = http_client::build_client_with_body();
+        let mut export = export(&base, &buffer);
+
+        assert!(
+            export
+                .round(&client, &"k".repeat(32), &metrics)
+                .await
+                .is_none()
+        );
+        buffer.push(&incident("c", None));
+        assert!(
+            export
+                .round(&client, &"k".repeat(32), &metrics)
+                .await
+                .is_none()
+        );
+
+        assert!(buffer.is_unsupported());
+        assert_eq!(2, metrics.hub_export_incidents_dropped_total.get());
+        assert_eq!(
+            1,
+            seen.lock().expect("lock").len(),
+            "one probe, then silence"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_incident_over_the_cap_alone_is_dropped_and_counted() {
+        let (base, seen) = fake_hub(200).await;
+        let buffer = Arc::new(IncidentExportBuffer::new(10));
+        let mut big = incident("a", None);
+        big.detail = Some("x".repeat(MAX_INCIDENT_BODY_BYTES));
+        buffer.push(&big);
+        let metrics = MetricsState::new();
+        let client = http_client::build_client_with_body();
+
+        export(&base, &buffer)
+            .round(&client, &"k".repeat(32), &metrics)
+            .await;
+
+        assert_eq!(0, buffer.len());
+        assert_eq!(1, metrics.hub_export_incidents_dropped_total.get());
+        assert!(seen.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_busy_hub_keeps_the_batch() {
+        let (base, _seen) = fake_hub(503).await;
+        let buffer = Arc::new(IncidentExportBuffer::new(10));
+        buffer.push(&incident("a", None));
+        let client = http_client::build_client_with_body();
+
+        let next = export(&base, &buffer)
+            .round(&client, &"k".repeat(32), &MetricsState::new())
+            .await;
+
+        assert!(next.is_some());
+        assert_eq!(1, buffer.len());
+    }
 
     pub(crate) fn incident(id: &str, ended_at_ms: Option<u64>) -> Incident {
         let mut value = serde_json::json!({
