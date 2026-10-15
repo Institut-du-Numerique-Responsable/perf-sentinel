@@ -695,7 +695,7 @@ storage_path` to the PVC for you.
 **Size the PVC for the archive.** At its defaults the per-window archive
 keeps one active file plus `max_files = 12` rotated ones of
 `max_size_mb = 100` each, about 1.3 GB, which the chart's default claim
-of `2Gi` covers with the ack store beside it. Since 0.29.0, quarterly
+of `2Gi` covers with the ack store beside it. Since 0.28.0, quarterly
 disclosures read the daily rollups the daemon writes beside the window
 archive, a few MB per quarter, so the default claim no longer needs
 raising for them. Window retention (`max_files`, `max_size_mb`) then

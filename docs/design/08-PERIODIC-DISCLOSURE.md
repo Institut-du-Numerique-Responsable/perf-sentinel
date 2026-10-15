@@ -73,7 +73,7 @@ The aggregator reads NDJSON files (or directories of `*.ndjson` files), where ea
 {"ts":"<RFC 3339 UTC>","report":{...full Report...}}
 ```
 
-Since 0.29.0 the inputs can also hold daily rollup files, see Daily rollups below.
+Since 0.28.0 the inputs can also hold daily rollup files, see Daily rollups below.
 
 For each in-period envelope:
 
@@ -113,7 +113,7 @@ A deferred upgrade would stamp the canonical threshold per window and reconcile 
 
 The validator authenticates the canonical *label* (`canonical_waste.n_plus_one_threshold == 2`), not the *magnitude* of the archived figures: a tampered NDJSON line can carry threshold 2 with deflated counts and still pass. This is inherent to a self-disclosure model. The `content_hash` (plus the optional cosign attestation) binds the integrity of the *published report*. The trustworthiness of the source archives rests on the binary's `binary_hash` and SLSA provenance, not on the aggregator. Archive-derived counts are summed with `saturating_add` so a crafted near-`u64::MAX` value cannot wrap a period total into a small (under-reported) number.
 
-## Daily rollups (0.29.0)
+## Daily rollups (0.28.0)
 
 The window archive writes one full `Report` per scoring window, every `trace_ttl_ms / 2` (15 s by default). A lab measurement under synthetic load found 350 to 900 KiB per line, so the default 12 files of 100 MiB hold 6 to 16 hours, never a quarter. 0.28.0 made an official `disclose` refuse a period the archive no longer reaches, which stops a wrong report but does not make the archive hold the period.
 
@@ -173,7 +173,7 @@ Rollup files are read first (`process_rollup_file`). Each in-period rollup line 
 
 The daemon folds without `--strict-attribution`, which stays the reader's choice. The state records the earliest window that fell into `_unattributed` (`first_unattributed`), so with the flag `disclose` refuses an in-period rollup that folded one and names that window.
 
-The 0.28.0 reach check takes the oldest `ts` across rollup and window lines. With rollups, an official quarterly disclosure works with the default settings once the daemon has run since the quarter's first day.
+The 0.28.0 reach check takes the oldest verified `ts` across rollup and window lines. With rollups, an official quarterly disclosure works with the default settings once the daemon has run since the quarter's first day.
 
 ### Rounding
 
@@ -181,7 +181,7 @@ Figures from rollups match figures from the same windows up to floating-point ro
 
 ### What operators see
 
-- `/api/status` gains `disclosure_archive: {"oldest_day": "YYYY-MM-DD", "days": N, "last_closed_day": "YYYY-MM-DD"}`, absent until a day has closed. Additive since 0.29.0.
+- `/api/status` gains `disclosure_archive: {"oldest_day": "YYYY-MM-DD", "days": N, "last_closed_day": "YYYY-MM-DD"}`, absent until a day has closed. Additive since 0.28.0.
 - `/metrics` gains three label-free gauges: `perf_sentinel_archive_oldest_day_timestamp_seconds` (oldest day held, epoch seconds at 00:00 UTC), `perf_sentinel_archive_rollup_days` (distinct days held) and `perf_sentinel_archive_last_closed_day_timestamp_seconds` (newest closed day). All read 0 until a day has closed. They are set at startup from the files on disk and after each closed day.
 - The published `PeriodicReport` schema does not change: rollups are an input format only.
 - The Helm chart does not change: rollups land beside the archive path, on the persistent volume when persistence is enabled.
@@ -236,7 +236,7 @@ The `jq -cS` step canonicalises object keys via jq's built-in `S` flag, which ma
 Two new config sections in `.perf-sentinel.toml`:
 
 - `[reporting]` carries `intent`, `confidentiality_level`, `org_config_path`, `disclose_output_path`, `disclose_period`. Validated at config load.
-- `[daemon.archive]` carries `path`, `max_size_mb` (default 100), `max_files` (default 12), and since 0.29.0 `windows` (default `true`) and `rollup_retention_days` (default 400, at least 1). Validated at config load and at archive open.
+- `[daemon.archive]` carries `path`, `max_size_mb` (default 100), `max_files` (default 12), and since 0.28.0 `windows` (default `true`) and `rollup_retention_days` (default 400, at least 1). Validated at config load and at archive open.
 
 Both sections are optional. Their absence leaves Perf Sentinel in its prior behaviour: NDJSON to stdout, no archive, no reporting gate.
 

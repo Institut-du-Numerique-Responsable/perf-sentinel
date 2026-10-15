@@ -73,7 +73,7 @@ L'agrégateur lit des fichiers NDJSON (ou des dossiers contenant des `*.ndjson`)
 {"ts":"<RFC 3339 UTC>","report":{...full Report...}}
 ```
 
-Depuis 0.29.0, les entrées peuvent aussi contenir des fichiers de cumuls quotidiens, voir Cumuls quotidiens plus bas.
+Depuis 0.28.0, les entrées peuvent aussi contenir des fichiers de cumuls quotidiens, voir Cumuls quotidiens plus bas.
 
 Pour chaque enveloppe dans la période :
 
@@ -113,7 +113,7 @@ Une amélioration différée estamperait le seuil canonique par fenêtre et réc
 
 Le validateur authentifie le *label* canonique (`canonical_waste.n_plus_one_threshold == 2`), pas la *magnitude* des chiffres archivés : une ligne NDJSON falsifiée peut porter le seuil 2 avec des compteurs dégonflés et passer quand même. C'est inhérent à un modèle d'auto-déclaration. Le `content_hash` (et l'attestation cosign optionnelle) lie l'intégrité du *rapport publié*. La fiabilité des archives sources repose sur le `binary_hash` du binaire et la provenance SLSA, pas sur l'agrégateur. Les compteurs issus des archives sont sommés avec `saturating_add`, pour qu'une valeur proche de `u64::MAX` forgée ne puisse pas faire déborder un total de période vers un petit nombre (sous-déclaré).
 
-## Cumuls quotidiens (0.29.0)
+## Cumuls quotidiens (0.28.0)
 
 L'archive de fenêtres écrit un `Report` complet par fenêtre de scoring, toutes les `trace_ttl_ms / 2` (15 s par défaut). Une mesure en laboratoire sous charge synthétique a relevé 350 à 900 Kio par ligne, donc les 12 fichiers de 100 Mio par défaut tiennent 6 à 16 heures, jamais un trimestre. La 0.28.0 a fait refuser à un `disclose` officiel une période que l'archive n'atteint plus, ce qui empêche un rapport faux sans faire tenir la période dans l'archive.
 
@@ -173,7 +173,7 @@ Les fichiers de cumuls sont lus en premier (`process_rollup_file`). Chaque ligne
 
 Le daemon agrège sans `--strict-attribution`, qui reste le choix du lecteur. L'état garde la plus ancienne fenêtre tombée dans `_unattributed` (`first_unattributed`), donc avec cette option `disclose` refuse un cumul de la période qui en a agrégé une, et nomme cette fenêtre.
 
-La vérification de la 0.28.0, qui exige que l'archive remonte au début de la période, prend le plus ancien `ts` parmi les lignes de cumul et de fenêtre. Avec les cumuls, une divulgation trimestrielle officielle fonctionne avec les réglages par défaut dès que le daemon tourne depuis le premier jour du trimestre.
+La vérification de la 0.28.0, qui exige que l'archive remonte au début de la période, prend le plus ancien `ts` vérifié parmi les lignes de cumul et de fenêtre. Avec les cumuls, une divulgation trimestrielle officielle fonctionne avec les réglages par défaut dès que le daemon tourne depuis le premier jour du trimestre.
 
 ### Arrondis
 
@@ -181,7 +181,7 @@ Les chiffres issus des cumuls correspondent à ceux des mêmes fenêtres aux arr
 
 ### Ce que voit l'opérateur
 
-- `/api/status` gagne `disclosure_archive: {"oldest_day": "YYYY-MM-DD", "days": N, "last_closed_day": "YYYY-MM-DD"}`, absent tant qu'aucun jour n'est clos. Additif depuis 0.29.0.
+- `/api/status` gagne `disclosure_archive: {"oldest_day": "YYYY-MM-DD", "days": N, "last_closed_day": "YYYY-MM-DD"}`, absent tant qu'aucun jour n'est clos. Additif depuis 0.28.0.
 - `/metrics` gagne trois jauges sans étiquette : `perf_sentinel_archive_oldest_day_timestamp_seconds` (plus ancien jour conservé, secondes epoch à 00:00 UTC), `perf_sentinel_archive_rollup_days` (jours distincts conservés) et `perf_sentinel_archive_last_closed_day_timestamp_seconds` (jour clos le plus récent). Toutes valent 0 tant qu'aucun jour n'est clos. Elles sont posées au démarrage depuis les fichiers sur disque et après chaque jour clos.
 - Le schéma publié `PeriodicReport` ne change pas : les cumuls sont seulement un format d'entrée.
 - Le chart Helm ne change pas : les cumuls arrivent à côté du chemin d'archive, sur le volume persistant quand la persistance est activée.
@@ -236,7 +236,7 @@ L'étape `jq -cS` canonicalise les clés d'objet via le flag `S` intégré à jq
 Deux nouvelles sections dans `.perf-sentinel.toml` :
 
 - `[reporting]` porte `intent`, `confidentiality_level`, `org_config_path`, `disclose_output_path`, `disclose_period`. Validée au chargement de la config.
-- `[daemon.archive]` porte `path`, `max_size_mb` (défaut 100), `max_files` (défaut 12), et depuis 0.29.0 `windows` (défaut `true`) et `rollup_retention_days` (défaut 400, au moins 1). Validée au chargement de la config et à l'ouverture d'archive.
+- `[daemon.archive]` porte `path`, `max_size_mb` (défaut 100), `max_files` (défaut 12), et depuis 0.28.0 `windows` (défaut `true`) et `rollup_retention_days` (défaut 400, au moins 1). Validée au chargement de la config et à l'ouverture d'archive.
 
 Les deux sections sont optionnelles. Leur absence laisse Perf Sentinel dans son comportement antérieur : NDJSON sur stdout, pas d'archive, pas de garde-fou de reporting.
 

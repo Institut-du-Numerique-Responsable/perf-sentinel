@@ -78,7 +78,7 @@ Three different lifetimes are in play, and the visible 30 s TTL is the shortest 
 | Spans (needed for an explain tree)                    | `TraceWindow` in memory                                 | `trace_ttl_ms` elapses, 30 s by default, or LRU eviction past `max_active_traces`                                                                             |
 | Findings                                              | Findings ring buffer                                    | The ring fills past `max_retained_findings` (10000). **No TTL**: on a quiet fleet they are still served the next day, on a busy one they are gone in minutes  |
 | Findings, per window, on disk                         | NDJSON archive (`[daemon.archive]`)                     | Past `max_files` (12) rotated files of `max_size_mb` (100) each, the oldest file is deleted, about 1.3 GB at the defaults. **No TTL**: nothing expires by age |
-| Daily rollups for `disclose`, on disk (0.29.0)        | `<stem>-daily-YYYY-MM.ndjson`, beside the archive       | A month's file is deleted whole once its last day is more than `rollup_retention_days` (400) days before the newest closed day. `max_files` never touches it  |
+| Daily rollups for `disclose`, on disk (0.28.0)        | `<stem>-daily-YYYY-MM.ndjson`, beside the archive       | A month's file is deleted whole once its last day is more than `rollup_retention_days` (400) days before the newest closed day. `max_files` never touches it  |
 | Findings, latest state and days seen, per environment | The Hub's SQLite store (Hub 0.3.0 and later)            | `Hub:Retention` elapses since the last observation, 180 days by default                                                                                       |
 | Findings, every detection                             | Your log backend, fed by the daemon's stdout            | That backend's retention                                                                                                                                      |
 | Cross-trace correlations                              | `/api/correlations` and `/api/export/report`, live only | Immediately. **Not archived, not reproducible offline**, see below                                                                                            |
@@ -96,7 +96,7 @@ If the ratio sits near 1 during normal traffic, findings are being evicted withi
 
 ```bash
 # Findings from a given window, straight out of the archive. Daily rollup
-# lines (0.29.0+) share the directory and carry no .report, `[]?` skips them.
+# lines (0.28.0+) share the directory and carry no .report, `[]?` skips them.
 jq -c --arg from 2026-07-27T14:00:00Z --arg to 2026-07-27T15:00:00Z \
   'select((.ts | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) as $ts
           | $ts >= ($from | fromdateiso8601) and $ts < ($to | fromdateiso8601))
@@ -352,7 +352,7 @@ curl -s http://perf-sentinel:4318/api/status | jq '{uptime_seconds, active_trace
 3. **Sampling change.** A config bump reduced the sampling rate. Audit recent commits in your OTel config repo.
 4. **Daemon backpressure.** Three distinct pressure points. If ingestion outpaces the receive loop the OTLP channel fills and events are rejected: look for `channel full` warnings (`RUST_LOG=sentinel_core::ingest=debug`) and `perf_sentinel_otlp_rejected_total{reason="channel_full"}`. If detection can't keep up, the analysis worker queue fills and whole batches are shed: watch `perf_sentinel_analysis_queue_depth` and `perf_sentinel_analysis_shed_batches_total`. A third, quieter pressure point is the disclosure archive: when its writer falls behind on disk I/O, whole windows are dropped even though their findings were analyzed and served live. The drop is visible only on `perf_sentinel_archive_windows_dropped_total` (by `reason`), never in the archive itself. Common triggers: a pathological trace slowing detect+score, `max_active_traces` too low for current throughput, or slow or full storage under the archive path.
 
-   Before a quarterly disclosure (0.29.0), check how far back the daily rollups reach. An official `disclose` refuses a period the archive no longer reaches, so `oldest_day` should fall on or before the quarter's first day. Until a first UTC day has closed the field is absent, and the command prints `null`:
+   Before a quarterly disclosure (0.28.0), check how far back the daily rollups reach. An official `disclose` refuses a period the archive no longer reaches, so `oldest_day` should fall on or before the quarter's first day. Until a first UTC day has closed the field is absent, and the command prints `null`:
 
    ```bash
    curl -sf http://perf-sentinel:4318/api/status | jq .disclosure_archive
@@ -688,7 +688,7 @@ curl -s http://perf-sentinel:4318/api/export/report | jq -r '.warning_details[].
 
 **What survives.**
 
-- From the daemon itself, only what it writes to disk: the NDJSON findings archive and, since 0.29.0, its daily rollups when `[daemon.archive]` is set (a crash costs the rollups at most their last 20 windows, which `disclose` still counts from the window lines), the runtime ack store (`acks.jsonl`, replayed at startup) and the incident ring when `[daemon.incidents] archive_path` is set (reloaded at startup). Everything else is memory-only.
+- From the daemon itself, only what it writes to disk: the NDJSON findings archive and, since 0.28.0, its daily rollups when `[daemon.archive]` is set (a crash costs the rollups at most their last 20 windows, which `disclose` still counts from the window lines), the runtime ack store (`acks.jsonl`, replayed at startup) and the incident ring when `[daemon.incidents] archive_path` is set (reloaded at startup). Everything else is memory-only.
 - Prometheus retains the metrics it already scraped (historical counters are safe).
 - Tempo retains the traces, assuming you also send them there.
 

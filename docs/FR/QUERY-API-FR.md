@@ -316,7 +316,7 @@ ou comme moyen le moins coûteux de vérifier que le daemon tourne.
 | `stored_findings`         | number | Findings actuellement retenus dans le ring buffer de requêtage                                 |
 | `max_retained_findings`   | number | Plafond configuré de ce ring buffer (depuis 0.8.8)                                             |
 | `oldest_finding_ms`       | number | Instant de détection du plus ancien finding retenu, absent si le ring est vide (depuis 0.20.0) |
-| `disclosure_archive`      | object | Jours détenus en cumuls quotidiens, `{ oldest_day, days, last_closed_day }` (depuis 0.29.0)    |
+| `disclosure_archive`      | object | Jours détenus en cumuls quotidiens, `{ oldest_day, days, last_closed_day }` (depuis 0.28.0)    |
 
 Les trois paires gauge/plafond alimentent le graphe Headroom de
 l'onglet Trends de `perf-sentinel query monitor` : chaque paire se lit
@@ -336,7 +336,7 @@ porte les trois mêmes valeurs sous
 `perf_sentinel_archive_oldest_day_timestamp_seconds`,
 `perf_sentinel_archive_rollup_days` et
 `perf_sentinel_archive_last_closed_day_timestamp_seconds`. Voir
-[REPORTING-FR.md](REPORTING-FR.md#les-cumuls-quotidiens-tiennent-une-période-0290).
+[REPORTING-FR.md](REPORTING-FR.md#les-cumuls-quotidiens-tiennent-une-période-0280).
 
 **Exemple :**
 

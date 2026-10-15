@@ -381,7 +381,7 @@ struct StatusResponse {
     oldest_finding_ms: Option<u64>,
     /// Days the disclosure archive's daily rollups hold, absent until one
     /// has closed. A period starting before `oldest_day` cannot be
-    /// disclosed officially from this archive. Additive since 0.29.0.
+    /// disclosed officially from this archive. Additive since 0.28.0.
     #[serde(skip_serializing_if = "Option::is_none")]
     disclosure_archive: Option<DisclosureArchiveStatus>,
 }

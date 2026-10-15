@@ -38,8 +38,10 @@ annotations:
   artifacthub.io/changes: |
     - kind: security
       description: "The image picks up rustls 0.23.46 against RUSTSEC-2026-0346 to RUSTSEC-2026-0349. Only the unauthenticated ServerHello that could steer later connections to classical key exchange applies, to the shared outbound HTTP client."
+    - kind: added
+      description: "With [daemon.archive] configured, the image also writes one hash-chained line per UTC day beside the window archive, a few tens of KiB per day, kept rollup_retention_days (400 by default). disclose reads them, so a quarterly disclosure fits on the default claim. They land on the persistent volume with the archive."
     - kind: fixed
-      description: "appVersion 0.28.0. The image's disclose --emit-attestation now names the report's canonical content hash as the attestation subject, and verify-hash checks that the attestation names the figures it is verifying, so a signature no longer vouches for figures edited after signing. The daemon's behaviour, its API and its metrics do not change. No values.yaml key is added or removed, and no template changes."
+      description: "appVersion 0.28.0. The image's disclose --emit-attestation now names the report's canonical content hash as the attestation subject, and verify-hash checks that the attestation names the figures it is verifying, so a signature no longer vouches for figures edited after signing. No values.yaml key is added or removed, and no template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
       image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.28.0

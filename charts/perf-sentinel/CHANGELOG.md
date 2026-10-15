@@ -12,23 +12,32 @@ the chart version, to know which daemon image ships.
 
 ## [0.28.0]
 
+### Added
+
+- With `[daemon.archive]` configured, the image also writes one
+  hash-chained line per UTC day beside the window archive, a few tens of
+  KiB per day, kept `rollup_retention_days` (400 by default). `disclose`
+  reads them, so a quarterly disclosure fits on the default claim. They
+  land on the persistent volume with the archive. `/api/status` and
+  `/metrics` gain the rollup horizon.
+
 ### Fixed
 
 - **`appVersion` moves to `0.28.0`.** The image's `disclose
   --emit-attestation` now names the report's canonical content hash as the
   in-toto subject, and `verify-hash` checks that the attestation names the
   figures it is verifying. A Sigstore signature therefore no longer vouches
-  for figures edited after signing. The daemon's behaviour, its query API
-  and its metrics do not change.
+  for figures edited after signing.
 - The image's `disclose` refuses an official period the archive no longer
   reaches back to, which the archive defaults allow on a busy daemon within
   a day.
 
 ### Changed
 
-- The `persistence.size` comment says the default archive holds less than
-  a day of a busy daemon, not a quarter, and how to size it for quarterly
-  disclosures. Comment only, the rendered manifests do not change.
+- The `persistence.size` comment says the default window archive holds
+  less than a day of a busy daemon, and that quarterly disclosures read
+  the daily rollups on the same volume. Comment only, the rendered
+  manifests do not change.
 
 ### Security
 

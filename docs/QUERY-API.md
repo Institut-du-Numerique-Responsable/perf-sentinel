@@ -304,7 +304,7 @@ cheapest way to verify the daemon is up.
 | `stored_findings`         | number | Findings currently retained in the query ring buffer                                        |
 | `max_retained_findings`   | number | Configured cap of that ring buffer (since 0.8.8)                                            |
 | `oldest_finding_ms`       | number | Detection time of the oldest retained finding, absent when the ring is empty (since 0.20.0) |
-| `disclosure_archive`      | object | Days held by the daily rollups, `{ oldest_day, days, last_closed_day }` (since 0.29.0)      |
+| `disclosure_archive`      | object | Days held by the daily rollups, `{ oldest_day, days, last_closed_day }` (since 0.28.0)      |
 
 The three gauge/capacity pairs back the Headroom chart of
 `perf-sentinel query monitor`'s Trends tab: each pair reads as "how
@@ -322,7 +322,7 @@ reads reach that far back. The field is absent without
 the same three values as `perf_sentinel_archive_oldest_day_timestamp_seconds`,
 `perf_sentinel_archive_rollup_days` and
 `perf_sentinel_archive_last_closed_day_timestamp_seconds`. See
-[REPORTING.md](REPORTING.md#daily-rollups-hold-a-period-0290).
+[REPORTING.md](REPORTING.md#daily-rollups-hold-a-period-0280).
 
 **Example:**
 
