@@ -78,6 +78,7 @@ Trois durées de vie différentes coexistent, et le TTL de 30 s, le plus visible
 | Les spans (nécessaires à un explain tree)                            | La `TraceWindow` en mémoire                                      | `trace_ttl_ms` s'écoule, 30 s par défaut, ou éviction LRU au-delà de `max_active_traces`                                                                                          |
 | Les findings                                                         | Le ring buffer de findings                                       | Le ring dépasse `max_retained_findings` (10000). **Aucun TTL** : sur une flotte calme ils sont encore servis le lendemain, sur une flotte bavarde ils partent en quelques minutes |
 | Les findings, par fenêtre, sur disque                                | L'archive NDJSON (`[daemon.archive]`)                            | Au-delà de `max_files` (12) fichiers tournés de `max_size_mb` (100) chacun, le plus ancien est supprimé, environ 1,3 Go aux défauts. **Aucun TTL** : rien n'expire par l'âge      |
+| Les cumuls quotidiens pour `disclose`, sur disque (0.29.0)           | `<stem>-daily-YYYY-MM.ndjson`, à côté de l'archive               | Le fichier d'un mois est supprimé en entier dès que son dernier jour précède de plus de `rollup_retention_days` (400) jours le dernier jour clos. `max_files` n'y touche jamais   |
 | Les findings, dernier état et jours d'observation, par environnement | Le store SQLite du Hub (Hub 0.3.0 et suivants)                   | `Hub:Retention` s'écoule depuis la dernière observation, 180 jours par défaut                                                                                                     |
 | Les findings, chaque détection                                       | Votre backend de logs, alimenté par le stdout du daemon          | La rétention de ce backend                                                                                                                                                        |
 | Les corrélations cross-trace                                         | `/api/correlations` et `/api/export/report`, en direct seulement | Immédiatement. **Ni archivées, ni reproductibles hors ligne**, voir plus bas                                                                                                      |
@@ -94,11 +95,12 @@ Si le ratio est proche de 1 en trafic normal, les findings sont évincés en que
 **Privilégiez l'archive quand elle est activée.** Si `[daemon.archive]` est configurée, le daemon écrit un `Report` par fenêtre d'analyse sous forme d'une ligne NDJSON, et ce fichier répond directement à "qu'a-t-on trouvé à 14h05", indépendamment de ce que le daemon garde encore en mémoire. Ce sont les mêmes données que `perf-sentinel disclose` agrège.
 
 ```bash
-# Findings d'une fenêtre donnée, directement depuis l'archive
+# Findings d'une fenêtre donnée, directement depuis l'archive. Les lignes de
+# cumul quotidien (0.29.0+) partagent le répertoire sans .report, `[]?` les saute.
 jq -c --arg from 2026-07-27T14:00:00Z --arg to 2026-07-27T15:00:00Z \
   'select((.ts | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) as $ts
           | $ts >= ($from | fromdateiso8601) and $ts < ($to | fromdateiso8601))
-   | .report.findings[]' \
+   | .report.findings[]?' \
   /var/lib/perf-sentinel/archive/*.ndjson
 ```
 
@@ -356,6 +358,12 @@ curl -s http://perf-sentinel:4318/api/status | jq '{uptime_seconds, active_trace
 2. **OTel collector indisponible.** Si un collector central est entre les services et Perf Sentinel, vérifiez d'abord sa santé et ses métriques de réception.
 3. **Changement de sampling.** Une modification de config a baissé le taux de sampling. Auditez les commits récents dans le repo de config OTel.
 4. **Backpressure du daemon.** Trois points de pression distincts. Si l'ingestion dépasse la boucle de réception, le canal OTLP se remplit et les events sont rejetés : cherchez les avertissements `channel full` (`RUST_LOG=sentinel_core::ingest=debug`) et `perf_sentinel_otlp_rejected_total{reason="channel_full"}`. Si la détection ne suit pas, la file du worker d'analyse se remplit et des lots entiers sont délestés : surveillez `perf_sentinel_analysis_queue_depth` et `perf_sentinel_analysis_shed_batches_total`. Un troisième point de pression, plus discret, est l'archive de divulgation : quand son écrivain prend du retard sur les I/O disque, des fenêtres entières sont perdues alors même que leurs findings ont été analysés et servis en direct. La perte n'est visible que sur `perf_sentinel_archive_windows_dropped_total` (par `reason`), jamais dans l'archive elle-même. Déclencheurs fréquents : une trace pathologique qui ralentit detect+score, `max_active_traces` trop bas pour le débit courant, ou un stockage lent ou plein sous le chemin d'archive.
+
+   Avant une divulgation trimestrielle (0.29.0), vérifiez jusqu'où remontent les cumuls quotidiens. Un `disclose` officiel refuse une période que l'archive n'atteint plus, donc `oldest_day` doit tomber au plus tard le premier jour du trimestre. Tant qu'aucun jour UTC n'est clos, le champ est absent et la commande affiche `null` :
+
+   ```bash
+   curl -sf http://perf-sentinel:4318/api/status | jq .disclosure_archive
+   ```
 
 Traitez de haut en bas par élimination. Les cas 1 et 2 représentent la grande majorité.
 
@@ -690,7 +698,7 @@ curl -s http://perf-sentinel:4318/api/export/report | jq -r '.warning_details[].
 
 **Ce qui survit.**
 
-- Du daemon lui-même, seulement ce qu'il écrit sur disque : l'archive NDJSON des findings quand `[daemon.archive]` est défini, le stockage runtime des acks (`acks.jsonl`, rejoué au démarrage) et l'anneau d'incidents quand `[daemon.incidents] archive_path` est défini (rechargé au démarrage). Tout le reste vit en mémoire.
+- Du daemon lui-même, seulement ce qu'il écrit sur disque : l'archive NDJSON des findings et, depuis 0.29.0, ses cumuls quotidiens quand `[daemon.archive]` est défini (un crash coûte aux cumuls au plus leurs 20 dernières fenêtres, jamais la journée), le stockage runtime des acks (`acks.jsonl`, rejoué au démarrage) et l'anneau d'incidents quand `[daemon.incidents] archive_path` est défini (rechargé au démarrage). Tout le reste vit en mémoire.
 - Prometheus conserve les métriques déjà scrapées (les compteurs historiques sont saufs).
 - Tempo conserve les traces, à condition que vous les y envoyiez aussi.
 

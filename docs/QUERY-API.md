@@ -304,12 +304,25 @@ cheapest way to verify the daemon is up.
 | `stored_findings`         | number | Findings currently retained in the query ring buffer                                        |
 | `max_retained_findings`   | number | Configured cap of that ring buffer (since 0.8.8)                                            |
 | `oldest_finding_ms`       | number | Detection time of the oldest retained finding, absent when the ring is empty (since 0.20.0) |
+| `disclosure_archive`      | object | Days held by the daily rollups, `{ oldest_day, days, last_closed_day }` (since 0.29.0)      |
 
 The three gauge/capacity pairs back the Headroom chart of
 `perf-sentinel query monitor`'s Trends tab: each pair reads as "how
 close is this runtime gauge to its configured cap". The settings
 advisor starts hinting at 90% of `max_active_traces`. The fields are
 additive, so clients written against older daemons keep parsing.
+
+`disclosure_archive` describes the daily rollups that `[daemon.archive]`
+writes for `perf-sentinel disclose`. `oldest_day` and `last_closed_day`
+are UTC dates, and `days` counts the distinct days held. A period that
+starts before `oldest_day` reaches past the rollups, and
+`disclose --intent official` refuses it unless the window lines it
+reads reach that far back. The field is absent without
+`[daemon.archive]` and while no day has closed yet. `/metrics` carries
+the same three values as `perf_sentinel_archive_oldest_day_timestamp_seconds`,
+`perf_sentinel_archive_rollup_days` and
+`perf_sentinel_archive_last_closed_day_timestamp_seconds`. See
+[REPORTING.md](REPORTING.md#daily-rollups-hold-a-period-0290).
 
 **Example:**
 
@@ -327,7 +340,12 @@ curl -sS http://127.0.0.1:4318/api/status
   "analysis_queue_capacity": 1024,
   "stored_findings": 5,
   "max_retained_findings": 10000,
-  "oldest_finding_ms": 1757000400000
+  "oldest_finding_ms": 1757000400000,
+  "disclosure_archive": {
+    "oldest_day": "2025-07-01",
+    "days": 65,
+    "last_closed_day": "2025-09-03"
+  }
 }
 ```
 

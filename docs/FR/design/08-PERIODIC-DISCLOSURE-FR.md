@@ -12,10 +12,12 @@ crates/sentinel-core/src/report/periodic/
   ├── hasher.rs     // JSON canonique + SHA-256 + fonction utilitaire binary_hash
   ├── validator.rs  // validate_official, validate_content_hash
   ├── aggregator.rs // lecteur archive NDJSON, attribution par service
+  ├── rollup.rs     // format de ligne du cumul quotidien, accumulateur du jour
   └── org_config.rs // chargeur du TOML fourni par l'opérateur
 
-crates/sentinel-core/src/daemon/archive.rs   // écriture de l'archive
-crates/sentinel-cli/src/disclose.rs          // dispatcher CLI
+crates/sentinel-core/src/daemon/archive.rs         // écriture de l'archive
+crates/sentinel-core/src/daemon/rollup_writer.rs   // écriture des cumuls quotidiens
+crates/sentinel-cli/src/disclose.rs                // dispatcher CLI
 ```
 
 La répartition reprend le pattern pipeline du reste de la crate : fonctions pures sur les données, traits uniquement aux frontières d'I/O (`std::fs` pour l'org-config et l'archive, `tokio::sync::mpsc` pour la tâche writer). Pas de nouvelle abstraction entre les étages.
@@ -71,6 +73,8 @@ L'agrégateur lit des fichiers NDJSON (ou des dossiers contenant des `*.ndjson`)
 {"ts":"<RFC 3339 UTC>","report":{...full Report...}}
 ```
 
+Depuis 0.29.0, les entrées peuvent aussi contenir des fichiers de cumuls quotidiens, voir Cumuls quotidiens plus bas.
+
 Pour chaque enveloppe dans la période :
 
 1. **Compteurs globaux** somment `total_io_ops`, `avoidable_io_ops`, `total.mid` (gCO2), `avoidable.mid` (gCO2). gCO2 est divisé par 1000 pour obtenir kgCO2eq.
@@ -108,6 +112,79 @@ Le `n_plus_one_threshold` de l'opérateur décide quels patterns N+1 deviennent 
 Une amélioration différée estamperait le seuil canonique par fenêtre et réconcilierait à travers un parc de binaires hétérogène à l'agrégation. Aujourd'hui l'agrégateur réconcilie les seuils par `max` et expose les binaires producteurs via `aggregate.binary_versions`.
 
 Le validateur authentifie le *label* canonique (`canonical_waste.n_plus_one_threshold == 2`), pas la *magnitude* des chiffres archivés : une ligne NDJSON falsifiée peut porter le seuil 2 avec des compteurs dégonflés et passer quand même. C'est inhérent à un modèle d'auto-déclaration. Le `content_hash` (et l'attestation cosign optionnelle) lie l'intégrité du *rapport publié*. La fiabilité des archives sources repose sur le `binary_hash` du binaire et la provenance SLSA, pas sur l'agrégateur. Les compteurs issus des archives sont sommés avec `saturating_add`, pour qu'une valeur proche de `u64::MAX` forgée ne puisse pas faire déborder un total de période vers un petit nombre (sous-déclaré).
+
+## Cumuls quotidiens (0.29.0)
+
+L'archive de fenêtres écrit un `Report` complet par fenêtre de scoring, toutes les `trace_ttl_ms / 2` (15 s par défaut). Une mesure en laboratoire sous charge synthétique a relevé 350 à 900 Kio par ligne, donc les 12 fichiers de 100 Mio par défaut tiennent 6 à 16 heures, jamais un trimestre. La 0.28.0 a fait refuser à un `disclose` officiel une période que l'archive n'atteint plus, ce qui empêche un rapport faux sans faire tenir la période dans l'archive.
+
+Avec `[daemon.archive]` configurée, la tâche d'écriture produit désormais aussi des cumuls quotidiens : une ligne NDJSON par jour UTC dans `<stem>-daily-YYYY-MM.ndjson`, dans le répertoire de `[daemon.archive] path`, un fichier par mois. Avec `path = "/var/lib/perf-sentinel/archive.ndjson"`, octobre 2026 arrive dans `archive-daily-2026-10.ndjson` à côté. Une ligne contient l'état partiel propre à l'agrégateur pour les fenêtres de ce jour, donc un jour coûte quelques dizaines de Kio et un trimestre quelques Mo au plus.
+
+### Agrégation partagée
+
+`PeriodState` dans `aggregator.rs` est la moitié mesurante de l'agrégateur : ce que les fenêtres d'une période ont mesuré, indépendamment de la façon dont elles ont été lues. `process_window` y agrège une fenêtre et `merge` y fusionne un autre état. `Builder` ne garde que ce qui décrit la lecture : les compteurs de chaîne, les valeurs de base du compteur de fenêtres jetées, la plus ancienne fenêtre archivée et les jours qu'un cumul a déjà couverts. Le `DayAccumulator` du daemon (`rollup.rs`) exécute le même `process_window` sur chaque fenêtre, donc une ligne de cumul porte l'état que `disclose` construirait depuis les lignes de fenêtre de ce jour.
+
+Chaque champ est additif : il fusionne par l'opération qu'utilise son agrégation fenêtre par fenêtre, et chaque opération est commutative et associative.
+
+- Sommes : requêtes, I/O ops, énergie, termes carbone, nombres de fenêtres, chiffres évitables par palier, gaspillage base de données et messagerie.
+- Accumulateurs par service : eux-mêmes des sommes et des unions d'ensembles.
+- Unions d'ensembles : modèles d'énergie, versions de binaire, méthodologies carbone, coefficients de scoring, modèles d'énergie par service, jours observés.
+- Minimum et maximum : `first_seen` et `last_seen` par `(service, pattern)`, le seuil N+1 des paliers.
+- Ou logique : `calibration_applied`, `transport_coefficient_uncertain`.
+- Paires somme et compte : le ratio mesuré par service, transformé en moyenne seulement dans `finalize`, pour que les jours qui ont plus de fenêtres gardent leur poids.
+
+L'attribution par service a lieu dans l'agrégation de chaque fenêtre, donc un état fusionné n'a pas besoin d'une seconde attribution. Plusieurs lignes d'un même jour s'additionnent, et l'état fusionné se finalise sur les chiffres de l'agrégation fenêtre par fenêtre aux arrondis près (voir Arrondis plus bas).
+
+Une ligne de cumul est lue depuis un fichier, donc `merge` réapplique chaque garde-fou du chemin des fenêtres : le plafond de 4096 services (`MAX_SERVICES`), des noms d'anti-pattern limités aux valeurs connues de `FindingType`, les chiffres non finis ou négatifs ramenés à zéro (`sanitize_f64`), le contrôle de jeu de caractères et de longueur de `binary_version`, les contrôles des étiquettes de modèle d'énergie et de provenance, et `saturating_add` sur les compteurs. Une entrée `first_seen` ou `last_seen` ne survit que si sa paire `(service, pattern)` a survécu à la fusion des services. Un cumul ne répond en outre que pour son propre jour : `keep_only_day` restreint ses jours observés au `day` de la ligne avant la fusion, donc une ligne forgée ne peut pas relever `temporal_coverage` sur d'autres jours.
+
+### Format de ligne et chaîne
+
+Une ligne de cumul est un objet JSON avec ces champs :
+
+- `format` : `"perf-sentinel-rollup/v1"`, dans le corps haché. Le lecteur reconnaît le contenu d'un cumul à ce champ, et la version permet à l'agrégation d'évoluer.
+- `ts` : la première fenêtre du jour, pour que la vérification de la 0.28.0 qui exige que l'archive remonte au début de la période (`archive_reaches_period_start`) le lise comme le `ts` d'une fenêtre.
+- `day` : le jour UTC, qui décide si la ligne tombe dans la période.
+- `last_ts` : la dernière fenêtre du jour. `disclose` ne le lit pas.
+- `state` : le `PeriodState` sérialisé.
+- `prev`, `seq` : le maillon de chaîne, comme sur les lignes de fenêtre.
+- `drops` : le compteur cumulé de fenêtres jetées, comme sur les lignes de fenêtre.
+- `hash` : le même hash SHA-256 de chaîne d'archive que les lignes de fenêtre (`archive_chain_hash`), calculé sur la ligne privée de son champ `hash`.
+
+Tous les cumuls d'une archive forment une seule chaîne, jamais réinitialisée : elle court à travers les fichiers mensuels et à travers les redémarrages. Au démarrage, la tâche reprend `prev` et `seq` depuis la dernière ligne du fichier mensuel le plus récent, ou part de `ARCHIVE_CHAIN_SEED` s'il n'y en a aucun. Un jour supprimé ou modifié apparaît donc comme une rupture de chaîne, contrairement à un fichier de fenêtres purgé, dont la chaîne repart à chaque fichier tourné et ne laisse aucune trace. Le lecteur garde une ancre par famille de cumuls (répertoire et `<stem>`) à travers les fichiers mensuels, lus dans l'ordre de leurs noms, et adopte la plus ancienne ligne restante comme début de chaîne, donc la rétention n'est pas une rupture. Dans les compteurs d'intégrité publiés, une ligne de cumul vérifiée compte comme vérifiées les fenêtres qu'elle contient, et une ligne de cumul rompue compte une rupture.
+
+### Clôture d'un jour
+
+Un jour se clôt quand arrive la première fenêtre d'un autre jour UTC, selon le `ts` de cette fenêtre et non l'horloge murale, ainsi qu'à l'arrêt propre. L'archivage est déclenché par le trafic, donc sur un déploiement calme un jour ne se clôt qu'à la reprise du trafic. Un daemon redémarré le même jour écrit une seconde ligne pour ce jour, et une horloge reculée par-delà minuit écrit une seconde ligne pour le jour antérieur. Les lignes d'un même jour s'additionnent, rien n'est écrasé. Quand la sérialisation ou l'écriture d'une ligne échoue, un avertissement est journalisé et son jour se rabat sur ses lignes de fenêtre quand elles sont conservées et qu'aucune autre ligne de cumul ne couvre ce jour. Sinon, les fenêtres de la ligne perdue manquent à la divulgation.
+
+### Instantané en cas d'arrêt brutal
+
+Toutes les 20 fenêtres (`SNAPSHOT_EVERY`, environ cinq minutes avec la fenêtre par défaut), le jour ouvert est écrit dans `<stem>-daily.partial.json` : un fichier temporaire, réservé au propriétaire et ouvert sans suivre les liens symboliques, synchronisé, puis renommé par-dessus l'instantané. Au démarrage, après la reprise de la chaîne, la tâche ajoute l'instantané une seule fois comme ligne, sauf si la dernière ligne le couvre déjà, puis le supprime. La dernière ligne couvre l'instantané quand les deux partent de la même première fenêtre (même `ts`), ce qui arrive quand un arrêt brutal tombe après l'écriture de la ligne d'un jour et avant que l'instantané soit remplacé ou supprimé. Un instantané qui est un lien symbolique est refusé avec un avertissement. Un arrêt brutal (SIGKILL, OOM) perd donc au plus les 20 dernières fenêtres des cumuls, jamais le jour, et ne compte jamais un jour deux fois. L'instantané ne porte ni étiquette `format` ni champ de chaîne, il ne peut donc jamais passer pour une ligne de cumul.
+
+### Rétention
+
+`[daemon.archive] rollup_retention_days` (défaut 400, un peu plus d'un an, au moins 1) fixe une rétention par âge. À chaque clôture de jour, chaque fichier mensuel dont le dernier jour précède de plus de ce nombre de jours le jour qui vient de se clore est supprimé en entier, donc un fichier chaîné n'est jamais réécrit. La rotation des fenêtres (`max_size_mb`, `max_files`) ne touche jamais aux fichiers de cumuls.
+
+`[daemon.archive] windows = false` arrête les lignes par fenêtre et ne garde que les cumuls. Le défaut est `true` : les lignes de fenêtre restent la source du détail fenêtre par fenêtre et ce qu'interroge le guide d'exploitation.
+
+### Lecture des cumuls par `disclose`
+
+`disclose --input` accepte des fichiers de fenêtres, des fichiers de cumuls, ou les deux, et un répertoire qui contient les deux. `is_rollup_file` tranche sur le contenu : un fichier dont la première ligne non vide porte l'étiquette de format est un fichier de cumuls, donc un fichier de cumuls renommé ou copié est toujours lu comme tel. L'instantané `.json` n'est jamais pris dans un répertoire.
+
+Les fichiers de cumuls sont lus en premier (`process_rollup_file`), et chaque jour agrégé est noté. Un jour présent dans un cumul est agrégé depuis le cumul seul : les lignes de fenêtre de ce jour n'alimentent que la vérification de chaîne et le compteur de fenêtres jetées. Conséquence : les fenêtres qu'un arrêt brutal a fait perdre au cumul manquent dans la divulgation pour ce jour, même quand des lignes de fenêtre les contiennent encore.
+
+Le daemon agrège sans `--strict-attribution`, qui reste le choix du lecteur. L'état garde la plus ancienne fenêtre tombée dans `_unattributed` (`first_unattributed`), donc avec cette option `disclose` refuse un cumul de la période qui en a agrégé une, et nomme cette fenêtre.
+
+La vérification de la 0.28.0, qui exige que l'archive remonte au début de la période, prend le plus ancien `ts` parmi les lignes de cumul et de fenêtre. Avec les cumuls, une divulgation trimestrielle officielle fonctionne avec les réglages par défaut dès que le daemon tourne depuis le premier jour du trimestre.
+
+### Arrondis
+
+Les chiffres issus des cumuls correspondent à ceux des mêmes fenêtres aux arrondis flottants près : un cumul somme d'abord un jour, donc les additions se font dans un autre ordre. Les tests d'équivalence bornent l'écart relatif à 1e-9. La même période divulguée depuis les cumuls et depuis les fenêtres peut donc différer sur ses derniers chiffres, et donc sur son `content_hash`. Divulguer deux fois les mêmes entrées reste reproductible.
+
+### Ce que voit l'opérateur
+
+- `/api/status` gagne `disclosure_archive: {"oldest_day": "YYYY-MM-DD", "days": N, "last_closed_day": "YYYY-MM-DD"}`, absent tant qu'aucun jour n'est clos. Additif depuis 0.29.0.
+- `/metrics` gagne trois jauges sans étiquette : `perf_sentinel_archive_oldest_day_timestamp_seconds` (plus ancien jour conservé, secondes epoch à 00:00 UTC), `perf_sentinel_archive_rollup_days` (jours distincts conservés) et `perf_sentinel_archive_last_closed_day_timestamp_seconds` (jour clos le plus récent). Toutes valent 0 tant qu'aucun jour n'est clos. Elles sont posées au démarrage depuis les fichiers sur disque et après chaque jour clos.
+- Le schéma publié `PeriodicReport` ne change pas : les cumuls sont seulement un format d'entrée.
+- Le chart Helm ne change pas : les cumuls arrivent à côté du chemin d'archive, sur le volume persistant quand la persistance est activée.
 
 ## TOML org-config
 
@@ -159,7 +236,7 @@ L'étape `jq -cS` canonicalise les clés d'objet via le flag `S` intégré à jq
 Deux nouvelles sections dans `.perf-sentinel.toml` :
 
 - `[reporting]` porte `intent`, `confidentiality_level`, `org_config_path`, `disclose_output_path`, `disclose_period`. Validée au chargement de la config.
-- `[daemon.archive]` porte `path`, `max_size_mb` (défaut 100), `max_files` (défaut 12). Validée au chargement de la config et à l'ouverture d'archive.
+- `[daemon.archive]` porte `path`, `max_size_mb` (défaut 100), `max_files` (défaut 12), et depuis 0.29.0 `windows` (défaut `true`) et `rollup_retention_days` (défaut 400, au moins 1). Validée au chargement de la config et à l'ouverture d'archive.
 
 Les deux sections sont optionnelles. Leur absence laisse Perf Sentinel dans son comportement antérieur : NDJSON sur stdout, pas d'archive, pas de garde-fou de reporting.
 
@@ -250,9 +327,11 @@ Les invariants anti-triche sont testés sous la feature `daemon`, seul mode qui 
 | `report/periodic/hasher.rs`                          | JSON canonique + SHA-256, binary hash          |
 | `report/periodic/validator.rs`                       | validateur collect-all, KNOWN_PATTERNS         |
 | `report/periodic/aggregator.rs`                      | folding NDJSON, attribution par service        |
+| `report/periodic/rollup.rs`                          | ligne de cumul quotidien, accumulateur du jour |
 | `report/periodic/org_config.rs`                      | chargeur du TOML opérateur                     |
 | `report/periodic/errors.rs`                          | enums d'erreur                                 |
 | `daemon/archive.rs`                                  | writer NDJSON non bloquant avec rotation/prune |
+| `daemon/rollup_writer.rs`                            | cumuls quotidiens : chaîne, instantané, purge  |
 | `daemon/mod.rs` (`validate_official_reporting`)      | garde-fou de démarrage                         |
 | `daemon/event_loop.rs`                               | hook archive dans `process_traces`             |
 | `config/` (`ReportingConfig`, `DaemonArchiveConfig`) | sections TOML + validateurs                    |

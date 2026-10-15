@@ -12,10 +12,12 @@ crates/sentinel-core/src/report/periodic/
   ├── hasher.rs     // canonical JSON + SHA-256 + binary_hash helper
   ├── validator.rs  // validate_official, validate_content_hash
   ├── aggregator.rs // NDJSON archive reader, per-service attribution
+  ├── rollup.rs     // daily rollup line format, day accumulator
   └── org_config.rs // operator-supplied TOML loader
 
-crates/sentinel-core/src/daemon/archive.rs   // archive writer
-crates/sentinel-cli/src/disclose.rs          // CLI dispatcher
+crates/sentinel-core/src/daemon/archive.rs         // archive writer
+crates/sentinel-core/src/daemon/rollup_writer.rs   // daily rollup writer
+crates/sentinel-cli/src/disclose.rs                // CLI dispatcher
 ```
 
 The split mirrors the pipeline pattern of the rest of the crate: pure functions over data, traits only at I/O borders (`std::fs` for the org-config and archive, `tokio::sync::mpsc` for the writer task). No new abstractions between stages.
@@ -71,6 +73,8 @@ The aggregator reads NDJSON files (or directories of `*.ndjson` files), where ea
 {"ts":"<RFC 3339 UTC>","report":{...full Report...}}
 ```
 
+Since 0.29.0 the inputs can also hold daily rollup files, see Daily rollups below.
+
 For each in-period envelope:
 
 1. **Global counters** sum `total_io_ops`, `avoidable_io_ops`, `total.mid` (gCO2), `avoidable.mid` (gCO2). gCO2 is divided by 1000 to obtain kgCO2eq.
@@ -108,6 +112,79 @@ The operator's `n_plus_one_threshold` decides which N+1 patterns become findings
 A deferred upgrade would stamp the canonical threshold per window and reconcile across a heterogeneous binary fleet at aggregation time. Today the aggregator reconciles thresholds by `max` and surfaces the producing binaries via `aggregate.binary_versions`.
 
 The validator authenticates the canonical *label* (`canonical_waste.n_plus_one_threshold == 2`), not the *magnitude* of the archived figures: a tampered NDJSON line can carry threshold 2 with deflated counts and still pass. This is inherent to a self-disclosure model. The `content_hash` (plus the optional cosign attestation) binds the integrity of the *published report*. The trustworthiness of the source archives rests on the binary's `binary_hash` and SLSA provenance, not on the aggregator. Archive-derived counts are summed with `saturating_add` so a crafted near-`u64::MAX` value cannot wrap a period total into a small (under-reported) number.
+
+## Daily rollups (0.29.0)
+
+The window archive writes one full `Report` per scoring window, every `trace_ttl_ms / 2` (15 s by default). A lab measurement under synthetic load found 350 to 900 KiB per line, so the default 12 files of 100 MiB hold 6 to 16 hours, never a quarter. 0.28.0 made an official `disclose` refuse a period the archive no longer reaches, which stops a wrong report but does not make the archive hold the period.
+
+With `[daemon.archive]` configured, the writer task now also writes daily rollups: one NDJSON line per UTC day into `<stem>-daily-YYYY-MM.ndjson`, in the directory of `[daemon.archive] path`, one file per month. With `path = "/var/lib/perf-sentinel/archive.ndjson"`, October 2026 lands in `archive-daily-2026-10.ndjson` beside it. A line holds the aggregator's own partial state for that day's windows, so a day costs a few tens of KiB and a quarter a few MB at most.
+
+### Shared fold
+
+`PeriodState` in `aggregator.rs` is the measuring half of the aggregator: what the windows of a period measured, independent of how they were read. `process_window` folds one window into it and `merge` folds another state in. `Builder` keeps only what describes the reading: chain counters, drop-counter baselines, the oldest archived window and the days a rollup already covered. The daemon's `DayAccumulator` (`rollup.rs`) runs the same `process_window` on each window, so a rollup line carries the state `disclose` would build from that day's window lines.
+
+Every field is additive: it merges by the operation its window fold uses, and each operation is commutative and associative.
+
+- Sums: requests, I/O ops, energy, carbon terms, window counts, avoidable figures per tier, database and messaging waste.
+- Per-service accumulators: themselves sums and set unions.
+- Set unions: energy models, binary versions, carbon methodologies, scoring coefficients, per-service energy models, observed days.
+- Minimum and maximum: `first_seen` and `last_seen` per `(service, pattern)`, the tiers' N+1 threshold.
+- Logical or: `calibration_applied`, `transport_coefficient_uncertain`.
+- Sum and count pairs: the per-service measured ratio, turned into a mean only in `finalize`, so days with more windows keep their weight.
+
+Per-service attribution happens inside the window fold, so a merged state needs no second attribution. Several lines for the same day add up, and the merged state finalizes to the window-by-window figures up to rounding (see Rounding below).
+
+A rollup line is read from a file, so `merge` re-applies every guard of the window path: the 4096-service cardinality cap (`MAX_SERVICES`), anti-pattern names limited to known `FindingType` values, non-finite or negative figures zeroed (`sanitize_f64`), the `binary_version` charset and length check, the energy model and provenance tag checks, and `saturating_add` on counters. A `first_seen` or `last_seen` row survives only when its `(service, pattern)` pair survived the service merge. A rollup also answers for its own day only: `keep_only_day` restricts its observed days to the line's `day` before the merge, so a forged line cannot raise `temporal_coverage` on other days.
+
+### Line format and chain
+
+A rollup line is one JSON object with these fields:
+
+- `format`: `"perf-sentinel-rollup/v1"`, inside the hashed body. The reader recognises rollup content by it, and the version lets the fold evolve.
+- `ts`: the day's first window, so the 0.28.0 reach check (`archive_reaches_period_start`) reads it like a window's `ts`.
+- `day`: the UTC day, which decides whether the line falls in the period.
+- `last_ts`: the day's last window. `disclose` does not read it.
+- `state`: the serialised `PeriodState`.
+- `prev`, `seq`: the chain link, as on window lines.
+- `drops`: the cumulative drop counter, as on window lines.
+- `hash`: the same SHA-256 archive chain hash as window lines (`archive_chain_hash`), over the line without its `hash` field.
+
+All rollups of an archive form one chain that is never reset: it runs across the monthly files and across restarts. At startup the writer resumes `prev` and `seq` from the last line of the newest monthly file, or starts from `ARCHIVE_CHAIN_SEED` when there is none. A removed or edited day therefore shows as a chain break, unlike a pruned window file, whose chain restarts in every rotated file and leaves no trace. The reader keeps one anchor per rollup family (directory plus stem) across the monthly files, read in name order, and adopts the oldest surviving line as the chain's start, so retention is not a break. In the published integrity counters, a verified rollup line counts the windows it holds as verified, and a broken rollup line counts one break.
+
+### Closing a day
+
+A day closes when the first window of another UTC day arrives, decided by that window's own `ts` and not by the wall clock, and on graceful shutdown. Archiving is traffic-gated, so on a quiet deployment a day closes only when traffic resumes. A daemon restarted the same day writes a second line for that day, and a clock stepped back across midnight writes a second line for the earlier day. Lines of one day add up, nothing is overwritten. When a line fails to serialise or to write, a warning is logged and its day falls back to its window lines when those are kept and no other rollup line covers that day. When one does, the windows of the failed line are missing from the disclosure.
+
+### Crash snapshot
+
+Every 20 windows (`SNAPSHOT_EVERY`, about five minutes at the default window), the open day is written to `<stem>-daily.partial.json`: a temporary file, owner-only and opened without following symlinks, synced, then renamed over the snapshot. At startup, after resuming the chain, the writer appends the snapshot once as a line unless the last line already covers it, then removes it. The last line covers the snapshot when both start at the same first window (same `ts`), which happens when a crash lands after a day's line is written and before the snapshot is replaced or removed. A symlinked snapshot is refused with a warning. A crash (SIGKILL, OOM kill) therefore loses at most the last 20 windows from the rollups, never the day, and never counts a day twice. The snapshot carries no `format` tag and no chain fields, so it can never pass for a rollup line.
+
+### Retention
+
+`[daemon.archive] rollup_retention_days` (default 400, a little over a year, at least 1) sets retention by age. Each time a day closes, every monthly file whose last day is more than that many days before the day just closed is deleted whole, so a chained file is never rewritten. Window rotation (`max_size_mb`, `max_files`) never touches rollup files.
+
+`[daemon.archive] windows = false` stops the per-window lines and keeps only the rollups. The default is `true`: window lines remain the drill-down source and what the runbook queries.
+
+### Reading rollups in `disclose`
+
+`disclose --input` accepts window files, rollup files, or both, and a directory holding both. `is_rollup_file` decides by content: a file whose first non-empty line carries the format tag is a rollup file, so a renamed or copied rollup file is still read as one. The `.json` snapshot is never picked up from a directory.
+
+Rollup files are read first (`process_rollup_file`), and each folded day is recorded. A day present in a rollup is folded from the rollup alone: that day's window lines only feed the chain check and the drop counter. Consequence: windows a crash cost the rollup are missing from the disclosure for that day, even when window lines still hold them.
+
+The daemon folds without `--strict-attribution`, which stays the reader's choice. The state records the earliest window that fell into `_unattributed` (`first_unattributed`), so with the flag `disclose` refuses an in-period rollup that folded one and names that window.
+
+The 0.28.0 reach check takes the oldest `ts` across rollup and window lines. With rollups, an official quarterly disclosure works with the default settings once the daemon has run since the quarter's first day.
+
+### Rounding
+
+Figures from rollups match figures from the same windows up to floating-point rounding: a rollup sums a day first, so the additions run in another order. The equivalence tests bound the relative difference at 1e-9. The same period disclosed from rollups and from windows can therefore differ in its last digits, and so in its `content_hash`. Disclosing the same inputs twice stays reproducible.
+
+### What operators see
+
+- `/api/status` gains `disclosure_archive: {"oldest_day": "YYYY-MM-DD", "days": N, "last_closed_day": "YYYY-MM-DD"}`, absent until a day has closed. Additive since 0.29.0.
+- `/metrics` gains three label-free gauges: `perf_sentinel_archive_oldest_day_timestamp_seconds` (oldest day held, epoch seconds at 00:00 UTC), `perf_sentinel_archive_rollup_days` (distinct days held) and `perf_sentinel_archive_last_closed_day_timestamp_seconds` (newest closed day). All read 0 until a day has closed. They are set at startup from the files on disk and after each closed day.
+- The published `PeriodicReport` schema does not change: rollups are an input format only.
+- The Helm chart does not change: rollups land beside the archive path, on the persistent volume when persistence is enabled.
 
 ## Org-config TOML
 
@@ -159,7 +236,7 @@ The `jq -cS` step canonicalises object keys via jq's built-in `S` flag, which ma
 Two new config sections in `.perf-sentinel.toml`:
 
 - `[reporting]` carries `intent`, `confidentiality_level`, `org_config_path`, `disclose_output_path`, `disclose_period`. Validated at config load.
-- `[daemon.archive]` carries `path`, `max_size_mb` (default 100), `max_files` (default 12). Validated at config load and at archive open.
+- `[daemon.archive]` carries `path`, `max_size_mb` (default 100), `max_files` (default 12), and since 0.29.0 `windows` (default `true`) and `rollup_retention_days` (default 400, at least 1). Validated at config load and at archive open.
 
 Both sections are optional. Their absence leaves Perf Sentinel in its prior behaviour: NDJSON to stdout, no archive, no reporting gate.
 
@@ -250,9 +327,11 @@ The anti-gaming invariants are tested under the `daemon` feature, since that is 
 | `report/periodic/hasher.rs`                          | canonical JSON + SHA-256, binary hash          |
 | `report/periodic/validator.rs`                       | collect-all validator, KNOWN_PATTERNS          |
 | `report/periodic/aggregator.rs`                      | NDJSON folding, per-service attribution        |
+| `report/periodic/rollup.rs`                          | daily rollup line format, day accumulator      |
 | `report/periodic/org_config.rs`                      | operator TOML loader                           |
 | `report/periodic/errors.rs`                          | error enums                                    |
 | `daemon/archive.rs`                                  | non-blocking NDJSON writer with rotation/prune |
+| `daemon/rollup_writer.rs`                            | daily rollup files: chain, snapshot, retention |
 | `daemon/mod.rs` (`validate_official_reporting`)      | startup gate                                   |
 | `daemon/event_loop.rs`                               | archive hook in `process_traces`               |
 | `config/` (`ReportingConfig`, `DaemonArchiveConfig`) | TOML sections + validators                     |

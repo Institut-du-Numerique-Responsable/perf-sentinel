@@ -4,6 +4,19 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+The next release bumps the minor: `sentinel_core::config::DaemonArchiveConfig`, published on crates.io and not `#[non_exhaustive]`, gains two public fields.
+
+### Added
+
+- **Daily rollups for periodic disclosure.** With `[daemon.archive]` configured, the daemon also writes one hash-chained line per UTC day to `<stem>-daily-YYYY-MM.ndjson` beside the window archive. Each line holds the aggregator's own state for that day's windows, a few tens of KiB, so a quarter takes a few MB where the window archive's default 1.3 GB held 6 to 16 hours in a lab measurement. The chain runs across months and restarts, so a removed or edited day shows as a break. A snapshot every 20 windows bounds what a crash loses, and is never appended twice. Monthly files are deleted once older than `rollup_retention_days`, 400 by default. `disclose` reads rollup files, window files or both, recognises rollup files by content, and folds a day from its rollup when it has one. Figures match the window path up to floating-point rounding, so the same period disclosed from each can differ in its last digits and its `content_hash`. The published `PeriodicReport` schema and the Helm chart do not change. `docs/REPORTING.md` and `docs/design/08-PERIODIC-DISCLOSURE.md` describe it, with their French mirrors.
+- `[daemon.archive] windows = false` stops the per-window lines and keeps only the daily rollups. The default stays `true`.
+- `/api/status` reports `disclosure_archive`: the oldest day the rollups hold, the number of days, and the last closed day. Three label-free gauges back it: `perf_sentinel_archive_oldest_day_timestamp_seconds`, `perf_sentinel_archive_rollup_days` and `perf_sentinel_archive_last_closed_day_timestamp_seconds`.
+
+### Changed
+
+- `DaemonArchiveConfig` gains the public fields `windows` and `rollup_retention_days`. Code that builds it with a struct literal must set them or end with `..DaemonArchiveConfig::default()`.
+- `ServiceAccumulator` and `AntiPatternAccumulator` derive `Serialize` and `Deserialize`.
+
 ## [0.28.0] - 2026-10-14
 
 This release bumps the minor rather than the patch: `sentinel_core::report::periodic::PerfSentinelPredicate`, published on crates.io, gains the public field `subject_binding` and is not `#[non_exhaustive]`, so code that builds it with a literal stops compiling. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The daemon's API, its metrics and the findings it exports do not change. The theme is provenance: the signature on a periodic disclosure now covers the figures it was published with, `verify-hash` checks that it does, and an official disclosure can no longer claim a period its archive no longer covers.
