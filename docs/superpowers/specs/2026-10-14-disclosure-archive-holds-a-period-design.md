@@ -24,12 +24,12 @@ What fills a line, 50-service profile: `findings` 841 KB (940 findings, one per 
 
 "Projected" keeps only what the aggregator reads: `green_summary` without `top_offenders`, I/O ops folded per service, findings folded per `(service, type)` into a count and occurrences by service, `disclosure_waste`, `binary_version`, `analysis.traces_analyzed`.
 
-What the default 1.3 GB holds at these rates, and what a quarter (92 days, 22,080 lines) needs:
+What the default 1.3 GB holds at these rates, and what a quarter (92 days, 529,920 lines) needs. Corrected on 2026-10-15: the first version counted 240 lines per day instead of per hour, so its quarter columns were 24 times too small. The conclusion does not change.
 
 | Profile | Default archive holds | Quarter, current lines | Quarter, projected | Quarter, projected gzip | Quarter, daily rollups |
 |---|---|---|---|---|---|
-| Moderate | about 16 hours | 7.4 GB | 190 MB | 20 MB | under 1 MB |
-| Sustained | about 6 hours | 19 GB | 640 MB | 62 MB | under 3 MB |
+| Moderate | about 16 hours | about 175 GiB | about 4.3 GiB | about 0.5 GiB | under 1 MB |
+| Sustained | about 6 hours | about 445 GiB | about 15 GiB | about 1.4 GiB | under 3 MB |
 
 tracegen exercises the anti-pattern catalogue on purpose, so its finding rate is high. A production service with a few hot N+1 endpoints lands between the two profiles. The orders of magnitude, not the exact figures, drive the decision.
 
@@ -51,7 +51,7 @@ Only the chain counters and the drop-counter baseline describe how archive lines
 
 **A. Fail loudly.** Shipped in 0.28.0. Necessary, not sufficient.
 
-**B. Project and compress the window line.** Archive the projected line instead of the full `Report`, and gzip rotated files. 30 to 40 times smaller, roughly 300 times with gzip. A quarter fits in 20 to 60 MB. It keeps the window-level granularity and the per-file chain. Cost: the archive is no longer a `Report`, so anything else reading it (none in the repository besides `disclose` and its TUI preview) must follow, and the chain still resets per file, so pruning stays undetectable.
+**B. Project and compress the window line.** Archive the projected line instead of the full `Report`, and gzip rotated files. 30 to 40 times smaller, roughly 300 times with gzip. A quarter still needs 0.5 to 1.4 GiB gzipped, 4 to 15 GiB uncompressed. It keeps the window-level granularity and the per-file chain. Cost: the archive is no longer a `Report`, so anything else reading it (none in the repository besides `disclose` and its TUI preview) must follow, and the chain still resets per file, so pruning stays undetectable.
 
 **C. Daily rollups, recommended.** The daemon keeps an in-memory accumulator for the current UTC day, the same partial state the aggregator builds, and appends one rollup line per day to a monthly file beside the window archive. A quarter is 92 lines, a few MB at most. Details below.
 
@@ -63,7 +63,7 @@ Only the chain counters and the drop-counter baseline describe how archive lines
 
 **One chain, never reset.** Rollup lines chain across their monthly files and across restarts: the writer resumes from the last line of the newest file. A pruned or deleted day then shows as a `seq` gap or a `prev` mismatch, which today's per-file chain cannot reveal. `disclose` reports rollup days verified and gaps under `integrity.trace_integrity_chain` as it does for windows.
 
-**Retention by age.** Rollups go to `<stem>-daily-YYYY-MM.ndjson` beside `[daemon.archive] path`. A monthly file is deleted whole once its last day is more than `rollup_retention_days` (default 400, a year plus a quarter) before the newest closed day. The reader adopts the first surviving line as the chain's start, so retention is not a break, and the 0.28.0 reach check still refuses a period the rollups no longer reach.
+**Retention by age.** Rollups go to `<stem>-daily-YYYY-MM.ndjson` beside `[daemon.archive] path`. A monthly file is deleted whole once its last day is more than `rollup_retention_days` (default 400, a little over a year) before the newest closed day. The reader adopts the first surviving line as the chain's start, so retention is not a break, and the 0.28.0 reach check still refuses a period the rollups no longer reach.
 
 **Raw windows become optional.** `[daemon.archive] windows = false` stops the window lines and keeps the rollups. The default stays `true`. Rollups have no switch and no path of their own: they are always written beside `path`, so the chart's PVC holds both with no chart change.
 
