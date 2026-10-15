@@ -554,3 +554,17 @@ v0.28.0	41bcb84	2026-10-14	PASS
 # daemon's archive writer, not the detectors, the ingest paths or the
 # energy backends.
 v0.28.0	fd3e14c	2026-10-15	PASS
+# v0.29.0, 2026-10-15. Targeted pass on the final release tree. Daemon image
+# perf-sentinel:0.29.0-0851157e built from feat/incident-push, Hub image
+# perf-sentinel-hub:0.4.1-2a2e55a built from the Hub branch carrying
+# /api/import/incidents: validate-findings 12/12, hub-incidents-push (five
+# incidents through a ring of two reach the Hub without a poll, then the
+# resolved end), hub-incidents-mirror, hub-ingestion,
+# hub-source-reachability, hub-derived-status, incident-window-capture,
+# incident-namespace-scope, incident-alerting-chain 11/11 with kubeconform
+# skipped by design, daemon-sigterm-drain, all green. The lab ran at 6c7dfdb
+# with local, uncommitted image pins in the daemon and Hub manifests.
+# Not run: the disclose, limit-*, failure-mode-*, template-*, ci-e2e-* and
+# energy families. The release touches the daemon's Hub export and incident
+# store, not the detectors, the ingest paths, disclose or the energy backends.
+v0.29.0	6c7dfdb	2026-10-15	PASS
