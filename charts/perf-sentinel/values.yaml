@@ -77,8 +77,8 @@ workload:
       # max_size_mb (100) each, about 1.3 GB, with the ack store beside it.
       # Those defaults hold less than a day of a busy daemon, not a quarter:
       # a lab measurement found window lines of 350 to 900 KiB, one every
-      # 15 s, so a quarter needs 7 to 19 GB. disclose refuses an official
-      # period the archive no longer reaches back to. For quarterly
+      # 15 s, so a quarter needs about 175 to 445 GiB. disclose refuses an
+      # official period the archive no longer reaches back to. For quarterly
       # disclosures raise [daemon.archive] max_files or max_size_mb
       # (manageDaemonPaths: false) and this claim with them.
       # It leaves nothing for a [daemon.incidents] archive_path pointed at
