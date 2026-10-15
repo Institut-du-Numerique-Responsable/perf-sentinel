@@ -1888,3 +1888,30 @@ fn a_window_on_the_first_day_reaches_the_period_start() {
     assert!(!archive_reaches_period_start(Some(second_day), &period));
     assert!(!archive_reaches_period_start(None, &period));
 }
+
+#[test]
+fn a_hashless_line_ahead_of_a_chained_archive_does_not_reach_back_for_it() {
+    // One line without a hash, dated before the period, put in front of a
+    // chained archive that only starts in March: it must not stand in for
+    // the pruned windows, nor vanish from the integrity counters' view.
+    let (_dir, path) = write_chained_archive(&[(
+        Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap(),
+        plain_window(),
+    )]);
+    let chained = std::fs::read_to_string(&path).unwrap();
+    let forged = serde_json::json!({
+        "ts": Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap(),
+        "report": plain_window(),
+    });
+    std::fs::write(&path, format!("{forged}\n{chained}")).unwrap();
+    let period = q1_2026();
+    let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
+    assert_eq!(
+        inputs.earliest_archived_window,
+        Some(Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap())
+    );
+    assert!(!archive_reaches_period_start(
+        inputs.earliest_archived_window,
+        &period
+    ));
+}
