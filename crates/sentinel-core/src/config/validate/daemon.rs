@@ -157,6 +157,9 @@ impl Config {
         if archive.max_files < 1 {
             return Err("[daemon.archive] max_files must be >= 1".to_string());
         }
+        if archive.rollup_retention_days < 1 {
+            return Err("[daemon.archive] rollup_retention_days must be >= 1".to_string());
+        }
         Ok(())
     }
 

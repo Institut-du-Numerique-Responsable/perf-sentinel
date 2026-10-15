@@ -620,6 +620,10 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # path = "/var/lib/perf-sentinel/archive.ndjson"   # default unset (no archive)
 # max_size_mb = 100   # default 100, rotate past this size, >= 1
 # max_files = 12      # default 12, rotated files kept, >= 1
+# windows = true     # default true, false keeps only the daily rollups
+# rollup_retention_days = 400   # default 400, >= 1. One line per UTC day
+#   goes to <stem>-daily-YYYY-MM.ndjson beside `path`. A month is deleted
+#   once its last day is this many days older than the newest closed day.
 
 # --- Public disclosure reporting -------------------------------------------
 # Read this before filling anything in: `disclose` takes its own values from

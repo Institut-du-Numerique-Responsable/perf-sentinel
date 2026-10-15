@@ -531,6 +531,7 @@ mod tests {
             path: dir.path().join("archive.ndjson").display().to_string(),
             max_size_mb,
             max_files,
+            ..DaemonArchiveConfig::default()
         }
     }
 
@@ -822,6 +823,7 @@ mod tests {
                 path: link.display().to_string(),
                 max_size_mb: 1,
                 max_files: 4,
+                ..DaemonArchiveConfig::default()
             },
             test_metrics(),
         )
