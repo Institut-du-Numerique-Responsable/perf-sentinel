@@ -695,7 +695,15 @@ storage_path` to the PVC for you.
 **Size the PVC for the archive.** At its defaults the per-window archive
 keeps one active file plus `max_files = 12` rotated ones of
 `max_size_mb = 100` each, about 1.3 GB, which the chart's default claim
-of `2Gi` covers with the ack store beside it. A full volume does not stop
+of `2Gi` covers with the ack store beside it. Since 0.28.0, quarterly
+disclosures read the daily rollups the daemon writes beside the window
+archive, a few MB per quarter, so the default claim no longer needs
+raising for them. Window retention (`max_files`, `max_size_mb`) then
+sets how far back you can drill down into individual windows, and a day
+no rollup holds, such as one before the upgrade, is still disclosed from
+its window lines. The rollups follow `[daemon.archive] path`, as
+`archive-daily-YYYY-MM.ndjson` next to `archive.ndjson`, so they land on
+the same PVC and the chart needs no new value. A full volume does not stop
 the daemon: the archive writer drops the windows it cannot write and
 counts them in
 `perf_sentinel_archive_windows_dropped_total{reason="write_error"}`, so

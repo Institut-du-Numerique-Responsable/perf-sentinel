@@ -22,6 +22,31 @@ For `official` intent, the validator also rejects reports below 75% runtime-cali
 
 Two further checks tighten consistency. The validator hard-rejects a `days_covered` that does not equal `(to_date - from_date) + 1` (a disclose-produced report always satisfies this, so only a hand-edited file trips it) and a `requests_measured` that exceeds an operator-declared `total_requests_in_period`. For `official` intent, omitting `total_requests_in_period` in the org config emits a warning, since `coverage_percentage` is then absent from the report.
 
+### The archive must reach the period start (0.28.0)
+
+`disclose` also checks that the archive reaches back to the period's first day: the oldest window across every input file, in or out of the period, must fall on that day or earlier. When the inputs hold chained lines, only lines whose hash chain verifies count, so a line without a hash put in front of a chained archive cannot stand in for pruned windows. An archive written before chaining has no verified line, and its oldest line still counts. The daemon archive rotates at `max_size_mb` and prunes to `max_files` by count, not by age, and a busy daemon writes one window every `trace_ttl_ms / 2` (15 seconds by default). Its default 12 files of 100 MiB can therefore hold less than a day: a lab measurement under synthetic load found window lines of 350 to 900 KiB, which filled them in 6 to 16 hours, and the pruned files leave no trace in the hash chain, which restarts with each file. When the archive starts later, an `official` disclosure exits 2 without writing a report, and an `internal` one warns. Both messages name the archive's first day, so `--period-type custom --from <that day>` discloses what the archive still covers. A quiet start does not trip the check as long as older lines precede the period. Since 0.28.0, the daily rollups described below hold a quarter at the default settings. Without them, size the archive for the period you disclose, or disclose shorter periods.
+
+### Daily rollups hold a period (0.28.0)
+
+With `[daemon.archive]` configured, the daemon also writes daily rollups: one NDJSON line per UTC day, in one file per month named `<stem>-daily-YYYY-MM.ndjson` in the directory of `[daemon.archive] path`. With `path = "/var/lib/perf-sentinel/reports.ndjson"`, October 2026 lands in `/var/lib/perf-sentinel/reports-daily-2026-10.ndjson`. A rollup line holds the aggregator's own partial state for that day's windows, the same fold `disclose` runs over window lines, so a day costs a few tens of KiB and a quarter a few MiB at most. Its fields are `format` (`"perf-sentinel-rollup/v1"`), `ts` (the day's first window), `day`, `last_ts`, `state`, `prev`, `seq`, `drops` and `hash`. `hash` is the same SHA-256 archive chain hash as on window lines, computed over the line without its `hash` field.
+
+A day closes when the first window of another UTC day arrives, judged by that window's own timestamp and not by the wall clock, and on a graceful shutdown. A daemon restarted the same day therefore writes a second line for that day, and a clock stepped back across midnight writes a second line for the earlier day. The lines of one day add up, nothing is overwritten. Every 20 windows (about five minutes at the default window), the open day is also saved to `<stem>-daily.partial.json`, written to a temporary file then renamed, readable by its owner only. At startup the daemon appends that snapshot once as a line, unless a line on disk already starts at the same first window, then removes it. A snapshot behind a symlink is refused. A crash (SIGKILL, OOM kill) therefore costs the rollups at most their last 20 windows, never the day, and never counts a day twice. When the window lines are kept, `disclose` still counts those windows from them, see below. A line the directory refuses, on a full disk for instance, is kept in memory and retried at the next day close. At shutdown the open day goes to the snapshot instead.
+
+Two `[daemon.archive]` keys come with them:
+
+- `rollup_retention_days` (default `400`, a little over a year, must be `>= 1`). A monthly file is deleted whole once its last day is more than this many days before the newest closed day, or before today when a window stamped in the future closed a later day. The check runs each time a day closes.
+- `windows` (default `true`). `false` stops the per-window lines and keeps only the rollups. The window lines are the per-window detail the [RUNBOOK](RUNBOOK.md) queries, so turn them off only if you do not need it.
+
+`--input` accepts window files, rollup files or both, and a directory holding both. A rollup file is recognised by its content, the format tag on its first readable line, so a renamed or copied rollup file is still read as one. A directory never yields the `.json` snapshot. Rollup files are read first. A rollup line covers the windows between its first and last window (`ts` and `last_ts`) for the archive it sits beside, the window file with the same stem in the same directory. Window lines inside that span then feed only the chain check and the drop counter, so no window counts twice. Window lines outside every span still count: those archived before the upgrade on the upgrade day, and those a crash cost the rollup after its last snapshot. Hosts stay apart, so one host's rollups never hide another host's windows. A rollup file renamed away from its archive's stem is read as a source of its own, so do not pass it together with that archive's window lines.
+
+Figures from rollups match figures from the same windows up to floating-point rounding, because a rollup sums its day first and the additions run in another order. The same period disclosed from rollups and from windows can therefore differ in its last digits, and so in its `content_hash`. Disclosing the same inputs twice stays reproducible. The published report schema does not change: rollups are an input format only.
+
+The daemon writes rollups without applying `--strict-attribution`, which stays the reader's call. With the flag, `disclose` refuses a rollup that folded an unattributed window and names the earliest such window. A rollup line is read from a file, so merging it applies every guard the window path applies: the 4096-service cap, known anti-pattern names only, non-finite or negative figures zeroed, binary version and energy model tag validation. A rollup line also answers only for its own day.
+
+All rollup lines of an archive form one chain that never resets. It runs across the monthly files and across restarts, the writer resuming from the last line of the newest file. A removed or edited day shows as a chain break. Retention deletes whole months from the front, and the reader adopts the oldest surviving line as the chain's start, so retention is not a break. In `integrity.trace_integrity_chain`, a verified rollup line counts the windows it holds as verified, and a broken rollup line counts one break. Each line also carries the daemon's cumulative drop counter, so `windows_dropped` is published from rollups as from window lines.
+
+The reach check above takes the oldest verified `ts` across rollup and window lines. An official quarterly disclosure therefore passes it with the default settings once the daemon has been archiving since the quarter's first day, even after the window files of that day were pruned. To see how far back the rollups reach, read `disclosure_archive` in `/api/status` (`oldest_day`, `days`, `last_closed_day`, absent until a first day has closed), or the gauges `perf_sentinel_archive_oldest_day_timestamp_seconds`, `perf_sentinel_archive_rollup_days` and `perf_sentinel_archive_last_closed_day_timestamp_seconds`, which read `0` until then.
+
 ## Granularity
 
 Perf Sentinel publishes reports at two granularity levels, controlled by `--confidentiality`. The validator refuses to publish a `confidentiality = public` disclosure that carries G1 entries, and vice versa.
@@ -93,7 +118,7 @@ This is a **mapping aid, not a certification**. It does not make a report a CSRD
 
 ## Inputs
 
-**Daemon archives only.** A batch `analyze --format json` report cannot feed `disclose`, for three independent reasons: a directory input collects `*.ndjson` only, every line must deserialize as the `{"ts", "report"}` envelope below, and a batch report carries no `disclosure_waste` (the canonical avoidable tiers are computed at archive time). Batch reports stay excluded because a public disclosure rests on continuous observation over the declared period, not on ad-hoc runs. Run `perf-sentinel watch` with archiving enabled for anything you intend to disclose.
+**Daemon archives only.** A batch `analyze --format json` report cannot feed `disclose`, for three independent reasons: a directory input collects `*.ndjson` only, every line must deserialize as the `{"ts", "report"}` envelope below or as a daily rollup line, and a batch report carries no `disclosure_waste` (the canonical avoidable tiers are computed at archive time). Batch reports stay excluded because a public disclosure rests on continuous observation over the declared period, not on ad-hoc runs. Run `perf-sentinel watch` with archiving enabled for anything you intend to disclose.
 
 A period that mixes archives written before canonical disclosure with newer ones passes `--intent official` validation, because the canonical threshold is the maximum across windows. The canonical tier then omits waste from the older windows, so `disclose` prints how many windows carried no canonical figure. Regenerate over post-upgrade windows for a complete figure.
 
@@ -110,9 +135,11 @@ Configure the daemon archive via:
 path = "/var/lib/perf-sentinel/reports.ndjson"
 max_size_mb = 100
 max_files = 12
+windows = true
+rollup_retention_days = 400
 ```
 
-When the active file exceeds `max_size_mb`, Perf Sentinel renames it to `reports-<utc-timestamp>.ndjson` and starts a fresh file. Older rotated files beyond `max_files` are pruned by modification time.
+When the active file exceeds `max_size_mb`, Perf Sentinel renames it to `reports-<utc-timestamp>.ndjson` and starts a fresh file. Older rotated files beyond `max_files` are pruned by modification time. Window rotation never touches the daily rollup files, which `rollup_retention_days` prunes by age, see [Daily rollups hold a period](#daily-rollups-hold-a-period-0280).
 
 Operators that already collect daemon stdout via a sidecar can pass the resulting file (or directory) to `--input` directly, as long as each line is one `{ts, report}` envelope.
 
@@ -313,7 +340,9 @@ cosign sign-blob \
 #    Then bump report_metadata.integrity_level from "hash-only" to
 #    "signed" (or "signed-with-attestation" if the producing binary
 #    carries SLSA provenance). A future `perf-sentinel sign`
-#    subcommand will automate this step.
+#    subcommand will automate this step. The attestation names the
+#    report's canonical content hash, which leaves both fields out, so
+#    this edit does not break the tie between signature and figures.
 
 # 4. Publish report.json, attestation.intoto.jsonl, bundle.sig at
 #    your transparency URL.
@@ -573,21 +602,30 @@ invoke cosign and returns `Status::Fail` on the signature slot. See
 modes and their semantics. Reserve `--no-identity-check` for an
 internal self-check before publication.
 
-`verify-hash` chains three checks: deterministic content hash
-recompute (pure Rust, always run), Sigstore signature
-(`cosign verify-blob`), and SLSA binary provenance
-(metadata summary plus a `gh attestation verify` command pointing at
-the binary in `integrity.binary_verification_url`).
+`verify-hash` chains four checks: deterministic content hash
+recompute (pure Rust, always run), the attestation naming that
+content hash (pure Rust, run when an attestation is supplied),
+Sigstore signature over the attestation (`cosign verify-blob`), and
+SLSA binary provenance (metadata summary plus a `gh attestation
+verify` command pointing at the binary in
+`integrity.binary_verification_url`). The signature covers the
+attestation, not the report, so the second check is what ties a valid
+signature to the figures in hand: an attestation that names another
+content hash, typically after figures were edited and the hash
+re-baked, makes the verdict UNTRUSTED. An attestation written by
+perf-sentinel 0.27.0 or earlier pinned the report file bytes instead,
+and stays bound only while those bytes are untouched. Once `integrity.signature` has been
+patched in, it caps the verdict at PARTIAL.
 
 Exit codes:
 
-| Code | Meaning                                                                                                                                           |
-|------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `0`  | TRUSTED (content hash matched AND signature verified ok, and binary attestation not left unverified when the report carries attestation metadata) |
-| `1`  | UNTRUSTED (a check returned a hard failure: hash mismatch, signature invalid, attestation invalid, identity mismatch)                             |
-| `2`  | PARTIAL (no hard failure but at least one check could not complete: cosign absent, `gh` CLI absent, signature metadata absent, sidecars missing)  |
-| `3`  | INPUT_ERROR (report file unreadable, JSON invalid, missing `--report` or `--url`)                                                                 |
-| `4`  | NETWORK_ERROR (only `--url` mode: HTTP fetch failed, scheme rejected, body over the size cap)                                                     |
+| Code | Meaning                                                                                                                                                                                           |
+|------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | TRUSTED (content hash matched, the attestation names it, the signature over the attestation verified ok, and binary attestation not left unverified when the report carries attestation metadata) |
+| `1`  | UNTRUSTED (a check returned a hard failure: hash mismatch, attestation naming other figures, signature invalid, attestation invalid, identity mismatch)                                           |
+| `2`  | PARTIAL (no hard failure but at least one check could not complete: cosign absent, `gh` CLI absent, signature metadata absent, sidecars missing)                                                  |
+| `3`  | INPUT_ERROR (report file unreadable, JSON invalid, missing `--report` or `--url`)                                                                                                                 |
+| `4`  | NETWORK_ERROR (only `--url` mode: HTTP fetch failed, scheme rejected, body over the size cap)                                                                                                     |
 
 A scripted `verify-hash && deploy` gate blocks on any non-zero code
 and so still rejects PARTIAL, but a wrapper that distinguishes

@@ -521,3 +521,36 @@ v0.26.0	c8b06d6	2026-10-04	PASS
 # families. The release touches none of the detectors, the resilience
 # paths, the CI templates beyond the version pin, or the energy backends.
 v0.27.0	20ff4ab	2026-10-14	PASS
+# v0.28.0, 2026-10-14. Targeted pass, not verify-all-scenarios.
+# Daemon image perf-sentinel:0.28.0-213fa8bd built from release/0.28.0
+# (6589ff07 on top only adds a CI workflow): validate-findings 12/12,
+# disclose (sub-tests 7 attestation binding, 8 archive start gate),
+# disclose-temporal, disclose-archive-family-baseline, intent-validator,
+# verify-hash-roundtrip, verify-hash-fail-closed, esrs-e1-crosswalk,
+# rgesn-crosswalk, sci-functional-unit 5/5, alumet-db-waste,
+# broker-messaging-waste, chart-disclose-persistence, all green. The lab ran
+# at 41bcb84 with a local, uncommitted image pin in the daemon manifest.
+# Lab defect found and fixed, none in the product: the intent-validator
+# archives started on January 15, so the new archive start gate refused the
+# official quarter before the 75% coverage check it targets.
+# Not run: the hub-*, limit-*, failure-mode-*, template-*, ci-e2e-* and
+# energy families. The release touches only disclose and verify-hash.
+v0.28.0	41bcb84	2026-10-14	PASS
+# v0.28.0 rerun, 2026-10-15. Targeted pass on the final release tree, after
+# the rustls 0.23.46 bump, the reach check moved onto chain-verified lines
+# and the daily rollups folded into this release. The row above predates
+# all three. Daemon image perf-sentinel:0.28.0-e097972a built from
+# release/0.28.0: validate-findings 12/12, disclose 10/10 (sub-tests 7
+# attestation binding, 8 archive start gate), disclose-temporal,
+# disclose-archive-family-baseline, intent-validator 4/4,
+# verify-hash-roundtrip, verify-hash-fail-closed, esrs-e1-crosswalk,
+# rgesn-crosswalk, sci-functional-unit 5/5, alumet-db-waste,
+# broker-messaging-waste, chart-disclose-persistence with its new
+# disclose-rollups step (the daily rollups alone give the window and
+# anti-pattern counts the window lines give), all green. The lab ran at
+# fd3e14c with a local, uncommitted image pin in the daemon manifest.
+# Not run: the hub-*, limit-*, failure-mode-*, template-*, ci-e2e-* and
+# energy families. The release touches disclose, verify-hash and the
+# daemon's archive writer, not the detectors, the ingest paths or the
+# energy backends.
+v0.28.0	fd3e14c	2026-10-15	PASS

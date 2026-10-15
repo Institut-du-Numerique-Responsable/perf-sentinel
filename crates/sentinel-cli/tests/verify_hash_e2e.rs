@@ -125,6 +125,71 @@ fn verify_hash_signed_without_identity_flags_is_untrusted() {
     assert!(stdout.contains("UNTRUSTED"), "{stdout}");
 }
 
+fn write_attestation_for(report: &PeriodicReport, path: &std::path::Path) {
+    use sentinel_core::report::periodic::build_in_toto_statement_named;
+
+    let hash = compute_content_hash(report).unwrap();
+    let hex = hash.trim_start_matches("sha256:");
+    let statement = build_in_toto_statement_named(report, hex, "report.json");
+    let mut line = serde_json::to_string(&statement).unwrap();
+    line.push('\n');
+    fs::write(path, line).unwrap();
+}
+
+#[test]
+fn verify_hash_binds_an_attestation_naming_the_content_hash() {
+    // Hash-only report (no signature block) with its attestation: the
+    // binding check passes and the verdict stays PARTIAL, since no
+    // signature was verified.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let report_path = write_example_with_fixed_hash(tmp.path());
+    let report: PeriodicReport = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    let attestation_path = tmp.path().join("attestation.intoto.jsonl");
+    write_attestation_for(&report, &attestation_path);
+
+    let v = run_verify(&[
+        "--report",
+        report_path.to_str().unwrap(),
+        "--attestation",
+        attestation_path.to_str().unwrap(),
+    ]);
+    let stdout = String::from_utf8_lossy(&v.stdout);
+    assert_eq!(v.status.code(), Some(2), "{stdout}");
+    assert!(stdout.contains("[OK] Attestation binding"), "{stdout}");
+    assert!(stdout.contains("PARTIAL"), "{stdout}");
+}
+
+#[test]
+fn verify_hash_refuses_an_attestation_that_names_other_figures() {
+    // Figures edited after the attestation was signed, hash re-baked as
+    // `hash-bake --allow-signed` would: the content hash matches the edited
+    // file, but the signed statement names the original figures, so a valid
+    // signature over it must not vouch for these.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let report_path = write_example_with_fixed_hash(tmp.path());
+    let original: PeriodicReport =
+        serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    let attestation_path = tmp.path().join("attestation.intoto.jsonl");
+    write_attestation_for(&original, &attestation_path);
+
+    let mut edited = original.clone();
+    edited.aggregate.total_carbon_kgco2eq /= 2.0;
+    edited.integrity.content_hash = compute_content_hash(&edited).unwrap();
+    fs::write(&report_path, serde_json::to_vec_pretty(&edited).unwrap()).unwrap();
+
+    let v = run_verify(&[
+        "--report",
+        report_path.to_str().unwrap(),
+        "--attestation",
+        attestation_path.to_str().unwrap(),
+    ]);
+    let stdout = String::from_utf8_lossy(&v.stdout);
+    assert_eq!(v.status.code(), Some(1), "{stdout}");
+    assert!(stdout.contains("[OK] Content hash"), "{stdout}");
+    assert!(stdout.contains("[FAIL] Attestation binding"), "{stdout}");
+    assert!(stdout.contains("UNTRUSTED"), "{stdout}");
+}
+
 #[test]
 fn verify_hash_after_content_tamper_fails() {
     let tmp = tempfile::tempdir().expect("tempdir");

@@ -1,18 +1,20 @@
 //! `perf-sentinel verify-hash` subcommand.
 //!
-//! Chains up to three checks against a periodic disclosure report:
-//! deterministic content hash recompute (pure Rust, always run),
-//! Sigstore cosign attestation (delegated to the `cosign` binary), and
-//! SLSA build provenance for the producing binary (verified via the
+//! Chains up to four checks against a periodic disclosure report:
+//! deterministic content hash recompute (pure Rust, always run), the
+//! in-toto attestation naming that content hash (pure Rust, run when an
+//! attestation is supplied), Sigstore cosign signature over the
+//! attestation (delegated to the `cosign` binary), and SLSA build
+//! provenance for the producing binary (verified via the
 //! `gh attestation verify` GitHub CLI command, opt-in with
 //! `--verify-binary <path>`). Exit codes:
 //!
-//! - `0` `TRUSTED` (content hash matched AND signature verified ok, and
-//!   binary attestation not left unverified when the report carries
-//!   attestation metadata)
+//! - `0` `TRUSTED` (content hash matched, the attestation names it, the
+//!   signature over that attestation verified ok, and binary attestation
+//!   not left unverified when the report carries attestation metadata)
 //! - `1` `UNTRUSTED` (at least one check returned a hard failure: hash
-//!   mismatch, signature invalid, attestation invalid, identity
-//!   mismatch)
+//!   mismatch, attestation naming other figures, signature invalid,
+//!   attestation invalid, identity mismatch)
 //! - `2` `PARTIAL` (no hard failure but at least one check could not
 //!   complete: cosign absent, `gh` CLI absent, signature metadata
 //!   absent, sidecars missing). A scripted gate
@@ -27,8 +29,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use sentinel_core::report::periodic::compute_content_hash;
 use sentinel_core::report::periodic::schema::{IntegrityLevel, PeriodicReport, SignatureMetadata};
+use sentinel_core::report::periodic::{
+    AttestationBinding, InTotoStatement, check_attestation_binding, compute_content_hash,
+};
 
 use crate::limits::MAX_LOCAL_REPORT_BYTES;
 
@@ -36,6 +40,9 @@ use crate::limits::MAX_LOCAL_REPORT_BYTES;
 /// realistic report file size and guards against pathological responses.
 #[cfg(any(feature = "daemon", feature = "tempo", feature = "jaeger-query"))]
 const MAX_REMOTE_BYTES: usize = 10 * 1024 * 1024;
+
+/// Cap on the attestation read. A statement is a few KB.
+const MAX_ATTESTATION_BYTES: u64 = 1024 * 1024;
 
 /// Per-request timeout for `--url` fetches.
 #[cfg(any(feature = "daemon", feature = "tempo", feature = "jaeger-query"))]
@@ -82,8 +89,18 @@ struct Outcome {
     report: PeriodicReport,
     content_hash: Status,
     core_patterns: Status,
+    attestation_binding: Status,
     signature: Status,
     binary_attestation: Status,
+}
+
+/// A report as read, with the bytes it was parsed from: an attestation
+/// written before content-hash subjects is checked against them.
+struct LoadedReport {
+    report: PeriodicReport,
+    bytes: Vec<u8>,
+    display: String,
+    fetched: FetchedPaths,
 }
 
 /// Signer identity expectation, fed by the CLI flags
@@ -108,26 +125,34 @@ pub async fn cmd_verify_hash(
     format: VerifyHashFormat,
     identity: &IdentityOptions,
 ) -> i32 {
-    let (report, display_path, fetched_paths) = match load_report(report_path, url).await {
+    let LoadedReport {
+        report,
+        bytes,
+        display,
+        fetched,
+    } = match load_report(report_path, url).await {
         Ok(v) => v,
         Err(code) => return code,
     };
 
+    let attestation = fetched.attestation.as_deref().or(attestation_path);
     let content_hash = verify_content_hash(&report);
     let core_patterns = verify_core_patterns(&report);
+    let attestation_binding = verify_attestation_binding(&report, &bytes, attestation);
     let signature = verify_signature(
         &report,
-        fetched_paths.attestation.as_deref().or(attestation_path),
-        fetched_paths.bundle.as_deref().or(bundle_path),
+        attestation,
+        fetched.bundle.as_deref().or(bundle_path),
         identity,
     );
     let binary_attestation = verify_binary_attestation(&report, verify_binary);
 
     let outcome = Outcome {
-        report_path: display_path,
+        report_path: display,
         report,
         content_hash,
         core_patterns,
+        attestation_binding,
         signature,
         binary_attestation,
     };
@@ -145,10 +170,7 @@ struct FetchedPaths {
     bundle: Option<PathBuf>,
 }
 
-async fn load_report(
-    report_path: Option<&Path>,
-    url: Option<&str>,
-) -> Result<(PeriodicReport, String, FetchedPaths), i32> {
+async fn load_report(report_path: Option<&Path>, url: Option<&str>) -> Result<LoadedReport, i32> {
     if let Some(path) = report_path {
         return load_local_report(path);
     }
@@ -161,7 +183,7 @@ async fn load_report(
 
 /// Read and parse a report from disk. Synchronous on purpose: a single small
 /// file, read before any network work, has nothing to gain from async I/O.
-fn load_local_report(path: &Path) -> Result<(PeriodicReport, String, FetchedPaths), i32> {
+fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
     let meta = std::fs::metadata(path).map_err(|e| {
         eprintln!(
             "Error: stat {}: {e}",
@@ -192,31 +214,30 @@ fn load_local_report(path: &Path) -> Result<(PeriodicReport, String, FetchedPath
         );
         EXIT_INPUT_ERROR
     })?;
-    let display = path.display().to_string();
-    let fetched = FetchedPaths {
-        attestation: None,
-        bundle: None,
-    };
-    Ok((report, display, fetched))
+    Ok(LoadedReport {
+        report,
+        bytes,
+        display: path.display().to_string(),
+        fetched: FetchedPaths {
+            attestation: None,
+            bundle: None,
+        },
+    })
 }
 
 fn parse_report(bytes: &[u8]) -> Result<PeriodicReport, serde_json::Error> {
     serde_json::from_slice(bytes)
 }
 
-async fn fetch_from_url(url: &str) -> Result<(PeriodicReport, String, FetchedPaths), i32> {
-    let report = http_get(url)
-        .await
-        .map_err(|e| {
-            eprintln!("Error: fetch {url}: {e}");
-            EXIT_NETWORK_ERROR
-        })
-        .and_then(|bytes| {
-            parse_report(&bytes).map_err(|e| {
-                eprintln!("Error: parse {url}: {e}");
-                EXIT_INPUT_ERROR
-            })
-        })?;
+async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
+    let bytes = http_get(url).await.map_err(|e| {
+        eprintln!("Error: fetch {url}: {e}");
+        EXIT_NETWORK_ERROR
+    })?;
+    let report = parse_report(&bytes).map_err(|e| {
+        eprintln!("Error: parse {url}: {e}");
+        EXIT_INPUT_ERROR
+    })?;
     let attestation_url = derive_sidecar_url(url, "attestation.intoto.jsonl");
     let bundle_url = derive_sidecar_url(url, "bundle.sig");
     let mut fetched = FetchedPaths {
@@ -249,7 +270,12 @@ async fn fetch_from_url(url: &str) -> Result<(PeriodicReport, String, FetchedPat
             Err(e) => eprintln!("Note: could not fetch signature bundle: {e}"),
         }
     }
-    Ok((report, url.to_string(), fetched))
+    Ok(LoadedReport {
+        report,
+        bytes,
+        display: url.to_string(),
+        fetched,
+    })
 }
 
 /// Write `data` to `path` while refusing to follow a pre-existing
@@ -402,6 +428,55 @@ fn verify_core_patterns(report: &PeriodicReport) -> Status {
          Report was produced by perf-sentinel {producing_version}, consider re-running \
          verify-hash with that exact version before flagging the report as untrusted."
     ))
+}
+
+/// Check that the attestation beside the report names these figures. The
+/// signature covers the attestation, not the report, so without this a
+/// valid signature would vouch for any report carrying the right hash.
+fn verify_attestation_binding(
+    report: &PeriodicReport,
+    report_bytes: &[u8],
+    attestation_path: Option<&Path>,
+) -> Status {
+    let Some(path) = attestation_path else {
+        return Status::NotProvided;
+    };
+    let statement = match read_statement(path) {
+        Ok(s) => s,
+        Err(reason) => return Status::Fail(reason),
+    };
+    match check_attestation_binding(report, report_bytes, &statement) {
+        Ok(AttestationBinding::ContentHash) => {
+            Status::Ok("the attestation names this content hash".to_string())
+        }
+        Ok(AttestationBinding::FileBytes) => Status::Ok(
+            "the attestation pins these exact report bytes (written before content-hash subjects)"
+                .to_string(),
+        ),
+        Ok(AttestationBinding::Unbindable) => Status::Skip(format!(
+            "the attestation predates content-hash subjects and pins report bytes that changed \
+             since, usually when integrity.signature was patched in. Nothing ties it to these \
+             figures. Emit it again with perf-sentinel {} or later and sign it again.",
+            env!("CARGO_PKG_VERSION")
+        )),
+        Ok(AttestationBinding::Mismatch(reason)) => Status::Fail(sanitise_for_terminal(&reason)),
+        Ok(_) => Status::Fail("unrecognised attestation binding".to_string()),
+        Err(e) => Status::Fail(format!("recompute failed: {e}")),
+    }
+}
+
+fn read_statement(path: &Path) -> Result<InTotoStatement, String> {
+    let shown = sanitise_for_terminal(&path.display().to_string());
+    let meta = std::fs::metadata(path).map_err(|e| format!("stat {shown}: {e}"))?;
+    if meta.len() > MAX_ATTESTATION_BYTES {
+        return Err(format!(
+            "attestation at {shown} is {} bytes, over the {MAX_ATTESTATION_BYTES}-byte cap",
+            meta.len()
+        ));
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("read {shown}: {e}"))?;
+    serde_json::from_str(text.trim())
+        .map_err(|e| format!("attestation at {shown} is not one in-toto statement: {e}"))
 }
 
 /// What identity constraint cosign should enforce. Constrain enforces
@@ -745,6 +820,10 @@ fn print_text(outcome: &Outcome) {
         "  {}",
         format_status("Core patterns", &outcome.core_patterns)
     );
+    println!(
+        "  {}",
+        format_status("Attestation binding", &outcome.attestation_binding)
+    );
     println!("  {}", format_status("Signature", &outcome.signature));
     println!(
         "  {}",
@@ -779,6 +858,7 @@ fn print_json(outcome: &Outcome) {
         "verifications": {
             "content_hash": status_to_json(&outcome.content_hash),
             "core_patterns": status_to_json(&outcome.core_patterns),
+            "attestation_binding": status_to_json(&outcome.attestation_binding),
             "signature": status_to_json(&outcome.signature),
             "binary_attestation": status_to_json(&outcome.binary_attestation),
         },
@@ -802,14 +882,18 @@ fn status_to_json(s: &Status) -> serde_json::Value {
 fn overall_label(outcome: &Outcome) -> &'static str {
     if outcome.content_hash.is_failure()
         || outcome.core_patterns.is_failure()
+        || outcome.attestation_binding.is_failure()
         || outcome.signature.is_failure()
         || outcome.binary_attestation.is_failure()
     {
         "UNTRUSTED"
     } else if matches!(outcome.content_hash, Status::Ok(_))
+        && matches!(outcome.attestation_binding, Status::Ok(_))
         && matches!(outcome.signature, Status::Ok(_))
         && !matches!(outcome.binary_attestation, Status::Skip(_))
     {
+        // The signature covers the attestation, so it vouches for these
+        // figures only when the attestation names them.
         // A Skip on binary_attestation means the report carries attestation
         // metadata that was not verified (no --verify-binary, or gh absent).
         // Do not award TRUSTED on that: it would be a false provenance
@@ -1143,6 +1227,7 @@ mod tests {
             report,
             content_hash: Status::Ok("match".to_string()),
             core_patterns: Status::Ok("match".to_string()),
+            attestation_binding: Status::Ok("names".to_string()),
             signature: Status::Ok("valid".to_string()),
             binary_attestation: Status::Skip("metadata present, unverified".to_string()),
         };
@@ -1160,10 +1245,67 @@ mod tests {
             report,
             content_hash: Status::Ok("match".to_string()),
             core_patterns: Status::Ok("match".to_string()),
+            attestation_binding: Status::Ok("names".to_string()),
             signature: Status::Ok("valid".to_string()),
             binary_attestation: Status::NotProvided,
         };
         assert_eq!(overall_label(&outcome), "TRUSTED");
+    }
+
+    fn signed_outcome(attestation_binding: Status) -> Outcome {
+        let report: PeriodicReport =
+            serde_json::from_slice(&std::fs::read(example_g2()).unwrap()).unwrap();
+        Outcome {
+            report_path: "test".to_string(),
+            report,
+            content_hash: Status::Ok("match".to_string()),
+            core_patterns: Status::Ok("match".to_string()),
+            attestation_binding,
+            signature: Status::Ok("valid".to_string()),
+            binary_attestation: Status::NotProvided,
+        }
+    }
+
+    #[test]
+    fn a_valid_signature_over_other_figures_is_untrusted() {
+        let outcome = signed_outcome(Status::Fail("names other figures".to_string()));
+        assert_eq!(overall_label(&outcome), "UNTRUSTED");
+    }
+
+    #[test]
+    fn a_valid_signature_over_an_unbindable_attestation_stays_partial() {
+        let outcome = signed_outcome(Status::Skip("predates content-hash subjects".to_string()));
+        assert_eq!(overall_label(&outcome), "PARTIAL");
+    }
+
+    #[test]
+    fn attestation_binding_is_not_provided_without_an_attestation() {
+        let report: PeriodicReport =
+            serde_json::from_slice(&std::fs::read(example_g2()).unwrap()).unwrap();
+        let s = verify_attestation_binding(&report, b"", None);
+        assert_matches!(s, Status::NotProvided);
+    }
+
+    #[test]
+    fn attestation_binding_fails_on_a_file_that_is_not_a_statement() {
+        let report: PeriodicReport =
+            serde_json::from_slice(&std::fs::read(example_g2()).unwrap()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("attestation.intoto.jsonl");
+        std::fs::write(&path, "{\"not\": \"a statement\"}\n").unwrap();
+        let s = verify_attestation_binding(&report, b"", Some(&path));
+        assert!(
+            matches!(&s, Status::Fail(d) if d.contains("not one in-toto statement")),
+            "{s:?}"
+        );
+    }
+
+    #[test]
+    fn attestation_binding_fails_on_a_missing_file() {
+        let report: PeriodicReport =
+            serde_json::from_slice(&std::fs::read(example_g2()).unwrap()).unwrap();
+        let s = verify_attestation_binding(&report, b"", Some(Path::new("/nonexistent/att.jsonl")));
+        assert_matches!(s, Status::Fail(_));
     }
 
     #[test]

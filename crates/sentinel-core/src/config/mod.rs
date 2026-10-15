@@ -103,6 +103,12 @@ pub struct DaemonArchiveConfig {
     pub path: String,
     pub max_size_mb: u64,
     pub max_files: u32,
+    /// Write one line per scoring window to `path`. `false` keeps only
+    /// the daily rollups beside it.
+    pub windows: bool,
+    /// Age past which a monthly rollup file is deleted, counted from the
+    /// newest closed day.
+    pub rollup_retention_days: u32,
 }
 
 impl Default for DaemonArchiveConfig {
@@ -111,6 +117,8 @@ impl Default for DaemonArchiveConfig {
             path: String::new(),
             max_size_mb: 100,
             max_files: 12,
+            windows: true,
+            rollup_retention_days: 400,
         }
     }
 }

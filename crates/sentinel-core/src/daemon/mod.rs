@@ -19,6 +19,7 @@ mod hub_export;
 mod json_socket;
 mod listeners;
 mod mem_pressure;
+mod rollup_writer;
 mod sampling;
 mod slow_window;
 mod task_guard;

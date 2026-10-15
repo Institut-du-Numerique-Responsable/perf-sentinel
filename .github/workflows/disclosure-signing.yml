@@ -1,0 +1,133 @@
+name: Disclosure signing
+
+# End to end over a real Sigstore signature, the one rung neither the e2e suite
+# nor the simulation lab can reach: they have no OIDC identity, so their
+# verify-hash runs stop at PARTIAL. This job produces a disclosure and its
+# attestation, signs the attestation keyless with the job's own identity, and
+# requires TRUSTED. It then edits the figures and re-bakes the hash, keeping
+# the genuine signature, and requires UNTRUSTED on the attestation binding.
+#
+# Each run writes one entry to the public Rekor log under this workflow's
+# identity, hence the narrow triggers.
+on:
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/sentinel-core/src/report/periodic/**'
+      - 'crates/sentinel-cli/src/disclose.rs'
+      - 'crates/sentinel-cli/src/disclose/**'
+      - 'crates/sentinel-cli/src/verify_hash.rs'
+      - 'crates/sentinel-cli/src/hash_bake.rs'
+      - '.github/workflows/disclosure-signing.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: disclosure-signing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sign-and-verify:
+    name: Sign a disclosure and verify it
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A fork's pull request gets no OIDC token, so it cannot sign.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      # The action defaults to an older cosign, so the release is pinned the
+      # same way helm-release.yml pins it.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Build perf-sentinel
+        run: cargo build --release -p perf-sentinel --locked
+
+      - name: Produce a disclosure and its attestation
+        run: |
+          set -euo pipefail
+          bin=target/release/perf-sentinel
+          mkdir -p work
+          "$bin" analyze --format json --input tests/fixtures/n_plus_one_sql.json > work/window.json
+          # Two windows, the first on the period's first day so the archive
+          # reaches the period start.
+          for ts in 2026-01-01T09:00:00Z 2026-01-20T09:00:00Z; do
+            jq -c --arg ts "$ts" '{ts: $ts, report: .}' work/window.json
+          done > work/archive.ndjson
+          "$bin" disclose --intent internal --confidentiality public \
+            --period-type custom --from 2026-01-01 --to 2026-01-31 \
+            --input work/archive.ndjson --org-config docs/examples/perf-sentinel-org.toml \
+            --output work/report.json --emit-attestation work/attestation.intoto.jsonl
+
+      - name: Sign the attestation keyless
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes --bundle work/bundle.sig --new-bundle-format \
+            work/attestation.intoto.jsonl
+
+      - name: Patch the signature locator, as an operator does
+        env:
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          index=$(jq -r '.verificationMaterial.tlogEntries[0].logIndex' work/bundle.sig)
+          integrated=$(jq -r '.verificationMaterial.tlogEntries[0].integratedTime' work/bundle.sig)
+          signed_at=$(date -u -d "@${integrated}" +%Y-%m-%dT%H:%M:%SZ)
+          jq --arg id "$IDENTITY" --arg at "$signed_at" --argjson idx "$index" '
+            .integrity.signature = {
+              format: "sigstore-cosign-intoto-v1",
+              bundle_url: "https://example.invalid/bundle.sig",
+              signer_identity: $id,
+              signer_issuer: "https://token.actions.githubusercontent.com",
+              rekor_url: "https://rekor.sigstore.dev",
+              rekor_log_index: $idx,
+              signed_at: $at
+            }
+            | .report_metadata.integrity_level = "signed"' work/report.json > work/signed.json
+
+      - name: The signed disclosure verifies TRUSTED
+        env:
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          target/release/perf-sentinel verify-hash --report work/signed.json \
+            --attestation work/attestation.intoto.jsonl --bundle work/bundle.sig \
+            --expected-identity "$IDENTITY" \
+            --expected-issuer https://token.actions.githubusercontent.com \
+            | tee work/trusted.txt
+          grep -q '\[OK\] Attestation binding' work/trusted.txt
+          grep -q '\[OK\] Signature' work/trusted.txt
+          grep -q 'Overall: TRUSTED' work/trusted.txt
+
+      - name: Figures edited after signing verify UNTRUSTED
+        env:
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          jq '.aggregate.total_carbon_kgco2eq /= 2' work/signed.json > work/edited.json
+          target/release/perf-sentinel hash-bake --report work/edited.json \
+            --output work/rebaked.json --allow-signed
+          rc=0
+          target/release/perf-sentinel verify-hash --report work/rebaked.json \
+            --attestation work/attestation.intoto.jsonl --bundle work/bundle.sig \
+            --expected-identity "$IDENTITY" \
+            --expected-issuer https://token.actions.githubusercontent.com \
+            > work/untrusted.txt || rc=$?
+          cat work/untrusted.txt
+          test "$rc" -eq 1
+          # The signature itself is still genuine: only the binding catches it.
+          grep -q '\[OK\] Content hash' work/untrusted.txt
+          grep -q '\[OK\] Signature' work/untrusted.txt
+          grep -q '\[FAIL\] Attestation binding' work/untrusted.txt
+          grep -q 'Overall: UNTRUSTED' work/untrusted.txt

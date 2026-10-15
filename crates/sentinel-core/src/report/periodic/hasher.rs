@@ -51,7 +51,8 @@ enum BlankZero {
 ///
 /// - `(integrity, content_hash)` is filled by disclose at write time.
 /// - `(integrity, signature)` is filled by the operator after
-///   `cosign attest-blob` succeeds and the locator is pasted in.
+///   `cosign sign-blob` signs the attestation and the locator is pasted
+///   in.
 /// - `(integrity, binary_attestation)` is filled when the producing
 ///   binary carries SLSA provenance recorded post-build.
 /// - `(report_metadata, integrity_level)` flips from `hash-only` to
@@ -175,9 +176,8 @@ pub fn binary_hash() -> std::io::Result<String> {
     Ok(out)
 }
 
-/// Hash an arbitrary file by path and return the 64-hex SHA-256 digest
-/// (without the `sha256:` prefix, to match the in-toto v1 subject digest
-/// convention). Streams via the same `BUF` size and `BINARY_HASH_MAX_BYTES`
+/// Hash an arbitrary file by path and return the 64-hex SHA-256 digest,
+/// without the `sha256:` prefix. Streams via the same `BUF` size and `BINARY_HASH_MAX_BYTES`
 /// cap as [`binary_hash`].
 ///
 /// # Errors

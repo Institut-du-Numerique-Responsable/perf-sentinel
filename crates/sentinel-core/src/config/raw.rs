@@ -58,6 +58,8 @@ struct ArchiveSection {
     path: Option<String>,
     max_size_mb: Option<u64>,
     max_files: Option<u32>,
+    windows: Option<bool>,
+    rollup_retention_days: Option<u32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -752,6 +754,10 @@ fn convert_archive_section(raw: &ArchiveSection) -> Option<DaemonArchiveConfig> 
         path,
         max_size_mb: raw.max_size_mb.unwrap_or(defaults.max_size_mb),
         max_files: raw.max_files.unwrap_or(defaults.max_files),
+        windows: raw.windows.unwrap_or(defaults.windows),
+        rollup_retention_days: raw
+            .rollup_retention_days
+            .unwrap_or(defaults.rollup_retention_days),
     })
 }
 

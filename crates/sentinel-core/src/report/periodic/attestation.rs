@@ -1,7 +1,7 @@
 //! In-toto v1 statement builder for periodic disclosure reports.
 //!
-//! Produces a sidecar attestation document that pins the report's
-//! SHA-256 digest and a lean methodology summary. The output is a
+//! Produces a sidecar attestation document whose subject is the
+//! report's canonical content hash, plus a lean methodology summary. The output is a
 //! complete in-toto v1 Statement (`_type`, `predicateType`, `subject`,
 //! `predicate`), not just a predicate. Operators sign it with
 //! `cosign sign-blob <statement> --bundle <bundle.sig>
@@ -19,6 +19,8 @@ use std::fmt::Write as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::errors::HashError;
+use super::hasher::{compute_content_hash, format_sha256};
 use super::schema::{PeriodicReport, ReportIntent};
 
 /// in-toto v1 statement type URL.
@@ -34,6 +36,10 @@ pub const PERF_SENTINEL_PREDICATE_TYPE: &str = "https://perf-sentinel.io/attesta
 /// Conventional subject name for the report file, used when the caller
 /// does not pass an explicit name to [`build_in_toto_statement`].
 pub const DEFAULT_SUBJECT_NAME: &str = "perf-sentinel-report.json";
+
+/// Value of [`PerfSentinelPredicate::subject_binding`] when the subject
+/// digest is the report's canonical content hash.
+pub const SUBJECT_BINDING_CONTENT_HASH: &str = "content_hash";
 
 // Only `PartialEq` (no `Eq`) on the statement, predicate, and methodology
 // summary: `MethodologySummary.period_coverage: f64` is not `Eq` because
@@ -64,6 +70,13 @@ pub struct PerfSentinelPredicate {
     pub confidentiality_level: String,
     pub organisation: OrganisationSummary,
     pub methodology_summary: MethodologySummary,
+    /// What the subject digest names. [`SUBJECT_BINDING_CONTENT_HASH`]
+    /// on every statement disclose writes: the canonical content hash,
+    /// which stays put when the signature locator is patched into the
+    /// report after signing. Absent on statements written before, whose
+    /// subject pinned the report file bytes at disclose time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_binding: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,17 +126,15 @@ pub struct MethodologySummary {
     pub core_patterns_hash: String,
 }
 
-/// Build an in-toto v1 statement that pins `report_file_sha256` as the
-/// hash of the report file and folds in a lean projection of the
-/// disclosure's methodology block. The 64-hex value must come from
-/// hashing the serialised report file on disk, not the canonical
-/// `content_hash` (which blanks one field).
+/// Build an in-toto v1 statement whose subject is `content_hash_hex`
+/// and fold in a lean projection of the disclosure's methodology block.
+/// `content_hash_hex` must be the report's canonical content hash
+/// without its `sha256:` prefix: unlike the file bytes, it survives the
+/// signature locator being patched in after signing, so the signed
+/// statement keeps naming the published figures.
 #[must_use]
-pub fn build_in_toto_statement(
-    report: &PeriodicReport,
-    report_file_sha256: &str,
-) -> InTotoStatement {
-    build_in_toto_statement_named(report, report_file_sha256, DEFAULT_SUBJECT_NAME)
+pub fn build_in_toto_statement(report: &PeriodicReport, content_hash_hex: &str) -> InTotoStatement {
+    build_in_toto_statement_named(report, content_hash_hex, DEFAULT_SUBJECT_NAME)
 }
 
 /// Same as [`build_in_toto_statement`] but lets the caller pick the
@@ -132,11 +143,11 @@ pub fn build_in_toto_statement(
 #[must_use]
 pub fn build_in_toto_statement_named(
     report: &PeriodicReport,
-    report_file_sha256: &str,
+    content_hash_hex: &str,
     subject_name: &str,
 ) -> InTotoStatement {
     let mut digest = BTreeMap::new();
-    digest.insert("sha256".to_string(), report_file_sha256.to_string());
+    digest.insert("sha256".to_string(), content_hash_hex.to_string());
 
     let mut identifiers = BTreeMap::new();
     let ids = &report.organisation.identifiers;
@@ -193,8 +204,103 @@ pub fn build_in_toto_statement_named(
                     .unwrap_or(u32::MAX),
                 core_patterns_hash: hash_core_patterns(&report.methodology.core_patterns_required),
             },
+            subject_binding: Some(SUBJECT_BINDING_CONTENT_HASH.to_string()),
         },
     }
+}
+
+/// How an in-toto statement ties to the report it travels with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AttestationBinding {
+    /// A subject digest is the report's recomputed content hash.
+    ContentHash,
+    /// Statement written before content-hash subjects, whose subject is
+    /// the SHA-256 of these exact report bytes.
+    FileBytes,
+    /// Statement written before content-hash subjects, whose subject
+    /// pins report bytes that changed since, typically when
+    /// `integrity.signature` was patched in after signing. Nothing ties
+    /// it to these figures.
+    Unbindable,
+    /// The statement names another report. The string says how.
+    Mismatch(String),
+}
+
+/// Check that `statement` names `report`. `report_bytes` are the bytes
+/// the report was read from, compared only for statements written
+/// before content-hash subjects.
+///
+/// # Errors
+///
+/// Returns [`HashError`] when the report cannot be serialised to
+/// recompute its content hash.
+pub fn check_attestation_binding(
+    report: &PeriodicReport,
+    report_bytes: &[u8],
+    statement: &InTotoStatement,
+) -> Result<AttestationBinding, HashError> {
+    if let Some(reason) = header_mismatch(report, statement) {
+        return Ok(AttestationBinding::Mismatch(reason));
+    }
+    let content_hash = compute_content_hash(report)?;
+    if names_digest(statement, &content_hash) {
+        return Ok(AttestationBinding::ContentHash);
+    }
+    if let Some(binding) = &statement.predicate.subject_binding {
+        return Ok(AttestationBinding::Mismatch(
+            if binding == SUBJECT_BINDING_CONTENT_HASH {
+                format!(
+                    "the statement names {}, these figures hash to {content_hash}",
+                    first_subject_digest(statement)
+                )
+            } else {
+                format!("unknown subject_binding {binding:?}")
+            },
+        ));
+    }
+    if names_digest(statement, &format_sha256(report_bytes)) {
+        return Ok(AttestationBinding::FileBytes);
+    }
+    Ok(AttestationBinding::Unbindable)
+}
+
+fn header_mismatch(report: &PeriodicReport, statement: &InTotoStatement) -> Option<String> {
+    if statement.statement_type != IN_TOTO_STATEMENT_TYPE {
+        return Some(format!("_type is {:?}", statement.statement_type));
+    }
+    if statement.predicate_type != PERF_SENTINEL_PREDICATE_TYPE {
+        return Some(format!("predicateType is {:?}", statement.predicate_type));
+    }
+    let report_uuid = report.report_metadata.report_uuid.to_string();
+    if statement.predicate.report_uuid != report_uuid {
+        return Some(format!(
+            "the statement names report_uuid {}, the report is {report_uuid}",
+            statement.predicate.report_uuid
+        ));
+    }
+    None
+}
+
+/// Whether a subject's SHA-256 equals `prefixed`, a `sha256:<hex>` value.
+fn names_digest(statement: &InTotoStatement, prefixed: &str) -> bool {
+    let hex = prefixed.trim_start_matches("sha256:");
+    statement
+        .subject
+        .iter()
+        .filter_map(|s| s.digest.get("sha256"))
+        .any(|d| d.eq_ignore_ascii_case(hex))
+}
+
+fn first_subject_digest(statement: &InTotoStatement) -> String {
+    statement
+        .subject
+        .iter()
+        .find_map(|s| s.digest.get("sha256"))
+        .map_or_else(
+            || "no sha256 subject".to_string(),
+            |d| format!("sha256:{d}"),
+        )
 }
 
 /// SHA-256 over the sorted, colon-joined core pattern names. Sorting
@@ -409,5 +515,148 @@ mod tests {
         let r = load_g2_example();
         let s = build_in_toto_statement_named(&r, DIGEST_64, "2026-Q1-disclosure.json");
         assert_eq!(s.subject[0].name, "2026-Q1-disclosure.json");
+    }
+
+    #[test]
+    fn statement_declares_a_content_hash_subject() {
+        let s = build_in_toto_statement(&load_g2_example(), DIGEST_64);
+        assert_eq!(
+            s.predicate.subject_binding.as_deref(),
+            Some(SUBJECT_BINDING_CONTENT_HASH)
+        );
+        assert!(
+            serde_json::to_string(&s)
+                .unwrap()
+                .contains("\"subject_binding\":\"content_hash\"")
+        );
+    }
+
+    #[test]
+    fn statement_written_before_subject_binding_still_parses() {
+        let mut value =
+            serde_json::to_value(build_in_toto_statement(&load_g2_example(), DIGEST_64)).unwrap();
+        value["predicate"]
+            .as_object_mut()
+            .unwrap()
+            .remove("subject_binding");
+        let back: InTotoStatement = serde_json::from_value(value).unwrap();
+        assert_eq!(back.predicate.subject_binding, None);
+    }
+
+    fn hashed_g2() -> PeriodicReport {
+        let mut r = load_g2_example();
+        r.integrity.content_hash = compute_content_hash(&r).unwrap();
+        r
+    }
+
+    fn statement_for(r: &PeriodicReport) -> InTotoStatement {
+        let hash = compute_content_hash(r).unwrap();
+        build_in_toto_statement(r, hash.trim_start_matches("sha256:"))
+    }
+
+    fn legacy_statement(r: &PeriodicReport, file_bytes: &[u8]) -> InTotoStatement {
+        let digest = format_sha256(file_bytes);
+        let mut s = build_in_toto_statement(r, digest.trim_start_matches("sha256:"));
+        s.predicate.subject_binding = None;
+        s
+    }
+
+    #[test]
+    fn binding_holds_when_the_subject_is_the_content_hash() {
+        let r = hashed_g2();
+        let s = statement_for(&r);
+        let binding = check_attestation_binding(&r, b"any bytes", &s).unwrap();
+        assert_eq!(binding, AttestationBinding::ContentHash);
+    }
+
+    #[test]
+    fn binding_survives_the_signature_locator_patch() {
+        use crate::report::periodic::schema::{IntegrityLevel, SignatureMetadata};
+        let mut r = hashed_g2();
+        let s = statement_for(&r);
+        r.integrity.signature = Some(SignatureMetadata {
+            format: "sigstore-cosign-intoto-v1".to_string(),
+            bundle_url: "https://example.fr/bundle.sig".to_string(),
+            signer_identity: "ci@example.fr".to_string(),
+            signer_issuer: "https://token.actions.githubusercontent.com".to_string(),
+            rekor_url: "https://rekor.sigstore.dev".to_string(),
+            rekor_log_index: 1,
+            signed_at: "2026-04-05T12:04:00Z".to_string(),
+        });
+        r.report_metadata.integrity_level = IntegrityLevel::Signed;
+        let binding = check_attestation_binding(&r, b"patched bytes", &s).unwrap();
+        assert_eq!(binding, AttestationBinding::ContentHash);
+    }
+
+    #[test]
+    fn binding_fails_when_figures_changed_after_signing() {
+        let original = hashed_g2();
+        let s = statement_for(&original);
+        let mut edited = original.clone();
+        edited.aggregate.total_carbon_kgco2eq /= 2.0;
+        edited.integrity.content_hash = compute_content_hash(&edited).unwrap();
+        let binding = check_attestation_binding(&edited, b"edited bytes", &s).unwrap();
+        assert!(
+            matches!(&binding, AttestationBinding::Mismatch(reason) if reason.contains("these figures hash to")),
+            "{binding:?}"
+        );
+    }
+
+    #[test]
+    fn binding_fails_on_another_report_uuid() {
+        let r = hashed_g2();
+        let mut s = statement_for(&r);
+        s.predicate.report_uuid = "00000000-0000-4000-8000-000000000099".to_string();
+        let binding = check_attestation_binding(&r, b"", &s).unwrap();
+        assert!(
+            matches!(&binding, AttestationBinding::Mismatch(reason) if reason.contains("report_uuid")),
+            "{binding:?}"
+        );
+    }
+
+    #[test]
+    fn binding_fails_on_a_foreign_predicate_type() {
+        let r = hashed_g2();
+        let mut s = statement_for(&r);
+        s.predicate_type = "https://slsa.dev/provenance/v1".to_string();
+        let binding = check_attestation_binding(&r, b"", &s).unwrap();
+        assert!(
+            matches!(binding, AttestationBinding::Mismatch(_)),
+            "{binding:?}"
+        );
+    }
+
+    #[test]
+    fn binding_fails_on_an_unknown_subject_binding() {
+        let r = hashed_g2();
+        let mut s = statement_for(&r);
+        s.subject[0]
+            .digest
+            .insert("sha256".to_string(), DIGEST_64.to_string());
+        s.predicate.subject_binding = Some("file_bytes".to_string());
+        let binding = check_attestation_binding(&r, b"", &s).unwrap();
+        assert!(
+            matches!(&binding, AttestationBinding::Mismatch(reason) if reason.contains("unknown subject_binding")),
+            "{binding:?}"
+        );
+    }
+
+    #[test]
+    fn legacy_statement_binds_the_untouched_file_bytes() {
+        let r = hashed_g2();
+        let bytes = serde_json::to_vec_pretty(&r).unwrap();
+        let s = legacy_statement(&r, &bytes);
+        let binding = check_attestation_binding(&r, &bytes, &s).unwrap();
+        assert_eq!(binding, AttestationBinding::FileBytes);
+    }
+
+    #[test]
+    fn legacy_statement_over_patched_bytes_is_unbindable() {
+        let r = hashed_g2();
+        let before = serde_json::to_vec_pretty(&r).unwrap();
+        let s = legacy_statement(&r, &before);
+        let after = serde_json::to_vec(&r).unwrap();
+        let binding = check_attestation_binding(&r, &after, &s).unwrap();
+        assert_eq!(binding, AttestationBinding::Unbindable);
     }
 }

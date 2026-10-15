@@ -690,7 +690,7 @@ fn transport_bracket_needs_every_window_to_declare_the_fixed_coefficient() {
     };
 
     // A window declaring the fixed coefficient keeps the bracket.
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(
         Some(&with_transport(4.0)),
         Some(&coefficient(Some(DEFAULT_NETWORK_ENERGY_PER_BYTE_KWH))),
@@ -698,21 +698,21 @@ fn transport_bracket_needs_every_window_to_declare_the_fixed_coefficient() {
     assert!(!acc.transport_coefficient_uncertain);
 
     // A custom one disqualifies the period.
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(Some(&with_transport(4.0)), Some(&coefficient(Some(5e-10))));
     assert!(acc.transport_coefficient_uncertain);
 
     // So does an absent one: pre-0.9.25 windows record no coefficient
     // and could have been scored with anything.
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(Some(&with_transport(4.0)), Some(&coefficient(None)));
     assert!(acc.transport_coefficient_uncertain);
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(Some(&with_transport(4.0)), None);
     assert!(acc.transport_coefficient_uncertain);
 
     // A window that contributed no transport says nothing either way.
-    let mut acc = Builder::default();
+    let mut acc = PeriodState::default();
     acc.fold_transport_coefficient(Some(&with_transport(0.0)), None);
     assert!(!acc.transport_coefficient_uncertain);
 
@@ -1830,4 +1830,565 @@ fn waste_block(energy: f64, model: &str) -> crate::report::DisclosureDbWaste {
         canonical_waste_gco2: Some(energy * 80.0),
         energy_gco2: Some(energy * 100.0),
     }
+}
+
+#[test]
+fn an_archive_starting_before_the_period_reaches_its_start() {
+    // A quiet first week: no window inside the period before mid-January,
+    // but the archive holds December lines, so nothing was pruned.
+    let (_dir, path) = write_archive(&[
+        (
+            Utc.with_ymd_and_hms(2025, 12, 20, 9, 0, 0).unwrap(),
+            plain_window(),
+        ),
+        (
+            Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap(),
+            plain_window(),
+        ),
+    ]);
+    let period = q1_2026();
+    let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
+    assert_eq!(
+        inputs.earliest_archived_window,
+        Some(Utc.with_ymd_and_hms(2025, 12, 20, 9, 0, 0).unwrap())
+    );
+    assert!(archive_reaches_period_start(
+        inputs.earliest_archived_window,
+        &period
+    ));
+}
+
+#[test]
+fn a_pruned_archive_does_not_reach_the_period_start() {
+    // What rotation leaves after pruning a busy quarter: only its last weeks.
+    let (_dir, path) = write_archive(&[
+        (
+            Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap(),
+            plain_window(),
+        ),
+        (
+            Utc.with_ymd_and_hms(2026, 3, 30, 9, 0, 0).unwrap(),
+            plain_window(),
+        ),
+    ]);
+    let period = q1_2026();
+    let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
+    assert!(!archive_reaches_period_start(
+        inputs.earliest_archived_window,
+        &period
+    ));
+}
+
+#[test]
+fn a_window_on_the_first_day_reaches_the_period_start() {
+    let period = q1_2026();
+    let first_day = Utc.with_ymd_and_hms(2026, 1, 1, 23, 59, 0).unwrap();
+    assert!(archive_reaches_period_start(Some(first_day), &period));
+    let second_day = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
+    assert!(!archive_reaches_period_start(Some(second_day), &period));
+    assert!(!archive_reaches_period_start(None, &period));
+}
+
+fn folded(lines: &[(DateTime<Utc>, Report)]) -> PeriodState {
+    let mut state = PeriodState::default();
+    for (ts, report) in lines {
+        state.process_window(report, *ts, false).unwrap();
+    }
+    state
+}
+
+fn day(d: u32, h: u32) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 1, d, h, 0, 0).unwrap()
+}
+
+#[test]
+fn a_state_survives_a_json_round_trip() {
+    let finding = make_finding("svc-a", FindingType::NPlusOneSql, "SELECT ?");
+    let state = folded(&[(
+        day(10, 9),
+        make_report(10, 100, 10, &[("svc-a", "/api", 100)], vec![finding]),
+    )]);
+    let json = serde_json::to_string(&state).unwrap();
+    let back: PeriodState = serde_json::from_str(&json).unwrap();
+    assert_eq!(serde_json::to_string(&back).unwrap(), json);
+}
+
+#[test]
+fn merging_two_days_counts_like_folding_them() {
+    let a = (day(10, 9), plain_window());
+    let b = (day(11, 9), plain_window());
+    let mut merged = folded(std::slice::from_ref(&a));
+    merged.merge(folded(std::slice::from_ref(&b)));
+    let whole = folded(&[a, b]);
+    assert_eq!(merged.windows_aggregated, whole.windows_aggregated);
+    assert_eq!(merged.total_io_ops, whole.total_io_ops);
+    assert_eq!(merged.observed_days, whole.observed_days);
+    assert_eq!(
+        merged.per_service["svc-a"].total_requests,
+        whole.per_service["svc-a"].total_requests
+    );
+}
+
+#[test]
+fn merge_drops_unknown_patterns_and_sanitizes_figures() {
+    let mut incoming = folded(&[(day(10, 9), plain_window())]);
+    let bucket = incoming.per_service.get_mut("svc-a").unwrap();
+    bucket.energy_kwh = f64::NAN;
+    bucket.anti_patterns.insert(
+        "not_a_pattern".to_string(),
+        AntiPatternAccumulator::default(),
+    );
+    incoming
+        .first_seen
+        .insert(("svc-a".into(), "not_a_pattern".into()), day(10, 9));
+    incoming.binary_versions.insert("bad version!".to_string());
+    incoming.total_carbon_kgco2eq = f64::INFINITY;
+
+    let mut state = PeriodState::default();
+    state.merge(incoming);
+    let svc = &state.per_service["svc-a"];
+    assert!(svc.energy_kwh.is_finite());
+    assert!(!svc.anti_patterns.contains_key("not_a_pattern"));
+    assert!(state.first_seen.is_empty());
+    assert!(state.binary_versions.is_empty());
+    assert!(state.total_carbon_kgco2eq.is_finite());
+}
+
+#[test]
+fn merge_honours_the_service_cap() {
+    let mut incoming = PeriodState::default();
+    for i in 0..(MAX_SERVICES + 10) {
+        incoming
+            .per_service
+            .insert(format!("svc-{i}"), ServiceAccumulator::default());
+    }
+    let mut state = PeriodState::default();
+    state.merge(incoming);
+    assert_eq!(state.per_service.len(), MAX_SERVICES);
+}
+
+#[test]
+fn an_unattributed_window_is_remembered_for_strict_mode() {
+    let empty = make_report(10, 100, 10, &[], vec![]);
+    let state = folded(&[(day(12, 8), empty.clone()), (day(10, 8), empty)]);
+    assert_eq!(state.first_unattributed(), Some(day(10, 8)));
+}
+
+use super::super::rollup::{self, DayAccumulator};
+use proptest::prelude::*;
+
+/// The daemon's shape: one chained rollup line per closed day, in monthly
+/// files, the chain carried across files.
+fn write_rollups(dir: &Path, stem: &str, lines: &[(DateTime<Utc>, Report)]) -> Vec<PathBuf> {
+    let mut acc = DayAccumulator::default();
+    let mut days = Vec::new();
+    for (ts, report) in lines {
+        days.extend(acc.observe(*ts, report));
+    }
+    days.extend(acc.take());
+    let mut prev = super::super::hasher::ARCHIVE_CHAIN_SEED.to_string();
+    let mut files: BTreeMap<PathBuf, String> = BTreeMap::new();
+    for (seq, day) in days.iter().enumerate() {
+        let line = rollup::serialize_rollup(day, &prev, seq as u64, 0).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        prev = value["hash"].as_str().unwrap().to_string();
+        let path = dir.join(rollup::rollup_file_name(stem, day.day));
+        let buf = files.entry(path).or_default();
+        buf.push_str(&line);
+        buf.push('\n');
+    }
+    for (path, text) in &files {
+        std::fs::write(path, text).unwrap();
+    }
+    files.into_keys().collect()
+}
+
+fn window_pool() -> Vec<Report> {
+    let tier = crate::report::AvoidableTier {
+        n_plus_one_threshold: 2,
+        avoidable_io_ops: 10,
+        avoidable_kwh: 0.1,
+        avoidable_gco2: 1.0,
+    };
+    let mut with_waste = make_report(
+        40,
+        400,
+        30,
+        &[("svc-a", "/api", 300), ("svc-b", "/b", 100)],
+        vec![],
+    );
+    with_waste.disclosure_waste = Some(crate::report::DisclosureWaste {
+        canonical: tier.clone(),
+        operational: tier,
+        database: Some(waste_block(1.0, "alumet_rapl")),
+        messaging: Some(waste_block(0.5, "estimated")),
+    });
+    with_waste.binary_version = "0.29.0".to_string();
+    vec![
+        plain_window(),
+        make_report(
+            25,
+            250,
+            40,
+            &[("svc-a", "/api", 150), ("svc-c", "/c", 100)],
+            vec![
+                make_finding("svc-a", FindingType::NPlusOneSql, "SELECT ?"),
+                make_finding("svc-c", FindingType::RedundantSql, "SELECT 1"),
+            ],
+        ),
+        make_runtime_report(
+            &[("svc-a", "/api", 60), ("svc-b", "/b", 40)],
+            &[("svc-a", 0.003), ("svc-b", 0.001)],
+            &[("svc-a", 0.02), ("svc-b", 0.01)],
+            &[("svc-a", "eu-west-3"), ("svc-b", "eu-west-3")],
+            0.03,
+            "scaphandre_rapl+cal",
+        ),
+        make_report(5, 50, 0, &[], vec![]),
+        with_waste,
+    ]
+}
+
+/// Floats may differ in their last bits: a rollup sums a day first, so
+/// the additions run in another order than window by window.
+fn approx_json(a: &serde_json::Value, b: &serde_json::Value, at: &str) {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            let (x, y) = (x.as_f64().unwrap(), y.as_f64().unwrap());
+            let tolerance = 1e-9 * x.abs().max(y.abs()).max(1e-3);
+            assert!((x - y).abs() <= tolerance, "{at}: {x} != {y}");
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            assert_eq!(
+                x.keys().collect::<Vec<_>>(),
+                y.keys().collect::<Vec<_>>(),
+                "{at}"
+            );
+            for (key, value) in x {
+                approx_json(value, &y[key], &format!("{at}.{key}"));
+            }
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            assert_eq!(x.len(), y.len(), "{at}");
+            for (i, (p, q)) in x.iter().zip(y).enumerate() {
+                approx_json(p, q, &format!("{at}[{i}]"));
+            }
+        }
+        _ => assert_eq!(a, b, "{at}"),
+    }
+}
+
+fn assert_same_figures(windows: &AggregateInputs, rollups: &AggregateInputs) {
+    approx_json(
+        &serde_json::to_value(&windows.aggregate).unwrap(),
+        &serde_json::to_value(&rollups.aggregate).unwrap(),
+        "aggregate",
+    );
+    approx_json(
+        &serde_json::to_value(&windows.per_service).unwrap(),
+        &serde_json::to_value(&rollups.per_service).unwrap(),
+        "per_service",
+    );
+    assert_eq!(windows.windows_aggregated, rollups.windows_aggregated);
+    assert_eq!(windows.first_seen, rollups.first_seen);
+    assert_eq!(windows.last_seen, rollups.last_seen);
+    assert_eq!(windows.energy_source_models, rollups.energy_source_models);
+    assert_eq!(windows.carbon_methodologies, rollups.carbon_methodologies);
+    assert_eq!(windows.scoring_coefficients, rollups.scoring_coefficients);
+    assert_eq!(windows.legacy_waste_windows, rollups.legacy_waste_windows);
+    assert_eq!(windows.calibration_applied, rollups.calibration_applied);
+    assert_eq!(
+        windows.earliest_archived_window,
+        rollups.earliest_archived_window
+    );
+    assert_eq!(windows.chain_verified, rollups.chain_verified);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+    #[test]
+    fn rollups_publish_the_figures_the_windows_do(
+        picks in prop::collection::vec((0usize..5, 0i64..(3 * 86_400)), 1..40)
+    ) {
+        let pool = window_pool();
+        let base = Utc.with_ymd_and_hms(2026, 1, 30, 0, 0, 0).unwrap();
+        let mut lines: Vec<(DateTime<Utc>, Report)> = picks
+            .iter()
+            .map(|(i, s)| (base + chrono::Duration::seconds(*s), pool[*i].clone()))
+            .collect();
+        lines.sort_by_key(|(ts, _)| *ts);
+        let (_wdir, window_path) = write_chained_archive(&lines);
+        let rdir = TempDir::new().unwrap();
+        let rollup_paths = write_rollups(rdir.path(), "archive", &lines);
+        let from_windows = aggregate_from_paths(&[window_path], &q1_2026(), false).unwrap();
+        let from_rollups = aggregate_from_paths(&rollup_paths, &q1_2026(), false).unwrap();
+        assert_same_figures(&from_windows, &from_rollups);
+    }
+}
+
+#[test]
+fn a_rollup_covers_the_windows_it_holds_and_no_more() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let rolled = vec![(day(10, 9), pool[0].clone()), (day(11, 9), pool[1].clone())];
+    // The window archive beside the rollups also holds a window at 15:00
+    // on day 11 the rollup never folded, as after a crash's last snapshot,
+    // and day 12, which has no rollup yet.
+    let mut windows: Vec<_> = rolled.iter().map(|(ts, r)| (*ts, r.clone(), 0)).collect();
+    windows.push((day(11, 15), pool[2].clone(), 0));
+    windows.push((day(12, 9), pool[3].clone(), 0));
+    let mut paths = vec![write_drops_file(dir.path(), "archive.ndjson", &windows)];
+    paths.extend(write_rollups(dir.path(), "archive", &rolled));
+    let mixed = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+
+    let only = TempDir::new().unwrap();
+    let alone = write_drops_file(only.path(), "archive.ndjson", &windows);
+    let expected = aggregate_from_paths(&[alone], &q1_2026(), false).unwrap();
+    assert_eq!(mixed.windows_aggregated, 4);
+    approx_json(
+        &serde_json::to_value(&mixed.aggregate).unwrap(),
+        &serde_json::to_value(&expected.aggregate).unwrap(),
+        "aggregate",
+    );
+}
+
+#[test]
+fn two_lines_for_one_day_both_count() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let lines = vec![
+        (day(10, 23), pool[0].clone()),
+        (day(11, 0), pool[0].clone()),
+        (day(10, 22), pool[0].clone()),
+    ];
+    let paths = write_rollups(dir.path(), "archive", &lines);
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.windows_aggregated, 3);
+}
+
+#[test]
+fn a_removed_rollup_day_breaks_the_chain() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let lines: Vec<_> = (10..14).map(|d| (day(d, 9), pool[0].clone())).collect();
+    let paths = write_rollups(dir.path(), "archive", &lines);
+    let text = std::fs::read_to_string(&paths[0]).unwrap();
+    let kept: Vec<&str> = text
+        .lines()
+        .enumerate()
+        .filter(|(i, _)| *i != 1)
+        .map(|(_, l)| l)
+        .collect();
+    std::fs::write(&paths[0], kept.join("\n") + "\n").unwrap();
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.chain_breaks, 1);
+    assert_eq!(agg.windows_aggregated, 3);
+}
+
+#[test]
+fn the_rollup_chain_runs_across_monthly_files() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let lines = vec![
+        (day(30, 9), pool[0].clone()),
+        (day(31, 9), pool[0].clone()),
+        (
+            Utc.with_ymd_and_hms(2026, 2, 1, 9, 0, 0).unwrap(),
+            pool[0].clone(),
+        ),
+    ];
+    let paths = write_rollups(dir.path(), "archive", &lines);
+    assert_eq!(paths.len(), 2);
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!((agg.chain_breaks, agg.chain_verified), (0, 3));
+}
+
+#[test]
+fn strict_attribution_refuses_a_rollup_holding_an_unattributed_window() {
+    let dir = TempDir::new().unwrap();
+    let paths = write_rollups(
+        dir.path(),
+        "archive",
+        &[(day(10, 9), make_report(5, 50, 0, &[], vec![]))],
+    );
+    let err = aggregate_from_paths(&paths, &q1_2026(), true).unwrap_err();
+    assert_matches!(err, AggregationError::UnattributedWindow { .. });
+}
+
+#[test]
+fn a_rollup_cannot_claim_days_other_than_its_own() {
+    let dir = TempDir::new().unwrap();
+    let mut acc = DayAccumulator::default();
+    acc.observe(day(10, 9), &plain_window());
+    let mut closed = acc.take().unwrap();
+    closed
+        .state
+        .insert_observed_day_for_test(day(20, 0).date_naive());
+    let line = rollup::serialize_rollup(&closed, "seed", 0, 0).unwrap();
+    let path = dir.path().join("archive-daily-2026-01.ndjson");
+    std::fs::write(&path, line + "\n").unwrap();
+    let agg = aggregate_from_paths(&[path], &q1_2026(), false).unwrap();
+    assert_eq!(agg.aggregate.temporal_coverage.observed_days, 1);
+}
+
+#[test]
+fn a_directory_mixes_windows_rollups_a_renamed_rollup_and_the_snapshot() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    write_rollups(dir.path(), "archive", &[(day(10, 9), pool[0].clone())]);
+    let renamed = write_rollups(dir.path(), "other", &[(day(11, 9), pool[0].clone())]);
+    std::fs::rename(&renamed[0], dir.path().join("copied.ndjson")).unwrap();
+    let windows = dir.path().join("archive.ndjson");
+    let mut file = File::create(&windows).unwrap();
+    let envelope = serde_json::json!({ "ts": day(12, 9), "report": pool[0] });
+    writeln!(file, "{envelope}").unwrap();
+    std::fs::write(dir.path().join(rollup::partial_file_name("archive")), "{}").unwrap();
+    let agg = aggregate_from_paths(&[dir.path().to_path_buf()], &q1_2026(), false).unwrap();
+    assert_eq!(agg.windows_aggregated, 3);
+    assert_eq!(agg.malformed_lines_skipped, 0);
+}
+
+#[test]
+fn one_hosts_rollup_does_not_silence_another_hosts_windows() {
+    let pool = window_pool();
+    let host_a = TempDir::new().unwrap();
+    let host_b = TempDir::new().unwrap();
+    let mut paths = write_rollups(host_a.path(), "archive", &[(day(10, 9), pool[0].clone())]);
+    paths.push(write_drops_file(
+        host_b.path(),
+        "archive.ndjson",
+        &[(day(10, 10), pool[0].clone(), 0)],
+    ));
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.windows_aggregated, 2);
+}
+
+#[test]
+fn windows_outside_the_rollups_span_still_count_on_its_day() {
+    // Upgrade day: the old binary archived 08:00, the new one rolls up
+    // 12:00 and 13:00, which the window lines also hold.
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let windows = [(day(10, 8), 0), (day(10, 12), 1), (day(10, 13), 3)]
+        .map(|(ts, i)| (ts, pool[i].clone(), 0));
+    let mut paths = vec![write_drops_file(dir.path(), "archive.ndjson", &windows)];
+    paths.extend(write_rollups(
+        dir.path(),
+        "archive",
+        &[
+            (day(10, 12), pool[1].clone()),
+            (day(10, 13), pool[3].clone()),
+        ],
+    ));
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.windows_aggregated, 3);
+}
+
+#[test]
+fn removing_the_periods_last_rollup_day_is_an_in_period_break() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let lines: Vec<_> = (10..14).map(|d| (day(d, 9), pool[0].clone())).collect();
+    let paths = write_rollups(dir.path(), "archive", &lines);
+    let text = std::fs::read_to_string(&paths[0]).unwrap();
+    let kept: Vec<&str> = text
+        .lines()
+        .enumerate()
+        .filter(|(i, _)| *i != 2)
+        .map(|(_, l)| l)
+        .collect();
+    std::fs::write(&paths[0], kept.join("\n") + "\n").unwrap();
+    let period = Period {
+        from_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        to_date: NaiveDate::from_ymd_opt(2026, 1, 12).unwrap(),
+        period_type: crate::report::periodic::schema::PeriodType::Custom,
+        days_covered: 12,
+    };
+    let agg = aggregate_from_paths(&paths, &period, false).unwrap();
+    assert_eq!((agg.chain_breaks, agg.chain_breaks_outside), (1, 0));
+}
+
+#[test]
+fn a_rollup_file_with_a_crash_fragment_first_is_still_a_rollup_file() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let paths = write_rollups(
+        dir.path(),
+        "archive",
+        &[(day(10, 9), pool[0].clone()), (day(11, 9), pool[0].clone())],
+    );
+    let text = std::fs::read_to_string(&paths[0]).unwrap();
+    std::fs::write(&paths[0], format!("{{\"format\":\"perf-sent\n{text}")).unwrap();
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.windows_aggregated, 2);
+    assert_eq!(agg.malformed_lines_skipped, 1);
+}
+
+#[test]
+fn a_rollup_line_stripped_of_its_hash_is_a_break_even_first() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let paths = write_rollups(
+        dir.path(),
+        "archive",
+        &[(day(10, 9), pool[0].clone()), (day(11, 9), pool[0].clone())],
+    );
+    let text = std::fs::read_to_string(&paths[0]).unwrap();
+    let mut lines: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    lines[0].as_object_mut().unwrap().remove("hash");
+    let rewritten: Vec<String> = lines.iter().map(ToString::to_string).collect();
+    std::fs::write(&paths[0], rewritten.join("\n") + "\n").unwrap();
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.chain_breaks, 1);
+}
+
+#[test]
+fn a_hashless_line_ahead_of_a_chained_archive_does_not_reach_back_for_it() {
+    // One line without a hash, dated before the period, put in front of a
+    // chained archive that only starts in March: it must not stand in for
+    // the pruned windows, nor vanish from the integrity counters' view.
+    let (_dir, path) = write_chained_archive(&[(
+        Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap(),
+        plain_window(),
+    )]);
+    let chained = std::fs::read_to_string(&path).unwrap();
+    let forged = serde_json::json!({
+        "ts": Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap(),
+        "report": plain_window(),
+    });
+    std::fs::write(&path, format!("{forged}\n{chained}")).unwrap();
+    let period = q1_2026();
+    let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
+    assert_eq!(
+        inputs.earliest_archived_window,
+        Some(Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap())
+    );
+    assert!(!archive_reaches_period_start(
+        inputs.earliest_archived_window,
+        &period
+    ));
+}
+
+#[test]
+fn a_hashless_rollup_line_ahead_of_the_chain_does_not_reach_back_for_it() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let paths = write_rollups(dir.path(), "archive", &[(day(20, 9), pool[0].clone())]);
+    let mut acc = DayAccumulator::default();
+    acc.observe(
+        Utc.with_ymd_and_hms(2025, 12, 1, 9, 0, 0).unwrap(),
+        &pool[0],
+    );
+    let mut forged: serde_json::Value =
+        serde_json::from_str(&rollup::serialize_rollup(&acc.take().unwrap(), "x", 0, 0).unwrap())
+            .unwrap();
+    forged.as_object_mut().unwrap().remove("hash");
+    let chained = std::fs::read_to_string(&paths[0]).unwrap();
+    std::fs::write(&paths[0], format!("{forged}\n{chained}")).unwrap();
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.earliest_archived_window, Some(day(20, 9)));
 }

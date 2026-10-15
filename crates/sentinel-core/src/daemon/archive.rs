@@ -16,6 +16,8 @@ use crate::config::DaemonArchiveConfig;
 use crate::report::Report;
 use crate::report::metrics::{ArchiveDropReason, MetricsState};
 use crate::report::periodic::hasher::{ARCHIVE_CHAIN_SEED, archive_chain_hash};
+
+use super::rollup_writer::RollupWriter;
 use std::sync::Arc;
 
 const CHANNEL_CAPACITY: usize = 256;
@@ -84,25 +86,36 @@ pub fn spawn(
 ) -> Result<ArchiveHandle, ArchiveError> {
     let path = PathBuf::from(&cfg.path);
     refuse_symlink(&path)?;
-    let mut file = open_append(&path)?;
-    terminate_incomplete_line(&mut file).map_err(|source| ArchiveError::Open {
-        path: path.display().to_string(),
-        source,
-    })?;
-    let bytes_written = metadata_len(&path);
-    let cap_bytes = cfg.max_size_mb.saturating_mul(1_048_576);
-    let max_files = cfg.max_files;
+    let windows = if cfg.windows {
+        let mut file = open_append(&path)?;
+        terminate_incomplete_line(&mut file).map_err(|source| ArchiveError::Open {
+            path: path.display().to_string(),
+            source,
+        })?;
+        let (prev, seq) = resume_chain(&path);
+        Some(WindowSink {
+            bytes_written: metadata_len(&path),
+            path: path.clone(),
+            file,
+            cap_bytes: cfg.max_size_mb.saturating_mul(1_048_576),
+            max_files: cfg.max_files,
+            prev,
+            seq,
+        })
+    } else {
+        probe_rollup_dir(&path)?;
+        None
+    };
+    let retention_days = cfg.rollup_retention_days;
     let (tx, rx) = mpsc::channel::<OwnedArchive>(CHANNEL_CAPACITY);
     let join = tokio::task::spawn_blocking(move || {
-        run_writer(
-            rx,
+        let rollups = RollupWriter::open(
             &path,
-            file,
-            bytes_written,
-            cap_bytes,
-            max_files,
+            retention_days,
+            metrics.archive_drops_total(),
             &metrics,
         );
+        run_writer(rx, windows, rollups, &metrics);
     });
     Ok(ArchiveHandle { tx, join })
 }
@@ -159,7 +172,7 @@ pub(super) fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
     }
 }
 
-fn open_append(path: &Path) -> Result<File, ArchiveError> {
+pub(super) fn open_append(path: &Path) -> Result<File, ArchiveError> {
     let open_error = |source| ArchiveError::Open {
         path: path.display().to_string(),
         source,
@@ -184,6 +197,34 @@ fn open_append(path: &Path) -> Result<File, ArchiveError> {
         });
     }
     Ok(file)
+}
+
+/// With the window lines off nothing else opens a file before the writer
+/// thread runs, so check here that the rollups' directory takes one: the
+/// snapshot's temporary file, created and removed.
+fn probe_rollup_dir(archive_path: &Path) -> Result<(), ArchiveError> {
+    let dir = super::rollup_writer::rollup_dir(archive_path);
+    let probe = dir.join(".perf-sentinel-rollup-probe.tmp");
+    open_truncate(&probe).map_err(|source| ArchiveError::Open {
+        path: dir.display().to_string(),
+        source,
+    })?;
+    let _ = std::fs::remove_file(probe);
+    Ok(())
+}
+
+/// Owner-only, no-follow, truncating open for the rollup snapshot's
+/// temporary file.
+pub(super) fn open_truncate(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    no_follow(&mut options);
+    options.open(path)
 }
 
 /// Bring an existing file back to owner-only, or refuse it.
@@ -246,18 +287,43 @@ fn metadata_len(path: &Path) -> u64 {
 // on a slow disk stops polling every other task it holds.
 fn run_writer(
     mut rx: Receiver<OwnedArchive>,
-    path: &Path,
-    initial_file: File,
-    initial_bytes: u64,
-    cap_bytes: u64,
-    max_files: u32,
+    mut windows: Option<WindowSink>,
+    mut rollups: RollupWriter,
     metrics: &Arc<MetricsState>,
 ) {
-    let mut file = initial_file;
-    let mut bytes_written = initial_bytes;
-    let (mut prev, mut seq) = resume_chain(path);
     while let Some(archive) = rx.blocking_recv() {
-        let line = match serialize_envelope(&archive, &prev, seq, metrics.archive_drops_total()) {
+        rollups.observe(
+            archive.ts,
+            &archive.report,
+            metrics.archive_drops_total(),
+            metrics,
+        );
+        if let Some(sink) = windows.as_mut() {
+            sink.write(&archive, metrics);
+        }
+    }
+    rollups.shutdown(metrics.archive_drops_total(), metrics);
+}
+
+/// The window file and its chain head.
+struct WindowSink {
+    path: PathBuf,
+    file: File,
+    bytes_written: u64,
+    cap_bytes: u64,
+    max_files: u32,
+    prev: String,
+    seq: u64,
+}
+
+impl WindowSink {
+    fn write(&mut self, archive: &OwnedArchive, metrics: &MetricsState) {
+        let line = match serialize_envelope(
+            archive,
+            &self.prev,
+            self.seq,
+            metrics.archive_drops_total(),
+        ) {
             Ok(line) => line,
             Err(err) => {
                 metrics.record_archive_drop(ArchiveDropReason::SerializeError);
@@ -266,10 +332,10 @@ fn run_writer(
                     "archive serialization failed, dropping window (see \
                      perf_sentinel_archive_windows_dropped_total)"
                 );
-                continue;
+                return;
             }
         };
-        if let Err(err) = write_line(&mut file, &line) {
+        if let Err(err) = write_line(&mut self.file, &line) {
             // A failed write can still have landed part of the line, so the
             // file is cut back to the last complete window. Leaving the
             // fragment there would publish an I/O error as tampering.
@@ -279,7 +345,7 @@ fn run_writer(
                 "archive write failed, dropping line (see \
                  perf_sentinel_archive_windows_dropped_total)"
             );
-            if let Err(err) = file.set_len(bytes_written) {
+            if let Err(err) = self.file.set_len(self.bytes_written) {
                 tracing::warn!(error = %err, "archive truncation after a failed write failed");
                 // The fragment stays: seal it and resync the count, or a
                 // later truncation would cut into a complete window. The
@@ -287,22 +353,24 @@ fn run_writer(
                 // writer would map a path stat to 0 and a later set_len(0)
                 // would destroy the archive. On a stat error, keep the old
                 // count: it marks the last complete window.
-                let _ = terminate_incomplete_line(&mut file);
-                bytes_written = file.metadata().map_or(bytes_written, |m| m.len());
+                let _ = terminate_incomplete_line(&mut self.file);
+                self.bytes_written = self.file.metadata().map_or(self.bytes_written, |m| m.len());
             }
-            continue;
+            return;
         }
-        prev = extract_hash(&line).unwrap_or(prev);
-        seq = seq.saturating_add(1);
-        bytes_written = bytes_written.saturating_add(line.len() as u64 + 1);
-        if cap_bytes > 0 && bytes_written >= cap_bytes {
-            match rotate(path, &mut file, max_files) {
+        if let Some(hash) = extract_hash(&line) {
+            self.prev = hash;
+        }
+        self.seq = self.seq.saturating_add(1);
+        self.bytes_written = self.bytes_written.saturating_add(line.len() as u64 + 1);
+        if self.cap_bytes > 0 && self.bytes_written >= self.cap_bytes {
+            match rotate(&self.path, &mut self.file, self.max_files) {
                 // A rotated file opens a fresh chain: the reader treats a
                 // seed-rooted first line as a start, not as a break.
                 Ok(()) => {
-                    bytes_written = 0;
-                    prev = ARCHIVE_CHAIN_SEED.to_string();
-                    seq = 0;
+                    self.bytes_written = 0;
+                    self.prev = ARCHIVE_CHAIN_SEED.to_string();
+                    self.seq = 0;
                 }
                 Err(err) => {
                     tracing::warn!(error = %err, "archive rotation failed, continuing on current file");
@@ -387,7 +455,7 @@ fn extract_hash(line: &str) -> Option<String> {
 /// a `BufWriter` would leave a half-written line on an ungraceful death
 /// (SIGKILL, OOM) or hold bytes the caller then cannot account for when a
 /// write fails. Both cases end up published as a chain break.
-fn write_line(file: &mut File, line: &str) -> std::io::Result<()> {
+pub(super) fn write_line(file: &mut File, line: &str) -> std::io::Result<()> {
     let mut record = Vec::with_capacity(line.len() + 1);
     record.extend_from_slice(line.as_bytes());
     record.push(b'\n');
@@ -531,6 +599,7 @@ mod tests {
             path: dir.path().join("archive.ndjson").display().to_string(),
             max_size_mb,
             max_files,
+            ..DaemonArchiveConfig::default()
         }
     }
 
@@ -766,6 +835,11 @@ mod tests {
         handle.join.await.unwrap();
 
         assert!(decoy.exists(), "non-stamp file must be spared by prune");
+        assert_eq!(
+            daily_files(&dir).len(),
+            1,
+            "window rotation must spare the daily rollup file"
+        );
         let rotated: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(Result::ok)
@@ -774,6 +848,7 @@ mod tests {
                 if name.starts_with("archive-")
                     && name.ends_with(".ndjson")
                     && name != "archive-evil.ndjson"
+                    && !name.contains("-daily-")
                 {
                     Some(name)
                 } else {
@@ -822,6 +897,7 @@ mod tests {
                 path: link.display().to_string(),
                 max_size_mb: 1,
                 max_files: 4,
+                ..DaemonArchiveConfig::default()
             },
             test_metrics(),
         )
@@ -862,5 +938,60 @@ mod tests {
         assert!(!is_rotation_stamp("20260514T083000"));
         assert!(!is_rotation_stamp("2026-05-14T08:30:00Z"));
         assert!(!is_rotation_stamp(""));
+    }
+
+    fn daily_files(dir: &TempDir) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().contains("-daily-"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn every_window_also_lands_in_the_daily_rollup() {
+        let dir = TempDir::new().unwrap();
+        let handle = spawn(&cfg(&dir, 100, 12), test_metrics()).unwrap();
+        for _ in 0..3 {
+            handle.tx.send(sample_archive()).await.unwrap();
+        }
+        drop(handle.tx);
+        handle.join.await.unwrap();
+        let daily = daily_files(&dir);
+        assert_eq!(daily.len(), 1);
+        let line = std::fs::read_to_string(&daily[0]).unwrap();
+        let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(value["state"]["windows_aggregated"], 3);
+    }
+
+    #[tokio::test]
+    async fn windows_off_writes_rollups_only() {
+        let dir = TempDir::new().unwrap();
+        let config = DaemonArchiveConfig {
+            windows: false,
+            ..cfg(&dir, 100, 12)
+        };
+        let handle = spawn(&config, test_metrics()).unwrap();
+        handle.tx.send(sample_archive()).await.unwrap();
+        drop(handle.tx);
+        handle.join.await.unwrap();
+        assert!(!dir.path().join("archive.ndjson").exists());
+        assert_eq!(daily_files(&dir).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn windows_off_still_refuses_an_unusable_archive_directory() {
+        let dir = TempDir::new().unwrap();
+        let config = DaemonArchiveConfig {
+            path: dir
+                .path()
+                .join("missing/archive.ndjson")
+                .display()
+                .to_string(),
+            windows: false,
+            ..DaemonArchiveConfig::default()
+        };
+        assert!(spawn(&config, test_metrics()).is_err());
     }
 }

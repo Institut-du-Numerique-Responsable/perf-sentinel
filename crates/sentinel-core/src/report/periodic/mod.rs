@@ -14,6 +14,7 @@ pub mod attestation;
 pub mod errors;
 pub mod hasher;
 pub mod org_config;
+pub(crate) mod rollup;
 pub mod schema;
 pub mod validator;
 
@@ -36,12 +37,13 @@ pub(crate) fn is_zero_f64(v: &f64) -> bool {
 
 pub use aggregator::{
     AggregateInputs, AntiPatternAccumulator, ServiceAccumulator, UNATTRIBUTED_SERVICE,
-    aggregate_from_paths,
+    aggregate_from_paths, archive_reaches_period_start,
 };
 pub use attestation::{
-    IN_TOTO_STATEMENT_TYPE, InTotoStatement, InTotoSubject, MethodologySummary,
+    AttestationBinding, IN_TOTO_STATEMENT_TYPE, InTotoStatement, InTotoSubject, MethodologySummary,
     OrganisationSummary, PERF_SENTINEL_PREDICATE_TYPE, PerfSentinelPredicate, PeriodSummary,
-    build_in_toto_statement, build_in_toto_statement_named, hash_core_patterns,
+    SUBJECT_BINDING_CONTENT_HASH, build_in_toto_statement, build_in_toto_statement_named,
+    check_attestation_binding, hash_core_patterns,
 };
 pub use errors::{AggregationError, HashError, ValidationError};
 pub use hasher::{binary_hash, compute_content_hash, compute_file_sha256_hex};

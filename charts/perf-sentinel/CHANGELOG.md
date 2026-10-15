@@ -10,6 +10,45 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.28.0]
+
+### Added
+
+- With `[daemon.archive]` configured, the image also writes one
+  hash-chained line per UTC day beside the window archive, a few tens of
+  KiB per day, kept `rollup_retention_days` (400 by default). `disclose`
+  reads them, so a quarterly disclosure fits on the default claim. They
+  land on the persistent volume with the archive. `/api/status` and
+  `/metrics` gain the rollup horizon.
+
+### Fixed
+
+- **`appVersion` moves to `0.28.0`.** The image's `disclose
+  --emit-attestation` now names the report's canonical content hash as the
+  in-toto subject, and `verify-hash` checks that the attestation names the
+  figures it is verifying. A Sigstore signature therefore no longer vouches
+  for figures edited after signing.
+- The image's `disclose` refuses an official period the archive no longer
+  reaches back to, which the archive defaults allow on a busy daemon within
+  a day.
+
+### Changed
+
+- The `persistence.size` comment says the default window archive holds
+  less than a day of a busy daemon, and that quarterly disclosures read
+  the daily rollups on the same volume. Comment only, the rendered
+  manifests do not change.
+
+### Security
+
+- The daemon image picks up `rustls` 0.23.46 against RUSTSEC-2026-0346 to
+  RUSTSEC-2026-0349. Of the four, only the unauthenticated ServerHello that
+  could steer later connections to classical key exchange applies, to the
+  shared outbound HTTP client. Nothing in the chart changes, the fixed
+  library ships with the new `appVersion`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.27.0]
 
 ### Added

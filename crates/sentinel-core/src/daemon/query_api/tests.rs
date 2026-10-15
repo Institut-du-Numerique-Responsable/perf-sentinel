@@ -112,6 +112,38 @@ async fn status_returns_200() {
     assert!(status.get("analysis_queue_depth").is_some());
 }
 
+async fn status_json(app: Router) -> serde_json::Value {
+    let req = Request::builder()
+        .uri("/api/status")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn status_reports_the_rollup_horizon_once_a_day_closed() {
+    let state = make_state();
+    let app = query_api_router(state.clone());
+    let body = status_json(app.clone()).await;
+    assert!(body.get("disclosure_archive").is_none());
+
+    state.metrics.archive_rollup_days.set(2);
+    state.metrics.archive_oldest_day_seconds.set(1_767_225_600); // 2026-01-01
+    state
+        .metrics
+        .archive_last_closed_day_seconds
+        .set(1_767_312_000); // 2026-01-02
+    let body = status_json(app).await;
+    assert_eq!(
+        body["disclosure_archive"],
+        serde_json::json!({"oldest_day": "2026-01-01", "days": 2, "last_closed_day": "2026-01-02"})
+    );
+}
+
 #[tokio::test]
 async fn config_exposes_daemon_params_without_secrets() {
     let app = query_api_router(make_state());
