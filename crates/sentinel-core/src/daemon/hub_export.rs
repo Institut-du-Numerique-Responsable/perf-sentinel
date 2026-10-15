@@ -11,7 +11,9 @@ use super::ack::{AckEntry, AckStore};
 // it and the hourly re-send suppression compares against those stamps.
 use super::event_loop::current_time_ms as unix_time_ms;
 use super::findings_store::StoredFinding;
-use super::hub_incident_export::{IncidentExport, IncidentExportBuffer, incidents_endpoint};
+use super::hub_incident_export::{
+    IncidentExport, IncidentExportBuffer, incident_capacity, incidents_endpoint,
+};
 use super::query_api::{FindingResponse, lookup_ack};
 use crate::config::DaemonHubExportConfig;
 use crate::detect::Finding;
@@ -115,8 +117,11 @@ impl HubExporter {
             .parse::<http_client::Uri>()
             .map_err(|_| super::DaemonError::HubExportEndpoint)?;
         let buffer = Arc::new(HubExportBuffer::new(config.max_pending));
-        let incident_buffer =
-            push_incidents.then(|| Arc::new(IncidentExportBuffer::new(config.max_pending)));
+        let incident_buffer = push_incidents.then(|| {
+            Arc::new(IncidentExportBuffer::new(incident_capacity(
+                config.max_pending,
+            )))
+        });
         let incidents = incident_buffer
             .as_ref()
             .map(|incidents| incident_export(config, incidents))
@@ -461,75 +466,92 @@ async fn run_exporter(
     mut incidents: Option<IncidentExport>,
 ) {
     let client = http_client::build_client_with_body();
+    let start = tokio::time::Instant::now();
     let mut findings = FindingsExport {
         buffer,
         uri,
         batch_size,
         acks,
         failures: 0,
+        due: start + flush_interval,
     };
-    let mut delay = flush_interval;
-    // Once shutdown fires the loop stops waiting for the next interval and
-    // flushes until both tables empty. It never returns on a table it
-    // cannot send: `HubExporter::shutdown` owns the time budget and aborts,
-    // so the retry policy stays the same on both paths.
+    if let Some(export) = incidents.as_mut() {
+        export.due = start + flush_interval;
+    }
+    // Once shutdown fires the loop stops waiting for either half's next
+    // round and flushes until both tables empty. It never returns on a
+    // table it cannot send: `HubExporter::shutdown` owns the time budget
+    // and aborts, so the retry policy stays the same on both paths.
     let mut draining = false;
     loop {
+        // Each half keeps its own pace: one's backoff is not cut short by
+        // the other's flush, nor stretched by it.
+        let wake = incidents
+            .as_ref()
+            .map_or(findings.due, |export| export.due.min(findings.due));
         if draining {
             // Still yield between attempts, otherwise an unreachable Hub
             // turns the drain budget into a spin.
-            tokio::time::sleep(delay.min(Duration::from_millis(250))).await;
+            let yield_at = tokio::time::Instant::now() + Duration::from_millis(250);
+            tokio::time::sleep_until(wake.min(yield_at)).await;
         } else {
             tokio::select! {
-                () = tokio::time::sleep(delay) => {}
+                () = tokio::time::sleep_until(wake) => {}
                 () = shutdown.notified() => draining = true,
             }
         }
-        let findings_next = findings
-            .round(&client, &api_key, &metrics, flush_interval)
-            .await;
-        let incidents_next = match incidents.as_mut() {
-            Some(export) => export.round(&client, &api_key, &metrics).await,
-            None => None,
-        };
-        // The sooner of the two halves: one with work left sets the pace.
-        match findings_next.into_iter().chain(incidents_next).min() {
-            Some(next) => delay = next,
-            None if draining => return,
-            None => delay = flush_interval,
+        let now = tokio::time::Instant::now();
+        let mut sent = false;
+        if draining || findings.due <= now {
+            sent |= findings
+                .round(&client, &api_key, &metrics, flush_interval)
+                .await;
+        }
+        if let Some(export) = incidents.as_mut()
+            && (draining || export.due <= now)
+        {
+            sent |= export
+                .round(&client, &api_key, &metrics, flush_interval)
+                .await;
+        }
+        if draining && !sent {
+            return;
         }
     }
 }
 
-/// The exporter task's findings half, with its own failure count.
+/// The exporter task's findings half, with its own failure count and pace.
 struct FindingsExport {
     buffer: Arc<HubExportBuffer>,
     uri: http_client::Uri,
     batch_size: usize,
     acks: AckSources,
     failures: u32,
+    due: tokio::time::Instant,
 }
 
 impl FindingsExport {
-    /// One findings batch. `None` when nothing was pending, otherwise the
-    /// delay before the next round.
+    /// One findings batch, then the time of the next. False when nothing
+    /// was pending.
     async fn round(
         &mut self,
         client: &http_client::HttpClientWithBody,
         api_key: &str,
         metrics: &MetricsState,
         flush_interval: Duration,
-    ) -> Option<Duration> {
+    ) -> bool {
         let mut batch = self.buffer.snapshot(self.batch_size);
         if batch.is_empty() {
-            return None;
+            self.due = tokio::time::Instant::now() + flush_interval;
+            return false;
         }
         let mut annotated = annotate(&batch, &self.acks).await;
         let Some(body) = bounded_payload(&mut annotated) else {
             self.buffer.acknowledge(&batch[..1], unix_time_ms());
             metrics.hub_export_dropped_total.inc();
             metrics.hub_export_pending.set(self.buffer.len() as f64);
-            return Some(Duration::ZERO);
+            self.due = tokio::time::Instant::now();
+            return true;
         };
         // bounded_payload only pops from the end, so truncating keeps the
         // acknowledgment aligned with what went over the wire.
@@ -548,7 +570,7 @@ impl FindingsExport {
             Ok((status, _)) => classify(status),
             Err(error) => ExportOutcome::Retry(error.to_string()),
         };
-        Some(apply_outcome(
+        let delay = apply_outcome(
             &outcome,
             &batch,
             &self.buffer,
@@ -556,7 +578,9 @@ impl FindingsExport {
             &self.uri,
             flush_interval,
             &mut self.failures,
-        ))
+        );
+        self.due = tokio::time::Instant::now() + delay;
+        true
     }
 }
 
@@ -595,46 +619,29 @@ fn apply_outcome(
     flush_interval: Duration,
     failures: &mut u32,
 ) -> Duration {
-    let delay = match outcome {
-        ExportOutcome::Accepted => {
-            buffer.acknowledge(batch, unix_time_ms());
-            *failures = 0;
-            if buffer.len() == 0 {
-                flush_interval
-            } else {
-                Duration::ZERO
-            }
-        }
+    match outcome {
+        ExportOutcome::Accepted => buffer.acknowledge(batch, unix_time_ms()),
         ExportOutcome::Rejected(status) => {
             buffer.acknowledge(batch, unix_time_ms());
             metrics.hub_export_dropped_total.inc_by(batch.len() as u64);
-            *failures = 0;
             tracing::error!(
                 endpoint = %http_client::redact_endpoint(uri),
                 status = *status,
                 dropped = batch.len(),
                 "PerfSentinelHub rejected the batch permanently; dropping it"
             );
-            flush_interval
         }
-        ExportOutcome::Busy => {
-            // Advisory backpressure, not a fault: stay near the Hub's own
-            // Retry-After instead of climbing to the five-minute ceiling.
-            *failures = failures.saturating_add(1).min(BUSY_FAILURE_CAP);
-            retry_delay(*failures, jitter_seed())
-        }
-        ExportOutcome::Retry(reason) => {
-            *failures = failures.saturating_add(1);
-            let delay = retry_delay(*failures, jitter_seed());
-            tracing::warn!(
-                endpoint = %http_client::redact_endpoint(uri),
-                reason = %reason,
-                retry_seconds = delay.as_secs_f64(),
-                "PerfSentinelHub export failed; retaining the coalesced batch"
-            );
-            delay
-        }
-    };
+        ExportOutcome::Busy | ExportOutcome::Retry(_) => {}
+    }
+    let delay = next_delay(outcome, failures, flush_interval, buffer.len() > 0);
+    if let ExportOutcome::Retry(reason) = outcome {
+        tracing::warn!(
+            endpoint = %http_client::redact_endpoint(uri),
+            reason = %reason,
+            retry_seconds = delay.as_secs_f64(),
+            "PerfSentinelHub export failed; retaining the coalesced batch"
+        );
+    }
     metrics.hub_export_pending.set(buffer.len() as f64);
     delay
 }
@@ -699,6 +706,40 @@ pub(super) fn bounded_body<T>(
         batch.truncate(keep);
     }
     None
+}
+
+/// The delay before a half's next round, by what the Hub answered. Shared by
+/// the findings and the incident halves, so both back off the same way.
+pub(super) fn next_delay(
+    outcome: &ExportOutcome,
+    failures: &mut u32,
+    flush_interval: Duration,
+    more_pending: bool,
+) -> Duration {
+    match outcome {
+        ExportOutcome::Accepted => {
+            *failures = 0;
+            if more_pending {
+                Duration::ZERO
+            } else {
+                flush_interval
+            }
+        }
+        ExportOutcome::Rejected(_) => {
+            *failures = 0;
+            flush_interval
+        }
+        ExportOutcome::Busy => {
+            // Advisory backpressure, not a fault: stay near the Hub's own
+            // Retry-After instead of climbing to the five-minute ceiling.
+            *failures = failures.saturating_add(1).min(BUSY_FAILURE_CAP);
+            retry_delay(*failures, jitter_seed())
+        }
+        ExportOutcome::Retry(_) => {
+            *failures = failures.saturating_add(1);
+            retry_delay(*failures, jitter_seed())
+        }
+    }
 }
 
 pub(super) fn retry_delay(failures: u32, jitter: u64) -> Duration {
@@ -1099,6 +1140,123 @@ mod tests {
             .expect("exporter task panicked");
         assert_eq!(0, incidents.len());
         assert_eq!(1, seen.lock().expect("lock").len());
+    }
+
+    #[test]
+    fn a_busy_hub_keeps_either_half_near_its_retry_after() {
+        let mut failures = 10;
+        let delay = next_delay(
+            &ExportOutcome::Busy,
+            &mut failures,
+            Duration::from_secs(5),
+            false,
+        );
+        assert_eq!(BUSY_FAILURE_CAP, failures);
+        assert!(delay <= Duration::from_millis(4_800), "{delay:?}");
+        let mut failures = 0;
+        assert_eq!(
+            Duration::from_secs(5),
+            next_delay(
+                &ExportOutcome::Accepted,
+                &mut failures,
+                Duration::from_secs(5),
+                false
+            )
+        );
+        assert_eq!(
+            Duration::ZERO,
+            next_delay(
+                &ExportOutcome::Accepted,
+                &mut failures,
+                Duration::from_secs(5),
+                true
+            )
+        );
+    }
+
+    fn count(seen: &crate::daemon::hub_incident_export::tests::Seen, path: &str) -> usize {
+        seen.lock()
+            .expect("lock")
+            .iter()
+            .filter(|(uri, _, _)| uri.starts_with(path))
+            .count()
+    }
+
+    fn spawn_with_incidents(
+        base: &str,
+        findings: &Arc<HubExportBuffer>,
+        incidents: &Arc<crate::daemon::hub_incident_export::IncidentExportBuffer>,
+        flush_interval: Duration,
+    ) -> (tokio::task::JoinHandle<()>, Arc<tokio::sync::Notify>) {
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        let handle = tokio::spawn(run_exporter(
+            findings.clone(),
+            shutdown.clone(),
+            Arc::new(MetricsState::new()),
+            format!("{base}/api/import/findings?source_id=lab")
+                .parse()
+                .expect("uri"),
+            "k".repeat(32),
+            100,
+            flush_interval,
+            acks(None),
+            Some(crate::daemon::hub_incident_export::IncidentExport::new(
+                incidents.clone(),
+                format!("{base}/api/import/incidents?source_id=lab")
+                    .parse()
+                    .expect("uri"),
+            )),
+        ));
+        (handle, shutdown)
+    }
+
+    /// Steady findings must not drag a failing incident route along at their
+    /// own pace: the incident half keeps its backoff, one second and up.
+    #[tokio::test]
+    async fn a_failing_incident_route_keeps_its_backoff_while_findings_flow() {
+        use crate::daemon::hub_incident_export::{IncidentExportBuffer, tests};
+        let (base, seen) = tests::fake_hub_routes(200, 500).await;
+        let findings = Arc::new(HubExportBuffer::new(100));
+        let incidents = Arc::new(IncidentExportBuffer::new(10));
+        incidents.push(&tests::incident("a", None));
+        let (handle, _shutdown) =
+            spawn_with_incidents(&base, &findings, &incidents, Duration::from_millis(50));
+
+        for i in 0..30 {
+            findings.push_batch(&[finding(&format!("s{i}"), "trace")], unix_time_ms());
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        handle.abort();
+
+        assert!(count(&seen, "/api/import/findings") >= 3, "findings flow");
+        assert_eq!(
+            1,
+            count(&seen, "/api/import/incidents"),
+            "one try, then its backoff"
+        );
+    }
+
+    /// A Hub without the incident route stops incident pushes, never findings.
+    #[tokio::test]
+    async fn findings_keep_flowing_after_the_incident_route_answers_404() {
+        use crate::daemon::hub_incident_export::{IncidentExportBuffer, tests};
+        let (base, seen) = tests::fake_hub_routes(200, 404).await;
+        let findings = Arc::new(HubExportBuffer::new(100));
+        let incidents = Arc::new(IncidentExportBuffer::new(10));
+        incidents.push(&tests::incident("a", None));
+        findings.push_batch(&[finding("first", "trace")], unix_time_ms());
+        let (handle, _shutdown) =
+            spawn_with_incidents(&base, &findings, &incidents, Duration::from_millis(50));
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        incidents.push(&tests::incident("b", None));
+        findings.push_batch(&[finding("second", "trace")], unix_time_ms());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        handle.abort();
+
+        assert_eq!(1, count(&seen, "/api/import/incidents"));
+        assert_eq!(2, count(&seen, "/api/import/findings"));
+        assert!(incidents.is_unsupported());
     }
 
     fn acks(acked_signature: Option<&str>) -> AckSources {

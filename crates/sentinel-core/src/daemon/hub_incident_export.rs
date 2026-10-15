@@ -10,9 +10,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use serde::Serialize;
 
-use super::hub_export::{
-    ExportOutcome, bounded_body, classify, evict_by_order, jitter_seed, retry_delay,
-};
+use super::hub_export::{ExportOutcome, bounded_body, classify, evict_by_order, next_delay};
 use super::incidents::Incident;
 use crate::http_client;
 use crate::report::metrics::MetricsState;
@@ -138,6 +136,16 @@ struct IncidentPayload<'a> {
     incidents: Vec<&'a Incident>,
 }
 
+/// At most this many incidents wait for the Hub. One can carry a thousand
+/// frozen findings, so a findings-sized table of 10,000 could pin ten million
+/// of them through a Hub outage.
+const MAX_PENDING_INCIDENTS: usize = 1_000;
+
+/// The incident table's bound, from the findings one.
+pub(super) fn incident_capacity(max_pending: usize) -> usize {
+    max_pending.min(MAX_PENDING_INCIDENTS)
+}
+
 /// The incident import beside the configured findings import. Config
 /// validation guarantees the suffix, so this only swaps it.
 pub(super) fn incidents_endpoint(findings_endpoint: &str) -> String {
@@ -155,6 +163,9 @@ pub(crate) struct IncidentExport {
     buffer: Arc<IncidentExportBuffer>,
     uri: http_client::Uri,
     failures: u32,
+    /// When this half's next round is due, so its backoff holds whatever
+    /// pace the findings half keeps.
+    pub(super) due: tokio::time::Instant,
 }
 
 impl IncidentExport {
@@ -163,20 +174,24 @@ impl IncidentExport {
             buffer,
             uri,
             failures: 0,
+            due: tokio::time::Instant::now(),
         }
     }
 
-    /// Send one batch of what is pending. `None` when nothing was, otherwise
-    /// the delay before the next round, by the findings export's own rules.
+    /// Send one batch of what is pending, then set the time of the next.
+    /// False when nothing was pending, or when the Hub turned out to have
+    /// no incident route.
     pub(crate) async fn round(
         &mut self,
         client: &http_client::HttpClientWithBody,
         api_key: &str,
         metrics: &MetricsState,
-    ) -> Option<Duration> {
+        flush_interval: Duration,
+    ) -> bool {
         let mut batch = self.buffer.snapshot(MAX_INCIDENT_BATCH);
         if batch.is_empty() {
-            return None;
+            self.due = tokio::time::Instant::now() + flush_interval;
+            return false;
         }
         let Some(body) = bounded_body(&mut batch, MAX_INCIDENT_BODY_BYTES, |pending| {
             serde_json::to_vec(&IncidentPayload {
@@ -188,7 +203,8 @@ impl IncidentExport {
             self.buffer.acknowledge(&batch[..1]);
             metrics.hub_export_incidents_dropped_total.inc();
             self.publish(metrics);
-            return Some(Duration::ZERO);
+            self.due = tokio::time::Instant::now();
+            return true;
         };
         let outcome = match http_client::fetch_with_body(
             client,
@@ -201,13 +217,18 @@ impl IncidentExport {
         )
         .await
         {
-            Ok((status, _)) if is_missing_route(status) => return self.unsupported(metrics),
+            Ok((status, _)) if is_missing_route(status) => {
+                self.unsupported(metrics);
+                self.due = tokio::time::Instant::now() + flush_interval;
+                return false;
+            }
             Ok((status, _)) => classify(status),
             Err(error) => ExportOutcome::Retry(error.to_string()),
         };
-        let next = self.apply(&outcome, &batch, metrics);
+        let delay = self.apply(&outcome, &batch, metrics, flush_interval);
         self.publish(metrics);
-        Some(next)
+        self.due = tokio::time::Instant::now() + delay;
+        true
     }
 
     fn apply(
@@ -215,35 +236,44 @@ impl IncidentExport {
         outcome: &ExportOutcome,
         batch: &[PendingIncident],
         metrics: &MetricsState,
+        flush_interval: Duration,
     ) -> Duration {
         match outcome {
-            ExportOutcome::Accepted => {
-                self.buffer.acknowledge(batch);
-                self.failures = 0;
-                Duration::ZERO
-            }
+            ExportOutcome::Accepted => self.buffer.acknowledge(batch),
             ExportOutcome::Rejected(status) => {
                 self.buffer.acknowledge(batch);
                 metrics
                     .hub_export_incidents_dropped_total
                     .inc_by(batch.len() as u64);
-                self.failures = 0;
                 tracing::error!(
                     endpoint = %http_client::redact_endpoint(&self.uri),
                     status = *status,
                     dropped = batch.len(),
                     "PerfSentinelHub rejected the incident batch permanently; dropping it"
                 );
-                Duration::ZERO
             }
-            ExportOutcome::Busy | ExportOutcome::Retry(_) => {
-                self.failures = self.failures.saturating_add(1);
-                retry_delay(self.failures, jitter_seed())
-            }
+            ExportOutcome::Busy | ExportOutcome::Retry(_) => {}
         }
+        let delay = next_delay(
+            outcome,
+            &mut self.failures,
+            flush_interval,
+            self.buffer.len() > 0,
+        );
+        if let ExportOutcome::Retry(reason) = outcome {
+            // A Hub older than the incident route answers 401, not 404, when
+            // its sign-in is on: the retry is logged so that case is visible.
+            tracing::warn!(
+                endpoint = %http_client::redact_endpoint(&self.uri),
+                reason = %reason,
+                retry_seconds = delay.as_secs_f64(),
+                "PerfSentinelHub incident export failed; retaining the batch"
+            );
+        }
+        delay
     }
 
-    fn unsupported(&self, metrics: &MetricsState) -> Option<Duration> {
+    fn unsupported(&self, metrics: &MetricsState) {
         let dropped = self.buffer.mark_unsupported();
         metrics.hub_export_incidents_dropped_total.inc_by(dropped);
         self.publish(metrics);
@@ -252,7 +282,6 @@ impl IncidentExport {
             dropped,
             "PerfSentinelHub has no incident import route; incidents are not pushed until restart, findings are"
         );
-        None
     }
 
     fn publish(&self, metrics: &MetricsState) {
@@ -274,6 +303,7 @@ fn is_missing_route(status: hyper::StatusCode) -> bool {
 pub(crate) mod tests {
     use super::*;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use crate::http_client;
     use crate::report::metrics::MetricsState;
@@ -282,6 +312,12 @@ pub(crate) mod tests {
 
     /// A Hub that records each request and answers `status`.
     pub(crate) async fn fake_hub(status: u16) -> (String, Seen) {
+        fake_hub_routes(status, status).await
+    }
+
+    /// A Hub that answers the findings import with `findings` and every
+    /// other path, the incident import included, with `incidents`.
+    pub(crate) async fn fake_hub_routes(findings: u16, incidents: u16) -> (String, Seen) {
         let seen: Seen = Arc::new(Mutex::new(Vec::new()));
         let store = seen.clone();
         let app = axum::Router::new().fallback(
@@ -292,6 +328,11 @@ pub(crate) mod tests {
                         .get("x-api-key")
                         .and_then(|value| value.to_str().ok())
                         .map(str::to_string);
+                    let status = if uri.path() == "/api/import/findings" {
+                        findings
+                    } else {
+                        incidents
+                    };
                     store
                         .lock()
                         .expect("lock")
@@ -318,6 +359,12 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_incident_table_is_capped_below_the_findings_one() {
+        assert_eq!(1_000, incident_capacity(10_000));
+        assert_eq!(50, incident_capacity(50));
+    }
+
+    #[test]
     fn the_incidents_route_sits_beside_the_findings_one() {
         assert_eq!(
             "https://hub.example.com/api/import/incidents",
@@ -334,10 +381,10 @@ pub(crate) mod tests {
         let client = http_client::build_client_with_body();
 
         let next = export(&base, &buffer)
-            .round(&client, &"k".repeat(32), &metrics)
+            .round(&client, &"k".repeat(32), &metrics, Duration::from_secs(5))
             .await;
 
-        assert!(next.is_some());
+        assert!(next);
         assert_eq!(0, buffer.len());
         let requests = seen.lock().expect("lock");
         let (uri, key, body) = &requests[0];
@@ -355,10 +402,15 @@ pub(crate) mod tests {
         let client = http_client::build_client_with_body();
 
         let next = export(&base, &buffer)
-            .round(&client, &"k".repeat(32), &MetricsState::new())
+            .round(
+                &client,
+                &"k".repeat(32),
+                &MetricsState::new(),
+                Duration::from_secs(5),
+            )
             .await;
 
-        assert!(next.is_none());
+        assert!(!next);
         assert!(seen.lock().expect("lock").is_empty());
     }
 
@@ -373,17 +425,15 @@ pub(crate) mod tests {
         let mut export = export(&base, &buffer);
 
         assert!(
-            export
-                .round(&client, &"k".repeat(32), &metrics)
+            !export
+                .round(&client, &"k".repeat(32), &metrics, Duration::from_secs(5))
                 .await
-                .is_none()
         );
         buffer.push(&incident("c", None));
         assert!(
-            export
-                .round(&client, &"k".repeat(32), &metrics)
+            !export
+                .round(&client, &"k".repeat(32), &metrics, Duration::from_secs(5))
                 .await
-                .is_none()
         );
 
         assert!(buffer.is_unsupported());
@@ -406,7 +456,7 @@ pub(crate) mod tests {
         let client = http_client::build_client_with_body();
 
         export(&base, &buffer)
-            .round(&client, &"k".repeat(32), &metrics)
+            .round(&client, &"k".repeat(32), &metrics, Duration::from_secs(5))
             .await;
 
         assert_eq!(0, buffer.len());
@@ -422,10 +472,15 @@ pub(crate) mod tests {
         let client = http_client::build_client_with_body();
 
         let next = export(&base, &buffer)
-            .round(&client, &"k".repeat(32), &MetricsState::new())
+            .round(
+                &client,
+                &"k".repeat(32),
+                &MetricsState::new(),
+                Duration::from_secs(5),
+            )
             .await;
 
-        assert!(next.is_some());
+        assert!(next);
         assert_eq!(1, buffer.len());
     }
 
