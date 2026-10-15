@@ -48,7 +48,9 @@ during it.
 ### Pair and episode identity
 
 - `pair_key`: 32 hex characters of a SHA-256 over the canonical source and target endpoints,
-  each `(finding_type, service, template, grouping_key)`. Stable across restarts and daemons.
+  each `(finding_type, service, template, grouping_key, grouping_value)`, the five fields the
+  correlator pairs on, so the same pair in two namespaces gets two keys. Stable across restarts
+  and daemons.
 - Episode `id`: 32 hex characters of a SHA-256 over `pair_key` and `started_at_ms`. Stable
   across the pushes of one episode.
 
@@ -114,7 +116,9 @@ the jitter, the busy handling and the POST helper.
 }
 ```
 
-`gap_ms` lets the Hub tell an open episode from one whose daemon died before closing it.
+`gap_ms` lets the Hub tell an open episode from one whose daemon died before closing it. Each
+side is the correlator's own `CorrelationEndpoint` JSON: `grouping_key` and `grouping_value` are
+omitted when absent (the `null` above is illustrative) and read as null.
 
 ### Metrics
 
@@ -131,7 +135,7 @@ A schema migration adds `correlation_episodes`:
 
 - key `(id, source_id)`, and `pair_key`.
 - each side in columns, for filtering: `source_type`, `source_service`, `source_template`,
-  `source_grouping`, and the same for `target_`.
+  `source_grouping`, `source_grouping_value`, and the same for `target_`.
 - `started_at_ms`, `last_seen_ms`, `ended_at_ms` (null while open), `gap_ms`.
 - `peak_confidence`, `peak_co_occurrences`, `last_confidence`, `last_co_occurrences`,
   `median_lag_ms`, `sample_trace_id`, `source_sample_trace_id`.
@@ -172,6 +176,9 @@ episodes of the sources and services they may read.
   overlapping the span, open ones included), `active` (open only), `offset`, `limit` (200 by
   default, 1000 at most).
 - Order: `started_at` descending.
+- Response: a bare JSON array of episodes in the push shape, plus `source_id` and `source_name`.
+  A filter given as an empty or whitespace-only string means no filter, as Grafana sends one for
+  "All".
 - An open episode whose `last_seen` is older than `gap_ms` plus 15 minutes is served as ended at
   its `last_seen`, with `"ended_by": "stale"`. The row is not rewritten.
 
