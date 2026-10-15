@@ -829,7 +829,10 @@
             traces: light.traces,
             analysis_queue: light.analysis_queue,
             findings: light.findings,
-            state: lightState(light, previous.warnings.length)
+            state: lightState(light, previous.warnings.filter(function (hint) {
+                // DaemonView.AdvisingCount's set: the other kinds describe the daemon.
+                return hint.kind === 'ingestion_drops' || hint.kind === 'tuning';
+            }).length)
         });
     }
 
@@ -887,6 +890,119 @@
     }
 
     /**
+     * The fold behind which the incident filters an operator reaches for less
+     * often wait, named with how many of them are set, so a folded filter is
+     * never silently in force.
+     * @param {{namespace: string, environment: string, source_id: string}} filter
+     * @returns {string}
+     */
+    function moreFiltersLabel(filter) {
+        const set = ['namespace', 'environment', 'source_id'].filter(function (key) {
+            return filter[key] !== '';
+        }).length;
+        return set === 0 ? 'More filters' : 'More filters, ' + set + ' set';
+    }
+
+    const SEVERITY_RANK = {critical: 3, warning: 2, info: 1};
+
+    /**
+     * The normalized SQL or HTTP template a finding was raised on, the one thing
+     * that tells apart two findings of one type on one endpoint.
+     * @param {{finding?: any}} row
+     * @returns {string}
+     */
+    function findingTemplate(row) {
+        return String(((row.finding || {}).pattern || {}).template || '');
+    }
+
+    /**
+     * Whether a frozen finding matches what the operator typed above the table,
+     * on its endpoint or its template, ignoring case.
+     * @param {{finding?: any}} row
+     * @param {string} query
+     * @returns {boolean}
+     */
+    function findingMatches(row, query) {
+        const needle = String(query || '').trim().toLowerCase();
+        if (needle === '') return true;
+        return (((row.finding || {}).source_endpoint || '') + '\n' + findingTemplate(row))
+            .toLowerCase().indexOf(needle) >= 0;
+    }
+
+    /**
+     * The daemon-side ack, for a finding this Hub cannot acknowledge itself. The
+     * reason is left for the operator to write, the flag order is the CLI's own:
+     * `--daemon` belongs to `ack`, before the subcommand.
+     * @param {{base_url: string}} source
+     * @param {string} signature
+     * @param {string} shellId
+     * @returns {string}
+     */
+    function ackCommand(source, signature, shellId) {
+        const quote = shellById(shellId).quote;
+        return 'perf-sentinel ack --daemon ' + quote(source.base_url) + ' create --signature '
+            + quote(signature) + ' --reason ' + quote('why it can wait');
+    }
+
+    /**
+     * An incident's frozen findings in the order a column asks for. Ties fall
+     * back to the default reading order, worst and most seen first, so equal
+     * rows never shuffle between two renders.
+     * @param {Array<{seen_count?: number, first_seen_ms: number, finding?: any}>} rows
+     * @param {'type' | 'severity' | 'endpoint' | 'template' | 'seen' | 'first'} key
+     * @param {'asc' | 'desc'} dir
+     * @returns {Array<any>}
+     */
+    function sortFindings(rows, key, dir) {
+        const value = {
+            type: function (row) {
+                const type = (row.finding || {}).type || '';
+                return FINDING_TYPE_LABEL[type] || type;
+            },
+            severity: function (row) {
+                return SEVERITY_RANK[(row.finding || {}).severity] || 0;
+            },
+            endpoint: function (row) {
+                return (row.finding || {}).source_endpoint || '';
+            },
+            template: function (row) {
+                return findingTemplate(row);
+            },
+            seen: function (row) {
+                return row.seen_count || 0;
+            },
+            first: function (row) {
+                return row.first_seen_ms;
+            }
+        };
+        const compare = function (name, a, b) {
+            const x = value[name](a);
+            const y = value[name](b);
+            return typeof x === 'string' ? x.localeCompare(y) : x - y;
+        };
+        const sign = dir === 'asc' ? 1 : -1;
+        return rows.slice().sort(function (a, b) {
+            return sign * compare(key, a, b)
+                || -compare('severity', a, b) || -compare('seen', a, b)
+                || compare('endpoint', a, b) || compare('first', a, b);
+        });
+    }
+
+    /**
+     * How a frozen finding's first sighting reads against its incident. An OOM
+     * kill ends in a restart and a deploy is its own event, so "after the
+     * restart" is said only where a restart happened.
+     * @param {'before' | 'after'} phase
+     * @param {string} kind
+     * @returns {string}
+     */
+    function phaseLabel(phase, kind) {
+        if (phase !== 'after') return ' before the incident';
+        if (kind === 'restart' || kind === 'oom_kill') return ' after the restart';
+        return kind === 'deploy' ? ' after the deploy' : ' after the incident';
+    }
+
+    /**
      * Whether a frozen finding was already burning before the incident or fired
      * only after it. A finding is stamped when its trace is analysed, one TTL
      * after its last span, so a stamp past `at_ms` belongs to the replacement.
@@ -909,6 +1025,22 @@
         unauthorized: 'it refused the Hub\'s key',
         error: 'the read failed'
     };
+
+    /**
+     * How the service and namespace filters of the incidents screen show. They
+     * list what a read returns, so they wait, disabled, for the first one, the
+     * namespace filter holding its place so the line does not shift when it
+     * lands. After any read, even one that found nothing, they stay enabled
+     * through later refreshes, and the namespace filter shows only once a row
+     * has carried a namespace: a select over nothing would promise a column the
+     * fleet has not filled.
+     * @param {boolean} read whether a read of the fleet has completed
+     * @param {string[]} namespaces the namespaces the reads have seen
+     * @returns {{pending: boolean, namespace: boolean}}
+     */
+    function incidentFilterState(read, namespaces) {
+        return {pending: !read, namespace: !read || namespaces.length > 0};
+    }
 
     /**
      * How fresh the Hub's copy of one daemon's incidents is. The screen lists
@@ -1118,6 +1250,23 @@
     }
 
     /**
+     * What the date input under an ack amounts to, in UTC, beside the date the
+     * browser shows in its own locale.
+     * @param {string | null | undefined} dateValue
+     * @param {number} nowMs
+     * @returns {string}
+     */
+    function ackExpiryLine(dateValue, nowMs) {
+        try {
+            const end = ackExpiry(dateValue, nowMs);
+            return end === null ? 'No date: the ack is permanent.'
+                : 'Holds until ' + end.slice(0, 10) + ' 23:59:59 UTC.';
+        } catch (error) {
+            return error.message;
+        }
+    }
+
+    /**
      * Whether a row is checked: the reader's own tick when they made one for the
      * action the row offers now, what ackRows says otherwise. A tick made on an
      * ack says nothing once the row reads Revoke, while a source the reader left
@@ -1301,9 +1450,29 @@
         if (route.indexOf('run/') === 0) return 'run';
         if (route.indexOf('report/') === 0) return 'report';
         if (route === 'coverage' && accessOn) return admin ? 'coverage' : 'access';
-        if (route === 'access' || route === 'coverage') return accessOn ? 'access' : 'new';
+        if (route === 'access' || route === 'coverage') return accessOn ? 'access' : 'missing';
+        if (route === '') return 'new';
         // `ack` has no tab: it is reached by link only.
-        return ['new', 'recent', 'sources', 'incidents', 'ack'].indexOf(route) >= 0 ? route : 'new';
+        return ['new', 'recent', 'sources', 'incidents', 'ack'].indexOf(route) >= 0 ? route : 'missing';
+    }
+
+    /**
+     * The form fields a past run's request fills back in, so running it again
+     * starts from what it asked rather than from a blank form.
+     * @param {Record<string, unknown> | null | undefined} request
+     * @returns {Record<string, unknown>}
+     */
+    function formFromRequest(request) {
+        const r = request || {};
+        const form = {detection: Object.assign({}, r['detection'] || {}), pickerOpen: false};
+        if (r['trace_id']) return Object.assign(form, {mode: 'trace', traceId: String(r['trace_id'])});
+        Object.assign(form, {mode: 'service', service: String(r['service'] || ''), traceId: ''});
+        if (typeof r['max_traces'] === 'number') form.maxTraces = r['max_traces'];
+        if (typeof r['from_ms'] === 'number' && typeof r['to_ms'] === 'number') {
+            return Object.assign(form, {rangeMode: 'absolute', fromMs: r['from_ms'], toMs: r['to_ms']});
+        }
+        if (r['lookback']) Object.assign(form, {rangeMode: 'relative', lookback: String(r['lookback'])});
+        return form;
     }
 
     /**
@@ -1524,19 +1693,96 @@
         get HUB() {
             return HUB;
         },
-        ERRORS, READ_ERRORS, ERROR_TITLES, KIND_LABEL,
-        dur, durPrecise, durMinutes, durParts, splitByKind, clock, parseDur, humanDur, dtLocal, dtHuman, bytes,
-        vparts, vcmp, versionGap, skew, detector, statusKey, argsLine, weightBand,
-        shq, psq, SHELLS, shellById, defaultShell, exportLine,
-        analysisCommand, monitorCommand, monitorKeyHint, detectionToml, quotedForShell,
-        lightState, mergeableView, mergeLight, refreshPlan, releaseUrl, openFolds,
-        hubReleaseUrl, updateState, knownShell, CHART_PAGE, CHART_COORDINATE,
-        gaugeTone, gaugeMove,
-        INCIDENT_KIND_LABEL, FINDING_TYPE_LABEL, incidentCapture, findingPhase, INCIDENT_READ_STATE, incidentsCopy,
-        incidentHandoffHash, readHandoff,
-        ackRouteHash, ackEntryHash, readAckRoute, ackRows, ackExpiry, ackChecked, ackPlan, ackBody, ackSummary,
-        shellBanner, screenOf, permits, describePattern, accessExpiry, accessSignedIn, ACCESS_NO_REACH, accessReachRows,
-        coverageSnippet, accessRequestText, sourceCountLabel, revokeOutcome,
-        tokenRows, tokenRevokeRequest, deviceIntro, deviceRequestLine, deviceNetworkAlert, deviceApproveStep
+        ERRORS,
+        READ_ERRORS,
+        ERROR_TITLES,
+        KIND_LABEL,
+        dur,
+        durPrecise,
+        durMinutes,
+        durParts,
+        splitByKind,
+        clock,
+        parseDur,
+        humanDur,
+        dtLocal,
+        dtHuman,
+        bytes,
+        vparts,
+        vcmp,
+        versionGap,
+        skew,
+        detector,
+        statusKey,
+        argsLine,
+        weightBand,
+        shq,
+        psq,
+        SHELLS,
+        shellById,
+        defaultShell,
+        exportLine,
+        analysisCommand,
+        monitorCommand,
+        monitorKeyHint,
+        detectionToml,
+        quotedForShell,
+        lightState,
+        mergeableView,
+        mergeLight,
+        refreshPlan,
+        releaseUrl,
+        openFolds,
+        hubReleaseUrl,
+        updateState,
+        knownShell,
+        CHART_PAGE,
+        CHART_COORDINATE,
+        gaugeTone,
+        gaugeMove,
+        INCIDENT_KIND_LABEL,
+        FINDING_TYPE_LABEL,
+        incidentCapture,
+        findingPhase,
+        sortFindings,
+        moreFiltersLabel,
+        findingTemplate,
+        findingMatches,
+        ackCommand,
+        phaseLabel,
+        INCIDENT_READ_STATE,
+        incidentFilterState,
+        incidentsCopy,
+        incidentHandoffHash,
+        readHandoff,
+        ackRouteHash,
+        ackEntryHash,
+        readAckRoute,
+        ackRows,
+        ackExpiry,
+        ackExpiryLine,
+        ackChecked,
+        ackPlan,
+        ackBody,
+        ackSummary,
+        shellBanner,
+        screenOf,
+        formFromRequest,
+        permits,
+        describePattern,
+        accessExpiry,
+        accessSignedIn,
+        ACCESS_NO_REACH,
+        accessReachRows,
+        coverageSnippet,
+        accessRequestText,
+        sourceCountLabel,
+        revokeOutcome,
+        tokenRows,
+        tokenRevokeRequest,
+        deviceIntro,
+        deviceRequestLine,
+        deviceNetworkAlert,
+        deviceApproveStep
     };
 })(globalThis);

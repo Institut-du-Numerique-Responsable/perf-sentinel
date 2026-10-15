@@ -37,6 +37,10 @@
     --brand: #0ba671;
     --brand-2: #2fd49a;
     --brand-text: #3ecf9d;
+    /* A filled button's face and label. White on --brand read 3.13:1, under AA
+       for a 14px label: the sign-in page's pairs, 9.5:1 here and 5.36:1 light. */
+    --fill: #3ecf9d;
+    --on-fill: #0b1410;
     --accent-bg: rgba(11, 166, 113, .13);
     --crit-fg: #ffa79e;
     --crit-bg: #3a1f1c;
@@ -90,6 +94,8 @@
     --brand: #0ba671;
     --brand-2: #0b523a;
     --brand-text: #107a56;
+    --fill: #107a56;
+    --on-fill: #ffffff;
     --accent-bg: #e0f4ed;
     --crit-fg: #bf2a22;
     --crit-bg: #ffe4e1;
