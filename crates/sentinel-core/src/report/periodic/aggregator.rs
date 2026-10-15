@@ -170,7 +170,15 @@ pub fn aggregate_from_paths(
         .collect();
 
     let mut builder = Builder::default();
+    let mut window_files = Vec::new();
     for path in &files {
+        if is_rollup_file(path)? {
+            builder.process_rollup_file(path, period, strict_attribution)?;
+        } else {
+            window_files.push(path);
+        }
+    }
+    for path in window_files {
         builder.process_file(path, period, strict_attribution)?;
     }
 
@@ -428,6 +436,13 @@ struct Builder {
     last_drops: BTreeMap<String, u64>,
     /// Oldest well-formed window across every input line, period or not.
     earliest_archived: Option<DateTime<Utc>>,
+    /// Days a rollup line already folded. A window line on one of them is
+    /// read for its chain and drop counter only, so a day is never counted
+    /// twice when an archive holds both shapes.
+    rollup_days: BTreeSet<NaiveDate>,
+    /// Chain anchor per rollup family. Unlike window files, a rollup chain
+    /// runs across its monthly files, so a removed month shows as a break.
+    rollup_anchors: BTreeMap<String, ChainAnchor>,
 }
 
 /// The chain anchor: the previous line's hash and its sequence number.
@@ -458,6 +473,9 @@ struct ChainStep<'a> {
     path: &'a Path,
     line_no: usize,
     warned_break: &'a mut bool,
+    /// Windows this line attests: one for a window line, the folded count
+    /// for a rollup line.
+    weight: u64,
 }
 
 impl Builder {
@@ -476,7 +494,7 @@ impl Builder {
             ChainOutcome::Verified(hash) => {
                 *step.chain_started = true;
                 if step.in_scope {
-                    self.chain_verified += 1;
+                    self.chain_verified += step.weight;
                 }
                 let seq = (step.next_seq)(step.expected);
                 *step.expected = Some((hash, seq));
@@ -487,7 +505,7 @@ impl Builder {
             // the chain exists to catch.
             ChainOutcome::Unchained if !*step.chain_started => {
                 if step.in_scope {
-                    self.chain_unchained += 1;
+                    self.chain_unchained += step.weight;
                 }
             }
             ChainOutcome::Unchained => {
@@ -557,7 +575,8 @@ impl Builder {
             // own timestamp decides which counter it lands in: one
             // rolling archive can span several periods, and a 2024 edit
             // must not be published as this quarter's break.
-            let in_scope = line_in_period(parsed.as_ref(), period);
+            let in_scope =
+                line_in_period(parsed.as_ref(), period) && !self.rollup_covers(parsed.as_ref());
             if let Some(drops) = parsed
                 .as_ref()
                 .and_then(|v| v.get("drops"))
@@ -580,6 +599,7 @@ impl Builder {
                 path,
                 line_no,
                 warned_break: &mut warned_break,
+                weight: 1,
             });
             if parsed.is_some() {
                 previous_in_scope = in_scope;
@@ -625,7 +645,9 @@ impl Builder {
             self.earliest_archived
                 .map_or(envelope.ts, |seen| seen.min(envelope.ts)),
         );
-        if !in_period(envelope.ts, step.period) {
+        if !in_period(envelope.ts, step.period)
+            || self.rollup_days.contains(&envelope.ts.date_naive())
+        {
             return Ok(());
         }
         let used_fallback =
@@ -1156,6 +1178,20 @@ impl PeriodState {
         self.windows_aggregated
     }
 
+    /// Restrict the observed days to `day`, the only one a rollup line may
+    /// answer for. An empty state keeps no day.
+    pub(crate) fn keep_only_day(&mut self, day: NaiveDate) {
+        self.observed_days.clear();
+        if self.windows_aggregated > 0 {
+            self.observed_days.insert(day);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_observed_day_for_test(&mut self, day: NaiveDate) {
+        self.observed_days.insert(day);
+    }
+
     /// Fold another state in. Each field merges by the operation its
     /// window fold uses, and every guard that path applies to untrusted
     /// archive input applies again: a rollup line is read from a file.
@@ -1415,6 +1451,196 @@ mod pair_key_map {
             .map(|(service, pattern, ts)| ((service, pattern), ts))
             .collect())
     }
+}
+
+impl Builder {
+    fn process_rollup_file(
+        &mut self,
+        path: &Path,
+        period: &Period,
+        strict: bool,
+    ) -> Result<(), AggregationError> {
+        let file = File::open(path).map_err(|source| AggregationError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+        let family = rollup_family(path);
+        // A family starts unanchored: retention deletes whole months from
+        // the front, so the oldest surviving line is a start, not a break.
+        let mut expected = self.rollup_anchors.remove(&family).unwrap_or(None);
+        let mut chain_started = expected.is_some();
+        let mut warned_break = false;
+        for (line_no, line) in BufReader::new(file).lines().enumerate() {
+            let line = line.map_err(|source| AggregationError::Io {
+                path: path.display().to_string(),
+                source,
+            })?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            self.rollup_line(RollupStep {
+                trimmed,
+                period,
+                strict,
+                path,
+                line_no,
+                family: &family,
+                expected: &mut expected,
+                chain_started: &mut chain_started,
+                warned_break: &mut warned_break,
+            })?;
+        }
+        self.rollup_anchors.insert(family, expected);
+        Ok(())
+    }
+
+    fn rollup_line(&mut self, step: RollupStep<'_>) -> Result<(), AggregationError> {
+        let RollupStep {
+            trimmed,
+            period,
+            strict,
+            path,
+            line_no,
+            family,
+            expected,
+            chain_started,
+            warned_break,
+        } = step;
+        let mut parsed: Option<serde_json::Value> = serde_json::from_str(trimmed).ok();
+        let line = parsed
+            .clone()
+            .and_then(|value| serde_json::from_value::<super::rollup::RollupLine>(value).ok());
+        let in_scope = line.as_ref().is_none_or(|l| period_has_day(period, l.day));
+        if let Some(drops) = parsed
+            .as_ref()
+            .and_then(|v| v.get("drops"))
+            .and_then(serde_json::Value::as_u64)
+        {
+            self.fold_drops(family, drops, in_scope);
+        }
+        let parsed_seq = parsed
+            .as_ref()
+            .and_then(|v| v.get("seq"))
+            .and_then(serde_json::Value::as_u64);
+        let next_seq = |expected: &ChainAnchor| {
+            parsed_seq
+                .unwrap_or_else(|| expected.as_ref().map_or(0, |(_, seq)| *seq))
+                .saturating_add(1)
+        };
+        self.walk_chain_line(ChainStep {
+            parsed: parsed.as_mut(),
+            expected,
+            chain_started,
+            in_scope,
+            previous_in_scope: in_scope,
+            next_seq: &next_seq,
+            path,
+            line_no,
+            warned_break,
+            weight: line.as_ref().map_or(1, |l| l.state.windows_aggregated()),
+        });
+        let Some(line) = line else {
+            self.state.malformed_lines_skipped += 1;
+            return Ok(());
+        };
+        self.fold_rollup(line, period, strict)
+    }
+
+    fn fold_rollup(
+        &mut self,
+        line: super::rollup::RollupLine,
+        period: &Period,
+        strict: bool,
+    ) -> Result<(), AggregationError> {
+        self.earliest_archived = Some(
+            self.earliest_archived
+                .map_or(line.ts, |seen| seen.min(line.ts)),
+        );
+        if !period_has_day(period, line.day) {
+            return Ok(());
+        }
+        let mut state = line.state;
+        if strict && let Some(ts) = state.first_unattributed() {
+            return Err(AggregationError::UnattributedWindow {
+                ts: ts.to_rfc3339(),
+            });
+        }
+        // A rollup answers for its own day only.
+        state.keep_only_day(line.day);
+        self.rollup_days.insert(line.day);
+        self.state.merge(state);
+        Ok(())
+    }
+
+    /// Whether a rollup already folded this window line's day.
+    fn rollup_covers(&self, value: Option<&serde_json::Value>) -> bool {
+        value
+            .and_then(|v| v.get("ts"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+            .is_some_and(|ts| {
+                self.rollup_days
+                    .contains(&ts.with_timezone(&Utc).date_naive())
+            })
+    }
+}
+
+/// One rollup line's worth of reading state, threaded through
+/// [`Builder::rollup_line`].
+struct RollupStep<'a> {
+    trimmed: &'a str,
+    period: &'a Period,
+    strict: bool,
+    path: &'a Path,
+    line_no: usize,
+    family: &'a str,
+    expected: &'a mut ChainAnchor,
+    chain_started: &'a mut bool,
+    warned_break: &'a mut bool,
+}
+
+fn period_has_day(period: &Period, day: NaiveDate) -> bool {
+    period.from_date <= day && day <= period.to_date
+}
+
+/// Rollup files are told apart by content, so a renamed or copied one is
+/// still read as a rollup.
+fn is_rollup_file(path: &Path) -> Result<bool, AggregationError> {
+    let io = |source| AggregationError::Io {
+        path: path.display().to_string(),
+        source,
+    };
+    let file = File::open(path).map_err(io)?;
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(io)?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        return Ok(serde_json::from_str::<serde_json::Value>(trimmed)
+            .is_ok_and(|value| super::rollup::is_rollup_value(&value)));
+    }
+    Ok(false)
+}
+
+/// Monthly rollup files of one archive share a family, so their drop
+/// counter and their chain run on across months.
+fn rollup_family(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let stem = super::rollup::parse_rollup_file_name(&name).map_or_else(
+        || {
+            path.file_stem()
+                .map_or_else(String::new, |s| s.to_string_lossy().into_owned())
+        },
+        |(stem, _, _)| stem.to_string(),
+    );
+    format!(
+        "{}\u{1}{stem}\u{1}daily",
+        path.parent().unwrap_or(Path::new("")).display()
+    )
 }
 
 impl Builder {
