@@ -3008,6 +3008,41 @@ fn daemon_archive_absent_section_yields_none() {
     assert!(cfg.daemon.archive.is_none());
 }
 
+#[test]
+fn archive_section_defaults_keep_windows_and_400_days_of_rollups() {
+    let toml = r#"
+[daemon.archive]
+path = "/var/lib/perf-sentinel/archive.ndjson"
+"#;
+    let archive = load_from_str(toml).expect("valid").daemon.archive.unwrap();
+    assert!(archive.windows);
+    assert_eq!(archive.rollup_retention_days, 400);
+}
+
+#[test]
+fn archive_section_reads_windows_and_retention() {
+    let toml = r#"
+[daemon.archive]
+path = "/a/archive.ndjson"
+windows = false
+rollup_retention_days = 120
+"#;
+    let archive = load_from_str(toml).expect("valid").daemon.archive.unwrap();
+    assert!(!archive.windows);
+    assert_eq!(archive.rollup_retention_days, 120);
+}
+
+#[test]
+fn a_zero_day_rollup_retention_is_rejected() {
+    let toml = r#"
+[daemon.archive]
+path = "/a/archive.ndjson"
+rollup_retention_days = 0
+"#;
+    let err = load_from_str(toml).expect_err("zero retention must be rejected");
+    assert!(err.to_string().contains("rollup_retention_days"), "{err}");
+}
+
 // ---- Kepler / Redfish converters --------------------------------------
 
 #[test]

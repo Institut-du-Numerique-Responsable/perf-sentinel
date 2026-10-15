@@ -14,6 +14,7 @@ pub mod attestation;
 pub mod errors;
 pub mod hasher;
 pub mod org_config;
+pub(crate) mod rollup;
 pub mod schema;
 pub mod validator;
 

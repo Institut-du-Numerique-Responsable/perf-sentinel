@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::detect::Finding;
 use crate::report::Report;
@@ -119,7 +119,7 @@ pub struct AggregateInputs {
     pub transport_gco2_total: f64,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ServiceAccumulator {
     pub total_requests: u64,
     pub total_io_ops: u64,
@@ -129,7 +129,7 @@ pub struct ServiceAccumulator {
     pub endpoints_seen: BTreeSet<String>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AntiPatternAccumulator {
     pub occurrences: u64,
     /// Estimated avoidable I/O ops attributed to this pattern. For
@@ -170,11 +170,19 @@ pub fn aggregate_from_paths(
         .collect();
 
     let mut builder = Builder::default();
+    let mut window_files = Vec::new();
     for path in &files {
+        if is_rollup_file(path)? {
+            builder.process_rollup_file(path, period, strict_attribution)?;
+        } else {
+            window_files.push(path);
+        }
+    }
+    for path in window_files {
         builder.process_file(path, period, strict_attribution)?;
     }
 
-    if builder.windows_aggregated == 0 {
+    if builder.state.windows_aggregated == 0 {
         return Err(AggregationError::NoWindowsInPeriod);
     }
 
@@ -244,7 +252,7 @@ struct WindowMetrics {
 
 /// Period-summed avoidable energy/carbon for one N+1 threshold tier.
 /// `threshold` reconciled by `max` across windows. `avoidable_kg` in kg.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct WasteTierAccumulator {
     n_plus_one_threshold: u32,
     avoidable_io_ops: u64,
@@ -312,7 +320,7 @@ fn fold_waste_block(acc: &mut DbWasteAccumulator, block: &crate::report::Disclos
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct DbWasteAccumulator {
     energy_kwh: f64,
     measured_energy_kwh: f64,
@@ -333,13 +341,19 @@ struct DbWasteAccumulator {
     windows_with_carbon: u64,
 }
 
-#[derive(Default)]
-struct Builder {
+/// What the windows of a period measured, independent of how they were
+/// read. Folded window by window, and merged whole when a daily rollup
+/// carries it, see `rollup.rs`.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct PeriodState {
     per_service: BTreeMap<String, ServiceAccumulator>,
     windows_aggregated: u64,
     malformed_lines_skipped: u64,
     legacy_waste_windows: u64,
+    #[serde(with = "pair_key_map")]
     first_seen: BTreeMap<(String, String), DateTime<Utc>>,
+    #[serde(with = "pair_key_map")]
     last_seen: BTreeMap<(String, String), DateTime<Utc>>,
     total_requests: u64,
     total_io_ops: u64,
@@ -369,24 +383,6 @@ struct Builder {
     /// Set when at least one window's `energy_model` carried the `+cal`
     /// suffix, indicating operator calibration was active for that window.
     calibration_applied: bool,
-    /// Archive lines whose hash chain checked out, carried no chain at
-    /// all (pre-chaining archives), or failed to verify.
-    chain_verified: u64,
-    chain_unchained: u64,
-    chain_breaks: u64,
-    chain_breaks_outside: u64,
-    /// Sum of in-period deltas of the cumulative `drops` counter, and
-    /// whether any line carried it at all (pre-v1.7 archives carry none,
-    /// and `0` must stay distinguishable from "not measured").
-    windows_dropped: u64,
-    drop_counter_resets: u64,
-    drops_observed: bool,
-    /// Previous cumulative `drops` value per archive family, keyed by
-    /// the family stem. The counter is daemon-lifetime, so the baseline
-    /// must survive a rotation, and it must NOT cross into an unrelated
-    /// archive: `disclose` takes a list of paths, and diffing one host's
-    /// counter against another's would invent resets.
-    last_drops: BTreeMap<String, u64>,
     /// SCI methodology tags observed, bounded by `MAX_ENERGY_MODELS`.
     carbon_methodologies: BTreeSet<String>,
     /// Distinct coefficient sets observed, as `"key=value"` strings. A
@@ -411,8 +407,45 @@ struct Builder {
     /// by the period length (<= 366 for a calendar year), no cap needed.
     /// Drives the v1.2 temporal-coverage continuity signal.
     observed_days: BTreeSet<NaiveDate>,
+    /// Earliest window folded into the unattributed bucket. A rollup is
+    /// folded without `--strict-attribution`, so the reader needs this to
+    /// refuse it later when the flag is set.
+    first_unattributed: Option<DateTime<Utc>>,
+}
+
+#[derive(Default)]
+struct Builder {
+    state: PeriodState,
+    /// Archive lines whose hash chain checked out, carried no chain at
+    /// all (pre-chaining archives), or failed to verify.
+    chain_verified: u64,
+    chain_unchained: u64,
+    chain_breaks: u64,
+    chain_breaks_outside: u64,
+    /// Sum of in-period deltas of the cumulative `drops` counter, and
+    /// whether any line carried it at all (pre-v1.7 archives carry none,
+    /// and `0` must stay distinguishable from "not measured").
+    windows_dropped: u64,
+    drop_counter_resets: u64,
+    drops_observed: bool,
+    /// Previous cumulative `drops` value per archive family, keyed by
+    /// the family stem. The counter is daemon-lifetime, so the baseline
+    /// must survive a rotation, and it must NOT cross into an unrelated
+    /// archive: `disclose` takes a list of paths, and diffing one host's
+    /// counter against another's would invent resets.
+    last_drops: BTreeMap<String, u64>,
     /// Oldest well-formed window across every input line, period or not.
     earliest_archived: Option<DateTime<Utc>>,
+    /// Windows the rollup lines already folded, as `[first, last]` window
+    /// timestamps per archive family (the window archive a rollup file
+    /// sits beside). A window line inside one is read for its chain and
+    /// drop counter only, so no window counts twice. Windows outside every
+    /// span, archived before the upgrade or after a crash's last snapshot,
+    /// still count from their window lines.
+    rollup_spans: BTreeMap<String, Vec<WindowSpan>>,
+    /// Chain anchor per rollup family. Unlike window files, a rollup chain
+    /// runs across its monthly files, so a removed month shows as a break.
+    rollup_anchors: BTreeMap<String, ChainAnchor>,
     /// Oldest well-formed window whose chain verified. When any line is
     /// chained, the reach check reads this one: a line without a hash put
     /// in front of a chained archive must not stand in for pruned windows.
@@ -421,6 +454,9 @@ struct Builder {
 
 /// The chain anchor: the previous line's hash and its sequence number.
 type ChainAnchor = Option<(String, u64)>;
+
+/// First and last window timestamps a rollup line folded.
+type WindowSpan = (DateTime<Utc>, DateTime<Utc>);
 
 /// One archive line handed to [`Builder::fold_window`]. Grouped like
 /// [`ChainStep`]: the mutable `warned_fallback` has to travel with the
@@ -434,6 +470,8 @@ struct WindowStep<'a> {
     path: &'a Path,
     line_no: usize,
     warned_fallback: &'a mut bool,
+    /// A rollup line already folded this window.
+    covered: bool,
     /// The line's own hash and its `prev` both checked out.
     chain_verified: bool,
 }
@@ -449,6 +487,9 @@ struct ChainStep<'a> {
     path: &'a Path,
     line_no: usize,
     warned_break: &'a mut bool,
+    /// Windows this line attests: one for a window line, the folded count
+    /// for a rollup line.
+    weight: u64,
 }
 
 impl Builder {
@@ -469,7 +510,7 @@ impl Builder {
             ChainOutcome::Verified(hash) => {
                 *step.chain_started = true;
                 if step.in_scope {
-                    self.chain_verified += 1;
+                    self.chain_verified += step.weight;
                 }
                 let seq = (step.next_seq)(step.expected);
                 *step.expected = Some((hash, seq));
@@ -480,7 +521,7 @@ impl Builder {
             // the chain exists to catch.
             ChainOutcome::Unchained if !*step.chain_started => {
                 if step.in_scope {
-                    self.chain_unchained += 1;
+                    self.chain_unchained += step.weight;
                 }
             }
             ChainOutcome::Unchained => {
@@ -551,7 +592,8 @@ impl Builder {
             // own timestamp decides which counter it lands in: one
             // rolling archive can span several periods, and a 2024 edit
             // must not be published as this quarter's break.
-            let in_scope = line_in_period(parsed.as_ref(), period);
+            let covered = self.rollup_covers(&family, parsed.as_ref());
+            let in_scope = line_in_period(parsed.as_ref(), period) && !covered;
             if let Some(drops) = parsed
                 .as_ref()
                 .and_then(|v| v.get("drops"))
@@ -574,6 +616,7 @@ impl Builder {
                 path,
                 line_no,
                 warned_break: &mut warned_break,
+                weight: 1,
             });
             if parsed.is_some() {
                 previous_in_scope = in_scope;
@@ -586,6 +629,7 @@ impl Builder {
                 path,
                 line_no,
                 warned_fallback: &mut warned_fallback,
+                covered,
                 chain_verified,
             })?;
         }
@@ -606,7 +650,7 @@ impl Builder {
         let envelope = match typed {
             Ok(envelope) => envelope,
             Err(err) => {
-                self.malformed_lines_skipped += 1;
+                self.state.malformed_lines_skipped += 1;
                 tracing::warn!(
                     path = %step.path.display(),
                     line = step.line_no + 1,
@@ -626,10 +670,12 @@ impl Builder {
                     .map_or(envelope.ts, |seen| seen.min(envelope.ts)),
             );
         }
-        if !in_period(envelope.ts, step.period) {
+        if !in_period(envelope.ts, step.period) || step.covered {
             return Ok(());
         }
-        let used_fallback = self.process_window(envelope, step.strict)?;
+        let used_fallback =
+            self.state
+                .process_window(&envelope.report, envelope.ts, step.strict)?;
         if used_fallback && !*step.warned_fallback {
             *step.warned_fallback = true;
             tracing::warn!(
@@ -684,16 +730,16 @@ impl Builder {
             self.chain_breaks_outside += 1;
         }
     }
+}
 
-    fn process_window(
+impl PeriodState {
+    pub(crate) fn process_window(
         &mut self,
-        envelope: ArchivedReport,
+        report: &Report,
+        ts: DateTime<Utc>,
         strict: bool,
     ) -> Result<bool, AggregationError> {
-        let ts = envelope.ts;
-        let report = envelope.report;
-
-        let Some(m) = self.compute_window_metrics(&report, ts) else {
+        let Some(m) = self.compute_window_metrics(report, ts) else {
             return Ok(false);
         };
 
@@ -702,7 +748,7 @@ impl Builder {
         // non-finite-carbon guard), keeping observed_days aligned with
         // windows_aggregated.
         self.observed_days.insert(ts.date_naive());
-        self.fold_disclosure_waste(&report, &m);
+        self.fold_disclosure_waste(report, &m);
         self.fold_binary_version(&report.binary_version);
         self.fold_window_energy_model(
             &report.green_summary.energy_model,
@@ -724,8 +770,11 @@ impl Builder {
                 ts: ts.to_rfc3339(),
             });
         }
+        if unattributed {
+            self.first_unattributed = Some(self.first_unattributed.map_or(ts, |seen| seen.min(ts)));
+        }
 
-        self.attribute_window(&report, &m, &per_service_io, unattributed);
+        self.attribute_window(report, &m, &per_service_io, unattributed);
         self.route_findings(&report.findings, ts, unattributed);
 
         Ok(!m.runtime_attribution)
@@ -1141,29 +1190,540 @@ impl Builder {
             self.per_service.values().map(|s| s.energy_kwh).sum()
         }
     }
+}
 
+impl PeriodState {
+    pub(crate) fn first_unattributed(&self) -> Option<DateTime<Utc>> {
+        self.first_unattributed
+    }
+
+    pub(crate) fn windows_aggregated(&self) -> u64 {
+        self.windows_aggregated
+    }
+
+    /// Restrict the observed days to `day`, the only one a rollup line may
+    /// answer for. An empty state keeps no day.
+    pub(crate) fn keep_only_day(&mut self, day: NaiveDate) {
+        self.observed_days.clear();
+        if self.windows_aggregated > 0 {
+            self.observed_days.insert(day);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_observed_day_for_test(&mut self, day: NaiveDate) {
+        self.observed_days.insert(day);
+    }
+
+    /// Fold another state in. Each field merges by the operation its
+    /// window fold uses, and every guard that path applies to untrusted
+    /// archive input applies again: a rollup line is read from a file.
+    pub(crate) fn merge(&mut self, other: PeriodState) {
+        let PeriodState {
+            per_service,
+            windows_aggregated,
+            malformed_lines_skipped,
+            legacy_waste_windows,
+            first_seen,
+            last_seen,
+            total_requests,
+            total_io_ops,
+            total_carbon_kgco2eq,
+            canonical_waste,
+            operational_waste,
+            db_waste,
+            msg_waste,
+            runtime_energy_kwh,
+            energy_source_models,
+            runtime_windows,
+            fallback_windows,
+            binary_versions,
+            calibration_applied,
+            carbon_methodologies,
+            scoring_coefficients,
+            transport_coefficient_uncertain,
+            embodied_gco2_total,
+            operational_gco2_total,
+            transport_gco2_total,
+            per_service_energy_models,
+            per_service_measured_ratio_sums,
+            observed_days,
+            first_unattributed,
+        } = other;
+        self.windows_aggregated = self.windows_aggregated.saturating_add(windows_aggregated);
+        self.malformed_lines_skipped = self
+            .malformed_lines_skipped
+            .saturating_add(malformed_lines_skipped);
+        self.legacy_waste_windows = self
+            .legacy_waste_windows
+            .saturating_add(legacy_waste_windows);
+        self.total_requests = self.total_requests.saturating_add(total_requests);
+        self.total_io_ops = self.total_io_ops.saturating_add(total_io_ops);
+        self.runtime_windows = self.runtime_windows.saturating_add(runtime_windows);
+        self.fallback_windows = self.fallback_windows.saturating_add(fallback_windows);
+        self.total_carbon_kgco2eq += sanitize_f64(total_carbon_kgco2eq);
+        self.runtime_energy_kwh += sanitize_f64(runtime_energy_kwh);
+        self.embodied_gco2_total += sanitize_f64(embodied_gco2_total);
+        self.operational_gco2_total += sanitize_f64(operational_gco2_total);
+        self.transport_gco2_total += sanitize_f64(transport_gco2_total);
+        self.calibration_applied |= calibration_applied;
+        self.transport_coefficient_uncertain |= transport_coefficient_uncertain;
+        merge_tier(&mut self.canonical_waste, &canonical_waste);
+        merge_tier(&mut self.operational_waste, &operational_waste);
+        merge_waste_block(&mut self.db_waste, db_waste);
+        merge_waste_block(&mut self.msg_waste, msg_waste);
+        self.merge_services(per_service);
+        self.merge_seen(first_seen, last_seen);
+        self.merge_tags(binary_versions, energy_source_models, carbon_methodologies);
+        self.merge_coefficients(scoring_coefficients);
+        self.merge_per_service_maps(per_service_energy_models, per_service_measured_ratio_sums);
+        self.observed_days.extend(observed_days);
+        if let Some(ts) = first_unattributed {
+            self.first_unattributed = Some(self.first_unattributed.map_or(ts, |seen| seen.min(ts)));
+        }
+    }
+
+    fn merge_services(&mut self, incoming: BTreeMap<String, ServiceAccumulator>) {
+        for (service, acc) in incoming {
+            let Some(bucket) = bounded_entry(&mut self.per_service, &service) else {
+                continue;
+            };
+            bucket.total_requests = bucket.total_requests.saturating_add(acc.total_requests);
+            bucket.total_io_ops = bucket.total_io_ops.saturating_add(acc.total_io_ops);
+            bucket.energy_kwh += sanitize_f64(acc.energy_kwh);
+            bucket.carbon_kgco2eq += sanitize_f64(acc.carbon_kgco2eq);
+            bucket.endpoints_seen.extend(acc.endpoints_seen);
+            for (pattern, ap) in acc.anti_patterns {
+                if !is_known_pattern(&pattern) {
+                    continue;
+                }
+                let slot = bucket.anti_patterns.entry(pattern).or_default();
+                slot.occurrences = slot.occurrences.saturating_add(ap.occurrences);
+                slot.avoidable_io_ops = slot.avoidable_io_ops.saturating_add(ap.avoidable_io_ops);
+            }
+        }
+    }
+
+    /// Only rows whose `(service, pattern)` survived `merge_services`, the
+    /// pairing `credit` keeps on the window path.
+    fn merge_seen(
+        &mut self,
+        first: BTreeMap<(String, String), DateTime<Utc>>,
+        last: BTreeMap<(String, String), DateTime<Utc>>,
+    ) {
+        for (key, ts) in first {
+            if self.admits(&key) {
+                let slot = self.first_seen.entry(key).or_insert(ts);
+                *slot = (*slot).min(ts);
+            }
+        }
+        for (key, ts) in last {
+            if self.admits(&key) {
+                let slot = self.last_seen.entry(key).or_insert(ts);
+                *slot = (*slot).max(ts);
+            }
+        }
+    }
+
+    fn admits(&self, (service, pattern): &(String, String)) -> bool {
+        self.per_service
+            .get(service)
+            .is_some_and(|bucket| bucket.anti_patterns.contains_key(pattern))
+    }
+
+    fn merge_tags(
+        &mut self,
+        binary_versions: BTreeSet<String>,
+        energy_models: BTreeSet<String>,
+        methodologies: BTreeSet<String>,
+    ) {
+        for version in binary_versions {
+            self.fold_binary_version(&version);
+        }
+        for model in energy_models {
+            if !model.is_empty() && model.len() <= MAX_ENERGY_MODEL_LEN {
+                insert_capped(&mut self.energy_source_models, model, MAX_ENERGY_MODELS);
+            }
+        }
+        for tag in methodologies {
+            if !tag.is_empty() && tag.len() <= MAX_ENERGY_MODEL_LEN {
+                insert_capped(&mut self.carbon_methodologies, tag, MAX_ENERGY_MODELS);
+            }
+        }
+    }
+
+    fn merge_coefficients(&mut self, coefficients: BTreeSet<String>) {
+        for entry in coefficients {
+            if entry.len() <= MAX_COEFFICIENT_LEN {
+                insert_capped(&mut self.scoring_coefficients, entry, MAX_ENERGY_MODELS);
+            }
+        }
+    }
+
+    fn merge_per_service_maps(
+        &mut self,
+        models: BTreeMap<String, BTreeSet<String>>,
+        ratios: BTreeMap<String, (f64, u32)>,
+    ) {
+        for (service, set) in models {
+            for model in set {
+                if model.is_empty() || model.len() > MAX_ENERGY_MODEL_LEN {
+                    continue;
+                }
+                let known = self.per_service_energy_models.contains_key(&service);
+                if !known && self.per_service_energy_models.len() >= MAX_SERVICES {
+                    break;
+                }
+                let slot = self
+                    .per_service_energy_models
+                    .entry(service.clone())
+                    .or_default();
+                insert_capped(slot, model, MAX_ENERGY_MODELS);
+            }
+        }
+        for (service, (sum, count)) in ratios {
+            let known = self.per_service_measured_ratio_sums.contains_key(&service);
+            if !known && self.per_service_measured_ratio_sums.len() >= MAX_SERVICES {
+                continue;
+            }
+            let slot = self
+                .per_service_measured_ratio_sums
+                .entry(service)
+                .or_insert((0.0, 0));
+            // Each folded ratio is clamped to [0, 1], so a sum above its count is forged.
+            slot.0 += sanitize_f64(sum).min(f64::from(count));
+            slot.1 = slot.1.saturating_add(count);
+        }
+    }
+}
+
+/// Bound on one `key=value` coefficient entry read back from a rollup.
+const MAX_COEFFICIENT_LEN: usize = 128;
+
+fn insert_capped(set: &mut BTreeSet<String>, value: String, cap: usize) {
+    if set.len() < cap || set.contains(&value) {
+        set.insert(value);
+    }
+}
+
+/// A pattern name the window path could have produced: a `FindingType`.
+fn is_known_pattern(name: &str) -> bool {
+    serde_json::from_value::<crate::detect::FindingType>(serde_json::Value::String(
+        name.to_string(),
+    ))
+    .is_ok_and(|ft| ft.as_str() == name)
+}
+
+fn merge_tier(acc: &mut WasteTierAccumulator, other: &WasteTierAccumulator) {
+    acc.n_plus_one_threshold = acc.n_plus_one_threshold.max(other.n_plus_one_threshold);
+    acc.avoidable_io_ops = acc.avoidable_io_ops.saturating_add(other.avoidable_io_ops);
+    acc.avoidable_kwh += sanitize_f64(other.avoidable_kwh);
+    acc.avoidable_kg += sanitize_f64(other.avoidable_kg);
+}
+
+fn merge_waste_block(acc: &mut DbWasteAccumulator, other: DbWasteAccumulator) {
+    let add_opt = |slot: &mut Option<f64>, value: Option<f64>| {
+        if let Some(g) = value {
+            *slot = Some(slot.unwrap_or(0.0) + sanitize_f64(g));
+        }
+    };
+    acc.energy_kwh += sanitize_f64(other.energy_kwh);
+    acc.measured_energy_kwh += sanitize_f64(other.measured_energy_kwh);
+    acc.operational_kwh += sanitize_f64(other.operational_kwh);
+    acc.canonical_kwh += sanitize_f64(other.canonical_kwh);
+    acc.declared_energy_kwh += sanitize_f64(other.declared_energy_kwh);
+    add_opt(&mut acc.operational_g, other.operational_g);
+    add_opt(&mut acc.canonical_g, other.canonical_g);
+    add_opt(&mut acc.energy_g, other.energy_g);
+    acc.windows = acc.windows.saturating_add(other.windows);
+    acc.measured_windows = acc.measured_windows.saturating_add(other.measured_windows);
+    acc.declared_windows = acc.declared_windows.saturating_add(other.declared_windows);
+    acc.estimated_windows = acc
+        .estimated_windows
+        .saturating_add(other.estimated_windows);
+    acc.windows_with_carbon = acc
+        .windows_with_carbon
+        .saturating_add(other.windows_with_carbon);
+    for model in other.models {
+        if super::schema::is_valid_model_tag(&model) {
+            insert_capped(&mut acc.models, model, MAX_BINARY_VERSIONS);
+        }
+    }
+}
+
+/// `(service, pattern) -> ts` as a JSON list of `[service, pattern, ts]`.
+mod pair_key_map {
+    use std::collections::BTreeMap;
+
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    type Map = BTreeMap<(String, String), DateTime<Utc>>;
+
+    pub(super) fn serialize<S: Serializer>(map: &Map, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(
+            map.iter()
+                .map(|((service, pattern), ts)| (service, pattern, ts)),
+        )
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Map, D::Error> {
+        let rows = Vec::<(String, String, DateTime<Utc>)>::deserialize(d)?;
+        Ok(rows
+            .into_iter()
+            .map(|(service, pattern, ts)| ((service, pattern), ts))
+            .collect())
+    }
+}
+
+impl Builder {
+    fn process_rollup_file(
+        &mut self,
+        path: &Path,
+        period: &Period,
+        strict: bool,
+    ) -> Result<(), AggregationError> {
+        let file = File::open(path).map_err(|source| AggregationError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+        let owner = rollup_owner(path);
+        let family = format!("{owner}\u{1}daily");
+        // A family starts unanchored: retention deletes whole months from
+        // the front, so the oldest surviving line is a start, not a break.
+        let mut expected = self.rollup_anchors.remove(&family).unwrap_or(None);
+        // Rollups were chained from their first line, so a line without a
+        // hash is always an edit, never a pre-chain line.
+        let mut chain_started = true;
+        let mut previous_in_scope = false;
+        let mut warned_break = false;
+        for (line_no, line) in BufReader::new(file).lines().enumerate() {
+            let line = line.map_err(|source| AggregationError::Io {
+                path: path.display().to_string(),
+                source,
+            })?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            self.rollup_line(RollupStep {
+                trimmed,
+                period,
+                strict,
+                path,
+                line_no,
+                family: &family,
+                owner: &owner,
+                expected: &mut expected,
+                chain_started: &mut chain_started,
+                previous_in_scope: &mut previous_in_scope,
+                warned_break: &mut warned_break,
+            })?;
+        }
+        self.rollup_anchors.insert(family, expected);
+        Ok(())
+    }
+
+    fn rollup_line(&mut self, step: RollupStep<'_>) -> Result<(), AggregationError> {
+        let RollupStep {
+            trimmed,
+            period,
+            strict,
+            path,
+            line_no,
+            family,
+            owner,
+            expected,
+            chain_started,
+            previous_in_scope,
+            warned_break,
+        } = step;
+        let mut parsed: Option<serde_json::Value> = serde_json::from_str(trimmed).ok();
+        let line = parsed
+            .clone()
+            .and_then(|value| serde_json::from_value::<super::rollup::RollupLine>(value).ok());
+        let in_scope = line.as_ref().is_none_or(|l| period_has_day(period, l.day));
+        if let Some(drops) = parsed
+            .as_ref()
+            .and_then(|v| v.get("drops"))
+            .and_then(serde_json::Value::as_u64)
+        {
+            self.fold_drops(family, drops, in_scope);
+        }
+        let parsed_seq = parsed
+            .as_ref()
+            .and_then(|v| v.get("seq"))
+            .and_then(serde_json::Value::as_u64);
+        let next_seq = |expected: &ChainAnchor| {
+            parsed_seq
+                .unwrap_or_else(|| expected.as_ref().map_or(0, |(_, seq)| *seq))
+                .saturating_add(1)
+        };
+        let chain_verified = self.walk_chain_line(ChainStep {
+            parsed: parsed.as_mut(),
+            expected,
+            chain_started,
+            in_scope,
+            previous_in_scope: *previous_in_scope,
+            next_seq: &next_seq,
+            path,
+            line_no,
+            warned_break,
+            weight: line.as_ref().map_or(1, |l| l.state.windows_aggregated()),
+        });
+        if parsed.is_some() {
+            *previous_in_scope = in_scope;
+        }
+        let Some(line) = line else {
+            self.state.malformed_lines_skipped += 1;
+            return Ok(());
+        };
+        if chain_verified {
+            self.earliest_chained = Some(
+                self.earliest_chained
+                    .map_or(line.ts, |seen| seen.min(line.ts)),
+            );
+        }
+        self.fold_rollup(line, period, strict, owner)
+    }
+
+    fn fold_rollup(
+        &mut self,
+        line: super::rollup::RollupLine,
+        period: &Period,
+        strict: bool,
+        owner: &str,
+    ) -> Result<(), AggregationError> {
+        self.earliest_archived = Some(
+            self.earliest_archived
+                .map_or(line.ts, |seen| seen.min(line.ts)),
+        );
+        if !period_has_day(period, line.day) {
+            return Ok(());
+        }
+        let mut state = line.state;
+        if strict && let Some(ts) = state.first_unattributed() {
+            return Err(AggregationError::UnattributedWindow {
+                ts: ts.to_rfc3339(),
+            });
+        }
+        // A rollup answers for its own day only.
+        state.keep_only_day(line.day);
+        self.rollup_spans
+            .entry(owner.to_string())
+            .or_default()
+            .push((line.ts, line.last_ts));
+        self.state.merge(state);
+        Ok(())
+    }
+
+    /// Whether a rollup line of the same archive already folded this
+    /// window line.
+    fn rollup_covers(&self, family: &str, value: Option<&serde_json::Value>) -> bool {
+        let Some(spans) = self.rollup_spans.get(family) else {
+            return false;
+        };
+        value
+            .and_then(|v| v.get("ts"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+            .map(|ts| ts.with_timezone(&Utc))
+            .is_some_and(|ts| {
+                spans
+                    .iter()
+                    .any(|(first, last)| *first <= ts && ts <= *last)
+            })
+    }
+}
+
+/// One rollup line's worth of reading state, threaded through
+/// [`Builder::rollup_line`].
+struct RollupStep<'a> {
+    trimmed: &'a str,
+    period: &'a Period,
+    strict: bool,
+    path: &'a Path,
+    line_no: usize,
+    family: &'a str,
+    /// The window family the rollup file sits beside.
+    owner: &'a str,
+    expected: &'a mut ChainAnchor,
+    chain_started: &'a mut bool,
+    previous_in_scope: &'a mut bool,
+    warned_break: &'a mut bool,
+}
+
+fn period_has_day(period: &Period, day: NaiveDate) -> bool {
+    period.from_date <= day && day <= period.to_date
+}
+
+/// Rollup files are told apart by content, so a renamed or copied one is
+/// still read as a rollup. The first line that parses decides: a crash
+/// fragment ahead of it does not demote the whole file.
+fn is_rollup_file(path: &Path) -> Result<bool, AggregationError> {
+    let io = |source| AggregationError::Io {
+        path: path.display().to_string(),
+        source,
+    };
+    let file = File::open(path).map_err(io)?;
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(io)?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            return Ok(super::rollup::is_rollup_value(&value));
+        }
+    }
+    Ok(false)
+}
+
+/// The window family a rollup file belongs to, the same key
+/// [`archive_family`] gives the window archive beside it. Its monthly files
+/// share it, so their drop counter and their chain run on across months,
+/// and their spans only cover that archive's windows.
+fn rollup_owner(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let stem = super::rollup::parse_rollup_file_name(&name).map_or_else(
+        || {
+            path.file_stem()
+                .map_or_else(String::new, |s| s.to_string_lossy().into_owned())
+        },
+        |(stem, _, _)| stem.to_string(),
+    );
+    format!(
+        "{}\u{1}{stem}",
+        path.parent().unwrap_or(Path::new("")).display()
+    )
+}
+
+impl Builder {
     fn finalize(self, source_files: Vec<String>, period: &Period) -> AggregateInputs {
-        let total_requests = self.total_requests;
-        let total_energy_kwh = self.total_energy_kwh();
-        let total_carbon = self.total_carbon_kgco2eq;
+        let total_energy_kwh = self.state.total_energy_kwh();
+        let state = self.state;
+        let total_requests = state.total_requests;
+        let total_carbon = state.total_carbon_kgco2eq;
         // Flat avoidable fields alias the canonical (non-manipulable) tier.
-        let canonical_waste = make_waste_tier(&self.canonical_waste, self.total_io_ops);
-        let operational_waste = make_waste_tier(&self.operational_waste, self.total_io_ops);
-        let anti_patterns_count: u64 = self
+        let canonical_waste = make_waste_tier(&state.canonical_waste, state.total_io_ops);
+        let operational_waste = make_waste_tier(&state.operational_waste, state.total_io_ops);
+        let anti_patterns_count: u64 = state
             .per_service
             .values()
             .flat_map(|s| s.anti_patterns.values())
             .map(|ap| ap.occurrences)
             .sum();
 
-        let total_windows = self.runtime_windows + self.fallback_windows;
+        let total_windows = state.runtime_windows + state.fallback_windows;
         let period_coverage = if total_windows == 0 {
             1.0
         } else {
-            self.runtime_windows as f64 / total_windows as f64
+            state.runtime_windows as f64 / total_windows as f64
         };
 
-        let temporal_coverage = compute_temporal_coverage(&self.observed_days, period);
+        let temporal_coverage = compute_temporal_coverage(&state.observed_days, period);
         // An archive written before chaining has no verified line, so its
         // oldest line still counts.
         let earliest_archived_window = self.earliest_chained.or(self.earliest_archived);
@@ -1174,12 +1734,12 @@ impl Builder {
                 total_energy_kwh,
                 total_carbon_kgco2eq: total_carbon,
                 carbon_breakdown: build_carbon_breakdown(
-                    self.operational_gco2_total,
-                    self.embodied_gco2_total,
-                    self.transport_gco2_total,
-                    self.db_waste.energy_g,
-                    self.msg_waste.energy_g,
-                    !self.transport_coefficient_uncertain,
+                    state.operational_gco2_total,
+                    state.embodied_gco2_total,
+                    state.transport_gco2_total,
+                    state.db_waste.energy_g,
+                    state.msg_waste.energy_g,
+                    !state.transport_coefficient_uncertain,
                 ),
                 aggregate_efficiency_score: canonical_waste.efficiency_score,
                 aggregate_waste_ratio: canonical_waste.waste_ratio,
@@ -1188,27 +1748,27 @@ impl Builder {
                 canonical_waste,
                 operational_waste,
                 period_coverage,
-                binary_versions: self.binary_versions,
-                runtime_windows_count: self.runtime_windows,
-                fallback_windows_count: self.fallback_windows,
-                database_waste: (self.db_waste.windows > 0).then(|| DatabaseWasteAggregate {
-                    energy_kwh: self.db_waste.energy_kwh,
-                    measured_energy_kwh: self.db_waste.measured_energy_kwh,
-                    declared_energy_kwh: self.db_waste.declared_energy_kwh,
-                    models: self.db_waste.models,
-                    windows_with_figure: self.db_waste.windows,
-                    measured_windows: self.db_waste.measured_windows,
-                    declared_windows: self.db_waste.declared_windows,
-                    estimated_windows: self.db_waste.estimated_windows,
-                    windows_with_carbon: self.db_waste.windows_with_carbon,
-                    operational_waste_kwh: self.db_waste.operational_kwh,
-                    operational_waste_kgco2eq: self.db_waste.operational_g.map(|g| g / 1000.0),
-                    canonical_waste_kwh: self.db_waste.canonical_kwh,
-                    canonical_waste_kgco2eq: self.db_waste.canonical_g.map(|g| g / 1000.0),
+                binary_versions: state.binary_versions,
+                runtime_windows_count: state.runtime_windows,
+                fallback_windows_count: state.fallback_windows,
+                database_waste: (state.db_waste.windows > 0).then(|| DatabaseWasteAggregate {
+                    energy_kwh: state.db_waste.energy_kwh,
+                    measured_energy_kwh: state.db_waste.measured_energy_kwh,
+                    declared_energy_kwh: state.db_waste.declared_energy_kwh,
+                    models: state.db_waste.models,
+                    windows_with_figure: state.db_waste.windows,
+                    measured_windows: state.db_waste.measured_windows,
+                    declared_windows: state.db_waste.declared_windows,
+                    estimated_windows: state.db_waste.estimated_windows,
+                    windows_with_carbon: state.db_waste.windows_with_carbon,
+                    operational_waste_kwh: state.db_waste.operational_kwh,
+                    operational_waste_kgco2eq: state.db_waste.operational_g.map(|g| g / 1000.0),
+                    canonical_waste_kwh: state.db_waste.canonical_kwh,
+                    canonical_waste_kgco2eq: state.db_waste.canonical_g.map(|g| g / 1000.0),
                 }),
-                messaging_waste: messaging_waste_aggregate(self.msg_waste),
-                per_service_energy_models: self.per_service_energy_models,
-                per_service_measured_ratio: self
+                messaging_waste: messaging_waste_aggregate(state.msg_waste),
+                per_service_energy_models: state.per_service_energy_models,
+                per_service_measured_ratio: state
                     .per_service_measured_ratio_sums
                     .into_iter()
                     .map(|(svc, (sum, count))| {
@@ -1222,28 +1782,28 @@ impl Builder {
                     .collect(),
                 temporal_coverage,
             },
-            per_service: self.per_service,
-            windows_aggregated: self.windows_aggregated,
+            per_service: state.per_service,
+            windows_aggregated: state.windows_aggregated,
             source_files,
-            malformed_lines_skipped: self.malformed_lines_skipped,
-            legacy_waste_windows: self.legacy_waste_windows,
-            first_seen: self.first_seen,
-            last_seen: self.last_seen,
-            energy_source_models: self.energy_source_models,
-            runtime_windows: self.runtime_windows,
-            fallback_windows: self.fallback_windows,
-            calibration_applied: self.calibration_applied,
+            malformed_lines_skipped: state.malformed_lines_skipped,
+            legacy_waste_windows: state.legacy_waste_windows,
+            first_seen: state.first_seen,
+            last_seen: state.last_seen,
+            energy_source_models: state.energy_source_models,
+            runtime_windows: state.runtime_windows,
+            fallback_windows: state.fallback_windows,
+            calibration_applied: state.calibration_applied,
             windows_dropped: self.drops_observed.then_some(self.windows_dropped),
             drop_counter_resets: self.drops_observed.then_some(self.drop_counter_resets),
             chain_verified: self.chain_verified,
             chain_unchained: self.chain_unchained,
             chain_breaks: self.chain_breaks,
             chain_breaks_outside: self.chain_breaks_outside,
-            carbon_methodologies: self.carbon_methodologies,
-            scoring_coefficients: self.scoring_coefficients,
-            embodied_gco2_total: self.embodied_gco2_total,
-            operational_gco2_total: self.operational_gco2_total,
-            transport_gco2_total: self.transport_gco2_total,
+            carbon_methodologies: state.carbon_methodologies,
+            scoring_coefficients: state.scoring_coefficients,
+            embodied_gco2_total: state.embodied_gco2_total,
+            operational_gco2_total: state.operational_gco2_total,
+            transport_gco2_total: state.transport_gco2_total,
             earliest_archived_window,
         }
     }
