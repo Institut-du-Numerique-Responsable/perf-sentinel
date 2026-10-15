@@ -258,6 +258,13 @@ rechargé au démarrage depuis `[daemon.incidents] archive_path` quand il est
 posé. Sans lui, collectez cet endpoint si l'enregistrement doit survivre au
 nœud.
 
+Avec l'export vers le Hub actif, le Hub garde chaque incident dès son enregistrement,
+donc l'anneau n'a plus à couvrir l'intervalle d'un poll. Un `[daemon.incidents]
+max_retained` plus petit économise alors de la mémoire : un incident peut porter mille
+findings gelés, donc les 200 par défaut peuvent en retenir 200 000 dans le pire cas.
+Gardez-le assez grand pour `query monitor` et pour la passe de consolidation, qui complète
+un incident environ trois TTL de trace après lui.
+
 **Détecter le moment sans alerte externe.** Le daemon ne juge pas si un service
 est vivant, mais il publie quand il en a entendu parler pour la dernière fois.
 `time() - perf_sentinel_service_last_span_timestamp_seconds{service="cart-svc"} > 120`
