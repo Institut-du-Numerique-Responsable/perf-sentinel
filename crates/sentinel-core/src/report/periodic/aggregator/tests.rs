@@ -2345,3 +2345,50 @@ fn a_rollup_line_stripped_of_its_hash_is_a_break_even_first() {
     let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
     assert_eq!(agg.chain_breaks, 1);
 }
+
+#[test]
+fn a_hashless_line_ahead_of_a_chained_archive_does_not_reach_back_for_it() {
+    // One line without a hash, dated before the period, put in front of a
+    // chained archive that only starts in March: it must not stand in for
+    // the pruned windows, nor vanish from the integrity counters' view.
+    let (_dir, path) = write_chained_archive(&[(
+        Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap(),
+        plain_window(),
+    )]);
+    let chained = std::fs::read_to_string(&path).unwrap();
+    let forged = serde_json::json!({
+        "ts": Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap(),
+        "report": plain_window(),
+    });
+    std::fs::write(&path, format!("{forged}\n{chained}")).unwrap();
+    let period = q1_2026();
+    let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
+    assert_eq!(
+        inputs.earliest_archived_window,
+        Some(Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap())
+    );
+    assert!(!archive_reaches_period_start(
+        inputs.earliest_archived_window,
+        &period
+    ));
+}
+
+#[test]
+fn a_hashless_rollup_line_ahead_of_the_chain_does_not_reach_back_for_it() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let paths = write_rollups(dir.path(), "archive", &[(day(20, 9), pool[0].clone())]);
+    let mut acc = DayAccumulator::default();
+    acc.observe(
+        Utc.with_ymd_and_hms(2025, 12, 1, 9, 0, 0).unwrap(),
+        &pool[0],
+    );
+    let mut forged: serde_json::Value =
+        serde_json::from_str(&rollup::serialize_rollup(&acc.take().unwrap(), "x", 0, 0).unwrap())
+            .unwrap();
+    forged.as_object_mut().unwrap().remove("hash");
+    let chained = std::fs::read_to_string(&paths[0]).unwrap();
+    std::fs::write(&paths[0], format!("{forged}\n{chained}")).unwrap();
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.earliest_archived_window, Some(day(20, 9)));
+}

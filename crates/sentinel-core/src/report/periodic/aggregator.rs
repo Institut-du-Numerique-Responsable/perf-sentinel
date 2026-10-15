@@ -446,6 +446,10 @@ struct Builder {
     /// Chain anchor per rollup family. Unlike window files, a rollup chain
     /// runs across its monthly files, so a removed month shows as a break.
     rollup_anchors: BTreeMap<String, ChainAnchor>,
+    /// Oldest well-formed window whose chain verified. When any line is
+    /// chained, the reach check reads this one: a line without a hash put
+    /// in front of a chained archive must not stand in for pruned windows.
+    earliest_chained: Option<DateTime<Utc>>,
 }
 
 /// The chain anchor: the previous line's hash and its sequence number.
@@ -468,6 +472,8 @@ struct WindowStep<'a> {
     warned_fallback: &'a mut bool,
     /// A rollup line already folded this window.
     covered: bool,
+    /// The line's own hash and its `prev` both checked out.
+    chain_verified: bool,
 }
 
 /// One line's worth of chain state, threaded through [`Builder::walk_chain_line`].
@@ -489,13 +495,15 @@ struct ChainStep<'a> {
 impl Builder {
     /// Advance the integrity chain by one archive line. Split out of
     /// `process_file` so that loop stays under the complexity gate.
-    fn walk_chain_line(&mut self, step: ChainStep<'_>) {
+    /// Returns whether the line verified.
+    fn walk_chain_line(&mut self, step: ChainStep<'_>) -> bool {
         // An unparseable line is a crash-truncated fragment, not an edit.
         // The anchor is kept, so a destroyed window still surfaces as a
         // break through its successor's `prev`.
         let outcome = step.parsed.map_or(ChainOutcome::Malformed, |value| {
             verify_chain_value(value, step.expected.as_ref())
         });
+        let verified = matches!(outcome, ChainOutcome::Verified(_));
         match outcome {
             // The typed fold counts it under malformed_lines_skipped.
             ChainOutcome::Malformed => {}
@@ -537,6 +545,7 @@ impl Builder {
                 warn_break(step.path, step.line_no, step.warned_break);
             }
         }
+        verified
     }
 }
 
@@ -597,7 +606,7 @@ impl Builder {
                     .unwrap_or_else(|| expected.as_ref().map_or(0, |(_, seq)| *seq))
                     .saturating_add(1)
             };
-            self.walk_chain_line(ChainStep {
+            let chain_verified = self.walk_chain_line(ChainStep {
                 parsed: parsed.as_mut(),
                 expected: &mut expected,
                 chain_started: &mut chain_started,
@@ -621,6 +630,7 @@ impl Builder {
                 line_no,
                 warned_fallback: &mut warned_fallback,
                 covered,
+                chain_verified,
             })?;
         }
         Ok(())
@@ -654,6 +664,12 @@ impl Builder {
             self.earliest_archived
                 .map_or(envelope.ts, |seen| seen.min(envelope.ts)),
         );
+        if step.chain_verified {
+            self.earliest_chained = Some(
+                self.earliest_chained
+                    .map_or(envelope.ts, |seen| seen.min(envelope.ts)),
+            );
+        }
         if !in_period(envelope.ts, step.period) || step.covered {
             return Ok(());
         }
@@ -1543,7 +1559,7 @@ impl Builder {
                 .unwrap_or_else(|| expected.as_ref().map_or(0, |(_, seq)| *seq))
                 .saturating_add(1)
         };
-        self.walk_chain_line(ChainStep {
+        let chain_verified = self.walk_chain_line(ChainStep {
             parsed: parsed.as_mut(),
             expected,
             chain_started,
@@ -1562,6 +1578,12 @@ impl Builder {
             self.state.malformed_lines_skipped += 1;
             return Ok(());
         };
+        if chain_verified {
+            self.earliest_chained = Some(
+                self.earliest_chained
+                    .map_or(line.ts, |seen| seen.min(line.ts)),
+            );
+        }
         self.fold_rollup(line, period, strict, owner)
     }
 
@@ -1702,7 +1724,9 @@ impl Builder {
         };
 
         let temporal_coverage = compute_temporal_coverage(&state.observed_days, period);
-        let earliest_archived_window = self.earliest_archived;
+        // An archive written before chaining has no verified line, so its
+        // oldest line still counts.
+        let earliest_archived_window = self.earliest_chained.or(self.earliest_archived);
 
         AggregateInputs {
             aggregate: Aggregate {
