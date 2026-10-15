@@ -349,29 +349,40 @@ fn insert_pending(state: &mut PendingState, finding: &Finding, now_ms: u64) {
 }
 
 fn evict_overflow(state: &mut PendingState, max_pending: usize) -> u64 {
+    evict_by_order(&mut state.entries, &mut state.order, max_pending, |entry| {
+        entry.revision
+    })
+}
+
+/// Drop the least recently queued entries until `entries` fits `max`, then
+/// compact `order` once stale revisions make it twice the cap. An `order`
+/// item whose revision no longer matches its entry is a superseded queueing
+/// and is skipped, not counted. Returns how many entries were dropped.
+pub(super) fn evict_by_order<V>(
+    entries: &mut HashMap<String, V>,
+    order: &mut VecDeque<(String, u64)>,
+    max: usize,
+    revision: impl Fn(&V) -> u64,
+) -> u64 {
     let mut dropped = 0;
-    while state.entries.len() > max_pending {
-        let Some((signature, revision)) = state.order.pop_front() else {
+    while entries.len() > max {
+        let Some((key, queued)) = order.pop_front() else {
             break;
         };
-        if state
-            .entries
-            .get(&signature)
-            .is_some_and(|entry| entry.revision == revision)
+        if entries
+            .get(&key)
+            .is_some_and(|entry| revision(entry) == queued)
         {
-            state.entries.remove(&signature);
+            entries.remove(&key);
             dropped += 1;
         }
     }
-    if state.order.len() > max_pending.saturating_mul(2) {
-        let mut order = std::mem::take(&mut state.order);
-        order.retain(|(signature, revision)| {
-            state
-                .entries
-                .get(signature)
-                .is_some_and(|entry| entry.revision == *revision)
+    if order.len() > max.saturating_mul(2) {
+        order.retain(|(key, queued)| {
+            entries
+                .get(key)
+                .is_some_and(|entry| revision(entry) == *queued)
         });
-        state.order = order;
     }
     dropped
 }
@@ -383,7 +394,7 @@ struct ExportPayload<'a> {
 }
 
 /// What the Hub's answer means for the batch that produced it.
-enum ExportOutcome {
+pub(super) enum ExportOutcome {
     Accepted,
     /// A rejection no retry can change: the payload or the route is wrong.
     /// Retaining the batch would retry it forever while live findings are
@@ -474,7 +485,7 @@ async fn run_exporter(
     }
 }
 
-fn classify(status: hyper::StatusCode) -> ExportOutcome {
+pub(super) fn classify(status: hyper::StatusCode) -> ExportOutcome {
     if status.is_success() {
         ExportOutcome::Accepted
     } else if status == hyper::StatusCode::SERVICE_UNAVAILABLE {
@@ -570,21 +581,30 @@ async fn annotate(batch: &[PendingExport], acks: &AckSources) -> Vec<FindingResp
         .collect()
 }
 
-/// Serialize the largest prefix of `batch` that fits the body cap, popping
-/// from the end so the caller can keep its acknowledgment aligned.
+fn bounded_payload(batch: &mut Vec<FindingResponse>) -> Option<Vec<u8>> {
+    bounded_body(batch, MAX_EXPORT_BODY_BYTES, |findings| {
+        serde_json::to_vec(&ExportPayload {
+            producer_version: env!("CARGO_PKG_VERSION"),
+            findings,
+        })
+    })
+}
+
+/// Serialize the largest prefix of `batch` that fits `cap`, popping from
+/// the end so the caller can keep its acknowledgment aligned.
 ///
 /// An oversized body shrinks proportionally to how far over the cap it is,
-/// not one finding at a time. Findings are within an order of magnitude of
+/// not one entry at a time. Entries are within an order of magnitude of
 /// each other, so this converges in a couple of passes instead of
-/// re-serializing up to `batch_size` times for one huge outlier.
-fn bounded_payload(batch: &mut Vec<FindingResponse>) -> Option<Vec<u8>> {
+/// re-serializing up to the batch size for one huge outlier.
+pub(super) fn bounded_body<T>(
+    batch: &mut Vec<T>,
+    cap: usize,
+    serialize: impl Fn(&[T]) -> serde_json::Result<Vec<u8>>,
+) -> Option<Vec<u8>> {
     while !batch.is_empty() {
-        let payload = ExportPayload {
-            producer_version: env!("CARGO_PKG_VERSION"),
-            findings: batch,
-        };
-        let over_by = match serde_json::to_vec(&payload) {
-            Ok(body) if body.len() <= MAX_EXPORT_BODY_BYTES => return Some(body),
+        let over_by = match serialize(batch) {
+            Ok(body) if body.len() <= cap => return Some(body),
             // Serialization of owned scalars does not fail, but a poisoned
             // entry must still shrink the batch rather than spin.
             Err(_) => batch.len(),
@@ -596,7 +616,7 @@ fn bounded_payload(batch: &mut Vec<FindingResponse>) -> Option<Vec<u8>> {
         // Keep the prefix the cap can hold, and always drop at least one.
         let keep = batch
             .len()
-            .saturating_mul(MAX_EXPORT_BODY_BYTES)
+            .saturating_mul(cap)
             .checked_div(over_by)
             .unwrap_or(0)
             .min(batch.len() - 1)
@@ -606,7 +626,7 @@ fn bounded_payload(batch: &mut Vec<FindingResponse>) -> Option<Vec<u8>> {
     None
 }
 
-fn retry_delay(failures: u32, jitter: u64) -> Duration {
+pub(super) fn retry_delay(failures: u32, jitter: u64) -> Duration {
     let base_secs = 1_u64
         .checked_shl(failures.saturating_sub(1).min(8))
         .unwrap_or(256);
@@ -615,7 +635,7 @@ fn retry_delay(failures: u32, jitter: u64) -> Duration {
     Duration::from_millis(capped_ms * percent / 100)
 }
 
-fn jitter_seed() -> u64 {
+pub(super) fn jitter_seed() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| u64::from(duration.subsec_nanos()))
