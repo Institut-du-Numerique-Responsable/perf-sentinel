@@ -1,0 +1,151 @@
+{
+  "analysis": {
+    "duration_ms": 2,
+    "events_processed": 6,
+    "traces_analyzed": 1
+  },
+  "findings": [
+    {
+      "type": "n_plus_one_sql",
+      "severity": "warning",
+      "trace_id": "trace-n1-sql",
+      "service": "order-svc",
+      "source_endpoint": "POST /api/orders/42/submit",
+      "pattern": {
+        "template": "SELECT * FROM order_item WHERE order_id = ?",
+        "occurrences": 6,
+        "window_ms": 250,
+        "distinct_params": 6,
+        "span_duration_us_p50": 800,
+        "span_duration_us_p99": 900,
+        "span_duration_cv_x1000": 81
+      },
+      "suggestion": "Use `WHERE ... IN (?)` to batch 6 queries into one",
+      "first_timestamp": "2025-07-10T14:32:01.000Z",
+      "last_timestamp": "2025-07-10T14:32:01.250Z",
+      "green_impact": {
+        "estimated_extra_io_ops": 5,
+        "io_intensity_score": 6.0,
+        "io_intensity_band": "high"
+      },
+      "confidence": "local_batch",
+      "signature": "n_plus_one_sql:order-svc:POST__api_orders_42_submit:c69d2f3ae7f5c6cdb2c6762367852ec7"
+    }
+  ],
+  "green_summary": {
+    "total_io_ops": 6,
+    "avoidable_io_ops": 5,
+    "total_sql_io_ops": 6,
+    "avoidable_sql_io_ops": 5,
+    "total_messaging_io_ops": 0,
+    "avoidable_messaging_io_ops": 0,
+    "io_waste_ratio": 0.8333333333333334,
+    "io_waste_ratio_band": "critical",
+    "top_offenders": [
+      {
+        "endpoint": "POST /api/orders/42/submit",
+        "service": "order-svc",
+        "io_intensity_score": 6.0,
+        "io_intensity_band": "high"
+      }
+    ],
+    "co2": {
+      "total": {
+        "low": 0.0005,
+        "mid": 0.001,
+        "high": 0.002,
+        "model": "io_proxy_v1",
+        "methodology": "sci_v1_numerator+transport"
+      },
+      "avoidable": {
+        "low": 0.0,
+        "mid": 0.0,
+        "high": 0.0,
+        "model": "io_proxy_v1",
+        "methodology": "sci_v1_operational_ratio"
+      },
+      "operational_gco2": 0.0,
+      "embodied_gco2": 0.001,
+      "sci_per_trace": {
+        "low": 0.0005,
+        "mid": 0.001,
+        "high": 0.002,
+        "model": "io_proxy_v1",
+        "methodology": "sci_v1_intensity"
+      },
+      "functional_unit": "trace"
+    },
+    "regions": [
+      {
+        "status": "unresolved",
+        "region": "unknown",
+        "grid_intensity_gco2_kwh": 0.0,
+        "pue": 0.0,
+        "io_ops": 6,
+        "co2_gco2": 0.0,
+        "intensity_source": "annual"
+      }
+    ],
+    "scoring_config": {
+      "api_version": "v4",
+      "emission_factor_type": "lifecycle",
+      "temporal_granularity": "hourly",
+      "electricity_maps": false,
+      "embodied_per_request_gco2": 0.001,
+      "network_energy_per_byte_kwh": 4e-11,
+      "per_operation_coefficients": true,
+      "use_hourly_profiles": true
+    },
+    "energy_kwh": 0.0,
+    "energy_model": ""
+  },
+  "quality_gate": {
+    "passed": false,
+    "rules": [
+      {
+        "rule": "n_plus_one_sql_critical_max",
+        "threshold": 0.0,
+        "actual": 0.0,
+        "passed": true
+      },
+      {
+        "rule": "n_plus_one_http_warning_max",
+        "threshold": 3.0,
+        "actual": 0.0,
+        "passed": true
+      },
+      {
+        "rule": "n_plus_one_messaging_warning_max",
+        "threshold": 3.0,
+        "actual": 0.0,
+        "passed": true
+      },
+      {
+        "rule": "io_waste_ratio_max",
+        "threshold": 0.3,
+        "actual": 0.8333333333333334,
+        "passed": false
+      }
+    ]
+  },
+  "per_endpoint_io_ops": [
+    {
+      "service": "order-svc",
+      "endpoint": "POST /api/orders/42/submit",
+      "io_ops": 6
+    }
+  ],
+  "binary_version": "0.28.0",
+  "detection_config": {
+    "n_plus_one_threshold": 5,
+    "window_ms": 500,
+    "slow_threshold_ms": 500,
+    "slow_min_occurrences": 3,
+    "max_fanout": 20,
+    "chatty_service_min_calls": 15,
+    "pool_saturation_concurrent_threshold": 10,
+    "serialized_min_sequential": 3,
+    "sanitizer_aware_classification": "auto",
+    "sanitizer_aware_min_cv": 0.5
+  }
+}

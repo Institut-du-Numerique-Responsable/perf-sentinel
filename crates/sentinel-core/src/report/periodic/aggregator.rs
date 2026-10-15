@@ -1152,6 +1152,10 @@ impl PeriodState {
         self.first_unattributed
     }
 
+    pub(crate) fn windows_aggregated(&self) -> u64 {
+        self.windows_aggregated
+    }
+
     /// Fold another state in. Each field merges by the operation its
     /// window fold uses, and every guard that path applies to untrusted
     /// archive input applies again: a rollup line is read from a file.
