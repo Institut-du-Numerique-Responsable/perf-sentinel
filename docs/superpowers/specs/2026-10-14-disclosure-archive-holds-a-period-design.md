@@ -67,7 +67,7 @@ Only the chain counters and the drop-counter baseline describe how archive lines
 
 **Raw windows become optional.** `[daemon.archive] windows = false` stops the window lines and keeps the rollups. The default stays `true`. Rollups have no switch and no path of their own: they are always written beside `path`, so the chart's PVC holds both with no chart change.
 
-**Mixed inputs.** `disclose --input` accepts window files and rollup files together. A day present as a rollup wins over that day's windows, so a period that spans the upgrade aggregates once. The 0.28.0 reach check uses the oldest day across both.
+**Mixed inputs.** `disclose --input` accepts window files and rollup files together. A rollup line covers the windows between its first and last window, for the archive it sits beside. Window lines inside that span are skipped and those outside still count, so a period that spans the upgrade aggregates every window once. (Revised on 2026-10-15 after the final review: the first version let a rollup win its whole day for every host.) The 0.28.0 reach check uses the oldest day across both.
 
 **Horizon signal.** `/api/status` gains `disclosure_archive: {oldest_day, days, last_closed_day}`, backed by three label-free gauges, `perf_sentinel_archive_oldest_day_timestamp_seconds`, `perf_sentinel_archive_rollup_days` and `perf_sentinel_archive_last_closed_day_timestamp_seconds`. An operator sees the horizon shrink before a quarter closes, and the Hub can later show it per source.
 

@@ -698,7 +698,7 @@ curl -s http://perf-sentinel:4318/api/export/report | jq -r '.warning_details[].
 
 **Ce qui survit.**
 
-- Du daemon lui-même, seulement ce qu'il écrit sur disque : l'archive NDJSON des findings et, depuis 0.29.0, ses cumuls quotidiens quand `[daemon.archive]` est défini (un crash coûte aux cumuls au plus leurs 20 dernières fenêtres, jamais la journée), le stockage runtime des acks (`acks.jsonl`, rejoué au démarrage) et l'anneau d'incidents quand `[daemon.incidents] archive_path` est défini (rechargé au démarrage). Tout le reste vit en mémoire.
+- Du daemon lui-même, seulement ce qu'il écrit sur disque : l'archive NDJSON des findings et, depuis 0.29.0, ses cumuls quotidiens quand `[daemon.archive]` est défini (un arrêt brutal coûte aux cumuls au plus leurs 20 dernières fenêtres, que `disclose` compte encore depuis les lignes de fenêtre), le stockage runtime des acks (`acks.jsonl`, rejoué au démarrage) et l'anneau d'incidents quand `[daemon.incidents] archive_path` est défini (rechargé au démarrage). Tout le reste vit en mémoire.
 - Prometheus conserve les métriques déjà scrapées (les compteurs historiques sont saufs).
 - Tempo conserve les traces, à condition que vous les y envoyiez aussi.
 

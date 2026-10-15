@@ -688,7 +688,7 @@ curl -s http://perf-sentinel:4318/api/export/report | jq -r '.warning_details[].
 
 **What survives.**
 
-- From the daemon itself, only what it writes to disk: the NDJSON findings archive and, since 0.29.0, its daily rollups when `[daemon.archive]` is set (a crash costs the rollups at most their last 20 windows, never the day), the runtime ack store (`acks.jsonl`, replayed at startup) and the incident ring when `[daemon.incidents] archive_path` is set (reloaded at startup). Everything else is memory-only.
+- From the daemon itself, only what it writes to disk: the NDJSON findings archive and, since 0.29.0, its daily rollups when `[daemon.archive]` is set (a crash costs the rollups at most their last 20 windows, which `disclose` still counts from the window lines), the runtime ack store (`acks.jsonl`, replayed at startup) and the incident ring when `[daemon.incidents] archive_path` is set (reloaded at startup). Everything else is memory-only.
 - Prometheus retains the metrics it already scraped (historical counters are safe).
 - Tempo retains the traces, assuming you also send them there.
 
