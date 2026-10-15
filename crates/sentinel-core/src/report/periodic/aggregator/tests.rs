@@ -2128,25 +2128,24 @@ proptest! {
 }
 
 #[test]
-fn a_day_with_a_rollup_ignores_that_days_windows() {
+fn a_rollup_covers_the_windows_it_holds_and_no_more() {
     let pool = window_pool();
-    let before = vec![(day(10, 9), pool[0].clone()), (day(11, 9), pool[1].clone())];
-    let mut after = before.clone();
-    after.push((day(11, 15), pool[2].clone()));
-    after.push((day(12, 9), pool[3].clone()));
-    // Windows cover days 10 to 12, with an extra window on day 11 the
-    // rollup does not hold. Rollups cover days 10 and 11.
-    let (_wdir, window_path) = write_chained_archive(&after);
-    let rdir = TempDir::new().unwrap();
-    let mut paths = write_rollups(rdir.path(), "archive", &before);
-    paths.push(window_path);
+    let dir = TempDir::new().unwrap();
+    let rolled = vec![(day(10, 9), pool[0].clone()), (day(11, 9), pool[1].clone())];
+    // The window archive beside the rollups also holds a window at 15:00
+    // on day 11 the rollup never folded, as after a crash's last snapshot,
+    // and day 12, which has no rollup yet.
+    let mut windows: Vec<_> = rolled.iter().map(|(ts, r)| (*ts, r.clone(), 0)).collect();
+    windows.push((day(11, 15), pool[2].clone(), 0));
+    windows.push((day(12, 9), pool[3].clone(), 0));
+    let mut paths = vec![write_drops_file(dir.path(), "archive.ndjson", &windows)];
+    paths.extend(write_rollups(dir.path(), "archive", &rolled));
     let mixed = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
 
-    let mut expected_lines = before;
-    expected_lines.push((day(12, 9), pool[3].clone()));
-    let (_edir, expected_path) = write_chained_archive(&expected_lines);
-    let expected = aggregate_from_paths(&[expected_path], &q1_2026(), false).unwrap();
-    assert_eq!(mixed.windows_aggregated, expected.windows_aggregated);
+    let only = TempDir::new().unwrap();
+    let alone = write_drops_file(only.path(), "archive.ndjson", &windows);
+    let expected = aggregate_from_paths(&[alone], &q1_2026(), false).unwrap();
+    assert_eq!(mixed.windows_aggregated, 4);
     approx_json(
         &serde_json::to_value(&mixed.aggregate).unwrap(),
         &serde_json::to_value(&expected.aggregate).unwrap(),
@@ -2248,4 +2247,101 @@ fn a_directory_mixes_windows_rollups_a_renamed_rollup_and_the_snapshot() {
     let agg = aggregate_from_paths(&[dir.path().to_path_buf()], &q1_2026(), false).unwrap();
     assert_eq!(agg.windows_aggregated, 3);
     assert_eq!(agg.malformed_lines_skipped, 0);
+}
+
+#[test]
+fn one_hosts_rollup_does_not_silence_another_hosts_windows() {
+    let pool = window_pool();
+    let host_a = TempDir::new().unwrap();
+    let host_b = TempDir::new().unwrap();
+    let mut paths = write_rollups(host_a.path(), "archive", &[(day(10, 9), pool[0].clone())]);
+    paths.push(write_drops_file(
+        host_b.path(),
+        "archive.ndjson",
+        &[(day(10, 10), pool[0].clone(), 0)],
+    ));
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.windows_aggregated, 2);
+}
+
+#[test]
+fn windows_outside_the_rollups_span_still_count_on_its_day() {
+    // Upgrade day: the old binary archived 08:00, the new one rolls up
+    // 12:00 and 13:00, which the window lines also hold.
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let windows = [(day(10, 8), 0), (day(10, 12), 1), (day(10, 13), 3)]
+        .map(|(ts, i)| (ts, pool[i].clone(), 0));
+    let mut paths = vec![write_drops_file(dir.path(), "archive.ndjson", &windows)];
+    paths.extend(write_rollups(
+        dir.path(),
+        "archive",
+        &[
+            (day(10, 12), pool[1].clone()),
+            (day(10, 13), pool[3].clone()),
+        ],
+    ));
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.windows_aggregated, 3);
+}
+
+#[test]
+fn removing_the_periods_last_rollup_day_is_an_in_period_break() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let lines: Vec<_> = (10..14).map(|d| (day(d, 9), pool[0].clone())).collect();
+    let paths = write_rollups(dir.path(), "archive", &lines);
+    let text = std::fs::read_to_string(&paths[0]).unwrap();
+    let kept: Vec<&str> = text
+        .lines()
+        .enumerate()
+        .filter(|(i, _)| *i != 2)
+        .map(|(_, l)| l)
+        .collect();
+    std::fs::write(&paths[0], kept.join("\n") + "\n").unwrap();
+    let period = Period {
+        from_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        to_date: NaiveDate::from_ymd_opt(2026, 1, 12).unwrap(),
+        period_type: crate::report::periodic::schema::PeriodType::Custom,
+        days_covered: 12,
+    };
+    let agg = aggregate_from_paths(&paths, &period, false).unwrap();
+    assert_eq!((agg.chain_breaks, agg.chain_breaks_outside), (1, 0));
+}
+
+#[test]
+fn a_rollup_file_with_a_crash_fragment_first_is_still_a_rollup_file() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let paths = write_rollups(
+        dir.path(),
+        "archive",
+        &[(day(10, 9), pool[0].clone()), (day(11, 9), pool[0].clone())],
+    );
+    let text = std::fs::read_to_string(&paths[0]).unwrap();
+    std::fs::write(&paths[0], format!("{{\"format\":\"perf-sent\n{text}")).unwrap();
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.windows_aggregated, 2);
+    assert_eq!(agg.malformed_lines_skipped, 1);
+}
+
+#[test]
+fn a_rollup_line_stripped_of_its_hash_is_a_break_even_first() {
+    let pool = window_pool();
+    let dir = TempDir::new().unwrap();
+    let paths = write_rollups(
+        dir.path(),
+        "archive",
+        &[(day(10, 9), pool[0].clone()), (day(11, 9), pool[0].clone())],
+    );
+    let text = std::fs::read_to_string(&paths[0]).unwrap();
+    let mut lines: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    lines[0].as_object_mut().unwrap().remove("hash");
+    let rewritten: Vec<String> = lines.iter().map(ToString::to_string).collect();
+    std::fs::write(&paths[0], rewritten.join("\n") + "\n").unwrap();
+    let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
+    assert_eq!(agg.chain_breaks, 1);
 }

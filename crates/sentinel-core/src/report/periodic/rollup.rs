@@ -140,19 +140,12 @@ pub(crate) fn serialize_partial(day: &ClosedDay) -> Result<String, serde_json::E
 
 #[cfg(any(feature = "daemon", test))]
 pub(crate) fn parse_partial(text: &str) -> Option<ClosedDay> {
-    #[derive(Deserialize)]
-    struct Snapshot {
-        ts: DateTime<Utc>,
-        day: NaiveDate,
-        last_ts: DateTime<Utc>,
-        state: PeriodState,
-    }
-    let snapshot: Snapshot = serde_json::from_str(text).ok()?;
+    let line: RollupLine = serde_json::from_str(text).ok()?;
     Some(ClosedDay {
-        day: snapshot.day,
-        first_ts: snapshot.ts,
-        last_ts: snapshot.last_ts,
-        state: snapshot.state,
+        day: line.day,
+        first_ts: line.ts,
+        last_ts: line.last_ts,
+        state: line.state,
     })
 }
 
@@ -161,11 +154,12 @@ pub(crate) fn is_rollup_value(value: &serde_json::Value) -> bool {
 }
 
 /// The fields the reader folds. `prev`, `seq`, `drops` and `hash` are
-/// read by the chain walk on the raw value. `last_ts` is left unread.
+/// read by the chain walk on the raw value.
 #[derive(Deserialize)]
 pub(crate) struct RollupLine {
     pub ts: DateTime<Utc>,
     pub day: NaiveDate,
+    pub last_ts: DateTime<Utc>,
     pub state: PeriodState,
 }
 
