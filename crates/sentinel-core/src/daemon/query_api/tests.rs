@@ -13,6 +13,7 @@ fn make_state_with_correlator(
         findings_store: Arc::new(FindingsStore::new(100)),
         incident_store: Some(Arc::new(crate::daemon::incidents::IncidentStore::new(10))),
         incident_archive: None,
+        incident_export: None,
         settle_permits: Arc::new(tokio::sync::Semaphore::new(MAX_SETTLES_IN_FLIGHT)),
         traces_store: Arc::new(crate::daemon::traces_store::TracesStore::new(50, 1_000)),
         window: Arc::new(tokio::sync::Mutex::new(TraceWindow::new(
@@ -987,6 +988,72 @@ async fn the_handlers_archive_each_change_of_an_incident() {
     }
     assert_eq!(ended.first(), Some(&false), "the creation is archived");
     assert_eq!(ended.last(), Some(&true), "then the close, last");
+}
+
+/// A state whose incident changes go to the Hub export table returned beside it.
+fn state_with_incident_export() -> (
+    Arc<QueryApiState>,
+    Arc<crate::daemon::hub_incident_export::IncidentExportBuffer>,
+) {
+    let buffer = Arc::new(crate::daemon::hub_incident_export::IncidentExportBuffer::new(10));
+    let mut state = make_state().clone_for_test();
+    state.incident_export = Some(Arc::clone(&buffer));
+    (Arc::new(state), buffer)
+}
+
+fn restart_alert(status: &str) -> serde_json::Value {
+    serde_json::json!([{
+        "status": status,
+        "labels": {"service": "svc", "perf_sentinel_kind": "restart"},
+        "startsAt": "2026-09-01T14:00:00Z",
+        "endsAt": "2026-09-01T14:05:00Z"
+    }])
+}
+
+async fn post_alert(state: &Arc<QueryApiState>, alert: &serde_json::Value) {
+    let resp = query_api_router(Arc::clone(state))
+        .oneshot(post_incidents_request(alert))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_recorded_incident_is_queued_for_the_hub() {
+    let (state, buffer) = state_with_incident_export();
+
+    post_alert(&state, &restart_alert("firing")).await;
+
+    assert_eq!(1, buffer.len());
+    assert!((state.metrics.hub_export_incidents_pending.get() - 1.0).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn a_reposted_alert_queues_nothing_new() {
+    let (state, buffer) = state_with_incident_export();
+    post_alert(&state, &restart_alert("firing")).await;
+    buffer.acknowledge(&buffer.snapshot(10));
+
+    post_alert(&state, &restart_alert("firing")).await;
+
+    assert_eq!(
+        0,
+        buffer.len(),
+        "the ring did not change, so nothing is re-sent"
+    );
+}
+
+#[tokio::test]
+async fn a_resolved_alert_queues_the_closed_incident() {
+    let (state, buffer) = state_with_incident_export();
+    post_alert(&state, &restart_alert("firing")).await;
+    buffer.acknowledge(&buffer.snapshot(10));
+
+    post_alert(&state, &restart_alert("resolved")).await;
+
+    let batch = buffer.snapshot(10);
+    assert_eq!(1, batch.len());
+    assert!(batch[0].incident.ended_at_ms.is_some());
 }
 
 #[tokio::test]
@@ -2827,6 +2894,7 @@ impl QueryApiState {
             findings_store: Arc::clone(&self.findings_store),
             incident_store: self.incident_store.clone(),
             incident_archive: self.incident_archive.clone(),
+            incident_export: self.incident_export.clone(),
             settle_permits: Arc::clone(&self.settle_permits),
             traces_store: Arc::clone(&self.traces_store),
             window: Arc::clone(&self.window),

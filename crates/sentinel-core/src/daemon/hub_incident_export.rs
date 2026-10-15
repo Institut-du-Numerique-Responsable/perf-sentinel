@@ -2,9 +2,6 @@
 //! findings: a latest-value table per incident id, fed by the incident
 //! store's change hooks and drained by the exporter task.
 
-// Wired into the exporter and the query API by the next commits.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

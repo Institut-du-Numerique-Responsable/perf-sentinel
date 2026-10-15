@@ -306,6 +306,9 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         ack_store,
         incident_store,
         incident_archive.as_ref().map(|h| h.tx.clone()),
+        hub_export
+            .as_ref()
+            .and_then(hub_export::HubExporter::incident_buffer),
     )
     .await?;
 

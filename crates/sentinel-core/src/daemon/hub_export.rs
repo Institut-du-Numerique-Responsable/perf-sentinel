@@ -149,7 +149,6 @@ impl HubExporter {
     }
 
     /// The incident table, when `[daemon.incidents]` is on as well.
-    #[allow(dead_code)] // read by the query API from the next commit
     pub(super) fn incident_buffer(&self) -> Option<Arc<IncidentExportBuffer>> {
         self.incident_buffer.clone()
     }

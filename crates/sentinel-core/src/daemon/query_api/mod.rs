@@ -100,6 +100,10 @@ pub struct QueryApiState {
     /// `[daemon.incidents] archive_path`. Opened at startup so a bad path
     /// fails the daemon, not the first incident.
     pub incident_archive: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
+    /// The Hub exporter's incident table, with `[daemon.hub_export]` and
+    /// `[daemon.incidents]` both on. Fed beside the archive, under the same
+    /// lock, so the Hub sees one id's changes in the ring's order.
+    pub(crate) incident_export: Option<Arc<super::hub_incident_export::IncidentExportBuffer>>,
     /// Bound on settle passes in flight, so an alert storm cannot park an
     /// unbounded number of tasks each holding this state.
     pub settle_permits: Arc<tokio::sync::Semaphore>,
@@ -1380,13 +1384,25 @@ async fn freeze_window(
     }
 }
 
-/// Hand one record to the archive writer, when there is one. The
-/// serialization is paid only then, and the hand-off is synchronous, so
-/// a handler dropped by a timeout has already delivered what it recorded.
-/// Called through the store's `*_then` methods, under the ring's write
-/// lock, so the records of one id reach the file in the order the ring
-/// applied them. `try_send` never waits, so the lock never waits on disk.
-fn archive_record(state: &QueryApiState, incident: &super::incidents::Incident) {
+/// Hand one changed record to the Hub exporter and the archive writer,
+/// when there are any. The serialization is paid only then, and both
+/// hand-offs are synchronous, so a handler dropped by a timeout has already
+/// delivered what it recorded. Called through the store's `*_then` methods,
+/// under the ring's write lock, so both see one id's changes in the order
+/// the ring applied them. Neither waits: `try_send` never blocks and the
+/// exporter's table is an in-memory map.
+fn on_incident_change(state: &QueryApiState, incident: &super::incidents::Incident) {
+    if let Some(export) = &state.incident_export {
+        let dropped = export.push(incident);
+        state
+            .metrics
+            .hub_export_incidents_dropped_total
+            .inc_by(dropped);
+        state
+            .metrics
+            .hub_export_incidents_pending
+            .set(export.len() as f64);
+    }
     let Some(tx) = &state.incident_archive else {
         return;
     };
@@ -1463,7 +1479,7 @@ fn schedule_settle(state: Arc<QueryApiState>, reqs: Vec<super::incidents::Incide
             }
             let settled = freeze_window(&state, &req).await;
             store
-                .merge_then(settled, |merged| archive_record(&state, merged))
+                .merge_then(settled, |merged| on_incident_change(&state, merged))
                 .await;
         }
     });
@@ -1514,7 +1530,7 @@ async fn handle_post_incidents(
         if !known {
             let incident = freeze_window(&state, &req).await;
             if store
-                .record_then(incident, |new| archive_record(&state, new))
+                .record_then(incident, |new| on_incident_change(&state, new))
                 .await
             {
                 intake.recorded += 1;
@@ -1530,7 +1546,7 @@ async fn handle_post_incidents(
         intake.repeated += 1;
         if let Some(ended) = req.ended_at_ms {
             store
-                .close_then(&req.id, ended, |closed| archive_record(&state, closed))
+                .close_then(&req.id, ended, |closed| on_incident_change(&state, closed))
                 .await;
         }
     }
