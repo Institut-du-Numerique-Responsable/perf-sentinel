@@ -379,6 +379,30 @@ struct StatusResponse {
     /// route. Additive since 0.20.0.
     #[serde(skip_serializing_if = "Option::is_none")]
     oldest_finding_ms: Option<u64>,
+    /// Days the disclosure archive's daily rollups hold, absent until one
+    /// has closed. A period starting before `oldest_day` cannot be
+    /// disclosed officially from this archive. Additive since 0.29.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disclosure_archive: Option<DisclosureArchiveStatus>,
+}
+
+#[derive(Serialize)]
+struct DisclosureArchiveStatus {
+    oldest_day: chrono::NaiveDate,
+    days: u64,
+    last_closed_day: chrono::NaiveDate,
+}
+
+fn disclosure_archive_status(metrics: &MetricsState) -> Option<DisclosureArchiveStatus> {
+    let days = u64::try_from(metrics.archive_rollup_days.get())
+        .ok()
+        .filter(|d| *d > 0)?;
+    let day = |seconds: i64| chrono::DateTime::from_timestamp(seconds, 0).map(|t| t.date_naive());
+    Some(DisclosureArchiveStatus {
+        oldest_day: day(metrics.archive_oldest_day_seconds.get())?,
+        days,
+        last_closed_day: day(metrics.archive_last_closed_day_seconds.get())?,
+    })
 }
 
 // ── Handlers ──────────────────────────────────────────────────────
@@ -589,6 +613,7 @@ async fn handle_status(State(state): State<Arc<QueryApiState>>) -> Json<StatusRe
         stored_findings,
         max_retained_findings: state.daemon_config.max_retained_findings,
         oldest_finding_ms,
+        disclosure_archive: disclosure_archive_status(&state.metrics),
     })
 }
 
