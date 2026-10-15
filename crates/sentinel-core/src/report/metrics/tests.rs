@@ -1492,3 +1492,14 @@ fn service_label_reads_the_service_label_only() {
     let families = Collector::collect(&unlabeled);
     assert_eq!(service_label(&families[0].get_metric()[0]), None);
 }
+
+#[test]
+fn incident_export_series_are_registered_label_free() {
+    let metrics = MetricsState::new();
+    metrics.hub_export_incidents_pending.set(3.0);
+    metrics.hub_export_incidents_dropped_total.inc_by(2);
+
+    let text = metrics.render();
+    assert!(text.contains("\nperf_sentinel_hub_export_incidents_pending 3\n"));
+    assert!(text.contains("\nperf_sentinel_hub_export_incidents_dropped_total 2\n"));
+}

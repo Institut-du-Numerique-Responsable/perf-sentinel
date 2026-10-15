@@ -169,6 +169,10 @@ pub struct MetricsState {
     pub hub_export_pending: Gauge,
     /// Signatures evicted or rejected by the bounded Hub export buffer.
     pub hub_export_dropped_total: IntCounter,
+    /// Distinct incidents waiting for Hub export.
+    pub hub_export_incidents_pending: Gauge,
+    /// Incidents evicted, oversized, rejected or abandoned for a Hub without the route.
+    pub hub_export_incidents_dropped_total: IntCounter,
     /// Total traces analyzed since daemon start.
     pub traces_analyzed_total: Counter,
     /// Total events processed since daemon start.
@@ -548,6 +552,18 @@ impl MetricsState {
         )
         .expect("metric creation should not fail");
 
+        let hub_export_incidents_pending = Gauge::new(
+            "perf_sentinel_hub_export_incidents_pending",
+            "Distinct incidents waiting for PerfSentinelHub export",
+        )
+        .expect("metric creation should not fail");
+
+        let hub_export_incidents_dropped_total = IntCounter::new(
+            "perf_sentinel_hub_export_incidents_dropped_total",
+            "Incidents the PerfSentinelHub export dropped: evicted, oversized, rejected, or held for a Hub without the route",
+        )
+        .expect("metric creation should not fail");
+
         let traces_analyzed_total = Counter::new(
             "perf_sentinel_traces_analyzed_total",
             "Total traces analyzed since start",
@@ -724,6 +740,12 @@ impl MetricsState {
             .expect("registration should not fail");
         registry
             .register(Box::new(hub_export_dropped_total.clone()))
+            .expect("registration should not fail");
+        registry
+            .register(Box::new(hub_export_incidents_pending.clone()))
+            .expect("registration should not fail");
+        registry
+            .register(Box::new(hub_export_incidents_dropped_total.clone()))
             .expect("registration should not fail");
         registry
             .register(Box::new(traces_analyzed_total.clone()))
@@ -1160,6 +1182,8 @@ impl MetricsState {
             stored_findings,
             hub_export_pending,
             hub_export_dropped_total,
+            hub_export_incidents_pending,
+            hub_export_incidents_dropped_total,
             traces_analyzed_total,
             events_processed_total,
             active_traces,
