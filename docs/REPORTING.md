@@ -597,8 +597,10 @@ The command prints one JSON line on stdout and exits with a fixed code, a contra
 |------|----------------|-----------------------------------------------------------------------------|
 | 0    | `rendered`     | none                                                                        |
 | 1    | `refused`      | `content_hash_mismatch`, `binding_mismatch`                                 |
-| 3    | `input_error`  | `missing_file`, `malformed_report`, `output_unwritable`                     |
+| 3    | `input_error`  | `missing_file`, `file_too_large`, `malformed_report`, `output_unwritable`   |
 | 5    | `unrenderable` | `unsupported_schema_version`, `unsupported_characters`, `pdf_export_failed` |
+
+`file_too_large` means the report is over 64 MiB, or the attestation or the bundle over 1 MiB.
 
 Exit 5 means nothing says the report is wrong, the engine just cannot draw it: a schema newer than this binary reads, text outside the bundled DM Sans and JetBrains Mono fonts (Latin scripts, no emoji) listed on stderr, or a document the PDF writer refuses. Newlines and tabs in report strings are drawn as spaces. Characters are never replaced on an official document.
 

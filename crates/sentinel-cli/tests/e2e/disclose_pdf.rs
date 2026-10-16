@@ -125,6 +125,30 @@ fn disclose_pdf_refuses_a_foreign_attestation() {
 }
 
 #[test]
+fn disclose_pdf_oversized_attestation_is_exit_3_file_too_large() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_baked(dir.path(), example());
+    let attestation = dir.path().join("attestation.intoto.jsonl");
+    fs::write(&attestation, vec![b' '; 1024 * 1024 + 1]).expect("write");
+    let output = dir.path().join("report.pdf");
+
+    let out = run(&[
+        "--report",
+        path.to_str().unwrap(),
+        "--attestation",
+        attestation.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+
+    assert_eq!(Some(3), out.status.code());
+    assert_eq!(
+        r#"{"result":"input_error","reason":"file_too_large"}"#,
+        stdout(&out)
+    );
+}
+
+#[test]
 fn disclose_pdf_missing_report_is_exit_3_missing_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let out = run(&[

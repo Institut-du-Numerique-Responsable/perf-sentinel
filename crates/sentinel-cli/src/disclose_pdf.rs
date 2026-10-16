@@ -101,7 +101,7 @@ fn read(path: &Path, cap: u64) -> Result<Vec<u8>, &'static str> {
     })?;
     if bytes.len() as u64 > cap {
         eprintln!("Error: {} exceeds the {cap}-byte cap", path.display());
-        return Err("malformed_report");
+        return Err("file_too_large");
     }
     Ok(bytes)
 }

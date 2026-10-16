@@ -617,8 +617,10 @@ La commande imprime une ligne JSON sur stdout et sort avec un code fixe, un cont
 |--------|----------------|-----------------------------------------------------------------------------|
 | 0      | `rendered`     | aucune                                                                      |
 | 1      | `refused`      | `content_hash_mismatch`, `binding_mismatch`                                 |
-| 3      | `input_error`  | `missing_file`, `malformed_report`, `output_unwritable`                     |
+| 3      | `input_error`  | `missing_file`, `file_too_large`, `malformed_report`, `output_unwritable`   |
 | 5      | `unrenderable` | `unsupported_schema_version`, `unsupported_characters`, `pdf_export_failed` |
+
+`file_too_large` signifie que le rapport dépasse 64 Mio, ou l'attestation ou le bundle 1 Mio.
 
 La sortie 5 signifie que rien ne dit que le rapport est faux, le moteur ne sait simplement pas le dessiner : un schéma plus récent que ce binaire, du texte hors des polices embarquées DM Sans et JetBrains Mono (écritures latines, sans emoji) listé sur stderr, ou un document que l'écriture PDF refuse. Les retours à la ligne et tabulations des chaînes du rapport sont dessinés comme des espaces. Les caractères ne sont jamais remplacés sur un document officiel.
 
