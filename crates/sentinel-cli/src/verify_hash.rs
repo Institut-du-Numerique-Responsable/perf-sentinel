@@ -138,14 +138,15 @@ pub async fn cmd_verify_hash(
         Err(code) => return code,
     };
 
-    let attestation = fetched.attestation.as_deref().or(attestation_path);
+    // An explicit flag wins over a file found beside the report.
+    let attestation = attestation_path.or(fetched.attestation.as_deref());
     let content_hash = verify_content_hash(&report);
     let core_patterns = verify_core_patterns(&report);
     let attestation_binding = verify_attestation_binding(&report, &bytes, attestation);
     let signature = verify_signature(
         &report,
         attestation,
-        fetched.bundle.as_deref().or(bundle_path),
+        bundle_path.or(fetched.bundle.as_deref()),
         identity,
     );
     let binary_attestation = verify_binary_attestation(&report, verify_binary);
@@ -210,16 +211,60 @@ fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
         );
         EXIT_INPUT_ERROR
     })?;
-    let report = parse_gated(&bytes, &path.display().to_string())?;
+    let display = path.display().to_string();
+    let (bytes, fetched) = if bytes.starts_with(b"%PDF-") {
+        unpack_pdf(&bytes, &display)?
+    } else {
+        (
+            bytes,
+            FetchedPaths {
+                attestation: None,
+                bundle: None,
+            },
+        )
+    };
+    let report = parse_gated(&bytes, &display)?;
     Ok(LoadedReport {
         report,
         bytes,
-        display: path.display().to_string(),
-        fetched: FetchedPaths {
-            attestation: None,
-            bundle: None,
-        },
+        display,
+        fetched,
     })
+}
+
+/// The report a disclosure PDF attaches, and its attestation and bundle
+/// written to temporary files for the checks that read paths.
+#[cfg(feature = "pdf")]
+fn unpack_pdf(pdf: &[u8], display: &str) -> Result<(Vec<u8>, FetchedPaths), i32> {
+    let files = sentinel_core::report::periodic::pdf::extract_attachments(
+        pdf,
+        MAX_LOCAL_REPORT_BYTES,
+        MAX_ATTESTATION_BYTES,
+    )
+    .map_err(|e| {
+        eprintln!("Error: {}: {e}", sanitise_for_terminal(display));
+        EXIT_INPUT_ERROR
+    })?;
+    let pid = std::process::id();
+    let spill = |data: Option<Vec<u8>>, name: &str| {
+        let path = std::env::temp_dir().join(format!("perf-sentinel-verify-{pid}-{name}"));
+        data.filter(|data| write_temp_no_follow(&path, data).is_ok())
+            .map(|_| path)
+    };
+    let fetched = FetchedPaths {
+        attestation: spill(files.attestation, "attestation.intoto.jsonl"),
+        bundle: spill(files.bundle, "bundle.sig"),
+    };
+    Ok((files.report, fetched))
+}
+
+#[cfg(not(feature = "pdf"))]
+fn unpack_pdf(_pdf: &[u8], display: &str) -> Result<(Vec<u8>, FetchedPaths), i32> {
+    eprintln!(
+        "Error: {}: this build cannot read PDF disclosures, use the attached report.json",
+        sanitise_for_terminal(display)
+    );
+    Err(EXIT_INPUT_ERROR)
 }
 
 fn parse_report(bytes: &[u8]) -> Result<PeriodicReport, serde_json::Error> {

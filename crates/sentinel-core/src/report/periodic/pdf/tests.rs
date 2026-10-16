@@ -408,3 +408,105 @@ mod layout_and_pages {
         assert!(layout_pages(&PageContext::for_report(&report)).len() >= 5);
     }
 }
+
+mod extraction {
+    use super::*;
+
+    fn rendered() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+        let (report, bytes) = baked_report();
+        let attestation = attestation_for(&report);
+        let bundle = b"{\"bundle\":true}".to_vec();
+        let pdf = render_disclosure_pdf(&inputs(&bytes, Some(&attestation), Some(&bundle)))
+            .expect("renders");
+        (pdf, bytes, attestation, bundle)
+    }
+
+    #[test]
+    fn extracts_the_three_files_byte_for_byte() {
+        let (pdf, report, attestation, bundle) = rendered();
+        let files = extract_attachments(&pdf, 1 << 20, 1 << 20).expect("extracts");
+        assert_eq!(report, files.report);
+        assert_eq!(Some(attestation), files.attestation);
+        assert_eq!(Some(bundle), files.bundle);
+    }
+
+    #[test]
+    fn a_copy_resaved_with_object_streams_still_extracts() {
+        let (pdf, report, ..) = rendered();
+        let mut doc = lopdf::Document::load_mem(&pdf).expect("load");
+        doc.compress();
+        let mut resaved = Vec::new();
+        doc.save_modern(&mut resaved)
+            .expect("save with object streams");
+        assert_ne!(pdf, resaved);
+        let files =
+            extract_attachments(&resaved, 1 << 20, 1 << 20).expect("extracts the re-saved copy");
+        assert_eq!(report, files.report);
+    }
+
+    #[test]
+    fn a_pdf_without_report_json_is_no_report() {
+        let mut doc = lopdf::Document::with_version("1.7");
+        let mut pages = lopdf::Dictionary::new();
+        pages.set("Type", lopdf::Object::Name(b"Pages".to_vec()));
+        pages.set("Kids", Vec::<lopdf::Object>::new());
+        pages.set("Count", 0);
+        let pages = doc.add_object(pages);
+        let mut catalog = lopdf::Dictionary::new();
+        catalog.set("Type", lopdf::Object::Name(b"Catalog".to_vec()));
+        catalog.set("Pages", pages);
+        let catalog = doc.add_object(catalog);
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("save");
+        assert!(matches!(
+            extract_attachments(&bytes, 1 << 20, 1 << 20),
+            Err(ExtractError::NoReport)
+        ));
+    }
+
+    #[test]
+    fn two_report_json_are_duplicate() {
+        let (pdf, ..) = rendered();
+        let mut doc = lopdf::Document::load_mem(&pdf).expect("load");
+        let stream = doc.add_object(lopdf::Stream::new(lopdf::Dictionary::new(), b"{}".to_vec()));
+        let mut ef = lopdf::Dictionary::new();
+        ef.set("F", stream);
+        let mut spec = lopdf::Dictionary::new();
+        spec.set("Type", lopdf::Object::Name(b"Filespec".to_vec()));
+        spec.set("F", lopdf::Object::string_literal("report.json"));
+        spec.set("EF", ef);
+        let spec = doc.add_object(spec);
+        let catalog = doc.catalog_mut().expect("catalog");
+        let mut af = catalog
+            .get(b"AF")
+            .and_then(lopdf::Object::as_array)
+            .expect("AF")
+            .clone();
+        af.push(spec.into());
+        catalog.set("AF", af);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("save");
+        assert!(matches!(
+            extract_attachments(&bytes, 1 << 20, 1 << 20),
+            Err(ExtractError::Duplicate("report.json"))
+        ));
+    }
+
+    #[test]
+    fn an_attachment_over_the_cap_is_too_large() {
+        let (pdf, ..) = rendered();
+        assert!(matches!(
+            extract_attachments(&pdf, 16, 1 << 20),
+            Err(ExtractError::TooLarge("report.json"))
+        ));
+    }
+
+    #[test]
+    fn a_text_file_is_not_a_pdf() {
+        assert!(matches!(
+            extract_attachments(b"hello", 1 << 20, 1 << 20),
+            Err(ExtractError::NotAPdf)
+        ));
+    }
+}

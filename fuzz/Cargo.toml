@@ -5,9 +5,10 @@
 #   cargo install cargo-fuzz
 #   cargo +nightly fuzz run json_ingest
 #   cargo +nightly fuzz run normalize_sql
+#   cargo +nightly fuzz run pdf_extract
 #
 # CI: .github/workflows/fuzz.yml (weekly, and on pull requests touching
-# ingest/, normalize/ or fuzz/).
+# ingest/, normalize/, the disclosure PDF reader or fuzz/).
 
 [package]
 name = "perf-sentinel-fuzz"
@@ -21,7 +22,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4.13"
-perf-sentinel-core = { path = "../crates/sentinel-core" }
+perf-sentinel-core = { path = "../crates/sentinel-core", features = ["pdf"] }
 
 [[bin]]
 name = "json_ingest"
@@ -33,6 +34,13 @@ bench = false
 [[bin]]
 name = "normalize_sql"
 path = "fuzz_targets/normalize_sql.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pdf_extract"
+path = "fuzz_targets/pdf_extract.rs"
 test = false
 doc = false
 bench = false

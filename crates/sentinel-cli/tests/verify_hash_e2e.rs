@@ -269,3 +269,59 @@ fn verify_hash_refuses_a_newer_schema_with_exit_5() {
     assert!(stderr.contains("perf-sentinel-report/v1.8"), "{stderr}");
     assert!(stderr.contains("upgrade perf-sentinel"), "{stderr}");
 }
+
+/// A recipient holding only the PDF gets the same verdict as one holding
+/// the JSON and the attestation.
+#[cfg(feature = "pdf")]
+#[test]
+fn verify_hash_on_the_pdf_matches_verify_hash_on_the_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let report_path = write_example_with_fixed_hash(dir.path());
+    let report: PeriodicReport = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    let attestation = dir.path().join("attestation.intoto.jsonl");
+    write_attestation_for(&report, &attestation);
+    let pdf = dir.path().join("report.pdf");
+    let render = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["disclose-pdf", "--report"])
+        .arg(&report_path)
+        .arg("--attestation")
+        .arg(&attestation)
+        .arg("--output")
+        .arg(&pdf)
+        .output()
+        .unwrap();
+    assert_eq!(
+        Some(0),
+        render.status.code(),
+        "{}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+
+    let from_json = run_verify(&[
+        "--report",
+        report_path.to_str().unwrap(),
+        "--attestation",
+        attestation.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    let from_pdf = run_verify(&["--report", pdf.to_str().unwrap(), "--format", "json"]);
+
+    let verdicts = |out: &std::process::Output| {
+        let value: serde_json::Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)));
+        (
+            value["verifications"].clone(),
+            value["overall"].clone(),
+            out.status.code(),
+        )
+    };
+    assert_eq!(verdicts(&from_json), verdicts(&from_pdf));
+    assert_eq!(
+        "ok",
+        verdicts(&from_pdf).0["attestation_binding"]["status"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+    );
+}

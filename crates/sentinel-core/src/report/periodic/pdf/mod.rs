@@ -3,6 +3,7 @@
 //! A rendered PDF stands for two checks: the content hash recomputes, and
 //! the attestation, when given, names it.
 
+mod extract;
 mod layout;
 mod logo;
 mod pages;
@@ -22,6 +23,7 @@ use krilla::{Document, SerializeSettings};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 
+pub use extract::{ExtractError, PdfAttachments, extract_attachments};
 use layout::{Face, missing_glyphs};
 use pages::{Op, Outline, PageContext, Rgb, layout_pages};
 
