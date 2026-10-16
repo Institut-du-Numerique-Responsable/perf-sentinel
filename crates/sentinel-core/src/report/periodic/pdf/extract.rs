@@ -42,6 +42,9 @@ const MAX_NAME_TREE_NODES: usize = 1024;
 /// `LOAD_STREAM_CAP`: lopdf bounds one stream, these bound them all.
 const MAX_LOAD_STREAMS: usize = 32;
 const LOAD_STREAM_CAP: usize = 4 * 1024 * 1024;
+/// What ends a name, as ISO 32000 defines it: NUL is whitespace too.
+const PDF_WHITESPACE: &[u8] = b" \t\n\r\x0C\0";
+const PDF_DELIMITERS: &[u8] = b"/<>[]()%{}";
 
 /// Read the attachments of `pdf`, `report_cap` and `sidecar_cap` bytes at
 /// most once decoded.
@@ -185,7 +188,7 @@ fn load_streams(pdf: &[u8]) -> usize {
         let start = at + offset + 1;
         let end = pdf[start..]
             .iter()
-            .position(|b| b.is_ascii_whitespace() || b"/<>[]()%{}".contains(b))
+            .position(|b| PDF_WHITESPACE.contains(b) || PDF_DELIMITERS.contains(b))
             .map_or(pdf.len(), |len| start + len);
         let name = decode_name(&pdf[start..end]);
         if name == b"ObjStm" || name == b"XRef" {

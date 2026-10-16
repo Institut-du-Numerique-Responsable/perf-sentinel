@@ -545,6 +545,20 @@ mod extraction {
     }
 
     #[test]
+    fn object_streams_ended_by_a_nul_are_counted() {
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        for index in 0..100 {
+            // NUL is PDF whitespace: the parser ends the name there.
+            pdf.extend_from_slice(
+                format!("{index} 0 obj << /Type /ObjStm\0>> endobj\n").as_bytes(),
+            );
+        }
+        assert!(
+            matches!(extract_attachments(&pdf, 1 << 20, 1 << 20), Err(ExtractError::Malformed(m)) if m.contains("object streams"))
+        );
+    }
+
+    #[test]
     fn too_many_object_streams_are_refused_before_decoding() {
         let mut pdf = b"%PDF-1.7\n".to_vec();
         for index in 0..100 {
