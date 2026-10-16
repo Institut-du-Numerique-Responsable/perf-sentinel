@@ -2983,7 +2983,7 @@
           "type": "table",
           "id": 103,
           "title": "Correlated pairs",
-          "description": "One row per pair over the dashboard's time range, grouped from the same episodes: how many episodes, the highest confidence any of them reached, when the latest one started and whether one is still open. Pair opens the Hub's Correlations screen on that pair, once Hub URL is set.\n\nNeeds PerfSentinelHub 0.6.0. The read stops at 1000 episodes, so a wide range on a busy fleet can miss older pairs.",
+          "description": "One row per pair and daemon over the dashboard's time range, grouped from the same episodes: how many episodes, the highest confidence any of them reached, when the latest one started and whether one is still open. Pair opens the Hub's Correlations screen on that pair, once Hub URL is set.\n\nNeeds PerfSentinelHub 0.6.0. The read stops at 1000 episodes, so a wide range on a busy fleet can miss older pairs.",
           "datasource": {
             "type": "yesoreyeram-infinity-datasource",
             "uid": "${DS_HUB}"
@@ -3009,7 +3009,7 @@
               "url_options": {
                 "method": "GET"
               },
-              "root_selector": "$count($) > 0 ? $each($ {pair_key: $}, function($v, $k) {($f := $v[0]; {\"pair\": $f.source.service & \" \" & $f.source.finding_type & \" -> \" & $f.target.service & \" \" & $f.target.finding_type, \"episodes\": $count($v), \"peak_confidence\": $max($v.peak_confidence), \"last_episode\": $max($v.started_at_ms), \"status\": $count($v[$not($exists(ended_at_ms)) or ended_at_ms = null]) > 0 ? \"active\" : \"closed\", \"daemon\": $f.source_name ? $f.source_name : $f.source_id, \"pair_key\": $k})}) : []",
+              "root_selector": "$count($) > 0 ? $each($ {pair_key & \"|\" & source_id: $}, function($v, $k) {($f := $v[0]; {\"pair\": $f.source.service & \" \" & $f.source.finding_type & \" -> \" & $f.target.service & \" \" & $f.target.finding_type, \"episodes\": $count($v), \"peak_confidence\": $max($v.peak_confidence), \"last_episode\": $max($v.started_at_ms), \"status\": $count($v[$not($exists(ended_at_ms)) or ended_at_ms = null]) > 0 ? \"active\" : \"closed\", \"daemon\": $f.source_name ? $f.source_name : $f.source_id, \"pair_key\": $f.pair_key})}) : []",
               "columns": [
                 {
                   "selector": "pair",

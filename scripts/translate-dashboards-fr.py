@@ -477,8 +477,8 @@ f("text", "Quiet", "Calme")
 f("title", "Correlated pairs", "Paires corrélées")
 
 f("description",
-  "One row per pair over the dashboard's time range, grouped from the same episodes: how many episodes, the highest confidence any of them reached, when the latest one started and whether one is still open. Pair opens the Hub's Correlations screen on that pair, once Hub URL is set.\n\nNeeds PerfSentinelHub 0.6.0. The read stops at 1000 episodes, so a wide range on a busy fleet can miss older pairs.",
-  "Une ligne par paire sur la période du dashboard, regroupée depuis les mêmes épisodes : combien d'épisodes, la plus haute confiance atteinte par l'un d'eux, le début du plus récent et s'il en reste un ouvert. Paire ouvre l'écran Corrélations du Hub sur cette paire, une fois URL du Hub renseignée.\n\nDemande PerfSentinelHub 0.6.0. La lecture s'arrête à 1000 épisodes, donc une large période sur un parc chargé peut manquer des paires plus anciennes.")
+  "One row per pair and daemon over the dashboard's time range, grouped from the same episodes: how many episodes, the highest confidence any of them reached, when the latest one started and whether one is still open. Pair opens the Hub's Correlations screen on that pair, once Hub URL is set.\n\nNeeds PerfSentinelHub 0.6.0. The read stops at 1000 episodes, so a wide range on a busy fleet can miss older pairs.",
+  "Une ligne par paire et par daemon sur la période du dashboard, regroupée depuis les mêmes épisodes : combien d'épisodes, la plus haute confiance atteinte par l'un d'eux, le début du plus récent et s'il en reste un ouvert. Paire ouvre l'écran Corrélations du Hub sur cette paire, une fois URL du Hub renseignée.\n\nDemande PerfSentinelHub 0.6.0. La lecture s'arrête à 1000 épisodes, donc une large période sur un parc chargé peut manquer des paires plus anciennes.")
 
 f("title", "Open this pair in the Hub", "Ouvrir cette paire dans le Hub")
 f("text", "Closed", "Terminé")
