@@ -23,6 +23,10 @@ use crate::time::parse_iso8601_utc_to_ms;
 /// The longest silence an episode's gap can reach, whatever the window.
 const MAX_EPISODE_GAP_MS: u64 = 30 * 60 * 1_000;
 
+/// Closed pairs remembered so a returning one starts a new episode, the
+/// correlator's default `max_tracked_pairs`.
+const MAX_CLOSED_PAIRS: usize = 10_000;
+
 /// An open episode is re-sent once its `last_seen` moved this far.
 const REQUEUE_AFTER_MS: u64 = 60_000;
 
@@ -215,6 +219,7 @@ pub(crate) struct EpisodeTracker {
     gap_ms: u64,
     // Ordered, so the copies of one round queue in the same order every run.
     pairs: BTreeMap<String, Track>,
+    max_closed: usize,
 }
 
 impl EpisodeTracker {
@@ -223,6 +228,7 @@ impl EpisodeTracker {
             window_ms,
             gap_ms: episode_gap_ms(window_ms),
             pairs: BTreeMap::new(),
+            max_closed: MAX_CLOSED_PAIRS,
         }
     }
 
@@ -248,16 +254,29 @@ impl EpisodeTracker {
                 })
                 .filter_map(Track::close),
         );
-        let window_ms = self.window_ms;
-        // A closed pair is remembered for one window: past it the correlator
-        // has dropped the pair too, so its next `first_seen` is fresh.
-        self.pairs.retain(|_, track| {
-            track.open.is_some()
-                || track
-                    .closed_seen_ms
-                    .is_some_and(|seen| now_ms.saturating_sub(seen) <= window_ms)
-        });
+        // A closed pair is remembered by count, not by time: below the
+        // thresholds it can keep co-occurring, and the correlator its old
+        // `first_seen`, long after the episode closed.
+        self.pairs
+            .retain(|_, track| track.open.is_some() || track.closed_seen_ms.is_some());
+        self.forget_oldest_closed();
         queue
+    }
+
+    fn forget_oldest_closed(&mut self) {
+        let mut closed: Vec<(u64, String)> = self
+            .pairs
+            .iter()
+            .filter(|(_, track)| track.open.is_none())
+            .filter_map(|(key, track)| Some((track.closed_seen_ms?, key.clone())))
+            .collect();
+        let Some(excess) = closed.len().checked_sub(self.max_closed) else {
+            return;
+        };
+        closed.sort_unstable();
+        for (_, key) in closed.into_iter().take(excess) {
+            self.pairs.remove(&key);
+        }
     }
 
     /// Close every open episode at its `last_seen`, for a graceful shutdown.
@@ -282,9 +301,14 @@ impl EpisodeTracker {
         {
             return None;
         }
+        // A pair never met starts at its `first_seen`, but no earlier than
+        // the window its counters cover: older activity is not evidenced.
         let started_at_ms = match track.closed_seen_ms {
             Some(_) => last_seen_ms,
-            None => parse_iso8601_utc_to_ms(&correlation.first_seen).unwrap_or(last_seen_ms),
+            None => parse_iso8601_utc_to_ms(&correlation.first_seen)
+                .unwrap_or(last_seen_ms)
+                .max(now_ms.saturating_sub(self.window_ms))
+                .min(last_seen_ms),
         };
         let episode = Episode::open(correlation, key, started_at_ms, last_seen_ms, self.gap_ms);
         track.open = Some(OpenEpisode::new(episode.clone()));

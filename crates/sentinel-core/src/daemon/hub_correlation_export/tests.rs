@@ -299,15 +299,44 @@ fn a_pair_first_met_after_it_went_quiet_opens_nothing() {
 }
 
 #[test]
-fn a_closed_pair_is_forgotten_one_window_after_its_last_co_occurrence() {
+fn a_pair_back_after_the_gap_starts_a_new_episode_with_its_own_id() {
     let mut tracker = EpisodeTracker::new(WINDOW);
+    let opened = tracker.observe(&[correlation(T0 - 5_000, T0, 0.8, 10)], T0);
+    // Closed one millisecond past the gap, not on its boundary.
+    tracker.observe(&[], T0 + GAP + 1);
+
+    let back = T0 + GAP + 1_000;
+    let reopened = tracker.observe(&[correlation(T0 - 5_000, back, 0.8, 10)], back);
+
+    assert_eq!(back, reopened[0].started_at_ms);
+    assert_ne!(opened[0].id, reopened[0].id);
+}
+
+#[test]
+fn closed_pairs_beyond_the_cap_are_forgotten_oldest_first() {
+    let mut tracker = EpisodeTracker::new(WINDOW);
+    tracker.max_closed = 1;
+    let mut other = correlation(T0 + 1_000, T0 + 1_000, 0.8, 10);
+    other.target.service = "billing-svc".to_string();
     tracker.observe(&[correlation(T0, T0, 0.8, 10)], T0);
-    tracker.observe(&[], T0 + GAP);
+    tracker.observe(std::slice::from_ref(&other), T0 + 1_000);
+    tracker.observe(&[], T0 + 1_000 + GAP);
+
     assert_eq!(1, tracker.pairs.len());
+    assert!(
+        tracker
+            .pairs
+            .contains_key(&pair_key(&other.source, &other.target))
+    );
+}
 
-    tracker.observe(&[], T0 + WINDOW + 1);
+#[test]
+fn a_never_seen_pair_starts_no_earlier_than_the_window() {
+    let mut tracker = EpisodeTracker::new(WINDOW);
 
-    assert_eq!(0, tracker.pairs.len());
+    let opened = tracker.observe(&[correlation(T0 - 3 * WINDOW, T0, 0.8, 10)], T0);
+
+    assert_eq!(T0 - WINDOW, opened[0].started_at_ms);
 }
 
 #[test]
