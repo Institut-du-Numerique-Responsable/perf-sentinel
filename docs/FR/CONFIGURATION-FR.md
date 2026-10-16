@@ -750,6 +750,12 @@ max_tracked_pairs = 50000
 
 Les corrélations sont exposées via `GET /api/correlations` (quand `api_enabled = true`) et figées sous `correlations` dans `GET /api/export/report`. Le flux stdout du daemon ne les porte jamais.
 
+Avec `[daemon.hub_export]` actif aussi, le daemon pousse les périodes actives de chaque paire
+vers PerfSentinelHub 0.6.0 ou ultérieur sous forme d'épisodes, depuis 0.30.0, donc une
+corrélation y survit à la fenêtre glissante. Un épisode se ferme une fois que la dernière
+co-occurrence de la paire est restée immobile pendant `min(window_minutes, 30 minutes)`.
+`[daemon.hub_export]` plus bas décrit ce qui part.
+
 #### `[daemon.ack]` (optionnel, depuis 0.5.20)
 
 Store d'acks runtime côté daemon. Complète les acks TOML CI (voir
@@ -831,6 +837,26 @@ tandis que les findings continuent. Un Hub plus ancien avec la connexion active 
 à la place, donc le daemon retente et journalise chaque tentative : mettez le Hub à jour
 d'abord. `perf_sentinel_hub_export_incidents_pending` et
 `perf_sentinel_hub_export_incidents_dropped_total` comptent ce qui attend et ce qui est
+abandonné.
+
+Avec `[daemon.correlation]` actif aussi, le daemon pousse ses corrélations cross-trace vers
+`/api/import/correlations` à côté d'`endpoint`, avec la même clé et le même identifiant de
+source, depuis 0.30.0, sous forme d'épisodes : un par période pendant laquelle une paire a
+continué de se produire ensemble. Un épisode s'ouvre quand la dernière co-occurrence d'une
+paire (`last_seen`) est récente, la suit tant qu'elle avance, et se ferme une fois qu'elle est
+restée immobile le temps de l'écart d'épisode, `min(window_minutes, 30 minutes)`, 10 minutes
+par défaut. Une copie part quand un épisode s'ouvre, quand sa confiance ou son nombre de
+co-occurrences maximal monte, au plus une fois par minute tant qu'il reste actif, et quand il
+se ferme, au plus 100 épisodes par requête et 1 Mio par corps. Un arrêt propre ferme chaque
+épisode ouvert avant que l'exporteur se vide. La table garde la dernière copie par épisode,
+bornée par `max_pending`, et retente avec le même backoff sur sa propre horloge. Un épisode
+de plus de 1 Mio à lui seul est abandonné. Un Hub qui répond 404 ou 405 sur cette route la
+précède : le daemon journalise un avertissement et cesse de pousser les corrélations jusqu'à
+son redémarrage, tandis que les findings et les incidents continuent. Un Hub plus ancien avec
+la connexion active répond 401 à la place, donc le daemon retente et journalise chaque
+tentative : mettez d'abord le Hub en PerfSentinelHub 0.6.0.
+`perf_sentinel_hub_export_correlations_pending` et
+`perf_sentinel_hub_export_correlations_dropped_total` comptent ce qui attend et ce qui est
 abandonné.
 
 À l'arrêt propre (SIGTERM, `helm upgrade`, redémarrage progressif), l'exporteur

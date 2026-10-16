@@ -4,6 +4,25 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- The Hub export pushes cross-trace correlations too, as episodes. With
+  `[daemon.hub_export]` and `[daemon.correlation]` both enabled, the daemon cuts each
+  pair's activity into episodes, open while the pair's `last_seen` advances and closed once
+  it has stood still for `min(window_minutes, 30 minutes)`, and sends them to the Hub's
+  `/api/import/correlations` when they open, peak, advance by a minute and close, so a
+  correlation outlives the rolling window. Batches hold at most 100 episodes and 1 MiB. A
+  graceful shutdown closes the open episodes before the drain. A Hub without the route (404
+  or 405) stops correlation pushes until restart, and findings and incidents keep flowing. An
+  older Hub with sign-in on answers 401, which is retried and logged, so upgrade the Hub to
+  PerfSentinelHub 0.6.0 first. New label-free metrics
+  `perf_sentinel_hub_export_correlations_pending` and
+  `perf_sentinel_hub_export_correlations_dropped_total`.
+- `examples/grafana-findings-dashboard.json` gains a Correlation episodes timeline, a
+  Correlated pairs table, a Hub incidents annotation (off by default) and a Hub source
+  variable in its History (Hub) row, read from PerfSentinelHub 0.6.0. Its daemon floor does
+  not move.
+
 ## [0.29.0] - 2026-10-15
 
 This release bumps the minor rather than the patch: `sentinel_core::daemon::query_api::QueryApiState` gains a crate-private field and is not `#[non_exhaustive]`, so code that builds it with a literal stops compiling. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The theme is the Hub's long memory: a daemon that exports findings to PerfSentinelHub now exports its incidents as well, so the Hub keeps one even when the daemon's ring evicts it between two polls. Upgrade the Hub to 0.5.0 before the daemons.
