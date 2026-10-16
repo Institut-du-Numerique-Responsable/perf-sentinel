@@ -19,6 +19,7 @@ on:
       - 'fuzz/**'
       - 'crates/sentinel-core/src/ingest/**'
       - 'crates/sentinel-core/src/normalize/**'
+      - 'crates/sentinel-core/src/report/periodic/pdf/**'
       - '.github/workflows/fuzz.yml'
 
 permissions:
@@ -36,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [json_ingest, normalize_sql]
+        target: [json_ingest, normalize_sql, pdf_extract]
     env:
       # cargo-fuzz needs a nightly for -Zsanitizer. Dated so a broken nightly
       # cannot redden the job, bump it by hand.
@@ -60,6 +61,18 @@ jobs:
           path: fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      # An empty corpus never gets past the %PDF- header: start from a real
+      # disclosure. The cache keeps it, so this only runs on a cold cache.
+      - name: Seed the PDF corpus with a rendered disclosure
+        if: matrix.target == 'pdf_extract' && hashFiles('fuzz/corpus/pdf_extract/*') == ''
+        run: |
+          set -euo pipefail
+          mkdir -p fuzz/corpus/pdf_extract
+          cargo run --quiet -p perf-sentinel --locked -- hash-bake \
+            --report docs/schemas/examples/example-official-public-G2.json --output "$RUNNER_TEMP/report.json"
+          cargo run --quiet -p perf-sentinel --locked -- disclose-pdf \
+            --report "$RUNNER_TEMP/report.json" --output fuzz/corpus/pdf_extract/seed.pdf
 
       - name: Fuzz
         working-directory: fuzz

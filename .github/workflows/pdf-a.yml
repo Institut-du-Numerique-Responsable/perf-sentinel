@@ -1,0 +1,52 @@
+name: PDF/A
+
+# Renders the official G2 example with disclose-pdf and validates it with
+# veraPDF against the PDF/A-3B profile, the conformance the Hub and an
+# archive rely on. krilla checks most clauses itself: this is the independent
+# validator.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/sentinel-core/src/report/periodic/pdf/**'
+      - 'crates/sentinel-cli/src/disclose_pdf.rs'
+      - '.github/workflows/pdf-a.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pdf-a-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate a rendered disclosure as PDF/A-3B
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+
+      - name: Render the G2 example
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          cargo run --quiet -p perf-sentinel --locked -- hash-bake \
+            --report docs/schemas/examples/example-official-public-G2.json --output work/report.json
+          cargo run --quiet -p perf-sentinel --locked -- disclose-pdf \
+            --report work/report.json --output work/report.pdf
+
+      - name: veraPDF, PDF/A-3B profile
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/work:/data" \
+            verapdf/cli:v1.30.2@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb \
+            --flavour 3b /data/report.pdf > work/verapdf.xml
+          grep -q 'isCompliant="true"' work/verapdf.xml || {
+            grep -o '<rule [^>]*status="failed"[^>]*>' work/verapdf.xml
+            exit 1
+          }
