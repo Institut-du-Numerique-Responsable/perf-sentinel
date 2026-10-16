@@ -16,6 +16,7 @@ pub mod traces_store;
 mod event_loop;
 mod hub_export;
 mod hub_incident_export;
+mod hub_table;
 #[cfg(unix)]
 mod json_socket;
 mod listeners;
