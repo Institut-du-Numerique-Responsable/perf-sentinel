@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use super::event_loop::current_time_ms;
 use super::hub_table::{Keyed, LatestTable, Pending, Route, RouteExport, import_route};
 use crate::detect::correlate_cross::{
-    CorrelationEndpoint, CrossTraceCorrelation, CrossTraceCorrelator,
+    CorrelationConfig, CorrelationEndpoint, CrossTraceCorrelation, CrossTraceCorrelator,
 };
 use crate::http_client;
 use crate::report::metrics::MetricsState;
@@ -22,10 +22,6 @@ use crate::time::parse_iso8601_utc_to_ms;
 
 /// The longest silence an episode's gap can reach, whatever the window.
 const MAX_EPISODE_GAP_MS: u64 = 30 * 60 * 1_000;
-
-/// Closed pairs remembered so a returning one starts a new episode, the
-/// correlator's default `max_tracked_pairs`.
-const MAX_CLOSED_PAIRS: usize = 10_000;
 
 /// An open episode is re-sent once its `last_seen` moved this far.
 const REQUEUE_AFTER_MS: u64 = 60_000;
@@ -219,16 +215,18 @@ pub(crate) struct EpisodeTracker {
     gap_ms: u64,
     // Ordered, so the copies of one round queue in the same order every run.
     pairs: BTreeMap<String, Track>,
+    /// Closed pairs remembered so a returning one starts a new episode: as
+    /// many as the correlator may still hold.
     max_closed: usize,
 }
 
 impl EpisodeTracker {
-    pub(crate) fn new(window_ms: u64) -> Self {
+    pub(crate) fn new(window_ms: u64, max_closed: usize) -> Self {
         Self {
             window_ms,
             gap_ms: episode_gap_ms(window_ms),
             pairs: BTreeMap::new(),
-            max_closed: MAX_CLOSED_PAIRS,
+            max_closed,
         }
     }
 
@@ -372,13 +370,13 @@ pub(crate) struct CorrelationExport {
 impl CorrelationExport {
     pub(crate) fn new(
         correlator: Arc<tokio::sync::Mutex<CrossTraceCorrelator>>,
-        window_ms: u64,
+        config: &CorrelationConfig,
         buffer: Arc<CorrelationExportBuffer>,
         uri: http_client::Uri,
     ) -> Self {
         Self {
             correlator,
-            tracker: EpisodeTracker::new(window_ms),
+            tracker: EpisodeTracker::new(config.window_ms, config.max_tracked_pairs),
             send: RouteExport::with_route(&CORRELATION_ROUTE, buffer.clone(), uri),
             buffer,
             observe_due: tokio::time::Instant::now(),

@@ -20,7 +20,7 @@ use super::hub_incident_export::{
 use super::query_api::{FindingResponse, lookup_ack};
 use crate::config::DaemonHubExportConfig;
 use crate::detect::Finding;
-use crate::detect::correlate_cross::CrossTraceCorrelator;
+use crate::detect::correlate_cross::{CorrelationConfig, CrossTraceCorrelator};
 use crate::http_client;
 use crate::report::metrics::MetricsState;
 
@@ -97,7 +97,7 @@ impl HubExporter {
         ack_store: Option<Arc<AckStore>>,
         push_incidents: bool,
         correlator: Option<Arc<tokio::sync::Mutex<CrossTraceCorrelator>>>,
-        correlation_window_ms: u64,
+        correlation: &CorrelationConfig,
     ) -> Result<Option<Self>, super::DaemonError> {
         if !config.enabled {
             return Ok(None);
@@ -134,9 +134,8 @@ impl HubExporter {
         let correlations = correlator
             .map(|correlator| {
                 let table = Arc::new(CorrelationExportBuffer::new(config.max_pending));
-                source_uri(&correlations_endpoint(endpoint), source_id).map(|uri| {
-                    CorrelationExport::new(correlator, correlation_window_ms, table, uri)
-                })
+                source_uri(&correlations_endpoint(endpoint), source_id)
+                    .map(|uri| CorrelationExport::new(correlator, correlation, table, uri))
             })
             .transpose()?;
         let correlation_buffer = correlations.as_ref().map(CorrelationExport::buffer);
@@ -1399,7 +1398,7 @@ mod tests {
             )),
             Some(CorrelationExport::new(
                 correlator,
-                600_000,
+                &CorrelationConfig::default(),
                 correlations.clone(),
                 route(base, "/api/import/correlations"),
             )),
@@ -1507,7 +1506,7 @@ mod tests {
                 None,
                 false,
                 correlator,
-                600_000,
+                &CorrelationConfig::default(),
             )
             .expect("spawn")
             .expect("enabled")

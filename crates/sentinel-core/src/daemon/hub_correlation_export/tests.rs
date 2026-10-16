@@ -8,6 +8,7 @@ use crate::detect::{FindingType, Severity};
 const T0: u64 = 1_800_000_000_000;
 const WINDOW: u64 = 600_000;
 const GAP: u64 = 600_000;
+const MAX_CLOSED: usize = 10_000;
 
 fn endpoint(service: &str, finding_type: FindingType, template: &str) -> CorrelationEndpoint {
     CorrelationEndpoint {
@@ -152,7 +153,7 @@ fn the_gap_is_the_window_up_to_thirty_minutes() {
 
 #[test]
 fn a_new_pair_opens_an_episode_at_the_correlator_first_seen() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
 
     let queued = tracker.observe(&[correlation(T0 - 5_000, T0, 0.8, 10)], T0);
 
@@ -165,7 +166,7 @@ fn a_new_pair_opens_an_episode_at_the_correlator_first_seen() {
 
 #[test]
 fn an_advance_under_a_minute_is_held_back_and_one_past_it_is_sent() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     tracker.observe(&[correlation(T0, T0, 0.8, 10)], T0);
 
     assert_eq!(
@@ -182,7 +183,7 @@ fn an_advance_under_a_minute_is_held_back_and_one_past_it_is_sent() {
 
 #[test]
 fn a_rising_peak_is_sent_at_once() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     tracker.observe(&[correlation(T0, T0, 0.8, 10)], T0);
 
     let queued = tracker.observe(&[correlation(T0, T0 + 5_000, 0.9, 10)], T0 + 5_000);
@@ -198,7 +199,7 @@ fn a_rising_peak_is_sent_at_once() {
 
 #[test]
 fn an_episode_closes_once_last_seen_stood_still_for_the_gap() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     let still = correlation(T0, T0, 0.8, 10);
     tracker.observe(std::slice::from_ref(&still), T0);
 
@@ -216,7 +217,7 @@ fn an_episode_closes_once_last_seen_stood_still_for_the_gap() {
 
 #[test]
 fn a_pair_gone_from_the_snapshot_closes_after_the_gap() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     tracker.observe(&[correlation(T0, T0, 0.8, 10)], T0);
 
     assert_eq!(0, tracker.observe(&[], T0 + GAP - 1).len());
@@ -228,7 +229,7 @@ fn a_pair_gone_from_the_snapshot_closes_after_the_gap() {
 
 #[test]
 fn activity_after_the_gap_opens_a_new_episode_at_its_own_start() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     let first = tracker.observe(&[correlation(T0 - 5_000, T0, 0.8, 10)], T0);
     tracker.observe(&[correlation(T0 - 5_000, T0, 0.8, 10)], T0 + GAP);
 
@@ -245,7 +246,7 @@ fn activity_after_the_gap_opens_a_new_episode_at_its_own_start() {
 fn a_pair_above_the_thresholds_with_a_still_last_seen_stays_closed() {
     let week = 7 * 24 * 3_600_000;
     let gap = episode_gap_ms(week);
-    let mut tracker = EpisodeTracker::new(week);
+    let mut tracker = EpisodeTracker::new(week, MAX_CLOSED);
     let still = correlation(T0, T0, 0.8, 10);
     tracker.observe(std::slice::from_ref(&still), T0);
 
@@ -268,7 +269,7 @@ fn a_pair_above_the_thresholds_with_a_still_last_seen_stays_closed() {
 
 #[test]
 fn a_pair_back_in_the_snapshot_does_not_start_before_its_last_episode_ended() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     tracker.observe(&[correlation(T0 - 5_000, T0, 0.8, 10)], T0);
     tracker.observe(&[], T0 + GAP);
 
@@ -282,7 +283,7 @@ fn a_pair_back_in_the_snapshot_does_not_start_before_its_last_episode_ended() {
 
 #[test]
 fn a_pair_first_met_after_it_went_quiet_opens_nothing() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
 
     assert_eq!(
         0,
@@ -300,7 +301,7 @@ fn a_pair_first_met_after_it_went_quiet_opens_nothing() {
 
 #[test]
 fn a_pair_back_after_the_gap_starts_a_new_episode_with_its_own_id() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     let opened = tracker.observe(&[correlation(T0 - 5_000, T0, 0.8, 10)], T0);
     // Closed one millisecond past the gap, not on its boundary.
     tracker.observe(&[], T0 + GAP + 1);
@@ -314,7 +315,7 @@ fn a_pair_back_after_the_gap_starts_a_new_episode_with_its_own_id() {
 
 #[test]
 fn closed_pairs_beyond_the_cap_are_forgotten_oldest_first() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     tracker.max_closed = 1;
     let mut other = correlation(T0 + 1_000, T0 + 1_000, 0.8, 10);
     other.target.service = "billing-svc".to_string();
@@ -330,9 +331,27 @@ fn closed_pairs_beyond_the_cap_are_forgotten_oldest_first() {
     );
 }
 
+/// A raised `max_tracked_pairs` keeps as many closed pairs, so a pair the
+/// correlator still holds is never forgotten and reopened under an old id.
+#[test]
+fn the_closed_pair_memory_follows_max_tracked_pairs() {
+    let config = CorrelationConfig {
+        max_tracked_pairs: 50_000,
+        ..CorrelationConfig::default()
+    };
+    let export = CorrelationExport::new(
+        empty_correlator(),
+        &config,
+        Arc::new(CorrelationExportBuffer::new(10)),
+        "http://hub/api/import/correlations".parse().expect("uri"),
+    );
+
+    assert_eq!(50_000, export.tracker.max_closed);
+}
+
 #[test]
 fn a_never_seen_pair_starts_no_earlier_than_the_window() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
 
     let opened = tracker.observe(&[correlation(T0 - 3 * WINDOW, T0, 0.8, 10)], T0);
 
@@ -341,7 +360,7 @@ fn a_never_seen_pair_starts_no_earlier_than_the_window() {
 
 #[test]
 fn shutdown_closes_open_episodes_at_their_latest_last_seen() {
-    let mut tracker = EpisodeTracker::new(WINDOW);
+    let mut tracker = EpisodeTracker::new(WINDOW, MAX_CLOSED);
     tracker.observe(&[correlation(T0, T0, 0.8, 10)], T0);
     // Held back by the one-minute throttle, yet the close must carry it.
     tracker.observe(&[correlation(T0, T0 + 10_000, 0.8, 10)], T0 + 10_000);
@@ -399,7 +418,7 @@ fn export(
 ) -> CorrelationExport {
     CorrelationExport::new(
         correlator.clone(),
-        WINDOW,
+        &CorrelationConfig::default(),
         buffer.clone(),
         format!("{base}/api/import/correlations?source_id=lab")
             .parse()

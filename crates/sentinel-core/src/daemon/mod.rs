@@ -273,7 +273,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         ack_store.clone(),
         config.daemon.incidents.enabled,
         correlator.clone(),
-        config.daemon.correlation.window_ms,
+        &config.daemon.correlation,
     )?;
     let hub_export_buffer = hub_export.as_ref().map(hub_export::HubExporter::buffer);
     // Masked span trees for the findings the store keeps, so an exported
