@@ -393,6 +393,16 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn no_coverage_bar_is_drawn_when_runtime_coverage_is_not_reported() {
+        let (mut report, _) = baked_report();
+        report.aggregate.runtime_windows_count = 0;
+        report.aggregate.fallback_windows_count = 0;
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("Runtime coverage: Not reported"), "{all}");
+        assert!(!all.contains("an official report needs 75"), "{all}");
+    }
+
+    #[test]
     fn page_five_fills_the_verify_command_with_the_expected_identity() {
         let (report, _) = baked_report();
         let mut context = PageContext::for_report(&report);
