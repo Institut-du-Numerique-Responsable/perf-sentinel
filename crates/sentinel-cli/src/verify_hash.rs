@@ -174,9 +174,48 @@ pub async fn cmd_verify_hash(
     exit_code(&outcome)
 }
 
+/// The attestation and bundle that came with the report, written for the
+/// checks that read paths into a private directory removed on drop.
 struct FetchedPaths {
     attestation: Option<PathBuf>,
     bundle: Option<PathBuf>,
+    _dir: Option<tempfile::TempDir>,
+}
+
+impl FetchedPaths {
+    const NONE: Self = Self {
+        attestation: None,
+        bundle: None,
+        _dir: None,
+    };
+
+    fn spill(attestation: Option<&[u8]>, bundle: Option<&[u8]>) -> std::io::Result<Self> {
+        if attestation.is_none() && bundle.is_none() {
+            return Ok(Self::NONE);
+        }
+        let dir = tempfile::Builder::new()
+            .prefix("perf-sentinel-verify-")
+            .tempdir()?;
+        let write = |data: Option<&[u8]>, name: &str| {
+            data.map(|data| {
+                let path = dir.path().join(name);
+                std::fs::write(&path, data).map(|()| path)
+            })
+            .transpose()
+        };
+        Ok(Self {
+            attestation: write(attestation, "attestation.intoto.jsonl")?,
+            bundle: write(bundle, "bundle.sig")?,
+            _dir: Some(dir),
+        })
+    }
+}
+
+fn spill_or_exit(attestation: Option<&[u8]>, bundle: Option<&[u8]>) -> Result<FetchedPaths, i32> {
+    FetchedPaths::spill(attestation, bundle).map_err(|e| {
+        eprintln!("Error: write the attestation and bundle to a temporary directory: {e}");
+        EXIT_INPUT_ERROR
+    })
 }
 
 async fn load_report(report_path: Option<&Path>, url: Option<&str>) -> Result<LoadedReport, i32> {
@@ -221,13 +260,7 @@ fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
     let (bytes, fetched) = if from_pdf {
         unpack_pdf(&bytes, &display)?
     } else {
-        (
-            bytes,
-            FetchedPaths {
-                attestation: None,
-                bundle: None,
-            },
-        )
+        (bytes, FetchedPaths::NONE)
     };
     let report = parse_gated(&bytes, &display)?;
     Ok(LoadedReport {
@@ -239,8 +272,7 @@ fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
     })
 }
 
-/// The report a disclosure PDF attaches, and its attestation and bundle
-/// written to temporary files for the checks that read paths.
+/// The report a disclosure PDF attaches, with its attestation and bundle.
 #[cfg(feature = "pdf")]
 fn unpack_pdf(pdf: &[u8], display: &str) -> Result<(Vec<u8>, FetchedPaths), i32> {
     let files = sentinel_core::report::periodic::pdf::extract_attachments(
@@ -252,16 +284,7 @@ fn unpack_pdf(pdf: &[u8], display: &str) -> Result<(Vec<u8>, FetchedPaths), i32>
         eprintln!("Error: {}: {e}", sanitise_for_terminal(display));
         EXIT_INPUT_ERROR
     })?;
-    let pid = std::process::id();
-    let spill = |data: Option<Vec<u8>>, name: &str| {
-        let path = std::env::temp_dir().join(format!("perf-sentinel-verify-{pid}-{name}"));
-        data.filter(|data| write_temp_no_follow(&path, data).is_ok())
-            .map(|_| path)
-    };
-    let fetched = FetchedPaths {
-        attestation: spill(files.attestation, "attestation.intoto.jsonl"),
-        bundle: spill(files.bundle, "bundle.sig"),
-    };
+    let fetched = spill_or_exit(files.attestation.as_deref(), files.bundle.as_deref())?;
     Ok((files.report, fetched))
 }
 
@@ -307,36 +330,21 @@ async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
     let report = parse_gated(&bytes, url)?;
     let attestation_url = derive_sidecar_url(url, "attestation.intoto.jsonl");
     let bundle_url = derive_sidecar_url(url, "bundle.sig");
-    let mut fetched = FetchedPaths {
-        attestation: None,
-        bundle: None,
-    };
-    let pid = std::process::id();
+    let mut attestation = None;
     if let Some(a_url) = attestation_url {
         match http_get(&a_url).await {
-            Ok(data) => {
-                let path = std::env::temp_dir().join(format!(
-                    "perf-sentinel-verify-attestation-{pid}.intoto.jsonl"
-                ));
-                if write_temp_no_follow(&path, &data).is_ok() {
-                    fetched.attestation = Some(path);
-                }
-            }
+            Ok(data) => attestation = Some(data),
             Err(e) => eprintln!("Note: could not fetch attestation sidecar: {e}"),
         }
     }
+    let mut bundle = None;
     if let Some(b_url) = bundle_url {
         match http_get(&b_url).await {
-            Ok(data) => {
-                let path =
-                    std::env::temp_dir().join(format!("perf-sentinel-verify-bundle-{pid}.sig"));
-                if write_temp_no_follow(&path, &data).is_ok() {
-                    fetched.bundle = Some(path);
-                }
-            }
+            Ok(data) => bundle = Some(data),
             Err(e) => eprintln!("Note: could not fetch signature bundle: {e}"),
         }
     }
+    let fetched = spill_or_exit(attestation.as_deref(), bundle.as_deref())?;
     Ok(LoadedReport {
         report,
         bytes,
@@ -344,24 +352,6 @@ async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
         fetched,
         from_pdf: false,
     })
-}
-
-/// Write `data` to `path` while refusing to follow a pre-existing
-/// symlink (defence in depth on shared `/tmp` setups). Uses
-/// `O_CREAT|O_EXCL|O_WRONLY` on Unix-likes via `create_new(true)`.
-/// On Windows there is no real symlink-attack surface for the
-/// system temp dir, so a plain `fs::write` is acceptable.
-fn write_temp_no_follow(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    // Best-effort: tolerate a residual file from a previous run with
-    // the same pid wrap-around by unlinking, then create_new to bind
-    // the inode atomically.
-    let _ = std::fs::remove_file(path);
-    let mut f = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)?;
-    f.write_all(data)
 }
 
 /// Fetch an `https://` URL through the shared core client, so the report

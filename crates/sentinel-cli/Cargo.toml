@@ -65,6 +65,9 @@ hyper = { version = "1.11.1", optional = true }
 bytes = { version = "1.12.1", optional = true }
 humantime = { version = "2.4.0", optional = true }
 rpassword = { version = "7.5.4", optional = true }
+# verify-hash writes the attestation and bundle it reads into a private
+# temporary directory, removed when the command returns.
+tempfile = "3.27.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"
@@ -76,4 +79,3 @@ mimalloc = "0.1.52"
 
 [dev-dependencies]
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
-tempfile = "3.27.0"

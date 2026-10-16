@@ -330,6 +330,46 @@ fn verify_hash_on_the_pdf_matches_verify_hash_on_the_json() {
     );
 }
 
+/// The attestation and bundle read out of a PDF go to a private directory
+/// that is gone when the command returns.
+#[cfg(feature = "pdf")]
+#[test]
+fn verify_hash_on_a_pdf_leaves_no_temporary_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let report_path = write_example_with_fixed_hash(dir.path());
+    let report: PeriodicReport = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    let attestation = dir.path().join("attestation.intoto.jsonl");
+    write_attestation_for(&report, &attestation);
+    let pdf = dir.path().join("report.pdf");
+    let render = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["disclose-pdf", "--report"])
+        .arg(&report_path)
+        .arg("--attestation")
+        .arg(&attestation)
+        .arg("--output")
+        .arg(&pdf)
+        .output()
+        .unwrap();
+    assert_eq!(Some(0), render.status.code());
+
+    let out = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .env("TMPDIR", tmp.path())
+        .args(["verify-hash", "--report"])
+        .arg(&pdf)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        Some(2),
+        out.status.code(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let left: Vec<_> = fs::read_dir(tmp.path()).unwrap().collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
 /// The command page 5 prints must parse: placeholders swapped for real
 /// values, it reaches a verdict instead of a usage error.
 #[cfg(feature = "pdf")]

@@ -24,6 +24,9 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
   misleading hash failure, and 3 on a `schema_version` that is not a version at all.
 - `--attestation` and `--bundle` now win over the files `verify-hash --url` finds beside the
   report.
+- `verify-hash --url` writes the attestation and bundle it fetches into a private temporary
+  directory removed when the command returns, instead of fixed names in the shared temporary
+  directory left behind. A failed write is an input error (exit 3), no longer a silent PARTIAL.
 - The release binary gains about 3.4 MB for the `pdf` feature, embedded fonts included: 14.4 MB
   to 17.8 MB on macOS arm64.
 
