@@ -577,7 +577,7 @@ public.
 
 ## Rendering a PDF for readers (`disclose-pdf`)
 
-`perf-sentinel disclose-pdf` renders a report as a PDF/A-3b a reader without a terminal can follow: five A4 pages in English with the figures, the uncertainty band, the applications, the method and its disclaimers, and how to verify the document. The report, its attestation and its bundle travel inside the PDF as attachments, byte for byte.
+`perf-sentinel disclose-pdf` renders a report as a PDF/A-3b a reader without a terminal can follow: A4 pages in English, five unless a section runs onto the next page, with the figures, the uncertainty band, the applications, the method and its disclaimers, and how to verify the document. The report, its attestation and its bundle travel inside the PDF as attachments, byte for byte.
 
 ```bash
 perf-sentinel disclose-pdf \
@@ -589,7 +589,7 @@ perf-sentinel disclose-pdf \
     --output report.pdf
 ```
 
-It renders only when the `content_hash` recomputes and, with `--attestation`, when the attestation names that hash, so a rendered PDF stands for those two checks. It never checks the signature: the last page prints the `verify-hash` command, with the identity and issuer passed here, for the reader to run. The document code is the report's `content_hash`, printed in full and grouped by four characters on pages 1 and 5, and shortened in the footer of every page. Add `transparency` to `[notes.reference_urls]` in the org config and the cover draws a QR code to the page where you publish your reports. Without it, no QR code is drawn.
+It renders only when the `content_hash` recomputes and, with `--attestation`, when the attestation names that hash, so a rendered PDF stands for those two checks. It never checks the signature: the last page prints the `verify-hash` command, with the identity and issuer passed here, for the reader to run. The document code is the report's `content_hash`, printed in full and grouped by four characters on the cover and the verify page, and shortened in the footer of every page. Add `transparency` to `[notes.reference_urls]` in the org config and the cover draws a QR code to the page where you publish your reports. Without it, no QR code is drawn.
 
 The command prints one JSON line on stdout and exits with a fixed code, a contract PerfSentinelHub relies on:
 

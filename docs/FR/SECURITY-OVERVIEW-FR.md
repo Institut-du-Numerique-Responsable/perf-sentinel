@@ -109,7 +109,7 @@ Détails : [authentification du Hub](https://github.com/Institut-du-Numerique-Re
 - Sous musl, l'allocateur est `mimalloc`, et la pile TLS (`ring`) contient du C et de l'assembleur.
 - Clippy tourne en mode pedantic avec les avertissements traités comme des erreurs, et CodeQL analyse le code Rust.
 - Le normaliseur SQL, l'ingestion JSON et la lecture des PDF de divulgation ont des cibles de fuzzing dans `fuzz/`. La CI les lance 20 minutes chacune toutes les semaines, et 2 minutes sur les pull requests qui les touchent.
-- `verify-hash --report report.pdf` analyse un PDF non fiable : le fichier passe par une lecture plafonnée à 64 Mio, chaque flux est décodé sous un plafond (64 Mio pour le rapport, 1 Mio pour l'attestation et le bundle), et le parcours de l'arbre de noms est borné en profondeur et en taille.
+- `verify-hash --report report.pdf` analyse un PDF non fiable : un PDF de plus de 4 Mio est refusé avant l'analyse, un fichier qui déclare plus de 32 flux d'objets ou de références croisées aussi, chaque flux est décodé sous un plafond (64 Mio pour le rapport, 1 Mio pour l'attestation et le bundle), et le parcours de l'arbre de noms est borné en profondeur et en taille.
 
 **Limites du moteur.**
 - Les payloads sont plafonnés à 16 Mio, compressés comme décompressés (`max_payload_size`).

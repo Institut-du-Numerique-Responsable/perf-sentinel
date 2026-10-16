@@ -7,7 +7,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 ### Added
 
 - `perf-sentinel disclose-pdf` renders a periodic report as a PDF/A-3b for readers without a
-  terminal: five A4 pages in English (figures, uncertainty band, applications, method and
+  terminal: A4 pages in English, five for most reports (figures, uncertainty band, applications, method and
   disclaimers, how to verify), with the report, its attestation and its bundle attached byte
   for byte. It renders only when the `content_hash` recomputes and the attestation names it,
   prints one JSON line and exits 0 (rendered), 1 (refused), 3 (input error) or 5 (cannot

@@ -109,7 +109,7 @@ Details: [Hub authentication](https://github.com/Institut-du-Numerique-Responsab
 - On musl, the allocator is `mimalloc`, and the TLS stack (`ring`) includes C and assembly.
 - Clippy runs in pedantic mode with warnings as errors, and CodeQL analyzes the Rust code.
 - The SQL normalizer, the JSON ingest and the disclosure PDF reader have fuzzing targets in `fuzz/`. CI runs them for 20 minutes each every week, and for 2 minutes on pull requests that touch them.
-- `verify-hash --report report.pdf` parses an untrusted PDF: the file goes through a 64 MiB capped read, every stream is decoded under a cap (64 MiB for the report, 1 MiB for the attestation and the bundle), and the name tree walk is bounded in depth and size.
+- `verify-hash --report report.pdf` parses an untrusted PDF: a PDF over 4 MiB is refused before parsing, a file declaring more than 32 object or cross-reference streams too, every stream is decoded under a cap (64 MiB for the report, 1 MiB for the attestation and the bundle), and the name tree walk is bounded in depth and size.
 
 **Engine limits.**
 - Payloads are capped at 16 MiB, compressed and decompressed (`max_payload_size`).
