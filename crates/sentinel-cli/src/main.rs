@@ -26,6 +26,8 @@ mod cli;
 mod config_load;
 mod demo;
 mod disclose;
+#[cfg(feature = "pdf")]
+mod disclose_pdf;
 mod hash_bake;
 #[cfg(feature = "daemon")]
 mod hub;
@@ -565,6 +567,25 @@ async fn dispatch_command(command: Commands) {
                 &identity,
             )
             .await;
+            std::process::exit(code);
+        }
+        #[cfg(feature = "pdf")]
+        Commands::DisclosePdf {
+            report,
+            attestation,
+            bundle,
+            expected_identity,
+            expected_issuer,
+            output,
+        } => {
+            let code = disclose_pdf::cmd_disclose_pdf(&disclose_pdf::Args {
+                report: &report,
+                attestation: attestation.as_deref(),
+                bundle: bundle.as_deref(),
+                expected_identity: expected_identity.as_deref(),
+                expected_issuer: expected_issuer.as_deref(),
+                output: &output,
+            });
             std::process::exit(code);
         }
         Commands::HashBake {

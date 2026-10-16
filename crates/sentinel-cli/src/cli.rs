@@ -1023,6 +1023,35 @@ pub(crate) enum Commands {
         #[arg(long)]
         no_identity_check: bool,
     },
+    /// Render a periodic report as a PDF/A-3b carrying its source files.
+    ///
+    /// Recomputes the report's `content_hash` and, with `--attestation`,
+    /// checks that the attestation names it. Renders only when both hold,
+    /// so a rendered PDF stands for those two checks. The report, the
+    /// attestation and the bundle are attached byte for byte. Prints one
+    /// JSON line naming the result and, on failure, a reason.
+    #[cfg(feature = "pdf")]
+    #[command(after_help = help_examples::DISCLOSE_PDF)]
+    DisclosePdf {
+        /// The periodic report to render.
+        #[arg(long, value_name = "PATH")]
+        report: PathBuf,
+        /// The in-toto attestation to check and attach.
+        #[arg(long, value_name = "PATH")]
+        attestation: Option<PathBuf>,
+        /// The Sigstore bundle to attach.
+        #[arg(long, value_name = "PATH")]
+        bundle: Option<PathBuf>,
+        /// Signer identity printed in the verify command of the last page.
+        #[arg(long, value_name = "ID", requires = "expected_issuer")]
+        expected_identity: Option<String>,
+        /// OIDC issuer printed in the verify command of the last page.
+        #[arg(long, value_name = "URL", requires = "expected_identity")]
+        expected_issuer: Option<String>,
+        /// Where to write the PDF. Nothing is written unless it renders.
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+    },
     /// Compute and bake the canonical `content_hash` into a periodic report.
     ///
     /// Reads `--report`, recomputes the canonical SHA-256 `content_hash`
@@ -1324,6 +1353,17 @@ Exit codes:
   3  input error, the report is unreadable or a flag is missing
   4  network error on --url
   5  the report's schema is newer than this engine, upgrade perf-sentinel";
+
+    #[cfg(feature = "pdf")]
+    pub const DISCLOSE_PDF: &str = "Examples:
+  # Render a signed disclosure for readers who will not open the JSON
+  perf-sentinel disclose-pdf --report report.json --attestation attestation.intoto.jsonl --bundle bundle.sig --expected-identity release@example.com --expected-issuer https://accounts.google.com --output report.pdf
+
+Exit codes, with one JSON line on stdout:
+  0  rendered
+  1  refused, the report is not what it claims (content_hash_mismatch, binding_mismatch)
+  3  input error (missing_file, malformed_report, output_unwritable)
+  5  cannot render, though nothing says the report is wrong (unsupported_schema_version, unsupported_characters)";
 
     pub const HASH_BAKE: &str = "Examples:
   # Bake the canonical content hash into a report in place
