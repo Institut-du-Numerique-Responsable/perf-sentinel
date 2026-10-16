@@ -1,8 +1,6 @@
 //! The daemon's cross-trace correlations on their way to the Hub, as
 //! episodes: each period during which a pair kept co-occurring. The daemon
 //! cuts them, since only it knows whether a pair still fires.
-// Wired into the exporter task by a later change.
-#![cfg_attr(not(test), allow(dead_code))]
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -364,9 +362,18 @@ impl CorrelationExport {
         }
     }
 
+    pub(super) fn buffer(&self) -> Arc<CorrelationExportBuffer> {
+        self.buffer.clone()
+    }
+
     /// The earlier of the next reading and the next send.
     pub(super) fn due(&self) -> tokio::time::Instant {
         self.observe_due.min(self.send.due)
+    }
+
+    pub(super) fn start_at(&mut self, at: tokio::time::Instant) {
+        self.observe_due = at;
+        self.send.due = at;
     }
 
     /// Read the correlator when due, then send one batch when due. While
