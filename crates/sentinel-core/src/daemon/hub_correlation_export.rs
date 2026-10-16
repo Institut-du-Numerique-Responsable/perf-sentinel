@@ -6,12 +6,20 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::sync::Arc;
+use std::time::Duration;
 
+use prometheus::{Gauge, IntCounter};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use super::hub_table::Keyed;
-use crate::detect::correlate_cross::{CorrelationEndpoint, CrossTraceCorrelation};
+use super::event_loop::current_time_ms;
+use super::hub_table::{Keyed, LatestTable, Pending, Route, RouteExport, import_route};
+use crate::detect::correlate_cross::{
+    CorrelationEndpoint, CrossTraceCorrelation, CrossTraceCorrelator,
+};
+use crate::http_client;
+use crate::report::metrics::MetricsState;
 use crate::time::parse_iso8601_utc_to_ms;
 
 /// The longest silence an episode's gap can reach, whatever the window.
@@ -19,6 +27,11 @@ const MAX_EPISODE_GAP_MS: u64 = 30 * 60 * 1_000;
 
 /// An open episode is re-sent once its `last_seen` moved this far.
 const REQUEUE_AFTER_MS: u64 = 60_000;
+
+/// Episodes per request.
+pub(super) const MAX_EPISODE_BATCH: usize = 100;
+/// The Hub's cap on a correlation import.
+pub(super) const MAX_EPISODE_BODY_BYTES: usize = 1024 * 1024;
 
 /// How long a pair's `last_seen` may stand still before its episode
 /// closes: the correlator's window, at most 30 minutes.
@@ -278,6 +291,129 @@ impl EpisodeTracker {
         let episode = Episode::open(correlation, key, started_at_ms, last_seen_ms, self.gap_ms);
         track.open = Some(OpenEpisode::new(episode.clone()));
         Some(episode)
+    }
+}
+
+pub(crate) type CorrelationExportBuffer = LatestTable<Episode>;
+
+#[derive(Serialize)]
+struct EpisodePayload<'a> {
+    producer_version: &'static str,
+    episodes: Vec<&'a Episode>,
+}
+
+fn episode_body(pending: &[Pending<Episode>]) -> serde_json::Result<Vec<u8>> {
+    serde_json::to_vec(&EpisodePayload {
+        producer_version: env!("CARGO_PKG_VERSION"),
+        episodes: pending.iter().map(|entry| &*entry.value).collect(),
+    })
+}
+
+fn episodes_pending(metrics: &MetricsState) -> &Gauge {
+    &metrics.hub_export_correlations_pending
+}
+
+fn episodes_dropped(metrics: &MetricsState) -> &IntCounter {
+    &metrics.hub_export_correlations_dropped_total
+}
+
+static CORRELATION_ROUTE: Route<Episode> = Route {
+    max_batch: MAX_EPISODE_BATCH,
+    max_body: MAX_EPISODE_BODY_BYTES,
+    body: episode_body,
+    pending: episodes_pending,
+    dropped: episodes_dropped,
+    rejected: "PerfSentinelHub rejected the correlation batch permanently; dropping it",
+    retrying: "PerfSentinelHub correlation export failed; retaining the batch",
+    missing: "PerfSentinelHub has no correlation import route; correlations are not pushed until restart, findings and incidents are",
+};
+
+/// The correlation import beside the configured findings import.
+pub(super) fn correlations_endpoint(findings_endpoint: &str) -> String {
+    import_route(findings_endpoint, "/api/import/correlations")
+}
+
+/// The exporter task's correlation half: it reads the correlator, cuts
+/// episodes, and sends them on its own route.
+pub(crate) struct CorrelationExport {
+    correlator: Arc<tokio::sync::Mutex<CrossTraceCorrelator>>,
+    tracker: EpisodeTracker,
+    buffer: Arc<CorrelationExportBuffer>,
+    send: RouteExport<Episode>,
+    /// When the correlator is next read. Its own clock, so a send backoff
+    /// does not blur when episodes start and end.
+    observe_due: tokio::time::Instant,
+    /// Set once shutdown closed every episode, so they are closed once.
+    closed: bool,
+}
+
+impl CorrelationExport {
+    pub(crate) fn new(
+        correlator: Arc<tokio::sync::Mutex<CrossTraceCorrelator>>,
+        window_ms: u64,
+        buffer: Arc<CorrelationExportBuffer>,
+        uri: http_client::Uri,
+    ) -> Self {
+        Self {
+            correlator,
+            tracker: EpisodeTracker::new(window_ms),
+            send: RouteExport::with_route(&CORRELATION_ROUTE, buffer.clone(), uri),
+            buffer,
+            observe_due: tokio::time::Instant::now(),
+            closed: false,
+        }
+    }
+
+    /// The earlier of the next reading and the next send.
+    pub(super) fn due(&self) -> tokio::time::Instant {
+        self.observe_due.min(self.send.due)
+    }
+
+    /// Read the correlator when due, then send one batch when due. While
+    /// draining, both happen every call, and the first one closes every
+    /// open episode. True when a batch went out.
+    pub(crate) async fn round(
+        &mut self,
+        client: &http_client::HttpClientWithBody,
+        api_key: &str,
+        metrics: &MetricsState,
+        flush_interval: Duration,
+        draining: bool,
+    ) -> bool {
+        let now = tokio::time::Instant::now();
+        if draining || self.observe_due <= now {
+            self.observe(metrics, draining).await;
+            self.observe_due = now + flush_interval;
+        }
+        if draining || self.send.due <= now {
+            return self
+                .send
+                .round(client, api_key, metrics, flush_interval)
+                .await;
+        }
+        false
+    }
+
+    async fn observe(&mut self, metrics: &MetricsState, draining: bool) {
+        if self.closed || self.buffer.is_unsupported() {
+            return;
+        }
+        let snapshot = self.correlator.lock().await.active_correlations();
+        let mut episodes = self.tracker.observe(&snapshot, current_time_ms());
+        if draining {
+            episodes.extend(self.tracker.close_all());
+            self.closed = true;
+        }
+        let evicted: u64 = episodes
+            .iter()
+            .map(|episode| self.buffer.push(episode))
+            .sum();
+        metrics
+            .hub_export_correlations_dropped_total
+            .inc_by(evicted);
+        metrics
+            .hub_export_correlations_pending
+            .set(self.buffer.len() as f64);
     }
 }
 

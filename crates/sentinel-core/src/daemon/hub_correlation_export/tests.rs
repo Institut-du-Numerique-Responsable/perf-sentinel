@@ -1,5 +1,9 @@
+use std::time::Duration;
+
 use super::*;
-use crate::detect::FindingType;
+use crate::daemon::hub_incident_export::tests::fake_hub;
+use crate::detect::correlate_cross::CorrelationConfig;
+use crate::detect::{FindingType, Severity};
 
 const T0: u64 = 1_800_000_000_000;
 const WINDOW: u64 = 600_000;
@@ -319,4 +323,221 @@ fn shutdown_closes_open_episodes_at_their_latest_last_seen() {
     assert_eq!(T0 + 10_000, closed[0].last_seen_ms);
     assert_eq!(Some(T0 + 10_000), closed[0].ended_at_ms);
     assert_eq!(0, tracker.close_all().len());
+}
+
+/// A correlator that reports nothing.
+pub(crate) fn empty_correlator() -> Arc<tokio::sync::Mutex<CrossTraceCorrelator>> {
+    Arc::new(tokio::sync::Mutex::new(CrossTraceCorrelator::new(
+        CorrelationConfig {
+            enabled: true,
+            ..CorrelationConfig::default()
+        },
+    )))
+}
+
+/// Feed `svc-a` then `svc-b` one second apart, analysed at `now_ms`.
+pub(crate) async fn co_occur(correlator: &tokio::sync::Mutex<CrossTraceCorrelator>, now_ms: u64) {
+    let finding = |service: &str, at_ms: u64| {
+        let mut finding =
+            crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning);
+        finding.service = service.to_string();
+        finding.first_timestamp = crate::time::millis_to_iso8601(at_ms);
+        finding
+    };
+    let mut correlator = correlator.lock().await;
+    let _ = correlator.ingest(&[finding("svc-a", now_ms)], now_ms);
+    let _ = correlator.ingest(&[finding("svc-b", now_ms + 1_000)], now_ms);
+}
+
+/// A correlator reporting one pair, `svc-a` then `svc-b`, active now.
+pub(crate) async fn correlator_with_one_pair() -> Arc<tokio::sync::Mutex<CrossTraceCorrelator>> {
+    let correlator = Arc::new(tokio::sync::Mutex::new(CrossTraceCorrelator::new(
+        CorrelationConfig {
+            enabled: true,
+            min_co_occurrences: 1,
+            min_confidence: 0.0,
+            ..CorrelationConfig::default()
+        },
+    )));
+    co_occur(&correlator, current_time_ms()).await;
+    correlator
+}
+
+fn export(
+    base: &str,
+    correlator: &Arc<tokio::sync::Mutex<CrossTraceCorrelator>>,
+    buffer: &Arc<CorrelationExportBuffer>,
+) -> CorrelationExport {
+    CorrelationExport::new(
+        correlator.clone(),
+        WINDOW,
+        buffer.clone(),
+        format!("{base}/api/import/correlations?source_id=lab")
+            .parse()
+            .expect("uri"),
+    )
+}
+
+fn open_last_seen(export: &CorrelationExport) -> Option<u64> {
+    export
+        .tracker
+        .pairs
+        .values()
+        .find_map(|track| track.open.as_ref())
+        .map(|open| open.episode.last_seen_ms)
+}
+
+#[test]
+fn the_correlations_route_sits_beside_the_findings_one() {
+    assert_eq!(
+        "https://hub.example.com/api/import/correlations",
+        correlations_endpoint("https://hub.example.com/api/import/findings")
+    );
+}
+
+#[test]
+fn a_late_acknowledgement_keeps_the_closing_copy() {
+    let buffer = CorrelationExportBuffer::new(10);
+    let open = episode("a");
+    buffer.push(&open);
+    let in_flight = buffer.snapshot(10);
+    let mut closed = open.clone();
+    closed.ended_at_ms = Some(closed.last_seen_ms);
+    buffer.push(&closed);
+
+    buffer.acknowledge(&in_flight);
+
+    let batch = buffer.snapshot(10);
+    assert_eq!(1, batch.len(), "the close is still to be sent");
+    assert_eq!(Some(open.last_seen_ms), batch[0].value.ended_at_ms);
+}
+
+#[tokio::test]
+async fn a_round_posts_the_open_episode_to_the_correlations_route() {
+    let (base, seen) = fake_hub(200).await;
+    let correlator = correlator_with_one_pair().await;
+    let buffer = Arc::new(CorrelationExportBuffer::new(10));
+    let metrics = MetricsState::new();
+    let client = http_client::build_client_with_body();
+
+    let sent = export(&base, &correlator, &buffer)
+        .round(
+            &client,
+            &"k".repeat(32),
+            &metrics,
+            Duration::from_secs(5),
+            false,
+        )
+        .await;
+
+    assert!(sent);
+    assert_eq!(0, buffer.len());
+    let requests = seen.lock().expect("lock");
+    let (uri, key, body) = &requests[0];
+    assert_eq!("/api/import/correlations?source_id=lab", uri);
+    assert_eq!(Some("k".repeat(32)), *key);
+    let body: serde_json::Value = serde_json::from_slice(body).expect("json");
+    assert_eq!(env!("CARGO_PKG_VERSION"), body["producer_version"]);
+    let episode = &body["episodes"][0];
+    assert_eq!("svc-a", episode["source"]["service"]);
+    assert_eq!("svc-b", episode["target"]["service"]);
+    assert_eq!(32, episode["pair_key"].as_str().expect("pair key").len());
+    assert!(episode["ended_at_ms"].is_null());
+    assert_eq!(GAP, episode["gap_ms"]);
+}
+
+#[tokio::test]
+async fn an_episode_over_the_cap_alone_is_dropped_and_counted() {
+    let (base, seen) = fake_hub(200).await;
+    let buffer = Arc::new(CorrelationExportBuffer::new(10));
+    let mut big = episode("a");
+    big.source.template = "x".repeat(MAX_EPISODE_BODY_BYTES);
+    buffer.push(&big);
+    let metrics = MetricsState::new();
+    let client = http_client::build_client_with_body();
+
+    export(&base, &empty_correlator(), &buffer)
+        .round(
+            &client,
+            &"k".repeat(32),
+            &metrics,
+            Duration::from_secs(5),
+            false,
+        )
+        .await;
+
+    assert_eq!(0, buffer.len());
+    assert_eq!(1, metrics.hub_export_correlations_dropped_total.get());
+    assert!(seen.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn a_hub_without_the_route_stops_correlation_export_for_good() {
+    let (base, seen) = fake_hub(404).await;
+    let correlator = correlator_with_one_pair().await;
+    let buffer = Arc::new(CorrelationExportBuffer::new(10));
+    buffer.push(&episode("a"));
+    let metrics = MetricsState::new();
+    let client = http_client::build_client_with_body();
+    let mut export = export(&base, &correlator, &buffer);
+
+    // The reading queues the live pair beside "a", then the 404 drops both.
+    assert!(
+        !export
+            .round(&client, &"k".repeat(32), &metrics, Duration::ZERO, false)
+            .await
+    );
+    co_occur(&correlator, current_time_ms() + 1_000).await;
+    assert!(
+        !export
+            .round(&client, &"k".repeat(32), &metrics, Duration::ZERO, false)
+            .await
+    );
+
+    assert!(buffer.is_unsupported());
+    assert_eq!(0, buffer.len());
+    assert_eq!(2, metrics.hub_export_correlations_dropped_total.get());
+    assert!(metrics.hub_export_correlations_pending.get().abs() < f64::EPSILON);
+    assert_eq!(
+        1,
+        seen.lock().expect("lock").len(),
+        "one probe, then silence"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_route_keeps_reading_the_correlator_on_its_own_clock() {
+    let (base, seen) = fake_hub(500).await;
+    let correlator = correlator_with_one_pair().await;
+    let buffer = Arc::new(CorrelationExportBuffer::new(10));
+    let metrics = MetricsState::new();
+    let client = http_client::build_client_with_body();
+    let flush = Duration::from_millis(50);
+    let mut export = export(&base, &correlator, &buffer);
+
+    assert!(
+        export
+            .round(&client, &"k".repeat(32), &metrics, flush, false)
+            .await
+    );
+    assert!(
+        export.due() < export.send.due,
+        "the send backs off, the reading does not"
+    );
+    let before = open_last_seen(&export).expect("an open episode");
+
+    tokio::time::sleep_until(export.due()).await;
+    co_occur(&correlator, current_time_ms() + 1_000).await;
+    assert!(
+        !export
+            .round(&client, &"k".repeat(32), &metrics, flush, false)
+            .await
+    );
+
+    assert!(open_last_seen(&export).expect("still open") > before);
+    assert_eq!(
+        1,
+        seen.lock().expect("lock").len(),
+        "no send before the backoff ends"
+    );
 }

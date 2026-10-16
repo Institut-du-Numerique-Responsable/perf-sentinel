@@ -98,6 +98,17 @@ pub(crate) mod tests {
     /// A Hub that answers the findings import with `findings` and every
     /// other path, the incident import included, with `incidents`.
     pub(crate) async fn fake_hub_routes(findings: u16, incidents: u16) -> (String, Seen) {
+        fake_hub_paths(findings, incidents, incidents).await
+    }
+
+    /// A Hub that answers the findings import with `findings`, the
+    /// correlation import with `correlations`, and every other path, the
+    /// incident import included, with `incidents`.
+    pub(crate) async fn fake_hub_paths(
+        findings: u16,
+        incidents: u16,
+        correlations: u16,
+    ) -> (String, Seen) {
         let seen: Seen = Arc::new(Mutex::new(Vec::new()));
         let store = seen.clone();
         let app = axum::Router::new().fallback(
@@ -108,10 +119,10 @@ pub(crate) mod tests {
                         .get("x-api-key")
                         .and_then(|value| value.to_str().ok())
                         .map(str::to_string);
-                    let status = if uri.path() == "/api/import/findings" {
-                        findings
-                    } else {
-                        incidents
+                    let status = match uri.path() {
+                        "/api/import/findings" => findings,
+                        "/api/import/correlations" => correlations,
+                        _ => incidents,
                     };
                     store
                         .lock()
