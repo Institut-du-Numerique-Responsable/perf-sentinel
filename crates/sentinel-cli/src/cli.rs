@@ -1010,7 +1010,8 @@ pub(crate) enum Commands {
         #[arg(long, value_name = "PATH", conflicts_with = "url")]
         report: Option<PathBuf>,
         /// HTTPS URL of a published report. perf-sentinel will also
-        /// fetch the sidecar attestation and bundle at the same prefix.
+        /// fetch the sidecar attestation and bundle at the same prefix,
+        /// unless the URL serves a disclosure PDF, which attaches both.
         #[arg(long, value_name = "URL", conflicts_with = "report")]
         url: Option<String>,
         /// Local in-toto v1 attestation file. When omitted in

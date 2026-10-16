@@ -251,19 +251,32 @@ fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
         }
     };
     let display = path.display().to_string();
-    let from_pdf = bytes.starts_with(b"%PDF-");
-    let (bytes, fetched) = if from_pdf {
-        unpack_pdf(&bytes, &display)?
-    } else {
-        (bytes, FetchedPaths::NONE)
-    };
+    if bytes.starts_with(PDF_MAGIC) {
+        return load_pdf(&bytes, display);
+    }
+    let report = parse_gated(&bytes, &display)?;
+    Ok(LoadedReport {
+        report,
+        bytes,
+        display,
+        fetched: FetchedPaths::NONE,
+        from_pdf: false,
+    })
+}
+
+const PDF_MAGIC: &[u8] = b"%PDF-";
+
+/// A disclosure PDF attaches its report, attestation and bundle, so
+/// nothing else is read next to it.
+fn load_pdf(pdf: &[u8], display: String) -> Result<LoadedReport, i32> {
+    let (bytes, fetched) = unpack_pdf(pdf, &display)?;
     let report = parse_gated(&bytes, &display)?;
     Ok(LoadedReport {
         report,
         bytes,
         display,
         fetched,
-        from_pdf,
+        from_pdf: true,
     })
 }
 
@@ -318,23 +331,35 @@ fn parse_gated(bytes: &[u8], source: &str) -> Result<PeriodicReport, i32> {
 }
 
 async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
-    let bytes = http_get(url).await.map_err(|e| {
+    load_remote(url, |u| async move { http_get(&u).await }).await
+}
+
+/// `get` stands in for the HTTP client, so tests can serve the bytes.
+async fn load_remote<F, Fut>(url: &str, get: F) -> Result<LoadedReport, i32>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, String>>,
+{
+    let bytes = get(url.to_string()).await.map_err(|e| {
         eprintln!("Error: fetch {url}: {e}");
         EXIT_NETWORK_ERROR
     })?;
+    if bytes.starts_with(PDF_MAGIC) {
+        return load_pdf(&bytes, url.to_string());
+    }
     let report = parse_gated(&bytes, url)?;
     let attestation_url = derive_sidecar_url(url, "attestation.intoto.jsonl");
     let bundle_url = derive_sidecar_url(url, "bundle.sig");
     let mut attestation = None;
     if let Some(a_url) = attestation_url {
-        match http_get(&a_url).await {
+        match get(a_url).await {
             Ok(data) => attestation = Some(data),
             Err(e) => eprintln!("Note: could not fetch attestation sidecar: {e}"),
         }
     }
     let mut bundle = None;
     if let Some(b_url) = bundle_url {
-        match http_get(&b_url).await {
+        match get(b_url).await {
             Ok(data) => bundle = Some(data),
             Err(e) => eprintln!("Note: could not fetch signature bundle: {e}"),
         }
@@ -1418,5 +1443,44 @@ mod tests {
         assert!(is_safe_cosign_argument(
             "https://token.actions.githubusercontent.com"
         ));
+    }
+
+    /// A disclosure PDF served at a URL carries its own attestation and
+    /// bundle, so no sidecar is fetched next to it.
+    #[cfg(feature = "pdf")]
+    #[tokio::test]
+    async fn a_url_serving_a_pdf_reads_the_report_it_attaches() {
+        use sentinel_core::report::periodic::pdf::{PdfInputs, render_disclosure_pdf};
+        use std::sync::Mutex;
+
+        let mut report: PeriodicReport =
+            serde_json::from_slice(&std::fs::read(example_g2()).unwrap()).unwrap();
+        report.integrity.content_hash = compute_content_hash(&report).unwrap();
+        let report_bytes = serde_json::to_vec(&report).unwrap();
+        let pdf = render_disclosure_pdf(&PdfInputs {
+            report_bytes: &report_bytes,
+            attestation: None,
+            bundle: None,
+            expected_identity: None,
+            expected_issuer: None,
+        })
+        .unwrap();
+        let url = "https://example.fr/disclosure/report.pdf";
+        let asked = Mutex::new(Vec::new());
+        let loaded = load_remote(url, |u| {
+            asked.lock().unwrap().push(u.clone());
+            let body = (u == url).then(|| pdf.clone());
+            async move { body.ok_or_else(|| "http status 404".to_string()) }
+        })
+        .await
+        .unwrap_or_else(|code| panic!("exit {code}"));
+
+        assert!(loaded.from_pdf);
+        assert_eq!(report_bytes, loaded.bytes);
+        assert_eq!(
+            report.integrity.content_hash,
+            loaded.report.integrity.content_hash
+        );
+        assert_eq!(vec![url.to_string()], *asked.lock().unwrap());
     }
 }
