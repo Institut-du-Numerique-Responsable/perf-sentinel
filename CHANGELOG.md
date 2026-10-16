@@ -4,6 +4,28 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- `perf-sentinel disclose-pdf` renders a periodic report as a PDF/A-3b for readers without a
+  terminal: five A4 pages in English (figures, uncertainty band, applications, method and
+  disclaimers, how to verify), with the report, its attestation and its bundle attached byte
+  for byte. It renders only when the `content_hash` recomputes and the attestation names it,
+  prints one JSON line and exits 0 (rendered), 1 (refused), 3 (input error) or 5 (cannot
+  render: a newer schema, or text outside the bundled fonts). A `transparency` entry in
+  `[notes.reference_urls]` puts a QR code on the cover. veraPDF validates the output in CI.
+- `verify-hash --report report.pdf` verifies the report a disclosure PDF attaches, a copy a
+  viewer saved again included, and says it checked that report and not the printed pages.
+  `--format json` adds `verified_from: "pdf_attachment"`.
+
+### Changed
+
+- `verify-hash` exits 5 on a report whose schema is newer than the binary, instead of a
+  misleading hash failure.
+- `--attestation` and `--bundle` now win over the files `verify-hash --url` finds beside the
+  report.
+- The release binary gains about 3.4 MB for the `pdf` feature, embedded fonts included: 14.4 MB
+  to 17.8 MB on macOS arm64.
+
 ## [0.29.0] - 2026-10-15
 
 This release bumps the minor rather than the patch: `sentinel_core::daemon::query_api::QueryApiState` gains a crate-private field and is not `#[non_exhaustive]`, so code that builds it with a literal stops compiling. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The theme is the Hub's long memory: a daemon that exports findings to PerfSentinelHub now exports its incidents as well, so the Hub keeps one even when the daemon's ring evicts it between two polls. Upgrade the Hub to 0.5.0 before the daemons.

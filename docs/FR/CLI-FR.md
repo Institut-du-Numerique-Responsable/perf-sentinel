@@ -417,8 +417,8 @@ liste complète des options de `analyze`, `watch`, `query`, `report`,
 `demo`, `bench` et `calibrate`. Les commandes elles-mêmes sont
 stables. Leur documentation en prose est complétée au fur et à mesure.
 
-Le trio chaîne d'approvisionnement dispose d'une documentation
-dédiée ailleurs : `disclose`, `verify-hash` et `hash-bake` sont
+Les commandes de chaîne d'approvisionnement disposent d'une documentation
+dédiée ailleurs : `disclose`, `disclose-pdf`, `verify-hash` et `hash-bake` sont
 couverts dans [`REPORTING-FR.md`](./REPORTING-FR.md), avec le
 contexte signature et provenance dans
 [`SUPPLY-CHAIN-FR.md`](./SUPPLY-CHAIN-FR.md). La complétion shell et

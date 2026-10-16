@@ -106,3 +106,5 @@ disclaimers = []
 methodology = "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/METHODOLOGY.md"
 project = "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel"
 schema = "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/schemas/perf-sentinel-report-v1.json"
+# The page where you publish your reports: disclose-pdf draws a QR code to it.
+# transparency = "https://example.fr/transparency"
