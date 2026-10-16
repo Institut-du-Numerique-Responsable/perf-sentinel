@@ -123,6 +123,8 @@ pub fn render_disclosure_pdf(inputs: &PdfInputs<'_>) -> Result<Vec<u8>, RenderEr
     let (report, binding) = checked_report(inputs)?;
     let context = PageContext {
         report: &report,
+        // checked_report already parsed these bytes, so this cannot fail.
+        source: serde_json::from_slice(inputs.report_bytes).unwrap_or_default(),
         attachments: attachment_digests(inputs),
         binding,
         expected_identity: inputs.expected_identity,

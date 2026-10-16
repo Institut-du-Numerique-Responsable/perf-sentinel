@@ -242,7 +242,7 @@ mod layout_and_pages {
     use super::super::{PAGE_HEIGHT, PAGE_WIDTH};
     use super::*;
     use crate::report::periodic::Application;
-    use crate::report::periodic::schema::PeriodType;
+    use crate::report::periodic::schema::{PeriodType, SCHEMA_VERSION};
 
     fn rebaked(mut report: PeriodicReport) -> (PeriodicReport, Vec<u8>) {
         report.integrity.content_hash = compute_content_hash(&report).expect("hash");
@@ -587,6 +587,46 @@ mod layout_and_pages {
                 "{path} is cut"
             );
         }
+    }
+
+    #[test]
+    fn the_annex_reads_the_attached_report_not_its_typed_defaults() {
+        let (report, _) = baked_report();
+        let mut context = PageContext::for_report(&report);
+        let mut source = serde_json::to_value(&report).expect("value");
+        let calibration = source["methodology"]["calibration_inputs"]
+            .as_object_mut()
+            .expect("calibration");
+        calibration.remove("scaphandre_used");
+        source["aggregate"]
+            .as_object_mut()
+            .expect("aggregate")
+            .remove("period_coverage");
+        context.source = source;
+        let all = texts(&layout_pages(&context)).join(" ");
+        assert!(
+            all.contains("methodology.calibration_inputs.scaphandre_used not reported"),
+            "{all}"
+        );
+        assert!(
+            all.contains("aggregate.period_coverage not reported"),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn the_annex_names_the_schema_it_lists_whatever_the_report_version() {
+        let (mut report, _) = baked_report();
+        report.schema_version = "perf-sentinel-report/v1.2".to_string();
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            all.contains(&format!("the {SCHEMA_VERSION} schema defines")),
+            "{all}"
+        );
+        assert!(
+            !all.contains("in the order of the attached report.json"),
+            "{all}"
+        );
     }
 
     #[test]

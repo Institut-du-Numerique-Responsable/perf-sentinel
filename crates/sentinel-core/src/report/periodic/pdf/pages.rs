@@ -11,7 +11,7 @@ use super::annex;
 use super::layout::{Face, fit, group4, text_width, wrap};
 use super::{PAGE_HEIGHT, PAGE_WIDTH};
 use crate::report::periodic::schema::{
-    CarbonBreakdown, IntegrityLevel, Period, PeriodType, ReportIntent, WasteTier,
+    CarbonBreakdown, IntegrityLevel, Period, PeriodType, ReportIntent, SCHEMA_VERSION, WasteTier,
 };
 use crate::report::periodic::{Application, AttestationBinding, Confidentiality, PeriodicReport};
 
@@ -115,6 +115,9 @@ pub(crate) enum Op {
 /// What the pages say besides the report itself.
 pub(crate) struct PageContext<'a> {
     pub(crate) report: &'a PeriodicReport,
+    /// The attached report.json as written, which the annex prints: the
+    /// typed report fills in defaults for the fields it does not carry.
+    pub(crate) source: serde_json::Value,
     /// Each attached file's name, SHA-256 in hex and size in bytes.
     pub(crate) attachments: Vec<(&'static str, String, usize)>,
     /// `None` when no attestation is attached.
@@ -128,6 +131,7 @@ impl<'a> PageContext<'a> {
     pub(crate) fn for_report(report: &'a PeriodicReport) -> Self {
         Self {
             report,
+            source: serde_json::to_value(report).expect("a report serialises"),
             attachments: Vec::new(),
             binding: None,
             expected_identity: None,
@@ -160,8 +164,25 @@ fn lay_out(context: &PageContext<'_>, verify_page: usize) -> (Vec<Vec<Op>>, usiz
     let actual = writer.pages.len();
     verify(&mut writer, context);
     writer.new_page();
-    annex_pages(&mut writer, context.report);
+    annex_pages(&mut writer, context);
     (writer.finish(context.report), actual)
+}
+
+/// How `Writer::columns` splits a line: where the value column starts, the
+/// text size, the space under the row and the least room it takes.
+struct Columns {
+    split: f32,
+    size: f32,
+    gap: f32,
+    min_height: f32,
+}
+
+/// One cell of `Writer::columns`.
+#[derive(Clone, Copy)]
+struct Cell<'a> {
+    text: &'a str,
+    face: Face,
+    color: Rgb,
 }
 
 struct Writer {
@@ -312,22 +333,59 @@ impl Writer {
 
     /// A label in the left column and its value wrapped in the right one.
     fn row(&mut self, label: &str, value: &str, value_face: Face) {
-        let label_height = block_height(label, Face::Regular, 8.5, LABEL_WIDTH - 8.0);
-        let value_height = block_height(value, value_face, 8.5, CONTENT_WIDTH - LABEL_WIDTH);
-        self.ensure((label_height.max(value_height) + 1.5).max(16.0));
+        self.columns(
+            &Columns {
+                split: LABEL_WIDTH,
+                size: 8.5,
+                gap: 1.5,
+                min_height: 16.0,
+            },
+            Cell {
+                text: label,
+                face: Face::Regular,
+                color: TEXT_2,
+            },
+            Cell {
+                text: value,
+                face: value_face,
+                color: TEXT,
+            },
+        );
+    }
+
+    /// Two cells side by side, kept on one page when they fit on one.
+    fn columns(&mut self, layout: &Columns, label: Cell<'_>, value: Cell<'_>) {
+        let label_width = layout.split - 8.0;
+        let value_width = CONTENT_WIDTH - layout.split;
+        let label_height = block_height(label.text, label.face, layout.size, label_width);
+        let value_height = block_height(value.text, value.face, layout.size, value_width);
+        self.ensure((label_height.max(value_height) + layout.gap).max(layout.min_height));
         let top = self.y;
-        self.block(MARGIN, LABEL_WIDTH - 8.0, Face::Regular, 8.5, TEXT_2, label);
+        self.block(
+            MARGIN,
+            label_width,
+            label.face,
+            layout.size,
+            label.color,
+            label.text,
+        );
         let label_bottom = self.y;
+        let page = self.pages.len();
         self.y = top;
         self.block(
-            MARGIN + LABEL_WIDTH,
-            CONTENT_WIDTH - LABEL_WIDTH,
-            value_face,
-            8.5,
-            TEXT,
-            value,
+            MARGIN + layout.split,
+            value_width,
+            value.face,
+            layout.size,
+            value.color,
+            value.text,
         );
-        self.y = self.y.max(label_bottom) + 1.5;
+        // A value taller than the page broke onto the next one, where the
+        // label's bottom means nothing.
+        if self.pages.len() == page {
+            self.y = self.y.max(label_bottom);
+        }
+        self.y += layout.gap;
     }
 
     /// A coloured box holding a bold title and a paragraph.
@@ -2046,58 +2104,44 @@ fn command_lines(line: &str, width: f32) -> Vec<(String, f32)> {
 
 // ---------------------------------------------------------------- annex
 
-/// Every field the schema defines, as the report carries it, so what it
-/// leaves out shows instead of disappearing.
-fn annex_pages(w: &mut Writer, report: &PeriodicReport) {
+/// Every field the schema defines, as the attached report carries it, so
+/// what it leaves out shows instead of disappearing.
+fn annex_pages(w: &mut Writer, context: &PageContext<'_>) {
     w.section("Annex");
     w.title("Every field of the report, as it carries it");
     w.para(
         9.0,
         TEXT_2,
         &format!(
-            "Each field the {} schema defines, in the order of the attached report.json. \"{}\" means the report does not carry the field, or carries it empty. This annex prints the attached report and checks nothing: the proof is still that report, checked as the verify page shows.",
-            report.schema_version,
+            "Each field the {SCHEMA_VERSION} schema defines, in the order it defines them, as the attached report.json carries it. A report written against an earlier version lacks the fields added since. \"{}\" means the report does not carry the field, or carries it empty. This annex prints the attached report and checks nothing: the proof is still that report, checked as the verify page shows.",
             annex::ABSENT
         ),
     );
-    let Ok(json) = serde_json::to_value(report) else {
-        w.para(9.0, TEXT, NOT_REPORTED);
-        return;
-    };
-    for (section, rows) in annex::rows(&json) {
+    for (section, rows) in annex::rows(&context.source) {
         w.heading(&section);
         for row in &rows {
-            annex_row(w, row);
+            let (value, color) = row
+                .value
+                .as_deref()
+                .map_or((annex::ABSENT, WARN_FG), |value| (value, TEXT));
+            w.columns(
+                &Columns {
+                    split: ANNEX_LABEL,
+                    size: 7.0,
+                    gap: 1.0,
+                    min_height: 0.0,
+                },
+                Cell {
+                    text: &row.path,
+                    face: Face::Mono,
+                    color: TEXT_2,
+                },
+                Cell {
+                    text: value,
+                    face: Face::Mono,
+                    color,
+                },
+            );
         }
     }
-}
-
-fn annex_row(w: &mut Writer, row: &annex::Row) {
-    let (value, color) = row
-        .value
-        .as_deref()
-        .map_or((annex::ABSENT, WARN_FG), |value| (value, TEXT));
-    let label_height = block_height(&row.path, Face::Mono, 7.0, ANNEX_LABEL - 8.0);
-    let value_height = block_height(value, Face::Mono, 7.0, CONTENT_WIDTH - ANNEX_LABEL);
-    w.ensure(label_height.max(value_height) + 1.0);
-    let top = w.y;
-    w.block(
-        MARGIN,
-        ANNEX_LABEL - 8.0,
-        Face::Mono,
-        7.0,
-        TEXT_2,
-        &row.path,
-    );
-    let label_bottom = w.y;
-    w.y = top;
-    w.block(
-        MARGIN + ANNEX_LABEL,
-        CONTENT_WIDTH - ANNEX_LABEL,
-        Face::Mono,
-        7.0,
-        color,
-        value,
-    );
-    w.y = w.y.max(label_bottom) + 1.0;
 }
