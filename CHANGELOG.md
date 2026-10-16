@@ -11,16 +11,17 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
   disclaimers, how to verify), with the report, its attestation and its bundle attached byte
   for byte. It renders only when the `content_hash` recomputes and the attestation names it,
   prints one JSON line and exits 0 (rendered), 1 (refused), 3 (input error) or 5 (cannot
-  render: a newer schema, or text outside the bundled fonts). A `transparency` entry in
+  render: a newer schema, text outside the bundled fonts, or a document the PDF writer refuses). A `transparency` entry in
   `[notes.reference_urls]` puts a QR code on the cover. veraPDF validates the output in CI.
-- `verify-hash --report report.pdf` verifies the report a disclosure PDF attaches, a copy a
-  viewer saved again included, and says it checked that report and not the printed pages.
+- `verify-hash --report report.pdf` verifies the report a disclosure PDF attaches, a copy
+  re-saved by a tool that keeps attachments included, and says it checked that report and not
+  the printed pages. PDFs over 4 MiB are refused before parsing.
   `--format json` adds `verified_from: "pdf_attachment"`.
 
 ### Changed
 
 - `verify-hash` exits 5 on a report whose schema is newer than the binary, instead of a
-  misleading hash failure.
+  misleading hash failure, and 3 on a `schema_version` that is not a version at all.
 - `--attestation` and `--bundle` now win over the files `verify-hash --url` finds beside the
   report.
 - The release binary gains about 3.4 MB for the `pdf` feature, embedded fonts included: 14.4 MB

@@ -609,18 +609,18 @@ perf-sentinel disclose-pdf \
     --output report.pdf
 ```
 
-Il ne rend que si le `content_hash` se recalcule et, avec `--attestation`, si l'attestation nomme ce hash : un PDF rendu vaut donc ces deux contrôles. Il ne vérifie jamais la signature : la dernière page imprime la commande `verify-hash`, avec l'identité et l'émetteur passés ici, que le lecteur lance lui-même. Le code du document imprimé sur chaque page est le `content_hash` du rapport, groupé par quatre caractères. Ajoutez `transparency` à `[notes.reference_urls]` dans l'org config et la couverture dessine un QR code vers la page où vous publiez vos rapports. Sans cette clé, aucun QR code n'est dessiné.
+Il ne rend que si le `content_hash` se recalcule et, avec `--attestation`, si l'attestation nomme ce hash : un PDF rendu vaut donc ces deux contrôles. Il ne vérifie jamais la signature : la dernière page imprime la commande `verify-hash`, avec l'identité et l'émetteur passés ici, que le lecteur lance lui-même. Le code du document est le `content_hash` du rapport, imprimé en entier et groupé par quatre caractères en pages 1 et 5, et abrégé dans le pied de chaque page. Ajoutez `transparency` à `[notes.reference_urls]` dans l'org config et la couverture dessine un QR code vers la page où vous publiez vos rapports. Sans cette clé, aucun QR code n'est dessiné.
 
 La commande imprime une ligne JSON sur stdout et sort avec un code fixe, un contrat sur lequel s'appuie PerfSentinelHub :
 
-| Sortie | `result`       | `reason`                                                 |
-|--------|----------------|----------------------------------------------------------|
-| 0      | `rendered`     | aucune                                                   |
-| 1      | `refused`      | `content_hash_mismatch`, `binding_mismatch`              |
-| 3      | `input_error`  | `missing_file`, `malformed_report`, `output_unwritable`  |
-| 5      | `unrenderable` | `unsupported_schema_version`, `unsupported_characters`   |
+| Sortie | `result`       | `reason`                                                                    |
+|--------|----------------|-----------------------------------------------------------------------------|
+| 0      | `rendered`     | aucune                                                                      |
+| 1      | `refused`      | `content_hash_mismatch`, `binding_mismatch`                                 |
+| 3      | `input_error`  | `missing_file`, `malformed_report`, `output_unwritable`                     |
+| 5      | `unrenderable` | `unsupported_schema_version`, `unsupported_characters`, `pdf_export_failed` |
 
-La sortie 5 signifie que rien ne dit que le rapport est faux, le moteur ne sait simplement pas le dessiner : un schéma plus récent que ce binaire, ou du texte hors des polices embarquées DM Sans et JetBrains Mono (écritures latines, sans emoji), listé sur stderr. Les caractères ne sont jamais remplacés sur un document officiel.
+La sortie 5 signifie que rien ne dit que le rapport est faux, le moteur ne sait simplement pas le dessiner : un schéma plus récent que ce binaire, du texte hors des polices embarquées DM Sans et JetBrains Mono (écritures latines, sans emoji) listé sur stderr, ou un document que l'écriture PDF refuse. Les retours à la ligne et tabulations des chaînes du rapport sont dessinés comme des espaces. Les caractères ne sont jamais remplacés sur un document officiel.
 
 La commande demande la feature Cargo `pdf`, active dans le binaire publié et dans l'image.
 
@@ -692,7 +692,7 @@ provenance soit contrôlée et que le code `0` le reflète.
 
 ### Vérifier un PDF
 
-`verify-hash --report report.pdf` lit le rapport, l'attestation et le bundle dans le PDF et lance les mêmes contrôles : un destinataire qui n'a que le PDF peut le vérifier. Une copie qu'une visionneuse ou une gestion documentaire a réenregistrée se vérifie encore, car la lecture suit la structure du PDF et non la mise en page écrite par le rendu. Le contrôle porte sur le rapport joint, pas sur les pages imprimées : `verify-hash` le dit, et le lecteur compare les chiffres imprimés à ce rapport. `--attestation` et `--bundle` passés en ligne de commande l'emportent sur les fichiers joints, ici comme en mode `--url`. Un rapport dont le schéma est plus récent que le binaire sort en 5 : mettez perf-sentinel à jour.
+`verify-hash --report report.pdf` lit le rapport, l'attestation et le bundle dans le PDF et lance les mêmes contrôles : un destinataire qui n'a que le PDF peut le vérifier. Une copie réenregistrée par un outil qui garde les pièces jointes se vérifie encore, car la lecture suit la structure du PDF et non la mise en page écrite par le rendu. Certaines visionneuses perdent les pièces jointes en enregistrant, dont Aperçu sur macOS : vérifiez le fichier d'origine. Le contrôle porte sur le rapport joint, pas sur les pages imprimées : `verify-hash` le dit, et le lecteur compare les chiffres imprimés à ce rapport. `--attestation` et `--bundle` passés en ligne de commande l'emportent sur les fichiers joints, ici comme en mode `--url`. Un rapport dont le schéma est plus récent que le binaire sort en 5 : mettez perf-sentinel à jour.
 
 ### Convention URL des sidecars en mode `--url`
 

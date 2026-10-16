@@ -589,18 +589,18 @@ perf-sentinel disclose-pdf \
     --output report.pdf
 ```
 
-It renders only when the `content_hash` recomputes and, with `--attestation`, when the attestation names that hash, so a rendered PDF stands for those two checks. It never checks the signature: the last page prints the `verify-hash` command, with the identity and issuer passed here, for the reader to run. The document code printed on every page is the report's `content_hash`, grouped by four characters. Add `transparency` to `[notes.reference_urls]` in the org config and the cover draws a QR code to the page where you publish your reports. Without it, no QR code is drawn.
+It renders only when the `content_hash` recomputes and, with `--attestation`, when the attestation names that hash, so a rendered PDF stands for those two checks. It never checks the signature: the last page prints the `verify-hash` command, with the identity and issuer passed here, for the reader to run. The document code is the report's `content_hash`, printed in full and grouped by four characters on pages 1 and 5, and shortened in the footer of every page. Add `transparency` to `[notes.reference_urls]` in the org config and the cover draws a QR code to the page where you publish your reports. Without it, no QR code is drawn.
 
 The command prints one JSON line on stdout and exits with a fixed code, a contract PerfSentinelHub relies on:
 
-| Exit | `result`       | `reason`                                                 |
-|------|----------------|----------------------------------------------------------|
-| 0    | `rendered`     | none                                                     |
-| 1    | `refused`      | `content_hash_mismatch`, `binding_mismatch`              |
-| 3    | `input_error`  | `missing_file`, `malformed_report`, `output_unwritable`  |
-| 5    | `unrenderable` | `unsupported_schema_version`, `unsupported_characters`   |
+| Exit | `result`       | `reason`                                                                    |
+|------|----------------|-----------------------------------------------------------------------------|
+| 0    | `rendered`     | none                                                                        |
+| 1    | `refused`      | `content_hash_mismatch`, `binding_mismatch`                                 |
+| 3    | `input_error`  | `missing_file`, `malformed_report`, `output_unwritable`                     |
+| 5    | `unrenderable` | `unsupported_schema_version`, `unsupported_characters`, `pdf_export_failed` |
 
-Exit 5 means nothing says the report is wrong, the engine just cannot draw it: a schema newer than this binary reads, or text outside the bundled DM Sans and JetBrains Mono fonts (Latin scripts, no emoji), listed on stderr. Characters are never replaced on an official document.
+Exit 5 means nothing says the report is wrong, the engine just cannot draw it: a schema newer than this binary reads, text outside the bundled DM Sans and JetBrains Mono fonts (Latin scripts, no emoji) listed on stderr, or a document the PDF writer refuses. Newlines and tabs in report strings are drawn as spaces. Characters are never replaced on an official document.
 
 The command needs the `pdf` Cargo feature, on in the release binary and the image.
 
@@ -670,7 +670,7 @@ provenance is checked and exit `0` reflects it.
 
 ### Verifying a PDF
 
-`verify-hash --report report.pdf` reads the report, the attestation and the bundle out of the PDF and runs the same checks, so a recipient who only holds the PDF can verify it. A copy that a viewer or a document system saved again still verifies: the reader follows the PDF's own structure, not the layout the renderer wrote. The check covers the attached report, not the printed pages: `verify-hash` says so, and the reader compares the printed figures with that report. `--attestation` and `--bundle` passed on the command line win over the attached files, here and in `--url` mode. A report whose schema is newer than the binary exits 5: upgrade perf-sentinel.
+`verify-hash --report report.pdf` reads the report, the attestation and the bundle out of the PDF and runs the same checks, so a recipient who only holds the PDF can verify it. A copy re-saved by a tool that keeps attachments still verifies: the reader follows the PDF's own structure, not the layout the renderer wrote. Some viewers drop attachments when they save, macOS Preview among them: verify the original file. The check covers the attached report, not the printed pages: `verify-hash` says so, and the reader compares the printed figures with that report. `--attestation` and `--bundle` passed on the command line win over the attached files, here and in `--url` mode. A report whose schema is newer than the binary exits 5: upgrade perf-sentinel.
 
 ### Sidecar URL convention in `--url` mode
 
