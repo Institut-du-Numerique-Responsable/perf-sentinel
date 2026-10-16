@@ -890,6 +890,10 @@ a.shell-identity[aria-current="page"] {
     color: var(--ok-fg);
 }
 
+.health[data-health="warn"] {
+    color: var(--warn-fg);
+}
+
 .health[data-health="crit"] {
     color: var(--crit-fg);
 }
@@ -4188,4 +4192,599 @@ section > .banner + .banner,
 .report-gone {
     align-self: flex-start;
     padding: 30px 22px;
+}
+
+/* A correlated pair: the side that fires first, then the one that follows it. */
+.pair {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 3px;
+    text-align: left;
+}
+
+.pair-side {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+}
+
+.pair-then {
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+/* A finding type takes the tone the incident kinds already use for its family. */
+.chip[data-type^="n_plus_one"] {
+    background: var(--info-bg);
+    color: var(--info-fg);
+}
+
+.chip[data-type="pool_saturation"] {
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+}
+
+.chip[data-type^="slow_"] {
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+}
+
+.chip[data-state="active"] {
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+}
+
+a.chip {
+    text-decoration: none;
+}
+
+.timeline {
+    margin: 4px 0 14px;
+}
+
+.timeline-strip {
+    display: block;
+    width: 100%;
+    height: 30px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+}
+
+.timeline-incident {
+    fill: var(--crit-bg);
+}
+
+.timeline-episode {
+    fill: var(--brand);
+}
+
+.timeline-axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+/* An incident's correlations, under its frozen findings and set apart from them. */
+.incident-correlations {
+    display: grid;
+    gap: 10px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------------ disclosures */
+
+/* The screen draws two kinds of mark and keeps them apart everywhere: what a report
+   declares about itself is dashed (.chip-declared), what this Hub recomputed is solid.
+   A signature is only ever declared here. */
+.disc {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.disc-back {
+    align-self: flex-start;
+    text-decoration: none;
+}
+
+.disc > .page-sub {
+    max-width: 78ch;
+}
+
+.disc-rail-wrap {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+}
+
+.disc-rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.disc-rail-cell {
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+}
+
+.disc-rail-cell > a,
+.disc-rail-cell:not(:has(a)) {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 9px 12px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.disc-rail-cell > a:hover .disc-rail-label {
+    color: var(--brand-text);
+}
+
+.disc-rail-cell[data-state="published"] {
+    border-color: var(--ok-bd);
+    background: var(--ok-bg);
+}
+
+.disc-rail-cell[data-state="internal"] {
+    border-style: dashed;
+    border-color: var(--dash);
+}
+
+.disc-rail-cell[data-state="withdrawn"] {
+    border-color: var(--crit-bd);
+    background: var(--crit-bg);
+}
+
+.disc-rail-cell[data-state="missing"] {
+    border-style: dashed;
+    border-color: var(--dash);
+    background: transparent;
+}
+
+.disc-rail-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.disc-rail-caption,
+.disc-legend-label,
+.disc-fact-label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+
+.disc-rail-cell[data-state="published"] .disc-rail-caption {
+    color: var(--ok-fg);
+}
+
+.disc-rail-cell[data-state="withdrawn"] .disc-rail-caption {
+    color: var(--crit-fg);
+}
+
+.disc-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+}
+
+.disc-legend-label {
+    margin-right: 2px;
+}
+
+.disc-legend-label:not(:first-child) {
+    margin-left: 10px;
+}
+
+.disc-legend-note {
+    flex-basis: 100%;
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--text-2);
+    max-width: 90ch;
+}
+
+.disc-level {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.disc-checked {
+    gap: 4px;
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+}
+
+.disc-unchecked {
+    background: transparent;
+    color: var(--text-3);
+}
+
+.disc-card {
+    display: flex;
+    flex-direction: column;
+}
+
+.disc-card[data-withdrawn="true"] .disc-figures {
+    opacity: .6;
+}
+
+.disc-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    padding: 16px 18px 0;
+}
+
+.disc-card-title {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.disc-card-title a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.disc-card-title a:hover {
+    color: var(--brand-text);
+}
+
+.disc-dates {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.disc-chips {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.disc-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 18px;
+}
+
+.disc-figures {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+}
+
+.disc-figure {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding: 12px 14px;
+}
+
+.disc-figure + .disc-figure {
+    border-left: 1px solid var(--border);
+}
+
+.disc-figure-label {
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.disc-figure-value {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
+.disc-figure-unit {
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+.disc-figure-sub {
+    font-size: 11.5px;
+    color: var(--text-3);
+}
+
+/* Runtime coverage against the official bar. The notch sits at 75 %, and a fill that
+   stops short of it turns to the warning tone. */
+.disc-track {
+    position: relative;
+    height: 6px;
+    margin: 6px 0 16px;
+    border-radius: 999px;
+    background: var(--surface-3);
+}
+
+.disc-track-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 999px;
+    background: var(--brand);
+}
+
+.disc-track[data-below="true"] .disc-track-fill {
+    background: var(--warn-fg);
+}
+
+.disc-track-notch {
+    position: absolute;
+    left: 75%;
+    top: -4px;
+    width: 2px;
+    height: 14px;
+    background: var(--text-2);
+}
+
+.disc-track-mark {
+    position: absolute;
+    left: 75%;
+    top: 12px;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+
+.disc-facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 18px;
+}
+
+.disc-fact {
+    display: inline-flex;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.disc-fact-value {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+}
+
+.disc-hash {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.disc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.disc-card > .disc-actions {
+    padding: 0 18px 16px;
+}
+
+.disc-open {
+    margin-left: auto;
+    text-decoration: none;
+}
+
+.disc-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+}
+
+.disc-panel-head {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.disc-panel-head h2 {
+    margin: 0;
+}
+
+.disc-panel-sub {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-2);
+    max-width: 90ch;
+}
+
+.disc-panel .sources-wrap {
+    margin: 0;
+}
+
+/* The carbon figure between half and twice itself, on a log scale: the band is the
+   whole track and the dot sits at its geometric middle. */
+.disc-bracket {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.disc-bracket-track {
+    position: relative;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--surface-3);
+}
+
+.disc-bracket-band {
+    position: absolute;
+    inset: 0 10%;
+    border-radius: 999px;
+    background: var(--accent-bg);
+    border: 1px solid var(--ok-bd);
+}
+
+.disc-bracket-dot {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: var(--brand);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+    transform: translate(-50%, -50%);
+}
+
+.disc-bracket-scale {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    padding: 0 10%;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-3);
+}
+
+.disc-bracket-scale > :last-child {
+    text-align: right;
+}
+
+.disc-bracket-mid {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.disc-share {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.disc-share-track {
+    position: relative;
+    width: 72px;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    overflow: hidden;
+}
+
+.disc-share-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: var(--brand);
+}
+
+.disc-defs {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 18px;
+    margin: 0;
+    font-size: 12.5px;
+}
+
+.disc-defs dt {
+    color: var(--text-3);
+}
+
+.disc-defs dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.disc-disclaimers {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-2);
+    max-width: 90ch;
+}
+
+.disc-withdraw {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border: 1px solid var(--crit-bd);
+    border-radius: var(--r-sm);
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+    font-size: 13px;
+}
+
+.disc-withdraw p {
+    margin: 0;
+}
+
+.disc-reason {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 11px;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    resize: vertical;
+}
+
+.disc-note {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-2);
+}
+
+@media (max-width: 760px) {
+    .disc-figures {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .disc-figure:nth-child(3) {
+        border-left: 0;
+    }
+
+    .disc-figure:nth-child(n + 3) {
+        border-top: 1px solid var(--border);
+    }
+
+    .disc-rail-wrap {
+        grid-template-columns: 1fr;
+    }
+
+    .disc-hash {
+        margin-left: 0;
+    }
+
+    .disc-open {
+        margin-left: 0;
+    }
 }

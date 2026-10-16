@@ -43,6 +43,8 @@
         loading: true,
         run: null,
         runError: false,
+        // Reads of the open run that failed in a row, for a reason other than its absence.
+        runReadFailures: 0,
         runTimer: null,
         noteTimer: null,
         // Every node whose text is a duration measured against the current moment,
@@ -101,6 +103,31 @@
         incidentServices: [],
         incidentNamespaces: [],
         incidentDetails: {},
+        // The correlations screen: the episodes of the range, null until read, the incidents
+        // its strips draw, every service seen so the select outlives its own filter, and the
+        // filters. An unfolded incident's episodes sit apart, by incident key: 'loading',
+        // 'error', or {rows, pushes}.
+        correlations: null,
+        correlationsError: false,
+        correlationIncidents: [],
+        correlationServices: [],
+        // pair_key mirrors the route, `#/correlations?pair_key=…`, and is never set from a select.
+        correlationFilter: {range: '24h', service: '', source_id: '', active: false, pair_key: ''},
+        // GET /api/disclosures, null while it loads.
+        disclosures: null,
+        disclosuresError: false,
+        // GET /api/disclosures/{id} and the report.json it serves, for the detail screen.
+        disclosure: null,
+        disclosureReport: null,
+        disclosureError: false,
+        // What the last action on the detail did, and a share link's token, shown once.
+        disclosureNote: null,
+        disclosureLink: null,
+        disclosureBusy: false,
+        withdrawOpen: false,
+        incidentCorrelations: {},
+        // A trace an episode handed to New analysis, with the pair's other one.
+        traceHandoff: null,
         // The ack page: the finding its link names, the form, and what the last
         // submit came to. Null until a link opens it.
         ack: null,
@@ -439,6 +466,8 @@
         renderFleetSkew();
         renderSourcesBadge();
         document.querySelector('.shell-tab[data-screen="coverage"]').hidden = !(state.access && state.access.admin);
+        // On only when the Hub has disclosures on and this caller reads them.
+        document.querySelector('.shell-tab[data-screen="disclosures"]').hidden = !(state.status && state.status.disclosures);
     }
 
     /** Takes a chip segment out along with the separator that was added for it. */
@@ -583,6 +612,18 @@
         state.liveDurations = [];
     }
 
+    // On a phone the tab row scrolls on its own, and a screen opened by a link or a reload has its
+    // tab off to the right. Only the row moves: scrollIntoView would scroll the page too.
+    function revealCurrentTab() {
+        const tab = document.querySelector('.shell-tab[aria-current="page"]');
+        const row = tab && tab.closest('.shell-tabs');
+        if (!row) return;
+        const rowBox = row.getBoundingClientRect();
+        const tabBox = tab.getBoundingClientRect();
+        if (tabBox.left < rowBox.left) row.scrollLeft -= rowBox.left - tabBox.left;
+        else if (tabBox.right > rowBox.right) row.scrollLeft += tabBox.right - rowBox.right;
+    }
+
     function render() {
         // A tip whose anchor is about to be replaced would never see its mouseleave.
         closeTip();
@@ -591,9 +632,12 @@
         stopDurationTicker();
         state.screen = currentScreen();
         Array.prototype.forEach.call(document.querySelectorAll('.shell-tab'), function (tab) {
-            if (tab.getAttribute('data-screen') === state.screen) tab.setAttribute('aria-current', 'page');
+            // A disclosure's own screen sits under the Disclosures tab.
+            const screen = state.screen === 'disclosure' ? 'disclosures' : state.screen;
+            if (tab.getAttribute('data-screen') === screen) tab.setAttribute('aria-current', 'page');
             else tab.removeAttribute('aria-current');
         });
+        revealCurrentTab();
         const identity = document.getElementById('identity');
         if (state.screen === 'access') identity.setAttribute('aria-current', 'page');
         else identity.removeAttribute('aria-current');
@@ -618,6 +662,9 @@
         else if (state.screen === 'coverage') main.replaceChildren(renderCoverageScreen());
         else if (state.screen === 'sources') main.replaceChildren(renderSourcesScreen());
         else if (state.screen === 'incidents') main.replaceChildren(renderIncidentsScreen());
+        else if (state.screen === 'correlations') main.replaceChildren(renderCorrelationsScreen());
+        else if (state.screen === 'disclosures') main.replaceChildren(renderDisclosuresScreen());
+        else if (state.screen === 'disclosure') main.replaceChildren(renderDisclosureScreen());
         else if (state.screen === 'ack') main.replaceChildren(renderAckScreen());
         else if (state.screen === 'new') main.replaceChildren(renderNewScreen());
         else if (state.screen === 'run') main.replaceChildren(renderRunScreen(currentRunId()));
@@ -1117,6 +1164,7 @@
         // First, before the render and before the loading guard: loadShell's own
         // onRoute has to apply it again, and loadRuns never re-renders New.
         applyHandoff(PSL.readHandoff(location.hash, Date.now()));
+        applyTraceHandoff(PSL.readTraceHandoff(location.hash));
         const screen = currentScreen();
         if (screen !== 'ack') state.ackReturn = null;
         clearTimeout(state.runTimer);
@@ -1130,10 +1178,31 @@
         // coming back from a run that just finished shows its weight.
         if (screen === 'recent' || screen === 'new') loadRuns();
         else if (screen === 'incidents') loadIncidents();
+        else if (screen === 'correlations') {
+            // A link to one pair, from Grafana or an incident, reads it over the widest range.
+            state.correlationFilter.pair_key = PSL.readCorrelationPair(location.hash);
+            if (state.correlationFilter.pair_key) state.correlationFilter.range = PSL.CORRELATION_RANGES[PSL.CORRELATION_RANGES.length - 1];
+            loadCorrelations();
+        }
+        else if (screen === 'disclosures') loadDisclosures();
+        else if (screen === 'disclosure') {
+            const id = PSL.readDisclosureId(location.hash);
+            // A note and a token belong to the disclosure they were made on.
+            if (!state.disclosure || !id || state.disclosure.disclosure.id !== id) {
+                state.disclosureNote = null;
+                state.disclosureLink = null;
+                state.withdrawOpen = false;
+            }
+            if (id) loadDisclosure(id);
+            else state.disclosureError = true;
+        }
         else if (screen === 'ack') loadAck(false);
         else if (screen === 'run' || screen === 'report') {
             const id = currentRunId();
-            if (id && (!state.run || state.run.id !== id)) loadRun(id);
+            if (id && (!state.run || state.run.id !== id)) {
+                state.runReadFailures = 0;
+                loadRun(id);
+            }
             else if (id) {
                 // The render above already mounted the report frame: a second one would load it twice.
                 if (screen === 'run') render();
@@ -1178,6 +1247,27 @@
         handoff.kind = row.kind;
         handoff.namespace = row.namespace;
         handoff.atMs = row.at_ms;
+    }
+
+    /**
+     * Puts a trace an episode handed over in the form. A route without one keeps the banner
+     * while the form still holds one of the pair's two traces.
+     */
+    function applyTraceHandoff(handoff) {
+        if (!handoff) {
+            const kept = state.traceHandoff;
+            if (kept && state.form.traceId !== kept.traceId && state.form.traceId !== kept.otherTraceId) {
+                state.traceHandoff = null;
+            }
+            return;
+        }
+        state.traceHandoff = handoff;
+        // A trace replaces a window handed over before it, banner included.
+        state.handoff = null;
+        state.form.mode = 'trace';
+        state.form.traceId = handoff.traceId;
+        state.form.service = '';
+        state.form.pickerOpen = false;
     }
 
     // -------------------------------------------------------- screen: sources
@@ -1306,15 +1396,10 @@
     }
 
     function healthCell(source, now) {
-        if (source.reachable) {
-            return el('span', {class: 'health', 'data-health': 'ok'}, [
-                el('span', {class: 'health-dot'}),
-                el('span', {text: source.last_attempt_ms == null ? 'not yet observed' : 'reachable'})
-            ]);
-        }
-        return el('span', {class: 'health', 'data-health': 'crit'}, [
+        const health = PSL.sourceHealth(source, now);
+        return el('span', {class: 'health', 'data-health': health.tone}, [
             el('span', {class: 'health-dot'}),
-            el('span', {text: 'unreachable ' + PSL.dur(now - source.unreachable_since_ms)})
+            el('span', {text: health.text})
         ]);
     }
 
@@ -2454,7 +2539,8 @@
 
         const source = selectedSource();
         const skew = source && PSL.skew(source.producer_version);
-        const right = el('div', {class: 'new-column'}, [handoffBanner(source), parametersPanel(), costBand()]);
+        const right = el('div', {class: 'new-column'},
+            [handoffBanner(source), traceHandoffBanner(source), parametersPanel(), costBand()]);
         const advanced = source && source.kind !== 'daemon' ? advancedPanel() : null;
         if (advanced) right.appendChild(advanced);
         if (skew) right.appendChild(skewNotice(source, skew));
@@ -2619,17 +2705,47 @@
         // `other` is the daemon's catch-all, and "the other of cart-svc" is not
         // a sentence, so it reads as the incident a missing kind reads as.
         const kind = handoff.kind === 'other' ? null : PSL.INCIDENT_KIND_LABEL[handoff.kind];
+        // An episode's window names no incident: it is said as the episode it came from.
+        const origin = handoff.pairKey
+            ? 'a correlation episode of ' + name + ' from the correlations screen, '
+            : 'the ' + (kind || 'incident') + ' of ' + name + ' from the incidents screen, ';
         return el('div', {class: 'banner', 'data-tone': daemon ? 'warn' : 'info'}, [
             daemon ? warningGlyph(16) : infoGlyph(16),
             el('div', {
-                text: 'Window of the ' + (kind || 'incident') + ' of '
-                    + name + ' from the incidents screen, ' + span
+                text: 'Window of ' + origin + span
                     + (handoff.namespace
                         ? ' An analysis takes a service and no namespace, so this one covers '
                         + handoff.service + ' in every namespace.'
                         : '')
                     + (daemon ? ' A daemon takes no window. Pick a trace backend on the left to run it.' : '')
             })
+        ]);
+    }
+
+    /** Where a trace in the form came from, and the pair's other trace one click away. */
+    function traceHandoffBanner(source) {
+        const handoff = state.traceHandoff;
+        if (!handoff) return null;
+        const daemon = Boolean(source && source.kind === 'daemon');
+        const other = state.form.traceId === handoff.traceId ? handoff.otherTraceId : handoff.traceId;
+        const swap = other ? el('button', {type: 'button', class: 'pill-button pill-sm', text: 'Use the other trace'})
+            : null;
+        if (swap) {
+            swap.addEventListener('click', function () {
+                state.form.traceId = other;
+                render();
+            });
+        }
+        return el('div', {class: 'banner', 'data-tone': daemon ? 'warn' : 'info'}, [
+            daemon ? warningGlyph(16) : infoGlyph(16),
+            el('div', {}, [
+                el('p', {
+                    text: 'A trace of the last co-occurrence of a correlated pair, from the correlations screen.'
+                        + (other ? ' The pair\'s other trace is ' + other + '.' : '')
+                        + (daemon ? ' A daemon takes no trace ID. Pick a trace backend on the left to run it.' : '')
+                }),
+                swap
+            ])
         ]);
     }
 
@@ -3466,7 +3582,10 @@
             text.appendChild(el('p', {class: 'notice-block-body'}, [
                 el('span', {text: 'The last attempt returned '}),
                 el('span', {class: 'code-inline', text: source.last_error_code}),
-                el('span', {text: ': ' + (PSL.ERRORS[source.last_error_code] || 'the Hub could not reach it.')})
+                el('span', {
+                    text: ': ' + (PSL.READ_ERRORS[source.last_error_code] || PSL.ERRORS[source.last_error_code]
+                        || 'the Hub could not reach it.')
+                })
             ]));
         }
         text.appendChild(el('p', {
@@ -3675,6 +3794,7 @@
             section.appendChild(unknownRun());
             return section;
         }
+        if (state.runReadFailures > 0) section.appendChild(hubUnreachableBanner());
         if (!run || run.id !== id) {
             section.appendChild(el('div', {class: 'card skeleton', style: 'height:220px;margin-top:16px'}));
             return section;
@@ -3717,6 +3837,7 @@
         Object.assign(state.form, PSL.formFromRequest(run.request),
             {sourceId: run.source_id, ackUnreachable: false, ackHeavy: false});
         state.handoff = null;
+        state.traceHandoff = null;
         location.hash = '#/new';
     }
 
@@ -4174,19 +4295,37 @@
         return getJson('/api/analyses/' + id).then(function (run) {
             state.run = run;
             state.runError = false;
+            state.runReadFailures = 0;
             render();
-            if (run.status === 'pending' || run.status === 'running') scheduleRunPoll(id);
-        }).catch(function () {
-            state.runError = id;
+            if (run.status === 'pending' || run.status === 'running') scheduleRunPoll(id, 1000);
+        }).catch(function (error) {
+            if (PSL.runReadOutcome(error) === 'unknown') {
+                state.runError = id;
+                state.runReadFailures = 0;
+                render();
+                return;
+            }
+            // The Hub restarting, or a proxy in front of it: what the page shows stays
+            // true, so it keeps it and asks again until the Hub answers.
+            state.runReadFailures = (state.runReadFailures || 0) + 1;
             render();
+            scheduleRunPoll(id, PSL.retryDelay(state.runReadFailures));
         });
     }
 
-    function scheduleRunPoll(id) {
+    function scheduleRunPoll(id, delay) {
         clearTimeout(state.runTimer);
         state.runTimer = setTimeout(function () {
             if (currentRunId() === id) loadRun(id);
-        }, 1000);
+        }, delay);
+    }
+
+    /** Said while reads of this run fail for a reason other than its absence. */
+    function hubUnreachableBanner() {
+        return el('div', {class: 'banner', 'data-tone': 'warn', role: 'status'}, [
+            warningGlyph(16),
+            el('p', {text: 'The Hub is not answering. This page keeps what it last read and asks again.'})
+        ]);
     }
 
 
@@ -4441,6 +4580,8 @@
      */
     function loadIncidents() {
         state.incidents = null;
+        // A re-read may bring episodes pushed since: an unfolded incident asks again.
+        state.incidentCorrelations = {};
         state.incidentsError = false;
         state.incidentsDone = false;
         state.incidentsReading = true;
@@ -4912,7 +5053,8 @@
             findings.length === 0
                 ? el('p', {class: 'daemon-lead', text: 'The daemon froze no finding for this incident.'})
                 : findingsFilter(detail),
-            findings.length === 0 ? null : el('div', {class: 'sources-wrap'}, [incidentFindingsTable(findings, detail)])
+            findings.length === 0 ? null : el('div', {class: 'sources-wrap'}, [incidentFindingsTable(findings, detail)]),
+            incidentCorrelationsBlock(incident)
         ]);
     }
 
@@ -5041,6 +5183,434 @@
             state.ackReturn = location.hash;
         });
         return link;
+    }
+
+    // ---------------------------------------------------- screen: correlations
+
+    const CORRELATION_LIMIT = 1000;
+    const CORRELATION_COLUMNS = ['Pair', 'Episodes', 'Last active', 'Peak', 'Lag', 'Source'];
+    const CORRELATION_COLUMNS_RIGHT = ['Episodes', 'Peak', 'Lag'];
+    const EPISODE_COLUMNS = ['Episode', 'Lasted', 'Peak conf.', 'Peak co-occ.', 'Incidents', ''];
+    const EPISODE_COLUMNS_RIGHT = ['Lasted', 'Peak conf.', 'Peak co-occ.'];
+    const STRIP_WIDTH = 640;
+
+    function correlationsPath() {
+        const filter = state.correlationFilter;
+        return '/api/correlations?limit=' + CORRELATION_LIMIT
+            + '&from=' + (Date.now() - PSL.parseDur(filter.range))
+            + (filter.service ? '&service=' + encodeURIComponent(filter.service) : '')
+            + (filter.source_id ? '&source_id=' + encodeURIComponent(filter.source_id) : '')
+            + (filter.pair_key ? '&pair_key=' + encodeURIComponent(filter.pair_key) : '')
+            + (filter.active ? '&active=true' : '');
+    }
+
+    /**
+     * The episodes of the range and the incidents the strips draw beside them, both from the
+     * store: this screen never reads the fleet. The incidents are the store's newest page, so
+     * a strip over an older range draws the ones that page still holds.
+     */
+    function loadCorrelations() {
+        state.correlations = null;
+        state.correlationsError = false;
+        render();
+        Promise.all([
+            getJson(correlationsPath()),
+            getJson('/api/incidents?limit=' + incidentPage() + '&offset=0').catch(function () {
+                return [];
+            })
+        ]).then(function (results) {
+            state.correlations = results[0];
+            state.correlationIncidents = results[1];
+            // A link to one pair lands on it unfolded, on every daemon that saw it.
+            if (state.correlationFilter.pair_key) {
+                results[0].forEach(function (episode) {
+                    state.panelOpen['pair:' + episode.source_id + ':' + episode.pair_key] = true;
+                });
+            }
+            results[0].forEach(function (episode) {
+                [episode.source.service, episode.target.service].forEach(function (service) {
+                    if (state.correlationServices.indexOf(service) < 0) state.correlationServices.push(service);
+                });
+            });
+            state.correlationServices.sort();
+        }).catch(function () {
+            state.correlationsError = true;
+            state.correlations = [];
+        }).finally(function () {
+            if (currentScreen() === 'correlations') render();
+        });
+    }
+
+    function renderCorrelationsScreen() {
+        const section = el('section', {}, [
+            ruledOverline('// correlations'),
+            el('h1', {class: 'page-title', text: 'Findings that keep following each other'}),
+            el('p', {class: 'page-sub'}, [
+                document.createTextNode('Each pair is a finding that, again and again, fires within seconds after '
+                    + 'another one. Its periods of activity stay here after the daemon forgets them. '),
+                helpDot('A daemon with [daemon.correlation] on and [daemon.hub_export] set pushes each period a '
+                    + 'pair stays active as an episode, and closes it once the pair has not co-occurred for its '
+                    + 'gap, ten minutes by default. The Hub keeps what it is pushed and re-derives nothing. An '
+                    + 'episode whose daemon went silent past its gap and a quarter of an hour reads as ended '
+                    + 'where it was last seen.', 'correlations')
+            ]),
+            correlationFilterLine()
+        ]);
+        if (state.correlations === null) {
+            section.appendChild(el('div', {class: 'sources-wrap'}, [skeletonTable()]));
+            return section;
+        }
+        if (state.correlationsError) {
+            section.appendChild(el('div', {class: 'banner', 'data-tone': 'crit'}, [
+                critGlyph(16),
+                el('div', {text: 'The Hub did not return the correlations. This is the Hub itself, not any daemon.'})
+            ]));
+            return section;
+        }
+        const pairs = PSL.correlationPairs(state.correlations);
+        if (pairs.length === 0) {
+            section.appendChild(el('div', {class: 'empty-state'}, [
+                el('p', {class: 'empty-title', text: 'No correlation in this range.'}),
+                el('p', {
+                    text: 'A pair shows here once a daemon with [daemon.correlation] and [daemon.hub_export] on '
+                        + 'pushes an episode of it.'
+                })
+            ]));
+            return section;
+        }
+        section.appendChild(el('div', {class: 'sources-wrap'}, [correlationsTable(pairs)]));
+        if (state.correlations.length === CORRELATION_LIMIT) {
+            section.appendChild(el('p', {
+                class: 'sources-note',
+                text: 'The Hub returned the ' + CORRELATION_LIMIT + ' most recent episodes of this range and stopped '
+                    + 'there. Narrow the range or the filters to see the others.'
+            }));
+        }
+        section.appendChild(el('p', {class: 'sources-note'}, [
+            el('span', {text: 'Pushed by daemons with '}),
+            el('span', {class: 'code-inline', text: '[daemon.hub_export]'}),
+            el('span', {text: ' and '}),
+            el('span', {class: 'code-inline', text: '[daemon.correlation]'}),
+            el('span', {text: ' on. A daemon that pushes none has no rows here.'})
+        ]));
+        return section;
+    }
+
+    function correlationFilterLine() {
+        const filter = state.correlationFilter;
+        const set = function (key) {
+            return function (value) {
+                filter[key] = value;
+                loadCorrelations();
+            };
+        };
+        const range = el('select', {class: 'refresh-select', 'aria-label': 'range'},
+            PSL.CORRELATION_RANGES.map(function (value) {
+                const option = el('option', {value: value, text: 'last ' + PSL.humanDur(value)});
+                if (value === filter.range) option.selected = true;
+                return option;
+            }));
+        range.addEventListener('change', function () {
+            set('range')(range.value);
+        });
+        const daemons = (state.sources || []).filter(function (source) {
+            return source.kind === 'daemon';
+        });
+        // Shown only on a pair link: the way back to every pair is the plain route.
+        const pairOnly = filter.pair_key
+            ? el('a', {class: 'pill-button pill-sm', href: '#/correlations'}, [el('span', {text: 'Show every pair'})])
+            : null;
+        return el('div', {class: 'refresh'}, [
+            pairOnly,
+            el('span', {class: 'refresh-label', text: 'range'}),
+            range,
+            filterSelect('service', filter.service, state.correlationServices.map(function (service) {
+                return [service, service];
+            }), set('service')),
+            filterSelect('daemon', filter.source_id, daemons.map(function (source) {
+                return [source.id, source.name];
+            }), set('source_id')),
+            checkbox(filter.active, 'active now only', set('active'))
+        ]);
+    }
+
+    function correlationsTable(pairs) {
+        const head = el('tr', {}, CORRELATION_COLUMNS.map(function (name) {
+            return el('th', {
+                text: name, scope: 'col', 'data-align': CORRELATION_COLUMNS_RIGHT.indexOf(name) >= 0 ? 'right' : null
+            });
+        }));
+        return el('table', {class: 'table'}, [el('thead', {}, [head]), el('tbody', {}, pairs.flatMap(pairRow))]);
+    }
+
+    /** Where an incident's span stops: its end once the alerting sent one, its window's end before. */
+    function incidentEnd(incident) {
+        return incident.ended_at_ms == null ? incident.window_to_ms : incident.ended_at_ms;
+    }
+
+    function pairRow(pair) {
+        const fold = 'pair:' + pair.key;
+        const id = 'pair-detail-' + pair.key.replace(/[^A-Za-z0-9_-]/g, '-');
+        const open = state.panelOpen[fold] === true;
+        const button = el('button', {
+            type: 'button',
+            class: 'row-toggle',
+            'aria-expanded': open ? 'true' : 'false',
+            'aria-controls': id,
+            'aria-label': PSL.pairLabel(pair.last)
+        }, [pairCell(pair.last)]);
+        button.addEventListener('click', function () {
+            const next = button.getAttribute('aria-expanded') !== 'true';
+            button.setAttribute('aria-expanded', next ? 'true' : 'false');
+            state.panelOpen[fold] = next;
+            saveFolds();
+            const cell = document.getElementById(id);
+            if (cell) cell.parentNode.hidden = !next;
+        });
+        const row = el('tr', {}, [
+            el('td', {}, [button]),
+            el('td', {'data-align': 'right', class: 'table-mono', text: String(pair.episodes.length)}),
+            episodeSpanCell(pair.last),
+            el('td', {'data-align': 'right', class: 'table-mono', text: pair.peak.toFixed(2)}),
+            el('td', {'data-align': 'right', class: 'table-mono', text: PSL.lagText(pair.last.median_lag_ms)}),
+            el('td', {class: 'table-strong', text: sourceName(pair.source_id)})
+        ]);
+        const detail = el('tr', {class: 'daemon-detail'}, [
+            el('td', {id: id, colspan: String(CORRELATION_COLUMNS.length)}, [pairPanel(pair)])
+        ]);
+        detail.hidden = !open;
+        return [row, detail];
+    }
+
+    /** Both sides of a pair, the one that fires first on top, each template in its tooltip. */
+    function pairCell(episode) {
+        return el('span', {class: 'pair'}, [pairSide(episode.source, null), pairSide(episode.target, '↳ then')]);
+    }
+
+    function pairSide(side, lead) {
+        return el('span', {class: 'pair-side', title: side.template || null}, [
+            lead ? el('span', {class: 'pair-then', text: lead}) : null,
+            el('span', {
+                class: 'chip',
+                'data-type': side.finding_type,
+                text: PSL.FINDING_TYPE_LABEL[side.finding_type] || side.finding_type
+            }),
+            el('span', {class: 'table-strong', text: side.service})
+        ]);
+    }
+
+    function episodeSpanCell(episode) {
+        const cell = el('td', {
+            class: 'table-mono',
+            title: episode.ended_by === 'stale'
+                ? 'The daemon stopped reporting this episode before closing it, so it reads as ended where it was '
+                + 'last seen.'
+                : null
+        });
+        if (episode.ended_at_ms == null) {
+            cell.appendChild(document.createTextNode(PSL.dtHuman(episode.started_at_ms) + ' → '));
+            cell.appendChild(el('span', {class: 'chip', 'data-state': 'active', text: 'active'}));
+        } else {
+            cell.appendChild(document.createTextNode(PSL.episodeSpan(episode.started_at_ms, episode.ended_at_ms)));
+            const note = PSL.episodeEndNote(episode);
+            if (note) cell.appendChild(el('span', {class: 'table-muted', text: ' (' + note + ')'}));
+        }
+        return cell;
+    }
+
+    function pairPanel(pair) {
+        const toMs = Date.now();
+        const fromMs = toMs - PSL.parseDur(state.correlationFilter.range);
+        const incidents = state.correlationIncidents.filter(function (incident) {
+            return incident.source_id === pair.source_id
+                && PSL.spansOverlap(incident.window_from_ms, incidentEnd(incident), fromMs, toMs);
+        });
+        return el('div', {class: 'daemon-panel'}, [
+            timelineStrip(pair.episodes, incidents, fromMs, toMs),
+            el('div', {class: 'sources-wrap'}, [episodesTable(pair.episodes, incidents)])
+        ]);
+    }
+
+    /** The range as a strip: each episode in green, the same daemon's incidents in red behind them. */
+    function timelineStrip(episodes, incidents, fromMs, toMs) {
+        const ns = 'http://www.w3.org/2000/svg';
+        const strip = document.createElementNS(ns, 'svg');
+        strip.setAttribute('viewBox', '0 0 ' + STRIP_WIDTH + ' 30');
+        strip.setAttribute('preserveAspectRatio', 'none');
+        strip.setAttribute('class', 'timeline-strip');
+        strip.setAttribute('role', 'img');
+        strip.setAttribute('aria-label', episodes.length + ' episodes and ' + incidents.length
+            + ' incidents over the last ' + PSL.humanDur(state.correlationFilter.range));
+        const draw = function (marks, className, y, height) {
+            marks.forEach(function (mark) {
+                const rect = document.createElementNS(ns, 'rect');
+                rect.setAttribute('x', String(mark.x));
+                rect.setAttribute('width', String(mark.w));
+                rect.setAttribute('y', String(y));
+                rect.setAttribute('height', String(height));
+                rect.setAttribute('rx', '3');
+                rect.setAttribute('class', className);
+                strip.appendChild(rect);
+            });
+        };
+        draw(PSL.timelineMarks(incidents.map(function (incident) {
+            return {from: incident.window_from_ms, to: incidentEnd(incident)};
+        }), fromMs, toMs, STRIP_WIDTH), 'timeline-incident', 2, 26);
+        draw(PSL.timelineMarks(episodes.map(function (episode) {
+            return {from: episode.started_at_ms, to: episode.ended_at_ms};
+        }), fromMs, toMs, STRIP_WIDTH), 'timeline-episode', 9, 12);
+        return el('div', {class: 'timeline'}, [
+            strip,
+            el('div', {class: 'timeline-axis'}, [
+                el('span', {text: PSL.dtHuman(fromMs)}),
+                el('span', {text: 'now'})
+            ])
+        ]);
+    }
+
+    function episodesTable(episodes, incidents) {
+        // Explain asks for a trace ID, which only a trace backend can resolve.
+        const traceable = (state.sources || []).some(function (source) {
+            return source.kind !== 'daemon';
+        });
+        const now = Date.now();
+        const head = el('tr', {}, EPISODE_COLUMNS.map(function (name) {
+            return el('th', {
+                text: name, scope: 'col', 'data-align': EPISODE_COLUMNS_RIGHT.indexOf(name) >= 0 ? 'right' : null
+            });
+        }));
+        const rows = episodes.map(function (episode) {
+            const overlapped = incidents.filter(function (incident) {
+                return PSL.spansOverlap(episode.started_at_ms, episode.ended_at_ms,
+                    incident.window_from_ms, incidentEnd(incident));
+            });
+            const end = episode.ended_at_ms == null ? now : episode.ended_at_ms;
+            return el('tr', {}, [
+                episodeSpanCell(episode),
+                el('td', {'data-align': 'right', class: 'table-mono', text: PSL.dur(end - episode.started_at_ms)}),
+                el('td', {'data-align': 'right', class: 'table-mono', text: episode.peak_confidence.toFixed(2)}),
+                el('td', {'data-align': 'right', class: 'table-mono', text: String(episode.peak_co_occurrences)}),
+                el('td', {}, overlapped.length === 0
+                    ? [el('span', {class: 'table-muted', text: 'none'})]
+                    : overlapped.map(incidentChip)),
+                el('td', {}, [episodeActions(episode, traceable)])
+            ]);
+        });
+        return el('table', {class: 'table'}, [el('thead', {}, [head]), el('tbody', {}, rows)]);
+    }
+
+    function episodeActions(episode, traceable) {
+        const traces = traceable ? PSL.pairTraceHash(episode) : null;
+        return el('div', {class: 'refresh'}, [
+            el('a', {class: 'pill-button pill-sm', href: PSL.episodeHandoffHash(episode, Date.now())},
+                [el('span', {text: 'Analyse this window'})]),
+            traces ? el('a', {class: 'pill-button pill-sm', href: traces},
+                [el('span', {text: 'Explain the last pair'})]) : null
+        ]);
+    }
+
+    /** An incident an episode overlaps, as a link that opens it unfolded on the incidents screen. */
+    function incidentChip(incident) {
+        const link = el('a', {
+            class: 'chip',
+            'data-kind': incident.kind,
+            href: '#/incidents',
+            text: (PSL.INCIDENT_KIND_LABEL[incident.kind] || incident.kind) + ' · ' + incident.service + ' · '
+                + PSL.dtHuman(incident.at_ms)
+        });
+        link.addEventListener('click', function () {
+            state.incidentFilter = {service: '', namespace: '', kind: '', environment: '', source_id: incident.source_id};
+            state.panelOpen[foldKey(incident)] = true;
+            saveFolds();
+        });
+        return link;
+    }
+
+    /**
+     * The episodes of an incident's daemon active during it, read once per unfolded incident.
+     * An empty read asks once more whether the daemon pushes any at all, so a daemon without
+     * the push never reads as a quiet one.
+     */
+    function loadIncidentCorrelations(incident) {
+        const key = incidentKey(incident);
+        const cacheKey = PSL.correlationWindowKey(key, incident.window_from_ms, incidentEnd(incident));
+        state.incidentCorrelations[cacheKey] = 'loading';
+        const scope = '/api/correlations?source_id=' + encodeURIComponent(incident.source_id);
+        getJson(scope + '&from=' + incident.window_from_ms + '&to=' + incidentEnd(incident))
+            .then(function (rows) {
+                if (rows.length > 0) return {rows: rows, pushes: true};
+                return getJson(scope + '&limit=1').then(function (any) {
+                    return {rows: rows, pushes: any.length > 0};
+                });
+            })
+            .then(function (result) {
+                state.incidentCorrelations[cacheKey] = result;
+            })
+            .catch(function () {
+                state.incidentCorrelations[cacheKey] = 'error';
+            })
+            .finally(function () {
+                const cell = document.getElementById('incident-detail-' + key);
+                if (cell) cell.replaceChildren(incidentPanel(incident));
+            });
+    }
+
+    function incidentCorrelationsBlock(incident) {
+        const cacheKey = PSL.correlationWindowKey(incidentKey(incident), incident.window_from_ms, incidentEnd(incident));
+        const held = state.incidentCorrelations[cacheKey];
+        if (held === undefined) {
+            queueMicrotask(function () {
+                loadIncidentCorrelations(incident);
+            });
+        }
+        const block = el('div', {class: 'incident-correlations'}, [
+            el('p', {class: 'overline daemon-audience', text: '// correlations'}),
+            el('h3', {class: 'daemon-lead', text: 'Correlations active during this incident'}),
+            el('p', {
+                class: 'daemon-source-note',
+                text: 'Episodes whose activity overlaps the incident\'s window, from the same daemon.'
+            })
+        ]);
+        if (held === undefined || held === 'loading') {
+            block.appendChild(el('p', {class: 'daemon-loading', role: 'status', text: 'Reading the correlations.'}));
+        } else if (held === 'error') {
+            // Shown once: the next render of this panel, a refold or a re-read, asks again.
+            delete state.incidentCorrelations[cacheKey];
+            block.appendChild(el('p', {class: 'table-muted', text: 'The Hub did not return the correlations of this window.'}));
+        } else if (held.rows.length > 0) {
+            block.appendChild(el('div', {class: 'sources-wrap'}, [incidentEpisodesTable(held.rows)]));
+        } else {
+            block.appendChild(el('p', {
+                class: 'empty-state',
+                text: held.pushes
+                    ? 'No correlation was active in this window.'
+                    : (incident.source_name || incident.source_id) + ' pushes no correlation you can read, so none can show here.'
+            }));
+        }
+        return block;
+    }
+
+    function incidentEpisodesTable(episodes) {
+        const head = el('tr', {}, ['Pair', 'Episode', 'Peak', ''].map(function (name) {
+            return el('th', {text: name, scope: 'col', 'data-align': name === 'Peak' ? 'right' : null});
+        }));
+        const rows = episodes.map(function (episode) {
+            return el('tr', {}, [
+                el('td', {}, [pairCell(episode)]),
+                episodeSpanCell(episode),
+                el('td', {'data-align': 'right', class: 'table-mono', text: episode.peak_confidence.toFixed(2)}),
+                el('td', {}, [allEpisodesLink(episode)])
+            ]);
+        });
+        return el('table', {class: 'table'}, [el('thead', {}, [head]), el('tbody', {}, rows)]);
+    }
+
+    /** Every episode of an episode's pair, through the route the Grafana table links to. */
+    function allEpisodesLink(episode) {
+        return el('a', {
+            class: 'pill-button pill-sm',
+            href: '#/correlations?pair_key=' + encodeURIComponent(episode.pair_key)
+        }, [el('span', {text: 'All its episodes'})]);
     }
 
     // ------------------------------------------------- screen: ack one finding
@@ -5367,6 +5937,685 @@
             ack.lines = PSL.ackSummary(outcomes);
             loadAck(true);
         });
+    }
+
+    // ---------------------------------------------------- screen: disclosures
+
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',
+        'October', 'November', 'December'];
+    const LEVEL_LABELS = {
+        'none': 'no integrity',
+        'hash-only': 'hash only',
+        'signed': 'signed',
+        'signed-with-attestation': 'signed + attestation',
+        'audited': 'audited'
+    };
+    const RENDER_REASONS = {
+        unsupported_engine: 'this Hub\'s engine cannot render disclosures yet',
+        unsupported_schema_version: 'the report is newer than this Hub\'s engine',
+        unsupported_characters: 'the report holds text the PDF fonts cannot draw',
+        pdf_export_failed: 'the engine could not write the PDF',
+        output_unwritable: 'the Hub could not write the PDF',
+        timeout: 'the render took longer than the Hub allows',
+        content_hash_mismatch: 'the engine found the report altered since its hash was baked',
+        binding_mismatch: 'the engine found the attestation is not over this report'
+    };
+    const DISCLOSURE_FILES = [
+        ['report.pdf', 'PDF/A-3b, carries the three files below as attachments', 'pdf'],
+        ['report.json', 'the disclosure, hashed', 'report'],
+        ['attestation.intoto.jsonl', 'in-toto v1 statement over report.json', 'attestation'],
+        ['bundle.sig', 'Sigstore bundle, with the transparency log entry', 'bundle'],
+        ['SHA256SUMS', 'one line per file, for sha256sum -c', 'report']
+    ];
+
+    function loadDisclosures() {
+        state.disclosures = null;
+        state.disclosuresError = false;
+        render();
+        getJson('/api/disclosures').then(function (list) {
+            state.disclosures = list;
+        }).catch(function () {
+            state.disclosuresError = true;
+            state.disclosures = [];
+        }).finally(function () {
+            if (currentScreen() === 'disclosures') render();
+        });
+    }
+
+    /** The detail, and the report itself for what the API leaves to it: applications, method, disclaimers. */
+    function loadDisclosure(id) {
+        if (!state.disclosure || state.disclosure.disclosure.id !== id) {
+            state.disclosure = null;
+            state.disclosureReport = null;
+        }
+        state.disclosureError = false;
+        render();
+        Promise.all([
+            getJson('/api/disclosures/' + id),
+            fetch('/api/disclosures/' + id + '/files/report.json', {headers: {accept: 'application/json'}})
+                .then(signInOn401)
+                .then(function (response) {
+                    return response.ok ? response.json() : null;
+                })
+                .catch(function () {
+                    return null;
+                })
+        ]).then(function (results) {
+            state.disclosure = results[0];
+            state.disclosureReport = results[1];
+        }).catch(function () {
+            state.disclosureError = true;
+        }).finally(function () {
+            if (currentScreen() === 'disclosure') render();
+        });
+    }
+
+    function sendDisclosure(path, method, body) {
+        return fetch(path, {
+            method: method,
+            headers: {'content-type': 'application/json', accept: 'application/json'},
+            body: JSON.stringify(body || {})
+        }).then(signInOn401).then(function (response) {
+            return response.json().catch(function () {
+                return null;
+            }).then(function (payload) {
+                return {ok: response.ok, status: response.status, payload: payload};
+            });
+        }, function () {
+            return {ok: false, status: 0, payload: null};
+        });
+    }
+
+    function longDate(iso) {
+        const parts = String(iso).split('-');
+        return Number(parts[2]) + ' ' + MONTHS[Number(parts[1]) - 1] + ' ' + parts[0];
+    }
+
+    function periodDays(period) {
+        return Math.round((Date.parse(period.to) - Date.parse(period.from)) / 86400000) + 1;
+    }
+
+    function periodLabel(period) {
+        const parts = String(period.to).split('-');
+        const month = Number(parts[1]);
+        if (period.type === 'calendar-quarter') return parts[0] + ' Q' + (Math.floor((month - 1) / 3) + 1);
+        if (period.type === 'calendar-year') return parts[0];
+        if (period.type === 'calendar-month') return MONTHS[month - 1] + ' ' + parts[0];
+        return longDate(period.from) + ' to ' + longDate(period.to);
+    }
+
+    function shortHash(hash) {
+        const value = String(hash);
+        return value.length > 20 ? value.slice(0, 11) + '…' + value.slice(-4) : value;
+    }
+
+    function checkGlyph() {
+        return svg([['path', {d: 'M5 12.5l4.2 4.2L19 7'}]], 11);
+    }
+
+    /** What the report declares about itself, dashed: the Hub cannot check it. */
+    function levelChip(level) {
+        return el('span', {class: 'chip chip-declared disc-level', text: LEVEL_LABELS[level] || level || 'undeclared'});
+    }
+
+    /** What this Hub recomputed, solid. Anything it did not check reads as muted text, never a mark. */
+    function checkChip(label, outcome) {
+        if (outcome === 'checked') return el('span', {class: 'chip disc-checked'}, [el('span', {text: label}), checkGlyph()]);
+        if (outcome === 'declared') return el('span', {class: 'chip chip-declared disc-level', text: label + ' declared'});
+        return el('span', {class: 'chip disc-unchecked', text: outcome === 'absent' ? 'no ' + label : label + ' not checked'});
+    }
+
+    function disclosureChips(item) {
+        const chips = [
+            el('span', {class: 'chip', text: item.intent}),
+            el('span', {class: 'chip', text: item.confidentiality}),
+            levelChip(item.integrity_level)
+        ];
+        if (item.pdf === 'rendered') {
+            chips.push(checkChip('hash', 'checked'));
+            if (item.files.attestation) chips.push(checkChip('bound', 'checked'));
+        } else {
+            chips.push(el('span', {class: 'chip disc-unchecked', text: 'not checked here'}));
+        }
+        if (item.confidentiality === 'internal') chips.push(el('span', {class: 'chip chip-declared', text: 'never shared'}));
+        return chips;
+    }
+
+    function figure(label, value, unit, sub) {
+        return el('div', {class: 'disc-figure'}, [
+            el('span', {class: 'disc-figure-label', text: label}),
+            el('span', {class: 'disc-figure-value'}, [
+                el('span', {text: value}),
+                unit ? el('span', {class: 'disc-figure-unit', text: unit}) : null
+            ]),
+            sub ? el('span', {class: 'disc-figure-sub', text: sub}) : null
+        ]);
+    }
+
+    function fixed(value, digits) {
+        return value == null ? 'n/a' : Number(value).toFixed(digits);
+    }
+
+    /** Runtime coverage on a track, with the official 75 % as a notch and the fill orange under it. */
+    function coverageBar(coverage) {
+        const notch = PSL.coverageNotch(coverage);
+        if (!notch) return el('span', {class: 'disc-figure-sub', text: 'not reported'});
+        const fill = el('span', {class: 'disc-track-fill'});
+        fill.style.width = Math.min(100, notch.percent) + '%';
+        return el('div', {class: 'disc-track', 'data-below': notch.below ? 'true' : null, role: 'img',
+            'aria-label': notch.percent + ' % runtime coverage, ' + (notch.below ? 'under' : 'at or over')
+                + ' the 75 % an official report needs'}, [
+            fill,
+            el('span', {class: 'disc-track-notch'}),
+            el('span', {class: 'disc-track-mark', text: '75 % official'})
+        ]);
+    }
+
+    function disclosureFigures(figures) {
+        const f = figures || {};
+        const coverage = PSL.coverageNotch(f.coverage);
+        return el('div', {class: 'disc-figures'}, [
+            figure('Energy', fixed(f.energy_kwh, 2), 'kWh', null),
+            figure('Carbon, location-based', fixed(f.carbon_kgco2eq, 2), 'kgCO₂eq',
+                f.carbon_kgco2eq == null ? null
+                    : 'bracket ' + fixed(f.carbon_kgco2eq / 2, 2) + ' to ' + fixed(f.carbon_kgco2eq * 2, 2)),
+            figure('Avoidable, canonical', f.avoidable_ratio == null ? 'n/a' : Math.round(f.avoidable_ratio * 100), '% of I/O',
+                null),
+            el('div', {class: 'disc-figure'}, [
+                el('span', {class: 'disc-figure-label', text: 'Runtime coverage'}),
+                el('span', {class: 'disc-figure-value'}, [
+                    el('span', {text: coverage ? String(coverage.percent) : 'n/a'}),
+                    coverage ? el('span', {class: 'disc-figure-unit', text: '%'}) : null
+                ]),
+                coverageBar(f.coverage)
+            ])
+        ]);
+    }
+
+    function fact(label, value) {
+        return el('span', {class: 'disc-fact'}, [
+            el('span', {class: 'disc-fact-label', text: label}),
+            el('span', {class: 'disc-fact-value', text: value})
+        ]);
+    }
+
+    function disclosureFacts(item) {
+        return el('div', {class: 'disc-facts'}, [
+            fact('published', PSL.dur(Date.now() - item.published_at_ms) + ' ago'),
+            item.signature_added_at_ms ? fact('signed copy', PSL.dur(Date.now() - item.signature_added_at_ms) + ' ago') : null,
+            fact('pdf', item.pdf === 'rendered' ? 'rendered here' : 'not rendered'),
+            el('span', {class: 'disc-fact disc-hash', title: item.content_hash, text: shortHash(item.content_hash)})
+        ]);
+    }
+
+    function downloadButton(id, name, primary, status) {
+        const button = el('button', {type: 'button', class: 'pill-button pill-sm' + (primary ? ' pill-primary' : '')},
+            [primary ? downloadGlyph() : null, el('span', {text: primary ? 'Download the PDF' : name})]);
+        button.addEventListener('click', function () {
+            button.disabled = true;
+            PSL.downloadAs('/api/disclosures/' + id + '/files/' + name, name).then(function (saved) {
+                button.disabled = false;
+                if (status) status.textContent = saved ? 'Sent ' + name + ' to your browser.' : 'The Hub did not return ' + name + '.';
+            });
+        });
+        return button;
+    }
+
+    function disclosureBanners(item) {
+        const banners = [];
+        if (item.withdrawn) {
+            banners.push(el('div', {class: 'banner', 'data-tone': 'crit'}, [critGlyph(16), el('div', {
+                text: 'Withdrawn ' + PSL.dur(Date.now() - item.withdrawn.at_ms) + ' ago by ' + (item.withdrawn.by || 'someone')
+                    // A reason typed as a sentence brings its own full stop, and the banner adds one.
+                    + ': ' + ((item.withdrawn.reason || '').replace(/\.+\s*$/, '') || 'no reason given')
+                    + '. Its files stay, its share links are dead.'
+            })]));
+        } else if (item.intent === 'official' && (item.integrity_level === 'hash-only' || item.integrity_level === 'none')) {
+            banners.push(el('div', {class: 'banner', 'data-tone': 'warn'}, [warningGlyph(16), el('div', {
+                text: 'Official intent without a signature. Anyone can check this file was not altered since its hash '
+                    + 'was baked, nobody can check who baked it. Sign the attestation with cosign and publish again to raise it.'
+            })]));
+        }
+        if (item.pdf !== 'rendered') {
+            // A render again the engine refused: the files are suspect, not merely unchecked.
+            const refused = item.render_reason === 'content_hash_mismatch' || item.render_reason === 'binding_mismatch';
+            const text = el('div', {
+                text: (refused ? 'Refused here: ' : 'Not checked here: ')
+                    + (RENDER_REASONS[item.render_reason] || item.render_reason || 'no render yet')
+                    + '. The files are kept as they arrived, and the figures are the report\'s own.'
+            });
+            banners.push(el('div', {class: 'banner', 'data-tone': refused ? 'crit' : 'info'}, refused ? [critGlyph(16), text] : [text]));
+        }
+        return banners;
+    }
+
+    function disclosureCard(item) {
+        const status = el('span', {class: 'terminal-status', role: 'status'});
+        const actions = [
+            item.files.pdf ? downloadButton(item.id, 'report.pdf', true, status) : null,
+            downloadButton(item.id, 'report.json', false, status),
+            item.files.attestation ? downloadButton(item.id, 'attestation.intoto.jsonl', false, status) : null,
+            item.files.bundle ? downloadButton(item.id, 'bundle.sig', false, status) : null,
+            el('a', {class: 'pill-button pill-sm disc-open', href: '#/disclosures/' + item.id}, [el('span', {text: 'Details'})]),
+            status
+        ];
+        return el('article', {class: 'card disc-card', 'data-withdrawn': item.withdrawn ? 'true' : null}, [
+            el('header', {class: 'disc-card-head'}, [
+                el('h2', {class: 'disc-card-title'}, [
+                    el('a', {href: '#/disclosures/' + item.id, text: periodLabel(item.period)})
+                ]),
+                el('span', {class: 'disc-dates',
+                    text: longDate(item.period.from) + ' → ' + longDate(item.period.to) + ' · ' + periodDays(item.period) + ' days'}),
+                el('span', {class: 'disc-chips'}, disclosureChips(item))
+            ]),
+            el('div', {class: 'disc-card-body'}, disclosureBanners(item).concat([disclosureFigures(item.figures), disclosureFacts(item)])),
+            el('div', {class: 'disc-actions'}, actions)
+        ]);
+    }
+
+    function railView(list) {
+        const rail = PSL.periodRail(list, Date.now());
+        if (rail.length === 0) return null;
+        return el('ol', {class: 'disc-rail', 'aria-label': 'Quarters'}, rail.map(function (cell) {
+            const caption = cell.state === 'published' ? LEVEL_LABELS[cell.level] || cell.level
+                : cell.state === 'internal' ? 'internal'
+                    : cell.state === 'withdrawn' ? 'withdrawn'
+                        : cell.state === 'current' ? 'closes in ' + cell.daysLeft + ' d' : 'not published';
+            const body = [el('span', {class: 'disc-rail-label', text: cell.label}), el('span', {class: 'disc-rail-caption', text: caption})];
+            return el('li', {class: 'disc-rail-cell', 'data-state': cell.state}, cell.id
+                ? [el('a', {href: '#/disclosures/' + cell.id}, body)]
+                : body);
+        }));
+    }
+
+    function railLegend() {
+        return el('div', {class: 'disc-legend'}, [
+            el('span', {class: 'disc-legend-label', text: 'declared'}),
+            levelChip('hash-only'), levelChip('signed'), levelChip('signed-with-attestation'),
+            el('span', {class: 'disc-legend-label', text: 'checked here'}),
+            checkChip('hash', 'checked'), checkChip('bound', 'checked'),
+            el('p', {class: 'disc-legend-note', text: 'A dashed level is what the report declares about itself. A solid '
+                + 'mark is what this Hub recomputed when it arrived: the content hash, and an attestation that names it. '
+                + 'The signature is checked on your machine, never here.'})
+        ]);
+    }
+
+    function publishPanel() {
+        return terminalBlock({
+            head: '// publish the next one',
+            sub: 'The last steps of the CI job that produces and signs the report.',
+            text: PSL.publishCommand(location.origin),
+            copyLabel: 'Copy the publish command',
+            notes: ['Publishing takes the import key `Hub:Disclosures:ImportKey`, like a daemon\'s findings import. '
+                + 'Reading this page needs `disclosures.read`, sharing and withdrawing need `disclosures.manage`. '
+                + 'Neither is in the built-in reader or member role.']
+        });
+    }
+
+    function renderDisclosuresScreen() {
+        const section = el('section', {class: 'disc'}, [
+            ruledOverline('// disclosures'),
+            el('h1', {class: 'page-title', text: 'Energy and carbon, period by period'}),
+            el('p', {class: 'page-sub', text: 'Each report was produced and signed outside the Hub by perf-sentinel '
+                + 'disclose, then published here by CI. The Hub recomputed its content hash on arrival and keeps the '
+                + 'files as they were sent. Public transparency, not regulatory-grade: every carbon figure carries a '
+                + '~2× bracket.'})
+        ]);
+        if (state.disclosures === null) {
+            section.appendChild(el('div', {class: 'card skeleton', style: 'height:220px'}));
+            return section;
+        }
+        if (state.disclosuresError) {
+            section.appendChild(el('div', {class: 'banner', 'data-tone': 'crit'}, [
+                critGlyph(16),
+                el('div', {text: 'The Hub did not return its disclosures. Reload the page to ask again.'})
+            ]));
+            return section;
+        }
+        if (state.disclosures.length === 0) {
+            section.appendChild(el('div', {class: 'empty-state'}, [
+                el('p', {class: 'empty-title', text: 'No disclosure published yet.'}),
+                el('p', {text: 'A CI job publishes one with the import key, as below. It shows here once the Hub '
+                    + 'has checked and kept it.'})
+            ]));
+            section.appendChild(publishPanel());
+            return section;
+        }
+        section.appendChild(el('div', {class: 'disc-rail-wrap'}, [
+            el('span', {class: 'disc-legend-label', text: 'periods'}),
+            railView(state.disclosures)
+        ]));
+        section.appendChild(railLegend());
+        state.disclosures.forEach(function (item) {
+            section.appendChild(disclosureCard(item));
+        });
+        section.appendChild(publishPanel());
+        return section;
+    }
+
+    // -------------------------------------------- screen: one disclosure
+
+    function detailPanel(head, sub, children) {
+        return el('section', {class: 'card disc-panel'}, [
+            el('div', {class: 'disc-panel-head'}, [
+                el('h2', {class: 'overline', text: head}),
+                sub ? el('p', {class: 'disc-panel-sub', text: sub}) : null
+            ])
+        ].concat(children));
+    }
+
+    function simpleTable(columns, rows, right) {
+        return el('div', {class: 'sources-wrap'}, [el('table', {class: 'table'}, [
+            el('thead', {}, [el('tr', {}, columns.map(function (name) {
+                return el('th', {scope: 'col', text: name, 'data-align': (right || []).indexOf(name) >= 0 ? 'right' : null});
+            }))]),
+            el('tbody', {}, rows)
+        ])]);
+    }
+
+    /** The carbon figure on a log scale between half and twice itself: the ~2× bracket the method states. */
+    function carbonBracket(carbon) {
+        if (carbon == null || carbon <= 0) return null;
+        return el('div', {class: 'disc-bracket'}, [
+            el('span', {class: 'disc-figure-label', text: 'Carbon with its ~2× bracket, log scale'}),
+            el('div', {class: 'disc-bracket-track', role: 'img',
+                'aria-label': fixed(carbon, 2) + ' kgCO₂eq, likely between ' + fixed(carbon / 2, 2) + ' and ' + fixed(carbon * 2, 2)}, [
+                el('span', {class: 'disc-bracket-band'}),
+                el('span', {class: 'disc-bracket-dot'})
+            ]),
+            el('div', {class: 'disc-bracket-scale'}, [
+                el('span', {text: fixed(carbon / 2, 2)}),
+                el('span', {class: 'disc-bracket-mid', text: fixed(carbon, 2) + ' kgCO₂eq'}),
+                el('span', {text: fixed(carbon * 2, 2)})
+            ])
+        ]);
+    }
+
+    function applicationsPanel(report, figures) {
+        const applications = report && Array.isArray(report.applications) ? report.applications : [];
+        if (applications.length === 0) return null;
+        const total = applications.reduce(function (sum, app) {
+            return sum + (Number(app.energy_kwh) || 0);
+        }, 0);
+        const rows = applications.map(function (app) {
+            const share = total > 0 ? (Number(app.energy_kwh) || 0) / total : 0;
+            const bar = el('span', {class: 'disc-share-fill'});
+            bar.style.width = Math.round(share * 100) + '%';
+            return el('tr', {}, [
+                el('td', {class: 'table-strong', text: app.display_name || app.service_name}),
+                el('td', {class: 'table-mono', 'data-align': 'right', text: app.total_requests == null ? '' : Number(app.total_requests).toLocaleString('en')}),
+                el('td', {}, [el('span', {class: 'disc-share'}, [el('span', {class: 'disc-share-track'}, [bar]),
+                    el('span', {class: 'table-mono', text: Math.round(share * 100) + ' %'})])]),
+                el('td', {class: 'table-mono', 'data-align': 'right', text: fixed(app.energy_kwh, 2)}),
+                el('td', {class: 'table-mono', 'data-align': 'right', text: fixed(app.carbon_kgco2eq, 2)}),
+                el('td', {class: 'table-mono', 'data-align': 'right', text: app.anti_patterns_detected_count == null ? '' : String(app.anti_patterns_detected_count)})
+            ]);
+        });
+        const excluded = report.scope_manifest && Array.isArray(report.scope_manifest.applications_excluded)
+            ? report.scope_manifest.applications_excluded : [];
+        excluded.forEach(function (app) {
+            rows.push(el('tr', {}, [
+                el('td', {}, [el('span', {class: 'table-strong', text: (app && (app.service_name || app.name)) || String(app)}), document.createTextNode(' '),
+                    el('span', {class: 'chip chip-declared', text: 'excluded'})]),
+                el('td', {class: 'table-muted', colspan: '5', text: (app && app.reason) || 'Declared by the operator, not measured.'})
+            ]));
+        });
+        const declared = figures && figures.applications_declared;
+        const measured = figures && figures.applications_measured;
+        return detailPanel('// applications',
+            declared != null && measured != null ? measured + ' of ' + declared + ' declared applications were measured.' : null,
+            [simpleTable(['Application', 'Requests', 'Energy share', 'kWh', 'kgCO₂eq', 'Anti-patterns'], rows,
+                ['Requests', 'kWh', 'kgCO₂eq', 'Anti-patterns'])]);
+    }
+
+    function integrityPanel(detail) {
+        const rows = PSL.checkRows(detail).map(function (row) {
+            const outcome = row.outcome === 'checked' ? checkChip('checked', 'checked')
+                : row.outcome === 'declared' ? el('span', {class: 'chip chip-declared disc-level', text: 'declared'})
+                    : el('span', {class: 'chip disc-unchecked', text: row.outcome === 'not_checked' ? 'not checked' : row.outcome});
+            return el('tr', {}, [
+                el('td', {class: 'table-strong', text: row.claim}),
+                el('td', {class: 'table-mono', text: row.by}),
+                el('td', {}, [outcome])
+            ]);
+        });
+        const item = detail.disclosure;
+        return detailPanel('// integrity',
+            'Who checked what. The Hub recomputes a hash with its engine. It cannot check a signature, which is only '
+            + 'worth what the verifier trusts.',
+            [
+                simpleTable(['Claim', 'Checked by', 'Outcome'], rows),
+                el('dl', {class: 'disc-defs'}, [
+                    el('dt', {text: 'content_hash'}), el('dd', {class: 'table-mono', text: item.content_hash}),
+                    el('dt', {text: 'report_uuid'}), el('dd', {class: 'table-mono', text: item.report_uuid}),
+                    el('dt', {text: 'expected signer'}), el('dd', {class: 'table-mono',
+                        text: detail.expected_identity ? detail.expected_identity + ' · ' + detail.expected_issuer
+                            : 'none in this Hub\'s configuration'})
+                ]),
+                terminalBlock({
+                    head: '// verify on your machine',
+                    sub: 'Download the PDF, then run the engine\'s own verifier on it.',
+                    text: PSL.verifyCommand(detail),
+                    copyLabel: 'Copy the verify command',
+                    notes: ['TRUSTED needs a signed report and an expected signer. The expected signer comes from this '
+                        + 'Hub\'s configuration, never from the report.']
+                })
+            ]);
+    }
+
+    function filesPanel(item) {
+        const status = el('span', {class: 'terminal-status', role: 'status'});
+        const rows = DISCLOSURE_FILES.filter(function (file) {
+            return item.files[file[2]];
+        }).map(function (file) {
+            return el('tr', {}, [
+                el('td', {class: 'table-strong', text: file[0]}),
+                el('td', {class: 'table-mono', text: file[1]}),
+                el('td', {'data-align': 'right'}, [downloadButton(item.id, file[0], false, status)])
+            ]);
+        });
+        return detailPanel('// files', 'Exactly what was published, kept in the Hub\'s database so its backup carries '
+            + 'them. The PDF is the one file this Hub produced, with the engine it embeds.',
+        [simpleTable(['File', 'Role', ''], rows), status]);
+    }
+
+    function linkState(link) {
+        return link.state === 'active' ? 'expires in ' + PSL.dur(link.expires_at_ms - Date.now())
+            : link.state === 'revoked' ? 'revoked by ' + link.revoked_by
+                : link.state === 'withdrawn' ? 'dead with the withdrawal' : 'expired';
+    }
+
+    function shareLinksPanel(detail, manage) {
+        const item = detail.disclosure;
+        const rows = detail.share_links.map(function (link) {
+            const revoke = manage && link.state === 'active'
+                ? actionButton('Revoke', function () {
+                    return sendDisclosure('/api/disclosures/' + item.id + '/share-links/' + link.id, 'DELETE');
+                }, 'Link revoked.')
+                : null;
+            return el('tr', {}, [
+                el('td', {class: 'table-mono', text: link.created_by}),
+                el('td', {class: 'table-mono', text: PSL.dur(Date.now() - link.created_at_ms) + ' ago'}),
+                el('td', {class: 'table-mono', text: linkState(link)}),
+                el('td', {class: 'table-mono', 'data-align': 'right', text: String(link.downloads)}),
+                el('td', {class: 'table-mono', text: link.last_used_at_ms ? PSL.dur(Date.now() - link.last_used_at_ms) + ' ago' : 'never'}),
+                el('td', {'data-align': 'right'}, [revoke])
+            ]);
+        });
+        const children = [];
+        if (state.disclosureLink && state.disclosureLink.id === item.id) children.push(terminalBlock({
+            head: '// new share link',
+            sub: 'Shown this once. Send the PDF\'s address. verify-hash --url works on the report.json beside it.',
+            text: state.disclosureLink.pdfUrl + '\n\nperf-sentinel verify-hash --url ' + state.disclosureLink.reportUrl,
+            copyLabel: 'Copy the share link'
+        }));
+        children.push(rows.length
+            ? simpleTable(['Created by', 'Created', 'State', 'Uses', 'Last use', ''], rows, ['Uses'])
+            : el('p', {class: 'sources-note', text: item.confidentiality === 'internal'
+                ? 'An internal report is never shared.' : 'No share link yet.'}));
+        return detailPanel('// share links', 'A share link serves this disclosure\'s PDF and its three files under their '
+            + 'fixed names to whoever holds it, with no session. It expires within 30 days and counts its uses.', children);
+    }
+
+    function deliveriesPanel(detail, manage) {
+        if (detail.deliveries.length === 0) return null;
+        const item = detail.disclosure;
+        const rows = detail.deliveries.map(function (delivery) {
+            const retry = manage && delivery.state !== 'delivered'
+                ? actionButton('Retry', function () {
+                    return sendDisclosure('/api/disclosures/' + item.id + '/deliveries/' + delivery.id + '/retry', 'POST');
+                }, 'Delivery queued again.')
+                : null;
+            return el('tr', {}, [
+                el('td', {class: 'table-strong', text: delivery.webhook}),
+                el('td', {class: 'table-mono', text: delivery.event}),
+                el('td', {class: 'table-mono', text: delivery.last_attempt_ms ? PSL.dur(Date.now() - delivery.last_attempt_ms) + ' ago' : 'not yet'}),
+                el('td', {}, [el('span', {class: 'status-pill', 'data-status': delivery.state === 'delivered' ? 'succeeded'
+                    : delivery.state === 'failed' ? 'failed' : 'queued',
+                text: delivery.state + (delivery.last_status ? ' · ' + delivery.last_status : '')
+                    + ' · ' + delivery.attempts + ' tries'})]),
+                el('td', {'data-align': 'right'}, [retry])
+            ]);
+        });
+        return detailPanel('// deliveries', 'Webhooks declared in the Hub\'s configuration, one signed POST each at '
+            + 'publication and at withdrawal. The Hub shows their names, never their URLs.',
+        [simpleTable(['Webhook', 'Event', 'Last attempt', 'Outcome', ''], rows)]);
+    }
+
+    function methodPanel(report) {
+        if (!report) return null;
+        const methodology = report.methodology || {};
+        const disclaimers = report.notes && Array.isArray(report.notes.disclaimers) ? report.notes.disclaimers : [];
+        const defs = [
+            ['specification', methodology.sci_specification],
+            ['conformance', methodology.conformance],
+            ['patterns', Array.isArray(methodology.enabled_patterns) ? methodology.enabled_patterns.join(', ') : null],
+            ['carbon intensity', methodology.calibration_inputs && methodology.calibration_inputs.carbon_intensity_source]
+        ].filter(function (pair) {
+            return pair[1];
+        });
+        return detailPanel('// method and limits', 'As the report states them. The disclaimers are copied verbatim.', [
+            el('dl', {class: 'disc-defs'}, defs.flatMap(function (pair) {
+                return [el('dt', {text: pair[0]}), el('dd', {class: 'table-mono', text: String(pair[1])})];
+            })),
+            disclaimers.length ? el('ol', {class: 'disc-disclaimers'}, disclaimers.map(function (text) {
+                return el('li', {text: String(text)});
+            })) : null
+        ]);
+    }
+
+    /** A button that runs one write, says what came of it, and reloads the detail. */
+    function actionButton(label, run, done, primary) {
+        const button = el('button', {type: 'button', class: 'pill-button pill-sm' + (primary ? ' pill-primary' : ''),
+            text: label});
+        button.addEventListener('click', function () {
+            if (state.disclosureBusy) return;
+            state.disclosureBusy = true;
+            button.disabled = true;
+            run().then(function (outcome) {
+                state.disclosureBusy = false;
+                state.disclosureNote = outcome && outcome.ok ? done
+                    : (outcome && outcome.payload && (outcome.payload.detail || outcome.payload.reason))
+                    || 'The Hub refused this (' + (outcome ? outcome.status : 0) + ').';
+                loadDisclosure(PSL.readDisclosureId(location.hash));
+            });
+        });
+        return button;
+    }
+
+    function withdrawForm(item) {
+        const reason = el('textarea', {class: 'disc-reason', rows: '2', maxlength: '500', 'aria-label': 'Reason for the withdrawal',
+            placeholder: 'Why, in a sentence: it is kept and sent with the withdrawal.'});
+        const submit = actionButton('Withdraw this disclosure', function () {
+            if (!reason.value.trim()) return Promise.resolve({ok: false, status: 400, payload: {detail: 'Give a reason first.'}});
+            return sendDisclosure('/api/disclosures/' + item.id + '/withdraw', 'POST', {reason: reason.value.trim()});
+        }, 'Withdrawn. Its share links are dead, and its webhooks are told.');
+        return el('div', {class: 'disc-withdraw'}, [
+            el('p', {text: 'Withdrawing is final. The files stay, every share link dies, and each webhook told of the '
+                + 'publication is told of the withdrawal. Publish a corrected report under a new uuid.'}),
+            reason,
+            el('div', {class: 'disc-actions'}, [submit])
+        ]);
+    }
+
+    function detailActions(detail, manage) {
+        const item = detail.disclosure;
+        const status = el('span', {class: 'terminal-status', role: 'status'});
+        const buttons = [item.files.pdf ? downloadButton(item.id, 'report.pdf', true, status) : null];
+        if (manage && !item.withdrawn && item.confidentiality !== 'internal') {
+            buttons.push(actionButton('New share link', function () {
+                return sendDisclosure('/api/disclosures/' + item.id + '/share-links', 'POST', {}).then(function (outcome) {
+                    if (outcome.ok) {
+                        const base = location.origin + outcome.payload.path;
+                        state.disclosureLink = {id: item.id, pdfUrl: base + 'report.pdf', reportUrl: base + 'report.json'};
+                    }
+                    return outcome;
+                });
+            }, 'Share link created. Copy it below: it is not shown again.'));
+        }
+        if (manage && item.pdf !== 'rendered') {
+            buttons.push(actionButton('Render again', function () {
+                return sendDisclosure('/api/disclosures/' + item.id + '/render', 'POST', {});
+            }, 'Rendered again.'));
+        }
+        if (manage && !item.withdrawn) {
+            const toggle = el('button', {type: 'button', class: 'pill-button pill-sm',
+                'aria-expanded': state.withdrawOpen ? 'true' : 'false', text: 'Withdraw'});
+            toggle.addEventListener('click', function () {
+                state.withdrawOpen = !state.withdrawOpen;
+                render();
+            });
+            buttons.push(toggle);
+        }
+        buttons.push(status);
+        return el('div', {class: 'disc-actions'}, buttons);
+    }
+
+    function renderDisclosureScreen() {
+        const back = el('a', {class: 'pill-button pill-sm disc-back', href: '#/disclosures'}, [el('span', {text: 'Back to disclosures'})]);
+        const section = el('section', {class: 'disc'}, [back]);
+        if (state.disclosureError) {
+            section.appendChild(el('div', {class: 'banner', 'data-tone': 'crit'}, [critGlyph(16),
+                el('div', {text: 'The Hub did not return this disclosure. It may not exist, or you may not read disclosures.'})]));
+            return section;
+        }
+        const detail = state.disclosure;
+        if (!detail) {
+            section.appendChild(el('div', {class: 'card skeleton', style: 'height:320px'}));
+            return section;
+        }
+        const item = detail.disclosure;
+        // The Hub decides: an action needs disclosures.manage and a caller it can name.
+        const manage = detail.can_manage === true;
+        [
+            ruledOverline('// disclosure · ' + periodLabel(item.period)),
+            el('h1', {class: 'page-title', text: item.organisation + ', ' + longDate(item.period.from) + ' to '
+                + longDate(item.period.to)}),
+            el('p', {class: 'page-sub', text: item.intent.charAt(0).toUpperCase() + item.intent.slice(1) + ' intent, '
+                + item.confidentiality + ' confidentiality. Published to this Hub ' + PSL.dur(Date.now() - item.published_at_ms)
+                + ' ago' + (item.pdf === 'rendered'
+                    ? ', its content hash recomputed on arrival and its bytes kept as they came.'
+                    : ', kept as it came without a check here.')}),
+            el('div', {class: 'disc-chips'}, disclosureChips(item)),
+            detailActions(detail, manage),
+            state.disclosureNote ? el('p', {class: 'disc-note', role: 'status', text: state.disclosureNote}) : null
+        ].forEach(function (node) {
+            if (node) section.appendChild(node);
+        });
+        if (state.withdrawOpen && manage && !item.withdrawn) section.appendChild(withdrawForm(item));
+        disclosureBanners(item).forEach(function (banner) {
+            section.appendChild(banner);
+        });
+        section.appendChild(detailPanel('// at a glance', null, [
+            disclosureFigures(item.figures),
+            carbonBracket(item.figures && item.figures.carbon_kgco2eq)
+        ]));
+        [applicationsPanel(state.disclosureReport, item.figures), integrityPanel(detail), filesPanel(item),
+            shareLinksPanel(detail, manage), deliveriesPanel(detail, manage), methodPanel(state.disclosureReport)]
+            .forEach(function (panel) {
+                if (panel) section.appendChild(panel);
+            });
+        return section;
     }
 
     // ---------------------------------------------------- screen: recent runs
