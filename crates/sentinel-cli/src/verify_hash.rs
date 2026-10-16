@@ -31,7 +31,8 @@ use std::process::Command;
 
 use sentinel_core::report::periodic::schema::{IntegrityLevel, PeriodicReport, SignatureMetadata};
 use sentinel_core::report::periodic::{
-    AttestationBinding, InTotoStatement, check_attestation_binding, compute_content_hash,
+    AttestationBinding, InTotoStatement, SchemaVersionError, check_attestation_binding,
+    check_schema_version, compute_content_hash,
 };
 
 use crate::limits::MAX_LOCAL_REPORT_BYTES;
@@ -63,6 +64,8 @@ pub const EXIT_INPUT_ERROR: i32 = 3;
 /// Exit code: `--url` fetch failed (HTTP error, scheme rejected, body
 /// over the size cap).
 pub const EXIT_NETWORK_ERROR: i32 = 4;
+/// Exit code: the report's schema is newer than this engine reads.
+pub const EXIT_UNSUPPORTED: i32 = 5;
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum VerifyHashFormat {
@@ -207,13 +210,7 @@ fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
         );
         EXIT_INPUT_ERROR
     })?;
-    let report = parse_report(&bytes).map_err(|e| {
-        eprintln!(
-            "Error: parse {}: {e}",
-            sanitise_for_terminal(&path.display().to_string())
-        );
-        EXIT_INPUT_ERROR
-    })?;
+    let report = parse_gated(&bytes, &path.display().to_string())?;
     Ok(LoadedReport {
         report,
         bytes,
@@ -229,15 +226,26 @@ fn parse_report(bytes: &[u8]) -> Result<PeriodicReport, serde_json::Error> {
     serde_json::from_slice(bytes)
 }
 
+/// Refuse a schema this engine does not read before parsing: a newer
+/// report would lose its new fields and fail the hash for the wrong reason.
+fn parse_gated(bytes: &[u8], source: &str) -> Result<PeriodicReport, i32> {
+    let source = sanitise_for_terminal(source);
+    if let Err(e @ SchemaVersionError::Unsupported(_)) = check_schema_version(bytes) {
+        eprintln!("Error: {source}: {}", sanitise_for_terminal(&e.to_string()));
+        return Err(EXIT_UNSUPPORTED);
+    }
+    parse_report(bytes).map_err(|e| {
+        eprintln!("Error: parse {source}: {e}");
+        EXIT_INPUT_ERROR
+    })
+}
+
 async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
     let bytes = http_get(url).await.map_err(|e| {
         eprintln!("Error: fetch {url}: {e}");
         EXIT_NETWORK_ERROR
     })?;
-    let report = parse_report(&bytes).map_err(|e| {
-        eprintln!("Error: parse {url}: {e}");
-        EXIT_INPUT_ERROR
-    })?;
+    let report = parse_gated(&bytes, url)?;
     let attestation_url = derive_sidecar_url(url, "attestation.intoto.jsonl");
     let bundle_url = derive_sidecar_url(url, "bundle.sig");
     let mut fetched = FetchedPaths {

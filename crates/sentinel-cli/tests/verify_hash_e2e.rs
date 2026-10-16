@@ -253,3 +253,19 @@ fn verify_hash_local_report_over_size_cap_returns_input_error() {
     let stderr = String::from_utf8_lossy(&v.stderr);
     assert!(stderr.contains("exceeds"), "stderr: {stderr}");
 }
+
+#[test]
+fn verify_hash_refuses_a_newer_schema_with_exit_5() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_example_with_fixed_hash(dir.path());
+    let mut report: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    report["schema_version"] = "perf-sentinel-report/v1.8".into();
+    fs::write(&path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+
+    let out = run_verify(&["--report", path.to_str().unwrap()]);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(5), "stderr: {stderr}");
+    assert!(stderr.contains("perf-sentinel-report/v1.8"), "{stderr}");
+    assert!(stderr.contains("upgrade perf-sentinel"), "{stderr}");
+}

@@ -1315,7 +1315,15 @@ mod help_examples {
   perf-sentinel verify-hash --report report.json --attestation report.intoto.jsonl --bundle report.sig --expected-identity release@example.com --expected-issuer https://accounts.google.com
 
   # Recompute the content hash of a published report
-  perf-sentinel verify-hash --url https://example.com/perf-sentinel-report.json --no-identity-check";
+  perf-sentinel verify-hash --url https://example.com/perf-sentinel-report.json --no-identity-check
+
+Exit codes:
+  0  TRUSTED, every check passed
+  1  UNTRUSTED, a check failed
+  2  PARTIAL, no failure but a check could not complete
+  3  input error, the report is unreadable or a flag is missing
+  4  network error on --url
+  5  the report's schema is newer than this engine, upgrade perf-sentinel";
 
     pub const HASH_BAKE: &str = "Examples:
   # Bake the canonical content hash into a report in place
