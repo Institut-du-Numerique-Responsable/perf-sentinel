@@ -1070,10 +1070,10 @@ pub(crate) enum Commands {
         /// The Sigstore bundle to attach.
         #[arg(long, value_name = "PATH")]
         bundle: Option<PathBuf>,
-        /// Signer identity printed in the verify command of the last page.
+        /// Signer identity printed in the verify command of the verify page.
         #[arg(long, value_name = "ID", requires = "expected_issuer")]
         expected_identity: Option<String>,
-        /// OIDC issuer printed in the verify command of the last page.
+        /// OIDC issuer printed in the verify command of the verify page.
         #[arg(long, value_name = "URL", requires = "expected_identity")]
         expected_issuer: Option<String>,
         /// Where to write the PDF. Nothing is written unless it renders.

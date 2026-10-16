@@ -264,6 +264,19 @@ mod layout_and_pages {
             .join(" ")
     }
 
+    /// The ops of the verify section, which the annex now follows.
+    fn verify_section(pages: &[Vec<Op>]) -> Vec<Op> {
+        let start = pages
+            .iter()
+            .position(|page| page_text(page).contains("Five minutes to know it was not altered"))
+            .expect("verify page");
+        let end = pages
+            .iter()
+            .position(|page| page_text(page).contains("Every field of the report"))
+            .expect("annex page");
+        pages[start..end].iter().flatten().cloned().collect()
+    }
+
     fn has_qr(page: &[Op]) -> bool {
         page.iter().any(|op| matches!(op, Op::Qr { .. }))
     }
@@ -465,6 +478,16 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn no_coverage_bar_is_drawn_when_runtime_coverage_is_not_reported() {
+        let (mut report, _) = baked_report();
+        report.aggregate.runtime_windows_count = 0;
+        report.aggregate.fallback_windows_count = 0;
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("Runtime coverage: Not reported"), "{all}");
+        assert!(!all.contains("an official report needs 75"), "{all}");
+    }
+
+    #[test]
     fn excluded_environments_are_printed_with_their_reason() {
         let (mut report, _) = baked_report();
         report.scope_manifest.environments_excluded.push(
@@ -518,6 +541,53 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn an_annex_after_the_verify_page_prints_every_field_and_marks_the_absent_ones() {
+        let (report, _) = baked_report();
+        let pages = texts(&layout_pages(&PageContext::for_report(&report)));
+        let verify = pages
+            .iter()
+            .position(|page| page.contains("Five minutes to know it was not altered"))
+            .expect("verify page");
+        assert_eq!(verify, 4, "the annex must not move the verify page");
+        let annex = pages[verify + 1..].join(" ");
+        assert!(annex.contains("Every field of the report"), "{annex}");
+        assert!(
+            annex.contains(&format!(
+                "report_metadata.report_uuid {}",
+                report.report_metadata.report_uuid
+            )),
+            "{annex}"
+        );
+        assert!(
+            annex.contains("organisation.identifiers.lei not reported"),
+            "{annex}"
+        );
+        assert!(
+            annex.contains("applications[0].service_name checkout"),
+            "{annex}"
+        );
+    }
+
+    #[test]
+    fn the_longest_annex_paths_print_on_one_line() {
+        let (report, _) = baked_report();
+        let pages = layout_pages(&PageContext::for_report(&report));
+        for path in [
+            "methodology.calibration_inputs.binary_specpower_vintage",
+            "aggregate.carbon_breakdown.messaging_kgco2eq_out_of_total",
+            "methodology.standard_crosswalk.mappings[0].report_field",
+        ] {
+            assert!(
+                pages
+                    .iter()
+                    .flatten()
+                    .any(|op| matches!(op, Op::Text { text, .. } if text.trim() == path)),
+                "{path} is cut"
+            );
+        }
+    }
+
+    #[test]
     fn reference_urls_other_than_transparency_are_listed() {
         let (mut report, _) = baked_report();
         report.notes.reference_urls.clear();
@@ -537,16 +607,6 @@ mod layout_and_pages {
     }
 
     #[test]
-    fn no_coverage_bar_is_drawn_when_runtime_coverage_is_not_reported() {
-        let (mut report, _) = baked_report();
-        report.aggregate.runtime_windows_count = 0;
-        report.aggregate.fallback_windows_count = 0;
-        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
-        assert!(all.contains("Runtime coverage: Not reported"), "{all}");
-        assert!(!all.contains("an official report needs 75"), "{all}");
-    }
-
-    #[test]
     fn page_five_fills_the_verify_command_with_the_expected_identity() {
         let (report, _) = baked_report();
         let mut context = PageContext::for_report(&report);
@@ -554,7 +614,7 @@ mod layout_and_pages {
             Some("https://github.com/acme/ci/.github/workflows/disclose.yml@refs/heads/main");
         context.expected_issuer = Some("https://token.actions.githubusercontent.com");
         let pages = layout_pages(&context);
-        let last = page_text(pages.last().expect("pages"));
+        let last = page_text(&verify_section(&pages));
         assert!(last.contains("--expected-identity"), "{last}");
         assert!(
             last.contains("token.actions.githubusercontent.com"),
@@ -593,7 +653,7 @@ mod layout_and_pages {
     fn page_five_prints_the_full_document_code() {
         let (report, _) = baked_report();
         let pages = layout_pages(&PageContext::for_report(&report));
-        let last = page_text(pages.last().expect("pages"));
+        let last = page_text(&verify_section(&pages));
         let hex = report.integrity.content_hash.trim_start_matches("sha256:");
         for group in hex.as_bytes().chunks(4) {
             assert!(last.contains(std::str::from_utf8(group).unwrap()), "{last}");
@@ -604,7 +664,7 @@ mod layout_and_pages {
     fn an_unsigned_report_does_not_claim_a_signature_stops_forgers() {
         let (report, _) = baked_report();
         let pages = layout_pages(&PageContext::for_report(&report));
-        let last = page_text(pages.last().expect("pages"));
+        let last = page_text(&verify_section(&pages));
         assert!(
             !last.contains("signed attestation names the original code"),
             "{last}"
@@ -682,9 +742,7 @@ mod layout_and_pages {
         context.expected_issuer = Some("https://token.actions.githubusercontent.com");
         let pages = layout_pages(&context);
         let quoted = format!("'{identity}'");
-        let line = pages
-            .last()
-            .expect("pages")
+        let line = verify_section(&pages)
             .iter()
             .find_map(|op| match op {
                 Op::Text {

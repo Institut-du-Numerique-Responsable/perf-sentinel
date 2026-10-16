@@ -3,6 +3,7 @@
 //! A rendered PDF stands for two checks: the content hash recomputes, and
 //! the attestation, when given, names it.
 
+mod annex;
 mod extract;
 mod layout;
 mod logo;

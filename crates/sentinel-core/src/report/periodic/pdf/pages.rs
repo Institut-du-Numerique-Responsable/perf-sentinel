@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use chrono::Datelike as _;
 
+use super::annex;
 use super::layout::{Face, fit, group4, text_width, wrap};
 use super::{PAGE_HEIGHT, PAGE_WIDTH};
 use crate::report::periodic::schema::{
@@ -42,6 +43,8 @@ const CONTENT_WIDTH: f32 = RIGHT - MARGIN;
 const BOTTOM: f32 = PAGE_HEIGHT - 70.0;
 const LABEL_WIDTH: f32 = 123.0;
 const NOT_REPORTED: &str = "Not reported";
+/// The annex's path column, wide enough for most schema paths on one line.
+const ANNEX_LABEL: f32 = 254.0;
 /// The coverage an official disclosure needs.
 const OFFICIAL_COVERAGE: f64 = 0.75;
 
@@ -156,6 +159,8 @@ fn lay_out(context: &PageContext<'_>, verify_page: usize) -> (Vec<Vec<Op>>, usiz
     writer.new_page();
     let actual = writer.pages.len();
     verify(&mut writer, context);
+    writer.new_page();
+    annex_pages(&mut writer, context.report);
     (writer.finish(context.report), actual)
 }
 
@@ -2020,4 +2025,62 @@ fn command_lines(line: &str, width: f32) -> Vec<(String, f32)> {
             (format!("{lead}{piece}"), size)
         })
         .collect()
+}
+
+// ---------------------------------------------------------------- annex
+
+/// Every field the schema defines, as the report carries it, so what it
+/// leaves out shows instead of disappearing.
+fn annex_pages(w: &mut Writer, report: &PeriodicReport) {
+    w.section("Annex");
+    w.title("Every field of the report, as it carries it");
+    w.para(
+        9.0,
+        TEXT_2,
+        &format!(
+            "Each field the {} schema defines, in the order of the attached report.json. \"{}\" means the report does not carry the field, or carries it empty. This annex prints the attached report and checks nothing: the proof is still that report, checked as the verify page shows.",
+            report.schema_version,
+            annex::ABSENT
+        ),
+    );
+    let Ok(json) = serde_json::to_value(report) else {
+        w.para(9.0, TEXT, NOT_REPORTED);
+        return;
+    };
+    for (section, rows) in annex::rows(&json) {
+        w.heading(&section);
+        for row in &rows {
+            annex_row(w, row);
+        }
+    }
+}
+
+fn annex_row(w: &mut Writer, row: &annex::Row) {
+    let (value, color) = row
+        .value
+        .as_deref()
+        .map_or((annex::ABSENT, WARN_FG), |value| (value, TEXT));
+    let label_height = block_height(&row.path, Face::Mono, 7.0, ANNEX_LABEL - 8.0);
+    let value_height = block_height(value, Face::Mono, 7.0, CONTENT_WIDTH - ANNEX_LABEL);
+    w.ensure(label_height.max(value_height) + 1.0);
+    let top = w.y;
+    w.block(
+        MARGIN,
+        ANNEX_LABEL - 8.0,
+        Face::Mono,
+        7.0,
+        TEXT_2,
+        &row.path,
+    );
+    let label_bottom = w.y;
+    w.y = top;
+    w.block(
+        MARGIN + ANNEX_LABEL,
+        CONTENT_WIDTH - ANNEX_LABEL,
+        Face::Mono,
+        7.0,
+        color,
+        value,
+    );
+    w.y = w.y.max(label_bottom) + 1.0;
 }
