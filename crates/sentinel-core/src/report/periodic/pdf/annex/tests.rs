@@ -54,19 +54,33 @@ const ROOTS: &[(&str, &[&str])] = &[
 
 /// `(struct, [(json name, type)])` for every `pub struct` of `schema.rs`.
 fn schema_structs() -> Vec<(String, Vec<(String, String)>)> {
-    let source = SCHEMA.split("#[cfg(test)]").next().unwrap_or(SCHEMA);
+    parse_structs(SCHEMA.split("#[cfg(test)]").next().unwrap_or(SCHEMA))
+}
+
+/// The structs of `source` and their serialised field names. A struct-level
+/// `rename_all` would change every name, so it is refused rather than
+/// misread.
+fn parse_structs(source: &str) -> Vec<(String, Vec<(String, String)>)> {
     let mut structs = Vec::new();
     let mut current: Option<(String, Vec<(String, String)>)> = None;
     let mut rename: Option<String> = None;
+    let mut renames_all = false;
     for line in source.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("pub struct ") {
-            let name: String = rest
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_')
-                .collect();
-            if rest.trim_end().ends_with('{') {
-                current = Some((name, Vec::new()));
+        if current.is_none() {
+            renames_all |= trimmed.starts_with("#[serde(") && trimmed.contains("rename_all");
+            if trimmed.starts_with("pub enum ") {
+                renames_all = false;
+            }
+            if let Some(rest) = trimmed.strip_prefix("pub struct ") {
+                assert!(!renames_all, "a struct-level rename_all: {trimmed}");
+                let name = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if rest.trim_end().ends_with('{') {
+                    current = Some((name, Vec::new()));
+                }
             }
             continue;
         }
@@ -81,12 +95,12 @@ fn schema_structs() -> Vec<(String, Vec<(String, String)>)> {
             .find("rename = \"")
             .filter(|_| trimmed.starts_with("#[serde("))
         {
-            let tail = &trimmed[start + 10..];
-            rename = tail.split('"').next().map(str::to_string);
+            rename = trimmed[start + 10..].split('"').next().map(str::to_string);
             continue;
         }
         if let Some((name, ty)) = trimmed
-            .strip_prefix("pub ")
+            .strip_prefix("pub(crate) ")
+            .or_else(|| trimmed.strip_prefix("pub "))
             .and_then(|rest| rest.split_once(':'))
         {
             let name = name.trim_start_matches("r#").trim().to_string();
@@ -311,5 +325,33 @@ fn an_array_prints_item_by_item() {
     assert!(
         at("applications[0].display_name") < at("applications[1].service_name"),
         "{paths:?}"
+    );
+}
+
+#[test]
+fn a_whitespace_only_value_is_absent() {
+    let sections = rows(&json!({"organisation": {"sector": "  "}}));
+    assert_eq!(find(&sections, "organisation.sector").value, None);
+}
+
+#[test]
+fn the_schema_parser_reads_crate_visible_fields() {
+    let parsed =
+        parse_structs("pub struct Probe {\n    pub(crate) hidden: u64,\n    pub shown: u64,\n}\n");
+    assert_eq!(
+        parsed[0]
+            .1
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["hidden", "shown"]
+    );
+}
+
+#[test]
+#[should_panic(expected = "rename_all")]
+fn the_schema_parser_refuses_a_struct_level_rename_all() {
+    parse_structs(
+        "#[serde(rename_all = \"camelCase\")]\npub struct Probe {\n    pub one: u64,\n}\n",
     );
 }

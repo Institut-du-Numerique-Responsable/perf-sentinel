@@ -211,37 +211,48 @@ fn runs<'a>(patterns: &[&'a str]) -> Vec<(&'a str, Vec<&'a str>)> {
 /// Prints every pattern from `node`, a run of patterns at a time.
 fn walk(node: &Value, patterns: &[&str], prefix: &str, rows: &mut Vec<Row>) {
     for (head, members) in runs(patterns) {
-        let rests: Vec<&str> = members
-            .iter()
-            .filter_map(|pattern| pattern.split_once('.').map(|(_, rest)| rest))
-            .collect();
         if head == "*" {
             map_rows(node, prefix, rows);
-            continue;
+        } else {
+            follow(node, head, &members, prefix, rows);
         }
-        let (name, is_array) = head
-            .strip_suffix("[]")
-            .map_or((head, false), |name| (name, true));
-        let here = join(prefix, name);
-        let child = node.get(name).filter(|value| !value.is_null());
-        match (child, is_array) {
-            (None, _) => absent_all(prefix, &members, rows),
-            (Some(child), false) if rests.is_empty() => leaf(child, here, rows),
-            (Some(child), false) => walk(child, &rests, &here, rows),
-            (Some(child), true) => match child.as_array().filter(|items| !items.is_empty()) {
-                None => absent_all(prefix, &members, rows),
-                Some(items) => {
-                    for (index, item) in items.iter().enumerate() {
-                        let indexed = format!("{here}[{index}]");
-                        if rests.is_empty() {
-                            leaf(item, indexed, rows);
-                        } else {
-                            walk(item, &rests, &indexed, rows);
-                        }
-                    }
-                }
-            },
+    }
+}
+
+/// One run: the patterns that start with `head`, followed into `node`.
+fn follow(node: &Value, head: &str, members: &[&str], prefix: &str, rows: &mut Vec<Row>) {
+    let rests: Vec<&str> = members
+        .iter()
+        .filter_map(|pattern| pattern.split_once('.').map(|(_, rest)| rest))
+        .collect();
+    let (name, is_array) = head
+        .strip_suffix("[]")
+        .map_or((head, false), |name| (name, true));
+    let here = join(prefix, name);
+    let Some(child) = node.get(name).filter(|value| !value.is_null()) else {
+        absent_all(prefix, members, rows);
+        return;
+    };
+    if !is_array {
+        descend(child, &rests, here, rows);
+        return;
+    }
+    match child.as_array().filter(|items| !items.is_empty()) {
+        Some(items) => {
+            for (index, item) in items.iter().enumerate() {
+                descend(item, &rests, format!("{here}[{index}]"), rows);
+            }
         }
+        None => absent_all(prefix, members, rows),
+    }
+}
+
+/// A leaf when nothing is left to follow, the remaining patterns otherwise.
+fn descend(node: &Value, rests: &[&str], path: String, rows: &mut Vec<Row>) {
+    if rests.is_empty() {
+        leaf(node, path, rows);
+    } else {
+        walk(node, rests, &path, rows);
     }
 }
 
@@ -285,11 +296,11 @@ fn leaf(value: &Value, path: String, rows: &mut Vec<Row>) {
     }
 }
 
-/// A value as printed: strings bare, empty or null as absent.
+/// A value as printed: strings bare, empty, blank or null as absent.
 fn scalar(value: &Value) -> Option<String> {
     match value {
         Value::Null => None,
-        Value::String(text) => (!text.is_empty()).then(|| text.clone()),
+        Value::String(text) => (!text.trim().is_empty()).then(|| text.clone()),
         Value::Array(items) if items.is_empty() => None,
         Value::Object(map) if map.is_empty() => None,
         other => Some(other.to_string()),
