@@ -626,6 +626,20 @@ La sortie 5 signifie que rien ne dit que le rapport est faux, le moteur ne sait 
 
 La commande demande la feature Cargo `pdf`, active dans le binaire publié et dans l'image.
 
+## Publier sur un Perf Sentinel Hub
+
+Un Hub dont les divulgations sont actives (PerfSentinelHub 0.7.0 ou plus récent, `Hub:Disclosures:ImportKey` renseigné) garde une divulgation, rend son PDF avec le moteur qu'il embarque, et la transmet par un écran restreint, des liens de partage qui expirent et des webhooks signés. La dernière étape du job qui produit et signe le rapport envoie les trois fichiers en une seule requête multipart :
+
+```bash
+curl --fail -H "X-API-Key: $HUB_DISCLOSURES_KEY" \
+  -F report=@report.json \
+  -F attestation=@attestation.intoto.jsonl \
+  -F bundle=@bundle.sig \
+  https://hub.example.com/api/import/disclosures
+```
+
+Le Hub lance `disclose-pdf` avant de garder quoi que ce soit. Un rapport dont le hash ne se recalcule pas, ou dont l'attestation nomme un autre hash, est refusé en 422 avec la raison du moteur. Un rapport non signé est accepté et affiché comme tel, et publier plus tard la copie signée du même rapport la remplace. Le Hub ne vérifie jamais de signature : qui reçoit le PDF lance `verify-hash` dessus. Voir le `API-FR.md` du Hub pour les réponses.
+
 ## Vérifier un rapport publié
 
 Un tiers vérifie un fichier publié en une commande :

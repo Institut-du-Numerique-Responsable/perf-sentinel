@@ -606,6 +606,20 @@ Exit 5 means nothing says the report is wrong, the engine just cannot draw it: a
 
 The command needs the `pdf` Cargo feature, on in the release binary and the image.
 
+## Publishing to a Perf Sentinel Hub
+
+A Hub with disclosures on (PerfSentinelHub 0.7.0 or later, `Hub:Disclosures:ImportKey` set) keeps a disclosure, renders its PDF with the engine it embeds, and hands it on through a restricted screen, expiring share links and signed webhooks. The last step of the job that produces and signs the report sends the three files as one multipart request:
+
+```bash
+curl --fail -H "X-API-Key: $HUB_DISCLOSURES_KEY" \
+  -F report=@report.json \
+  -F attestation=@attestation.intoto.jsonl \
+  -F bundle=@bundle.sig \
+  https://hub.example.com/api/import/disclosures
+```
+
+The Hub runs `disclose-pdf` before it keeps anything. A report whose hash does not recompute, or whose attestation names another hash, is refused with 422 and the engine's reason. An unsigned report is accepted and shown as such, and publishing the signed copy of the same report later replaces it. The Hub never checks a signature: whoever receives the PDF runs `verify-hash` on it. See the Hub's `API.md` for the responses.
+
 ## Verifying a published disclosure
 
 A third party verifies a published file with one command:
