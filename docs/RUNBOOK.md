@@ -849,8 +849,8 @@ The legacy `Report.warnings: Vec<String>` field (0.5.16+) still ships
 for backward compatibility. CLI and HTML renderers prefer
 `warning_details` when non-empty and fall back to `warnings`
 otherwise. The HTML dashboard exposes `warning_details` in the
-embedded JSON payload (`payload.report.warning_details`). A dedicated
-banner in the dashboard UI is on the roadmap.
+embedded JSON payload (`payload.report.warning_details`) and shows it
+in a banner above the panels, one `[kind] message` row per warning.
 
 When acknowledging findings via the daemon ack API (since 0.5.20), no
 warning kind is affected by acks: they reflect daemon state, not

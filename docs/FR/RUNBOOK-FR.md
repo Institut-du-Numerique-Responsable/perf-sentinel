@@ -869,8 +869,9 @@ Le champ legacy `Report.warnings: Vec<String>` (0.5.16+) reste émis
 pour la rétrocompatibilité. Les renderers CLI et HTML préfèrent
 `warning_details` quand non vide et se rabattent sur `warnings` sinon.
 Le dashboard HTML expose `warning_details` dans le payload JSON
-embarqué (`payload.report.warning_details`). Une bannière dédiée dans
-l'interface du dashboard est sur la feuille de route.
+embarqué (`payload.report.warning_details`) et l'affiche dans une
+bannière au-dessus des panneaux, une ligne `[kind] message` par
+avertissement.
 
 Quand on acquitte des findings via l'API ack du daemon (depuis
 0.5.20), aucun kind de warning n'est affecté par les acks : ils

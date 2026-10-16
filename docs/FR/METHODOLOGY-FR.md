@@ -144,7 +144,7 @@ Un rapport porte :
 - `integrity.content_hash` : SHA-256 sur la forme JSON canonique (clés d'objets triées, sérialisation compacte, UTF-8) avec `content_hash` mis à chaîne vide. Un consommateur recalcule en posant `content_hash` à `""` sur sa propre copie puis en calculant le hash.
 - `integrity.binary_hash` : SHA-256 du binaire Perf Sentinel qui a produit le fichier, lu via `std::env::current_exe()`. À coupler avec `binary_verification_url` pour vérifier que le binaire correspond à une release publiée.
 
-La chaîne d'intégrité de traces dans `integrity.trace_integrity_chain` est réservée pour une révision future et toujours `null` dans le schéma v1.0.
+`integrity.trace_integrity_chain` porte le verdict de la chaîne de hachage de l'archive depuis le schéma v1.6 : combien de fenêtres sont vérifiées, combien ne portent pas de chaîne, et combien de ruptures ont été trouvées. Le champ vaut `null` sur les rapports écrits avant v1.6. Voir [SCHEMA-FR.md](SCHEMA-FR.md).
 
 ## Intégrité cryptographique (0.7.0+)
 
