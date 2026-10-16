@@ -30,61 +30,97 @@ impl Face {
     }
 }
 
-/// Width of `text` in points, from the glyph advances without kerning.
-pub(crate) fn text_width(face: Face, size: f32, text: &str) -> f32 {
-    let font = face.font();
-    let charmap = font.charmap();
-    let metrics = font.glyph_metrics(Size::new(size), LocationRef::default());
-    text.chars()
-        .filter_map(|c| charmap.map(c))
-        .filter_map(|glyph| metrics.advance_width(glyph))
-        .sum()
+/// A line never holds more characters than this, so glyphs without an
+/// advance cannot grow one without bound.
+const MAX_LINE_CHARS: usize = 200;
+
+/// One face at one size, parsed once for a whole measurement.
+struct Measure {
+    charmap: skrifa::charmap::Charmap<'static>,
+    metrics: skrifa::metrics::GlyphMetrics<'static>,
 }
 
-/// Greedy line breaking on spaces. A word wider than the line is split
-/// between characters.
+impl Measure {
+    fn new(face: Face, size: f32) -> Self {
+        let font = face.font();
+        Self {
+            charmap: font.charmap(),
+            metrics: font.glyph_metrics(Size::new(size), LocationRef::default()),
+        }
+    }
+
+    fn advance(&self, c: char) -> f32 {
+        self.charmap
+            .map(c)
+            .and_then(|glyph| self.metrics.advance_width(glyph))
+            .unwrap_or(0.0)
+    }
+
+    fn width(&self, text: &str) -> f32 {
+        text.chars().map(|c| self.advance(c)).sum()
+    }
+}
+
+/// Width of `text` in points, from the glyph advances without kerning.
+#[cfg(test)]
+pub(crate) fn text_width(face: Face, size: f32, text: &str) -> f32 {
+    Measure::new(face, size).width(text)
+}
+
+/// The line being filled, with its width kept as it grows.
+#[derive(Default)]
+struct Line {
+    text: String,
+    width: f32,
+    chars: usize,
+}
+
+impl Line {
+    fn take(&mut self) -> String {
+        self.width = 0.0;
+        self.chars = 0;
+        std::mem::take(&mut self.text)
+    }
+}
+
+/// Greedy line breaking on spaces, in one pass. A word wider than the line
+/// is split between characters.
 pub(crate) fn wrap(text: &str, face: Face, size: f32, width: f32) -> Vec<String> {
+    let measure = Measure::new(face, size);
+    let space = measure.advance(' ');
     let mut lines = Vec::new();
-    let mut line = String::new();
+    let mut line = Line::default();
     for word in text.split(' ').filter(|word| !word.is_empty()) {
-        let candidate = if line.is_empty() {
-            word.to_string()
-        } else {
-            format!("{line} {word}")
-        };
-        if text_width(face, size, &candidate) <= width {
-            line = candidate;
+        let word_width = measure.width(word);
+        let word_chars = word.chars().count();
+        let joined = line.width + space + word_width;
+        if !line.text.is_empty() && joined <= width && line.chars + 1 + word_chars <= MAX_LINE_CHARS
+        {
+            line.text.push(' ');
+            line.text.push_str(word);
+            line.width = joined;
+            line.chars += 1 + word_chars;
             continue;
         }
-        if !line.is_empty() {
-            lines.push(std::mem::take(&mut line));
+        if !line.text.is_empty() {
+            lines.push(line.take());
         }
-        line = split_long_word(word, face, size, width, &mut lines);
+        for c in word.chars() {
+            let advance = measure.advance(c);
+            if !line.text.is_empty()
+                && (line.width + advance > width || line.chars >= MAX_LINE_CHARS)
+            {
+                lines.push(line.take());
+            }
+            line.text.push(c);
+            line.width += advance;
+            line.chars += 1;
+        }
     }
-    if !line.is_empty() {
-        lines.push(line);
+    if !line.text.is_empty() {
+        lines.push(line.text);
     }
     lines
-}
-
-/// Push the full-width pieces of `word` and return what is left of it.
-fn split_long_word(
-    word: &str,
-    face: Face,
-    size: f32,
-    width: f32,
-    lines: &mut Vec<String>,
-) -> String {
-    let mut piece = String::new();
-    for c in word.chars() {
-        piece.push(c);
-        if piece.chars().count() > 1 && text_width(face, size, &piece) > width {
-            piece.pop();
-            lines.push(std::mem::take(&mut piece));
-            piece.push(c);
-        }
-    }
-    piece
 }
 
 /// `sha256:abcd…` as `sha256: abcd efgh …`, to read aloud and compare.
@@ -106,14 +142,19 @@ pub(crate) fn group4(hash: &str) -> String {
 /// Characters some drawn text needs that its face cannot draw, sorted and
 /// deduplicated. Whitespace is never drawn as a glyph.
 pub(crate) fn missing_glyphs<'a>(texts: impl Iterator<Item = (Face, &'a str)>) -> Vec<char> {
-    let mut missing: Vec<char> = texts
-        .flat_map(|(face, text)| {
-            let charmap = face.font().charmap();
+    let charmaps =
+        [Face::Regular, Face::Bold, Face::Mono].map(|face| (face, face.font().charmap()));
+    let mut missing: Vec<char> = Vec::new();
+    for (face, text) in texts {
+        let (_, charmap) = charmaps
+            .iter()
+            .find(|(candidate, _)| *candidate == face)
+            .expect("every face has a charmap");
+        missing.extend(
             text.chars()
-                .filter(move |c| !c.is_whitespace() && charmap.map(*c).is_none())
-                .collect::<Vec<_>>()
-        })
-        .collect();
+                .filter(|c| !c.is_whitespace() && charmap.map(*c).is_none()),
+        );
+    }
     missing.sort_unstable();
     missing.dedup();
     missing

@@ -281,6 +281,26 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn a_huge_word_wraps_in_linear_time_and_bounded_lines() {
+        let word = "x".repeat(200_000);
+        let started = std::time::Instant::now();
+        let lines = wrap(&word, Face::Mono, 9.0, 480.0);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(200_000, lines.iter().map(String::len).sum::<usize>());
+        assert!(lines.iter().all(|line| line.chars().count() <= 200));
+    }
+
+    #[test]
+    fn glyphs_without_advance_still_break_lines() {
+        let lines = wrap(&"\u{200b}".repeat(1_000), Face::Regular, 10.0, 100.0);
+        assert!(lines.iter().all(|line| line.chars().count() <= 200));
+    }
+
+    #[test]
     fn an_organisation_in_cyrillic_is_unrenderable() {
         let (mut report, _) = baked_report();
         report.organisation.name = "Сбербанк".to_string();
