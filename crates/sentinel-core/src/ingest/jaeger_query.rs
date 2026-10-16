@@ -375,6 +375,7 @@ async fn search_v1(
     let uri: hyper::Uri = uri_str
         .parse()
         .map_err(|_| JaegerQueryError::InvalidEndpoint(endpoint.to_string()))?;
+    let url = http_client::redact_endpoint(&uri);
 
     let body = fetch_json(
         backend.client,
@@ -390,7 +391,7 @@ async fn search_v1(
     // the `Bytes -> Vec<u8> -> String` round trip that would double
     // the peak RSS of large multi-trace responses.
     let export: JaegerExport =
-        serde_json::from_slice(&body).map_err(|e| JaegerQueryError::JsonParse(e.to_string()))?;
+        serde_json::from_slice(&body).map_err(|e| not_json(e, &body, &url))?;
 
     if export.data.is_empty() {
         return Err(JaegerQueryError::NoTracesFound);
@@ -423,6 +424,7 @@ async fn search_v3(
     let uri: hyper::Uri = uri_str
         .parse()
         .map_err(|_| JaegerQueryError::InvalidEndpoint(endpoint.to_string()))?;
+    let url = http_client::redact_endpoint(&uri);
 
     let body = fetch_json(
         backend.client,
@@ -434,7 +436,10 @@ async fn search_v3(
     )
     .await?;
 
-    let events = convert_v3_results(&body, backend.grouping_attributes)?;
+    let events = convert_v3_results(&body, backend.grouping_attributes).map_err(|e| match e {
+        JaegerQueryError::JsonParse(reason) => not_json(reason, &body, &url),
+        other => other,
+    })?;
     let traces = events
         .iter()
         .map(|e| e.trace_id.as_str())
@@ -480,6 +485,17 @@ fn convert_v3_results(
     Ok(events)
 }
 
+/// A body that is not the API's JSON, named with the URL it came from. An
+/// HTML page is a proxy or the UI port, not a broken Jaeger.
+fn not_json(reason: impl std::fmt::Display, body: &[u8], url: &str) -> JaegerQueryError {
+    let hint = if body.trim_ascii_start().starts_with(b"<") {
+        ", an HTML page and not the Jaeger query API: check the endpoint"
+    } else {
+        ""
+    };
+    JaegerQueryError::JsonParse(format!("{reason} from {url}{hint}"))
+}
+
 /// Fetch a single trace by ID from a Jaeger query backend.
 ///
 /// # Errors
@@ -505,6 +521,7 @@ async fn fetch_trace_on(
     let uri: hyper::Uri = uri_str
         .parse()
         .map_err(|_| JaegerQueryError::InvalidEndpoint(endpoint.to_string()))?;
+    let url = http_client::redact_endpoint(&uri);
 
     let body = fetch_json(
         backend.client,
@@ -517,7 +534,7 @@ async fn fetch_trace_on(
     .await?;
 
     let export: JaegerExport =
-        serde_json::from_slice(&body).map_err(|e| JaegerQueryError::JsonParse(e.to_string()))?;
+        serde_json::from_slice(&body).map_err(|e| not_json(e, &body, &url))?;
 
     Ok(convert_jaeger_export(&export, backend.grouping_attributes))
 }
@@ -824,6 +841,27 @@ mod tests {
         .await
         .expect_err("malformed JSON must surface JsonParse");
         assert_matches!(err, JaegerQueryError::JsonParse(_));
+        server.await.expect("server join");
+    }
+
+    #[tokio::test]
+    async fn an_html_page_names_its_url_and_says_it_is_not_the_api() {
+        let (endpoint, server) =
+            spawn_one_shot_server(http_200_json("<!doctype html><html>Jaeger UI</html>")).await;
+        let client = http_client::build_client();
+        let err = search_and_fetch_traces(
+            &client,
+            &endpoint,
+            "svc",
+            SearchWindow::Lookback(Duration::from_mins(1)),
+            10,
+            None,
+        )
+        .await
+        .expect_err("an HTML page is no Jaeger answer");
+        let message = err.to_string();
+        assert!(message.contains(&endpoint), "{message}");
+        assert!(message.contains("HTML"), "{message}");
         server.await.expect("server join");
     }
 
