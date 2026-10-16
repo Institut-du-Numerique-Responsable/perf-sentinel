@@ -3116,6 +3116,18 @@
                     }
                   }
                 ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "pair_key"
+                },
+                "properties": [
+                  {
+                    "id": "custom.hidden",
+                    "value": true
+                  }
+                ]
               }
             ]
           },
@@ -3132,9 +3144,7 @@
             {
               "id": "organize",
               "options": {
-                "excludeByName": {
-                  "pair_key": true
-                },
+                "excludeByName": {},
                 "indexByName": {
                   "Pair": 0,
                   "Status": 1,
