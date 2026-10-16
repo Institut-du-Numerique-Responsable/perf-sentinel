@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use sentinel_core::report::periodic::{compute_content_hash, schema::PeriodicReport};
 use sentinel_core::text_safety::sanitize_for_terminal;
 
-use crate::limits::MAX_LOCAL_REPORT_BYTES;
+use crate::limits::{CappedRead, MAX_LOCAL_REPORT_BYTES, read_capped};
 
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_REFUSED: i32 = 1;
@@ -36,28 +36,16 @@ pub const EXIT_INPUT_ERROR: i32 = 3;
 pub fn cmd_hash_bake(report_path: &Path, output_path: &Path, allow_signed: bool) -> i32 {
     // Refuse oversized inputs before allocating to bound the worst
     // case (poisoned mirror feeding a multi-GB JSON to a CI runner).
-    match fs::metadata(report_path) {
-        Ok(meta) if meta.len() > MAX_LOCAL_REPORT_BYTES => {
+    let bytes = match read_capped(report_path, MAX_LOCAL_REPORT_BYTES) {
+        Ok(CappedRead::Bytes(bytes)) => bytes,
+        Ok(CappedRead::TooLarge(len)) => {
             eprintln!(
-                "Error: report at {} is {} bytes, exceeds the {}-byte cap.",
+                "Error: report at {} is {len} bytes, exceeds the {}-byte cap.",
                 sanitize_for_terminal(&report_path.display().to_string()),
-                meta.len(),
                 MAX_LOCAL_REPORT_BYTES
             );
             return EXIT_INPUT_ERROR;
         }
-        Err(err) => {
-            eprintln!(
-                "Error: failed to stat report at {}: {err}",
-                sanitize_for_terminal(&report_path.display().to_string())
-            );
-            return EXIT_INPUT_ERROR;
-        }
-        Ok(_) => {}
-    }
-
-    let bytes = match fs::read(report_path) {
-        Ok(b) => b,
         Err(err) => {
             eprintln!(
                 "Error: failed to read report at {}: {err}",

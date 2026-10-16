@@ -1503,3 +1503,14 @@ fn incident_export_series_are_registered_label_free() {
     assert!(text.contains("\nperf_sentinel_hub_export_incidents_pending 3\n"));
     assert!(text.contains("\nperf_sentinel_hub_export_incidents_dropped_total 2\n"));
 }
+
+#[test]
+fn correlation_export_series_are_registered_label_free() {
+    let metrics = MetricsState::new();
+    metrics.hub_export_correlations_pending.set(3.0);
+    metrics.hub_export_correlations_dropped_total.inc_by(2);
+
+    let text = metrics.render();
+    assert!(text.contains("\nperf_sentinel_hub_export_correlations_pending 3\n"));
+    assert!(text.contains("\nperf_sentinel_hub_export_correlations_dropped_total 2\n"));
+}

@@ -234,6 +234,7 @@ The detectors run sequentially on each trace. While they could theoretically sha
 2. Skip groups where the parent has `max_fanout` or fewer children (default 20)
 3. For each parent exceeding the threshold, emit an `ExcessiveFanout` finding
 4. Severity: Warning if > `max_fanout`, Critical if > 3x `max_fanout`
+5. Template: the parent's template, or the most frequent child template (ties to the smallest) when the parent is not in the trace, the usual case when the server span is not a captured event. Never the parent's span id, which differs in every trace and would give each occurrence its own signature
 
 The fanout detector uses a `HashMap<&str, usize>` span index for O(1) parent lookup and `compute_window_and_bounds` to compute the chronological span of child timestamps in a single pass.
 

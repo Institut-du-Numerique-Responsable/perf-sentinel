@@ -88,13 +88,6 @@ pub const DEFAULT_REKOR_URL: &str = "https://rekor.sigstore.dev";
 /// Public Sigstore Fulcio certificate authority.
 pub const DEFAULT_FULCIO_URL: &str = "https://fulcio.sigstore.dev";
 
-/// Workspace version that turns `[reporting] disclose_output_path`
-/// into a functional field (daemon-triggered periodic disclosures).
-/// Bump here when the timeline slips. The same value appears as a
-/// TOML comment in `docs/REPORTING.md` and `docs/FR/REPORTING-FR.md`,
-/// kept in sync by grep at release time.
-const RESERVED_DISCLOSE_OUTPUT_PATH_VERSION: &str = "0.8.0";
-
 /// Maps to `[daemon.archive]` in TOML. When `Some`, the daemon writes
 /// each per-window `Report` as one NDJSON line to `path`, with
 /// size-triggered rotation and `max_files` count-based pruning.

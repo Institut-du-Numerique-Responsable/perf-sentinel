@@ -4,6 +4,55 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-16
+
+A minor release for a new daemon behavior, with no public API change. One family of finding signatures changes, once. An `excessive_fanout` whose parent span is outside the trace, the usual case in production, took that span's id into its signature, so each occurrence got its own. It now keeps one signature from trace to trace: these findings show up once under a new signature, and an acknowledgment taken on one of the old ones, which never matched twice anyway, stops matching. No other detector, normalizer or signature changes. The Hub's long memory now covers cross-trace correlations: a daemon that exports findings to PerfSentinelHub and runs the correlator pushes each pair's active periods as episodes, so a correlation outlives the rolling window. Upgrade the Hub to 0.6.0 before the daemons.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.30.0 touches the scoring code.
+
+### Added
+
+- The Hub export pushes cross-trace correlations too, as episodes. With
+  `[daemon.hub_export]` and `[daemon.correlation]` both enabled, the daemon cuts each
+  pair's activity into episodes, open while the pair's `last_seen` advances and closed once
+  it has stood still for `min(window_minutes, 30 minutes)`, and sends them to the Hub's
+  `/api/import/correlations` when they open, peak, advance by a minute and close, so a
+  correlation outlives the rolling window. Batches hold at most 100 episodes and 1 MiB. A
+  graceful shutdown closes the open episodes before the drain. A Hub without the route (404
+  or 405) stops correlation pushes until restart, and findings and incidents keep flowing. An
+  older Hub with sign-in on answers 401, which is retried and logged, so upgrade the Hub to
+  PerfSentinelHub 0.6.0 first. New label-free metrics
+  `perf_sentinel_hub_export_correlations_pending` and
+  `perf_sentinel_hub_export_correlations_dropped_total`.
+- `examples/grafana-findings-dashboard.json` gains a Correlation episodes timeline, a
+  Correlated pairs table, a Hub incidents annotation (off by default) and a Hub source
+  variable in its History (Hub) row, read from PerfSentinelHub 0.6.0. Its daemon floor does
+  not move.
+
+### Fixed
+
+- An `excessive_fanout` whose parent span is not in the trace no longer takes
+  `parent:<span id>` as its template. The span id differs in every trace, so each
+  occurrence got its own signature: acknowledgments never matched twice, and a Hub fed
+  by such a daemon stored one finding per trace until its volume filled. The template is
+  now the most frequent child template, the same in every trace. These findings change
+  signature once, and an acknowledgment taken on one of them never matched again anyway.
+- A transport failure now names its cause. `query`, the scrapers and every other user of the
+  shared HTTP client printed a bare `HTTP transport error`, so a TLS handshake against a plain
+  HTTP port, a refused connection or a DNS failure all read the same. The message now carries
+  the whole cause chain.
+- `query` refuses a 2xx body it cannot read on every route. `query status`, `query
+  correlations`, `query explain`, `query inspect` and `--format json` printed `null`, an empty
+  status or "No active cross-trace correlations" for a proxy's HTML page. They now exit 1 with
+  `<route>: malformed response`, as `query findings` and `query incidents` already did.
+- `jaeger-query` names the URL of an answer it cannot parse, and says so when the answer is an
+  HTML page, usually the Jaeger UI port or a proxy rather than the query API.
+- `hash-bake` and `verify-hash --report` read the report through one file handle, its size
+  checked on that handle and the read bounded by the 64 MiB cap. A file swapped between the size
+  check and the read could be loaded past the cap, and a device or pipe read without bound.
+- The warning for `[reporting] disclose_output_path` no longer says the field is planned for
+  0.8.0. It stays reserved and unused.
+
 ## [0.29.0] - 2026-10-15
 
 This release bumps the minor rather than the patch: `sentinel_core::daemon::query_api::QueryApiState` gains a crate-private field and is not `#[non_exhaustive]`, so code that builds it with a literal stops compiling. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The theme is the Hub's long memory: a daemon that exports findings to PerfSentinelHub now exports its incidents as well, so the Hub keeps one even when the daemon's ring evicts it between two polls. Upgrade the Hub to 0.5.0 before the daemons.

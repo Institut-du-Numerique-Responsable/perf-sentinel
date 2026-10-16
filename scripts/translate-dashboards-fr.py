@@ -459,6 +459,30 @@ f("text", "Active", "Actif")
 f("text", "Likely resolved", "Probablement résolu")
 f("text", "Not observed", "Non observé")
 
+# --- 0.30.0: correlation episodes from the Hub ---
+f("label", "Hub source", "Source Hub")
+
+f("description",
+  "Daemon of the Correlation episodes and Correlated pairs panels and of the Hub incidents annotation, one of the Hub's source ids, listed from the source label of perf_sentinel_hub_source_last_import_seconds, so Prometheus has to scrape the Hub and only daemons that push appear. All sends a single space, which the Hub reads as every source the datasource's token reaches.",
+  "Daemon des panneaux Épisodes de corrélation et Paires corrélées et de l'annotation Incidents du Hub, parmi les identifiants de source du Hub, listés depuis le label source de perf_sentinel_hub_source_last_import_seconds : Prometheus doit donc scraper le Hub, et seuls les daemons qui poussent y figurent. All envoie une simple espace, que le Hub lit comme toutes les sources que le jeton du datasource atteint.")
+
+f("name", "Hub incidents", "Incidents du Hub")
+f("title", "Correlation episodes", "Épisodes de corrélation")
+
+f("description",
+  "One line per pair of findings that kept following each other, one segment per episode: a period during which the daemon saw the pair co-occur, cut once the pair stayed quiet for the episode gap (10 minutes on the default window). Read from the Hub's GET /api/correlations, so it reaches past the daemon's rolling window. An open episode runs to now.\n\nNeeds PerfSentinelHub 0.6.0 and a Perf Sentinel 0.30.0 daemon with [daemon.hub_export] and [daemon.correlation] on. An older Hub answers 404 and the panel stays empty. The read stops at 1000 episodes, so a wide range on a busy fleet can miss the older ones. Turn on the Hub incidents annotation to set incidents against the episodes.",
+  "Une ligne par paire de findings qui se suivent, un segment par épisode : une période pendant laquelle le daemon a vu la paire se produire ensemble, close une fois la paire restée calme le temps de l'écart d'épisode (10 minutes sur la fenêtre par défaut). Lu depuis GET /api/correlations du Hub, donc au-delà de la fenêtre glissante du daemon. Un épisode ouvert court jusqu'à maintenant.\n\nDemande PerfSentinelHub 0.6.0 et un daemon Perf Sentinel 0.30.0 avec [daemon.hub_export] et [daemon.correlation] actifs. Un Hub plus ancien répond 404 et le panneau reste vide. La lecture s'arrête à 1000 épisodes, donc une large période sur un parc chargé peut manquer les plus anciens. Activez l'annotation Incidents du Hub pour confronter les incidents aux épisodes.")
+
+f("text", "Quiet", "Calme")
+f("title", "Correlated pairs", "Paires corrélées")
+
+f("description",
+  "One row per pair and daemon over the dashboard's time range, grouped from the same episodes: how many episodes, the highest confidence any of them reached, when the latest one started and whether one is still open. Pair opens the Hub's Correlations screen on that pair, once Hub URL is set.\n\nNeeds PerfSentinelHub 0.6.0. The read stops at 1000 episodes, so a wide range on a busy fleet can miss older pairs.",
+  "Une ligne par paire et par daemon sur la période du dashboard, regroupée depuis les mêmes épisodes : combien d'épisodes, la plus haute confiance atteinte par l'un d'eux, le début du plus récent et s'il en reste un ouvert. Paire ouvre l'écran Corrélations du Hub sur cette paire, une fois URL du Hub renseignée.\n\nDemande PerfSentinelHub 0.6.0. La lecture s'arrête à 1000 épisodes, donc une large période sur un parc chargé peut manquer des paires plus anciennes.")
+
+f("title", "Open this pair in the Hub", "Ouvrir cette paire dans le Hub")
+f("text", "Closed", "Terminé")
+
 # --- finding type legends, renamed by renameByRegex ---
 t("renamePattern", "N+1 SQL$1", "N+1 SQL$1")
 t("renamePattern", "N+1 HTTP$1", "N+1 HTTP$1")
@@ -521,6 +545,10 @@ COLUMNS = [
     ("Median lag", "Délai médian"),
     ("Source operation", "Opération source"),
     ("Target operation", "Opération cible"),
+    ("Pair", "Paire"),
+    ("Episodes", "Épisodes"),
+    ("Peak confidence", "Confiance maximale"),
+    ("Last episode", "Dernier épisode"),
 ]
 
 # Stays English on purpose: metric, label and API field names, snake_case
@@ -534,6 +562,10 @@ KEEP_EN = {
     "Incident", "Incidents", "Namespace", "Capture", "Id", "Sources", "Code",
     # Variable options and states already left in English.
     "All", "true", "false", "DOWN", "UP", "OK", "REJECTING",
+    "Daemon",
+    # Field names a transformation, a data link or Grafana's annotation
+    # mapping reads by name: translating one breaks it with no error.
+    "time", "timeEnd", "title", "text", "pair", "state", "pair_key",
 }
 
 

@@ -734,6 +734,11 @@ max_tracked_pairs = 50000
 
 Correlations are exposed via `GET /api/correlations` (when `api_enabled = true`) and snapshotted under `correlations` in `GET /api/export/report`. The daemon's stdout stream never carries them.
 
+With `[daemon.hub_export]` on as well, the daemon pushes each pair's active periods to
+PerfSentinelHub 0.6.0 or later as episodes, from 0.30.0, so a correlation outlives the rolling
+window there. An episode closes once the pair's last co-occurrence has stood still for
+`min(window_minutes, 30 minutes)`. `[daemon.hub_export]` below describes what travels.
+
 #### `[daemon.ack]` (optional, since 0.5.20)
 
 Daemon-side runtime ack store. Complements the CI TOML acks (see
@@ -810,6 +815,22 @@ that route predates it: the daemon logs one warning and stops pushing incidents 
 restarts, while findings keep flowing. An older Hub with sign-in on answers 401 instead,
 so the daemon keeps retrying and logs each retry: upgrade the Hub first. `perf_sentinel_hub_export_incidents_pending` and
 `perf_sentinel_hub_export_incidents_dropped_total` count what waits and what is dropped.
+
+With `[daemon.correlation]` enabled too, the daemon pushes its cross-trace correlations to
+`/api/import/correlations` beside `endpoint`, with the same key and source id, from 0.30.0,
+as episodes: one per period during which a pair kept co-occurring. An episode opens when a
+pair's last co-occurrence (`last_seen`) is recent, follows it while it advances, and closes
+once it has stood still for the episode gap, `min(window_minutes, 30 minutes)`, 10 minutes by
+default. A copy is sent when an episode opens, when its peak confidence or co-occurrence count
+rises, at most once a minute while it stays active, and when it closes, at most 100 episodes
+per request and 1 MiB per body. A graceful shutdown closes every open episode before the
+drain. The table holds the latest copy per episode, bounded by `max_pending`, and retries with
+the same backoff on its own clock. An episode larger than 1 MiB alone is dropped. A Hub that
+answers 404 or 405 on that route predates it: the daemon logs one warning and stops pushing
+correlations until it restarts, while findings and incidents keep flowing. An older Hub with
+sign-in on answers 401 instead, so the daemon keeps retrying and logs each retry: upgrade the
+Hub to PerfSentinelHub 0.6.0 first. `perf_sentinel_hub_export_correlations_pending` and
+`perf_sentinel_hub_export_correlations_dropped_total` count what waits and what is dropped.
 
 On a graceful shutdown (SIGTERM, `helm upgrade`, a rolling restart) the
 exporter flushes what it still holds before the process exits, for up to

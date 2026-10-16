@@ -258,6 +258,53 @@ fn cli_query_findings_refuses_a_malformed_body() {
     );
 }
 
+/// `perf-sentinel query --daemon <url> <action> [extra]` against the mock.
+fn run_query_action(url: &str, action: &str, extra: &[&str]) -> std::process::Output {
+    let mut args = vec!["query", "--daemon", url, action];
+    args.extend_from_slice(extra);
+    run_cli(&args)
+}
+
+#[test]
+fn cli_query_refuses_a_malformed_body_on_every_route() {
+    // A proxy's HTML page must never print as `null`, as no correlation or
+    // as an empty status.
+    for (action, extra, clean) in [
+        (
+            "correlations",
+            &[][..],
+            "No active cross-trace correlations",
+        ),
+        ("status", &[][..], "Daemon status"),
+        ("findings", &["--format", "json"][..], "null"),
+    ] {
+        let (port, _seen) = spawn_mock(200, "OK", "<html>gateway timeout</html>");
+        let output = run_query_action(&format!("http://127.0.0.1:{port}"), action, extra);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{action} stdout:\n{stdout}");
+        assert!(
+            stderr.contains("malformed response"),
+            "{action} stderr:\n{stderr}"
+        );
+        assert!(!stdout.contains(clean), "{action} stdout:\n{stdout}");
+    }
+}
+
+#[test]
+fn cli_query_names_the_cause_of_a_transport_failure() {
+    // A TLS handshake against a plain HTTP port: the bare "HTTP transport
+    // error" left the operator with nothing to fix.
+    let (port, _seen) = spawn_mock(200, "OK", "[]");
+    let output = run_query_action(&format!("https://127.0.0.1:{port}"), "findings", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("HTTP transport error: "),
+        "stderr:\n{stderr}"
+    );
+}
+
 #[test]
 fn cli_query_incidents_refuses_a_limit_of_zero() {
     // The daemon would answer an empty array and the renderer would print

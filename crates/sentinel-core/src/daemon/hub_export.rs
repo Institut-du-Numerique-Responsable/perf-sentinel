@@ -11,12 +11,16 @@ use super::ack::{AckEntry, AckStore};
 // it and the hourly re-send suppression compares against those stamps.
 use super::event_loop::current_time_ms as unix_time_ms;
 use super::findings_store::StoredFinding;
+use super::hub_correlation_export::{
+    CorrelationExport, CorrelationExportBuffer, correlations_endpoint,
+};
 use super::hub_incident_export::{
     IncidentExport, IncidentExportBuffer, incident_capacity, incidents_endpoint,
 };
 use super::query_api::{FindingResponse, lookup_ack};
 use crate::config::DaemonHubExportConfig;
 use crate::detect::Finding;
+use crate::detect::correlate_cross::{CorrelationConfig, CrossTraceCorrelator};
 use crate::http_client;
 use crate::report::metrics::MetricsState;
 
@@ -71,6 +75,7 @@ pub(super) struct HubExportBuffer {
 pub(super) struct HubExporter {
     buffer: Arc<HubExportBuffer>,
     incident_buffer: Option<Arc<IncidentExportBuffer>>,
+    correlation_buffer: Option<Arc<CorrelationExportBuffer>>,
     handle: tokio::task::JoinHandle<()>,
     shutdown: Arc<tokio::sync::Notify>,
 }
@@ -91,6 +96,8 @@ impl HubExporter {
         toml_acks: Arc<crate::daemon::ack_toml_state::AckTomlState>,
         ack_store: Option<Arc<AckStore>>,
         push_incidents: bool,
+        correlator: Option<Arc<tokio::sync::Mutex<CrossTraceCorrelator>>>,
+        correlation: &CorrelationConfig,
     ) -> Result<Option<Self>, super::DaemonError> {
         if !config.enabled {
             return Ok(None);
@@ -124,6 +131,14 @@ impl HubExporter {
                     .map(|uri| IncidentExport::new(incidents.clone(), uri))
             })
             .transpose()?;
+        let correlations = correlator
+            .map(|correlator| {
+                let table = Arc::new(CorrelationExportBuffer::new(config.max_pending));
+                source_uri(&correlations_endpoint(endpoint), source_id)
+                    .map(|uri| CorrelationExport::new(correlator, correlation, table, uri))
+            })
+            .transpose()?;
+        let correlation_buffer = correlations.as_ref().map(CorrelationExport::buffer);
         let shutdown = Arc::new(tokio::sync::Notify::new());
         let handle = tokio::spawn(run_exporter(
             buffer.clone(),
@@ -138,10 +153,12 @@ impl HubExporter {
                 store: ack_store,
             },
             incidents,
+            correlations,
         ));
         Ok(Some(Self {
             buffer,
             incident_buffer,
+            correlation_buffer,
             handle,
             shutdown,
         }))
@@ -162,6 +179,10 @@ impl HubExporter {
                 .incident_buffer
                 .as_ref()
                 .map_or(0, |incidents| incidents.len())
+            + self
+                .correlation_buffer
+                .as_ref()
+                .map_or(0, |correlations| correlations.len())
     }
 
     /// Flush what the exporter still holds, then stop it.
@@ -183,7 +204,7 @@ impl HubExporter {
             tracing::warn!(
                 pending = self.pending(),
                 budget_secs = SHUTDOWN_DRAIN_BUDGET.as_secs(),
-                "Hub export drain timed out, the findings and incidents still pending are dropped"
+                "Hub export drain timed out, the findings, incidents and correlation episodes still pending are dropped"
             );
         } else if pending > 0 {
             tracing::info!(pending, "Hub export drained before shutdown");
@@ -457,32 +478,33 @@ async fn run_exporter(
     batch_size: usize,
     flush_interval: Duration,
     acks: AckSources,
-    mut incidents: Option<IncidentExport>,
+    incidents: Option<IncidentExport>,
+    correlations: Option<CorrelationExport>,
 ) {
     let client = http_client::build_client_with_body();
     let start = tokio::time::Instant::now();
-    let mut findings = FindingsExport {
-        buffer,
-        uri,
-        batch_size,
-        acks,
-        failures: 0,
-        due: start + flush_interval,
+    let mut halves = Halves {
+        findings: FindingsExport {
+            buffer,
+            uri,
+            batch_size,
+            acks,
+            failures: 0,
+            due: start,
+        },
+        incidents,
+        correlations,
     };
-    if let Some(export) = incidents.as_mut() {
-        export.due = start + flush_interval;
-    }
-    // Once shutdown fires the loop stops waiting for either half's next
-    // round and flushes until both tables empty. It never returns on a
-    // table it cannot send: `HubExporter::shutdown` owns the time budget
-    // and aborts, so the retry policy stays the same on both paths.
+    halves.start_at(start + flush_interval);
+    // Once shutdown fires the loop stops waiting for any half's next round
+    // and flushes until every table empties. It never returns on a table
+    // it cannot send: `HubExporter::shutdown` owns the time budget and
+    // aborts, so the retry policy stays the same on both paths.
     let mut draining = false;
     loop {
         // Each half keeps its own pace: one's backoff is not cut short by
-        // the other's flush, nor stretched by it.
-        let wake = incidents
-            .as_ref()
-            .map_or(findings.due, |export| export.due.min(findings.due));
+        // another's flush, nor stretched by it.
+        let wake = halves.wake();
         if draining {
             // Still yield between attempts, otherwise an unreachable Hub
             // turns the drain budget into a spin.
@@ -494,23 +516,75 @@ async fn run_exporter(
                 () = shutdown.notified() => draining = true,
             }
         }
-        let now = tokio::time::Instant::now();
-        let mut sent = false;
-        if draining || findings.due <= now {
-            sent |= findings
-                .round(&client, &api_key, &metrics, flush_interval)
-                .await;
-        }
-        if let Some(export) = incidents.as_mut()
-            && (draining || export.due <= now)
-        {
-            sent |= export
-                .round(&client, &api_key, &metrics, flush_interval)
-                .await;
-        }
+        let sent = halves
+            .round(&client, &api_key, &metrics, flush_interval, draining)
+            .await;
         if draining && !sent {
             return;
         }
+    }
+}
+
+/// The exporter task's three halves, findings always, incidents and
+/// correlations when configured.
+struct Halves {
+    findings: FindingsExport,
+    incidents: Option<IncidentExport>,
+    correlations: Option<CorrelationExport>,
+}
+
+impl Halves {
+    fn start_at(&mut self, at: tokio::time::Instant) {
+        self.findings.due = at;
+        if let Some(export) = self.incidents.as_mut() {
+            export.due = at;
+        }
+        if let Some(export) = self.correlations.as_mut() {
+            export.start_at(at);
+        }
+    }
+
+    /// The earliest of the halves' next rounds.
+    fn wake(&self) -> tokio::time::Instant {
+        let mut wake = self.findings.due;
+        if let Some(export) = &self.incidents {
+            wake = wake.min(export.due);
+        }
+        if let Some(export) = &self.correlations {
+            wake = wake.min(export.due());
+        }
+        wake
+    }
+
+    /// One round of every half that is due, of all of them while draining.
+    /// True when one of them sent a batch.
+    async fn round(
+        &mut self,
+        client: &http_client::HttpClientWithBody,
+        api_key: &str,
+        metrics: &MetricsState,
+        flush_interval: Duration,
+        draining: bool,
+    ) -> bool {
+        let now = tokio::time::Instant::now();
+        let mut sent = false;
+        if draining || self.findings.due <= now {
+            sent |= self
+                .findings
+                .round(client, api_key, metrics, flush_interval)
+                .await;
+        }
+        if let Some(export) = self.incidents.as_mut()
+            && (draining || export.due <= now)
+        {
+            sent |= export.round(client, api_key, metrics, flush_interval).await;
+        }
+        if let Some(export) = self.correlations.as_mut() {
+            sent |= export
+                .round(client, api_key, metrics, flush_interval, draining)
+                .await;
+        }
+        sent
     }
 }
 
@@ -1058,6 +1132,7 @@ mod tests {
             Duration::from_hours(1),
             acks(None),
             None,
+            None,
         ));
 
         // Let the task reach its wait before signalling, so the test covers
@@ -1090,6 +1165,7 @@ mod tests {
             100,
             Duration::from_hours(1),
             acks(None),
+            None,
             None,
         ));
 
@@ -1136,6 +1212,7 @@ mod tests {
                     .parse()
                     .expect("uri"),
             )),
+            None,
         ));
         tokio::task::yield_now().await;
         shutdown.notify_one();
@@ -1212,6 +1289,7 @@ mod tests {
                     .parse()
                     .expect("uri"),
             )),
+            None,
         ));
         (handle, shutdown)
     }
@@ -1289,6 +1367,156 @@ mod tests {
         assert_eq!(1, count(&seen, "/api/import/incidents"));
         assert_eq!(2, count(&seen, "/api/import/findings"));
         assert!(incidents.is_unsupported());
+    }
+
+    fn route(base: &str, path: &str) -> http_client::Uri {
+        format!("{base}{path}?source_id=lab").parse().expect("uri")
+    }
+
+    /// The exporter task with all three halves against the fake Hub at `base`.
+    fn spawn_all(
+        base: &str,
+        findings: &Arc<HubExportBuffer>,
+        incidents: &Arc<crate::daemon::hub_incident_export::IncidentExportBuffer>,
+        correlations: &Arc<CorrelationExportBuffer>,
+        correlator: Arc<tokio::sync::Mutex<CrossTraceCorrelator>>,
+        flush_interval: Duration,
+    ) -> (tokio::task::JoinHandle<()>, Arc<tokio::sync::Notify>) {
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        let handle = tokio::spawn(run_exporter(
+            findings.clone(),
+            shutdown.clone(),
+            Arc::new(MetricsState::new()),
+            route(base, "/api/import/findings"),
+            "k".repeat(32),
+            100,
+            flush_interval,
+            acks(None),
+            Some(IncidentExport::new(
+                incidents.clone(),
+                route(base, "/api/import/incidents"),
+            )),
+            Some(CorrelationExport::new(
+                correlator,
+                &CorrelationConfig::default(),
+                correlations.clone(),
+                route(base, "/api/import/correlations"),
+            )),
+        ));
+        (handle, shutdown)
+    }
+
+    /// A Hub without the correlation route stops correlation pushes, never
+    /// findings or incidents.
+    #[tokio::test]
+    async fn findings_and_incidents_keep_flowing_after_the_correlation_route_answers_404() {
+        use crate::daemon::hub_correlation_export::tests as episodes;
+        use crate::daemon::hub_incident_export::{IncidentExportBuffer, tests};
+        let (base, seen) = tests::fake_hub_paths(200, 200, 404).await;
+        let findings = Arc::new(HubExportBuffer::new(100));
+        let incidents = Arc::new(IncidentExportBuffer::new(10));
+        let correlations = Arc::new(CorrelationExportBuffer::new(10));
+        findings.push_batch(&[finding("first", "trace")], unix_time_ms());
+        incidents.push(&tests::incident("a", None));
+        correlations.push(&episodes::episode("a"));
+        let (handle, _shutdown) = spawn_all(
+            &base,
+            &findings,
+            &incidents,
+            &correlations,
+            episodes::empty_correlator(),
+            Duration::from_millis(50),
+        );
+
+        wait_for(|| {
+            correlations.is_unsupported()
+                && count(&seen, "/api/import/findings") == 1
+                && count(&seen, "/api/import/incidents") == 1
+        })
+        .await;
+        findings.push_batch(&[finding("second", "trace")], unix_time_ms());
+        incidents.push(&tests::incident("b", None));
+        correlations.push(&episodes::episode("b"));
+        wait_for(|| {
+            count(&seen, "/api/import/findings") == 2 && count(&seen, "/api/import/incidents") == 2
+        })
+        .await;
+        // A few flush intervals more, for a refused episode that leaked.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        handle.abort();
+
+        assert_eq!(1, count(&seen, "/api/import/correlations"));
+        assert_eq!(2, count(&seen, "/api/import/findings"));
+        assert_eq!(2, count(&seen, "/api/import/incidents"));
+    }
+
+    /// A restart must not leave the pair's episode open in the Hub.
+    #[tokio::test]
+    async fn a_drain_closes_the_open_episodes_and_sends_them() {
+        use crate::daemon::hub_correlation_export::tests as episodes;
+        use crate::daemon::hub_incident_export::{IncidentExportBuffer, tests};
+        let (base, seen) = tests::fake_hub(200).await;
+        let correlations = Arc::new(CorrelationExportBuffer::new(10));
+        let (handle, shutdown) = spawn_all(
+            &base,
+            &Arc::new(HubExportBuffer::new(10)),
+            &Arc::new(IncidentExportBuffer::new(10)),
+            &correlations,
+            episodes::correlator_with_one_pair().await,
+            Duration::from_hours(1),
+        );
+        tokio::task::yield_now().await;
+        shutdown.notify_one();
+
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("the drain ends once the three tables are empty")
+            .expect("exporter task panicked");
+        assert_eq!(0, correlations.len());
+        let requests = seen.lock().expect("lock");
+        let (_, _, body) = requests
+            .iter()
+            .find(|(uri, _, _)| uri.starts_with("/api/import/correlations"))
+            .expect("the closed episode was sent");
+        let body: serde_json::Value = serde_json::from_slice(body).expect("json");
+        let episode = &body["episodes"][0];
+        assert_eq!(episode["last_seen_ms"], episode["ended_at_ms"]);
+    }
+
+    /// `[daemon.correlation]` off: no correlator, so no table and no route.
+    #[tokio::test]
+    async fn the_correlation_table_exists_only_with_a_correlator() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let key = dir.path().join("hub-key");
+        std::fs::write(&key, "k".repeat(32)).expect("key");
+        let config = DaemonHubExportConfig {
+            enabled: true,
+            endpoint: Some("http://127.0.0.1:1/api/import/findings".to_string()),
+            source_id: Some("lab".to_string()),
+            api_key_file: Some(key.display().to_string()),
+            ..DaemonHubExportConfig::default()
+        };
+        let spawn = |correlator: Option<Arc<tokio::sync::Mutex<CrossTraceCorrelator>>>| {
+            HubExporter::spawn(
+                &config,
+                Arc::new(MetricsState::new()),
+                Arc::new(crate::daemon::ack_toml_state::AckTomlState::new(
+                    HashMap::new(),
+                )),
+                None,
+                false,
+                correlator,
+                &CorrelationConfig::default(),
+            )
+            .expect("spawn")
+            .expect("enabled")
+        };
+
+        assert!(spawn(None).correlation_buffer.is_none());
+        let with = spawn(Some(
+            crate::daemon::hub_correlation_export::tests::empty_correlator(),
+        ));
+        assert!(with.correlation_buffer.is_some());
     }
 
     fn acks(acked_signature: Option<&str>) -> AckSources {

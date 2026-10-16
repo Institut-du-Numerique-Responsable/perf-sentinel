@@ -234,6 +234,7 @@ Les détecteurs s'exécutent séquentiellement sur chaque trace. Bien qu'ils pui
 2. Ignorer les groupes où le parent a `max_fanout` ou moins d'enfants (défaut 20)
 3. Pour chaque parent dépassant le seuil, émettre un finding `ExcessiveFanout`
 4. Sévérité : Warning si > `max_fanout`, Critical si > 3x `max_fanout`
+5. Template : celui du parent, ou le template enfant le plus fréquent (le plus petit en cas d'égalité) quand le parent n'est pas dans la trace, cas courant quand le span serveur n'est pas un événement capturé. Jamais l'identifiant du span parent, qui change à chaque trace et donnerait à chaque occurrence sa propre signature
 
 Le détecteur de fanout utilise un index de spans `HashMap<&str, usize>` pour retrouver le parent en O(1) et `compute_window_and_bounds` pour calculer l'étendue chronologique des horodatages des enfants en une seule passe.
 
