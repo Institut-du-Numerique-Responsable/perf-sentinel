@@ -536,8 +536,10 @@ mod layout_and_pages {
         assert!(all.contains("160 scoring windows verified"), "{all}");
         assert!(all.contains("2 written before chaining"), "{all}");
         assert!(all.contains("1 break outside the period"), "{all}");
-        assert!(all.contains("3 windows not archived"), "{all}");
-        assert!(all.contains("1 daemon restart"), "{all}");
+        assert!(
+            all.contains("3 windows not archived, a lower bound across 1 daemon restart"),
+            "{all}"
+        );
     }
 
     #[test]

@@ -1700,16 +1700,12 @@ fn archive_summary(report: &PeriodicReport) -> String {
         ));
     }
     if let Some(dropped) = field("windows_dropped") {
-        parts.push(format!(
-            "{} not archived",
-            counted(dropped, "window", "windows")
-        ));
-    }
-    if let Some(resets) = field("drop_counter_resets").filter(|n| *n > 0) {
-        parts.push(format!(
-            "{}, so a lower bound",
-            counted(resets, "daemon restart", "daemon restarts")
-        ));
+        let mut part = format!("{} not archived", counted(dropped, "window", "windows"));
+        if let Some(resets) = field("drop_counter_resets").filter(|n| *n > 0) {
+            part.push_str(", a lower bound across ");
+            part.push_str(&counted(resets, "daemon restart", "daemon restarts"));
+        }
+        parts.push(part);
     }
     parts.join(" · ")
 }
