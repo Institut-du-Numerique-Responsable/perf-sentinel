@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::event_loop::current_time_ms;
 use super::hub_table::{Keyed, LatestTable, Pending, Route, RouteExport, import_route};
+use crate::daemon::hub_export::HubClient;
 use crate::detect::correlate_cross::{
     CorrelationConfig, CorrelationEndpoint, CrossTraceCorrelation, CrossTraceCorrelator,
 };
@@ -409,7 +410,7 @@ impl CorrelationExport {
     /// open episode. True when a batch went out.
     pub(crate) async fn round(
         &mut self,
-        client: &http_client::HttpClientWithBody,
+        client: &HubClient,
         api_key: &str,
         metrics: &MetricsState,
         flush_interval: Duration,

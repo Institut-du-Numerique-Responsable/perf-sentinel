@@ -26,6 +26,11 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
   re-saved by a tool that keeps attachments included, and says it checked that report and not
   the printed pages. PDFs over 4 MiB are refused before parsing.
   `--format json` adds `verified_from: "pdf_attachment"`.
+- `[daemon.hub_export] request_timeout_secs` sets how long one push to PerfSentinelHub may
+  take, 10 seconds by default as before, from 1 to 60. A Hub slowed down while catching up
+  answered past the fixed 10 seconds, so the daemon timed out every push, backed off up to
+  five minutes and dropped findings from a full pending table. It applies to the findings,
+  incidents and correlations pushes alike.
 
 ### Changed
 
