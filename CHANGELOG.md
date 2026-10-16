@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-10-16
+
+A patch release for a daemon pushing to a slow Hub, with no public API change. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. A production Hub slowed down while catching up answered its findings imports in 9 to 12 seconds, past the daemon's fixed 10-second push timeout: the daemon timed out every push, backed off up to five minutes and dropped findings from a full pending table. The timeout is now a setting.
+
+The embedded reference data keeps its vintages for this release, audited on the day of 0.27.0 and found inside their window. Nothing in 0.30.1 touches the scoring code.
+
 ### Added
 
 - `[daemon.hub_export] request_timeout_secs` sets how long one push to PerfSentinelHub may
