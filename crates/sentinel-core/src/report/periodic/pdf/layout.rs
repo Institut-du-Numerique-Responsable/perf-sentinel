@@ -62,7 +62,6 @@ impl Measure {
 }
 
 /// Width of `text` in points, from the glyph advances without kerning.
-#[cfg(test)]
 pub(crate) fn text_width(face: Face, size: f32, text: &str) -> f32 {
     Measure::new(face, size).width(text)
 }
