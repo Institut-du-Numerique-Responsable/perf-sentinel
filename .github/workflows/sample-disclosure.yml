@@ -49,7 +49,11 @@ jobs:
           bin=target/release/perf-sentinel
           version=$("$bin" --version | awk '{print $2}')
           mkdir -p work
-          jq --arg v "$version" 'walk(if . == "0.7.0" then $v else . end)' \
+          jq --arg v "$version" '
+            .report_metadata.perf_sentinel_version = $v
+            | .report_metadata.binary_version = $v
+            | .methodology.perf_sentinel_version = $v
+            | .aggregate.binary_versions = [$v]' \
             docs/schemas/examples/example-official-public-G2.json > work/unsigned.json
           "$bin" hash-bake --report work/unsigned.json --output work/unsigned.json
 

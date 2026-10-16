@@ -27,11 +27,11 @@ fn run_verify(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn verify_hash_on_placeholder_example_fails_content_check() {
-    // The shipped G2 example carries a zeroed content_hash placeholder
-    // so the recompute will not match. Exit code must be 1
-    // (UNTRUSTED), not 0.
-    let path = workspace_doc("docs/schemas/examples/example-official-public-G2.json");
+fn verify_hash_on_a_zeroed_hash_fails_content_check() {
+    // A zeroed content_hash does not match the recompute. Exit code must
+    // be 1 (UNTRUSTED), not 0.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = write_example_with_zeroed_hash(tmp.path());
     let out = run_verify(&["--report", path.to_str().unwrap()]);
     assert_eq!(
         out.status.code(),
@@ -45,6 +45,15 @@ fn verify_hash_on_placeholder_example_fails_content_check() {
         "expected content-hash FAIL: {stdout}"
     );
     assert!(stdout.contains("UNTRUSTED"), "expected UNTRUSTED: {stdout}");
+}
+
+fn write_example_with_zeroed_hash(dir: &std::path::Path) -> PathBuf {
+    let example = workspace_doc("docs/schemas/examples/example-official-public-G2.json");
+    let mut report: PeriodicReport = serde_json::from_slice(&fs::read(&example).unwrap()).unwrap();
+    report.integrity.content_hash = format!("sha256:{}", "0".repeat(64));
+    let path = dir.join("zeroed.json");
+    fs::write(&path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    path
 }
 
 fn write_example_with_fixed_hash(dir: &std::path::Path) -> PathBuf {
@@ -214,7 +223,8 @@ fn verify_hash_missing_report_returns_input_error() {
 
 #[test]
 fn verify_hash_json_format_emits_structured_output() {
-    let path = workspace_doc("docs/schemas/examples/example-official-public-G2.json");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = write_example_with_zeroed_hash(tmp.path());
     let v = run_verify(&["--report", path.to_str().unwrap(), "--format", "json"]);
     let stdout = String::from_utf8_lossy(&v.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON output");
