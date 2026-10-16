@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Fixed
+
+- `verify-hash --url` reads a disclosure PDF. It took the PDF for JSON and stopped on
+  `expected value at line 1 column 1`. It now checks the report, attestation and bundle the PDF
+  attaches, as `--report` does, and fetches no sidecar next to it.
+
 ## [0.31.0] - 2026-10-16
 
 A minor release for new subcommands and flags, with public API additions only. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. `disclose-pdf` turns a periodic disclosure into a PDF/A-3b a reader opens without a terminal, and `verify-hash` checks the report such a PDF carries. A live report can acknowledge through a PerfSentinelHub relay instead of reaching the daemon from the browser, the `pg_stat` and `mysql_stat` scrapes filter on label matchers, and the daemon's Hub export takes a configurable request timeout. PerfSentinelHub 0.7.0 drives `disclose-pdf` and `--hub-relay`.

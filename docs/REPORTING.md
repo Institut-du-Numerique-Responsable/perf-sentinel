@@ -686,7 +686,7 @@ provenance is checked and exit `0` reflects it.
 
 ### Verifying a PDF
 
-`verify-hash --report report.pdf` reads the report, the attestation and the bundle out of the PDF and runs the same checks, so a recipient who only holds the PDF can verify it. A copy re-saved by a tool that keeps attachments still verifies: the reader follows the PDF's own structure, not the layout the renderer wrote. Some viewers drop attachments when they save, macOS Preview among them: verify the original file. The check covers the attached report, not the printed pages: `verify-hash` says so, and the reader compares the printed figures with that report. `--attestation` and `--bundle` passed on the command line win over the attached files, here and in `--url` mode. A report whose schema is newer than the binary exits 5: upgrade perf-sentinel.
+`verify-hash --report report.pdf` reads the report, the attestation and the bundle out of the PDF and runs the same checks, so a recipient who only holds the PDF can verify it. A copy re-saved by a tool that keeps attachments still verifies: the reader follows the PDF's own structure, not the layout the renderer wrote. Some viewers drop attachments when they save, macOS Preview among them: verify the original file. The check covers the attached report, not the printed pages: `verify-hash` says so, and the reader compares the printed figures with that report. `--attestation` and `--bundle` passed on the command line win over the attached files, here and in `--url` mode. `verify-hash --url` given the address of a PDF does the same and fetches no sidecar. A report whose schema is newer than the binary exits 5: upgrade perf-sentinel.
 
 ### Sidecar URL convention in `--url` mode
 
