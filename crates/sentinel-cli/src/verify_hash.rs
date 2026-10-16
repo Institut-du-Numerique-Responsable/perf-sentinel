@@ -34,7 +34,7 @@ use sentinel_core::report::periodic::{
     AttestationBinding, InTotoStatement, check_attestation_binding, compute_content_hash,
 };
 
-use crate::limits::MAX_LOCAL_REPORT_BYTES;
+use crate::limits::{CappedRead, MAX_LOCAL_REPORT_BYTES, read_capped};
 
 /// Hard cap on remote payloads pulled by `--url`. 10 MB is well above any
 /// realistic report file size and guards against pathological responses.
@@ -184,29 +184,24 @@ async fn load_report(report_path: Option<&Path>, url: Option<&str>) -> Result<Lo
 /// Read and parse a report from disk. Synchronous on purpose: a single small
 /// file, read before any network work, has nothing to gain from async I/O.
 fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
-    let meta = std::fs::metadata(path).map_err(|e| {
-        eprintln!(
-            "Error: stat {}: {e}",
-            sanitise_for_terminal(&path.display().to_string())
-        );
-        EXIT_INPUT_ERROR
-    })?;
-    if meta.len() > MAX_LOCAL_REPORT_BYTES {
-        eprintln!(
-            "Error: report at {} is {} bytes, exceeds the {}-byte cap.",
-            sanitise_for_terminal(&path.display().to_string()),
-            meta.len(),
-            MAX_LOCAL_REPORT_BYTES
-        );
-        return Err(EXIT_INPUT_ERROR);
-    }
-    let bytes = std::fs::read(path).map_err(|e| {
-        eprintln!(
-            "Error: read {}: {e}",
-            sanitise_for_terminal(&path.display().to_string())
-        );
-        EXIT_INPUT_ERROR
-    })?;
+    let bytes = match read_capped(path, MAX_LOCAL_REPORT_BYTES) {
+        Ok(CappedRead::Bytes(bytes)) => bytes,
+        Ok(CappedRead::TooLarge(len)) => {
+            eprintln!(
+                "Error: report at {} is {len} bytes, exceeds the {}-byte cap.",
+                sanitise_for_terminal(&path.display().to_string()),
+                MAX_LOCAL_REPORT_BYTES
+            );
+            return Err(EXIT_INPUT_ERROR);
+        }
+        Err(e) => {
+            eprintln!(
+                "Error: read {}: {e}",
+                sanitise_for_terminal(&path.display().to_string())
+            );
+            return Err(EXIT_INPUT_ERROR);
+        }
+    };
     let report = parse_report(&bytes).map_err(|e| {
         eprintln!(
             "Error: parse {}: {e}",
