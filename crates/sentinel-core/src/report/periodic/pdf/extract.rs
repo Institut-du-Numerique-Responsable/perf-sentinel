@@ -36,6 +36,12 @@ const BUNDLE: &str = "bundle.sig";
 /// may name, before it is refused as hostile.
 const MAX_NAME_TREE_DEPTH: usize = 8;
 const MAX_FILE_SPECS: usize = 256;
+/// Name tree nodes walked at most, each once.
+const MAX_NAME_TREE_NODES: usize = 1024;
+/// Object and cross-reference streams decoded while loading, each under
+/// `LOAD_STREAM_CAP`: lopdf bounds one stream, these bound them all.
+const MAX_LOAD_STREAMS: usize = 32;
+const LOAD_STREAM_CAP: usize = 4 * 1024 * 1024;
 
 /// Read the attachments of `pdf`, `report_cap` and `sidecar_cap` bytes at
 /// most once decoded.
@@ -53,8 +59,13 @@ pub fn extract_attachments(
     }
     let report_cap = usize::try_from(report_cap).unwrap_or(usize::MAX);
     let sidecar_cap = usize::try_from(sidecar_cap).unwrap_or(usize::MAX);
+    if load_streams(pdf) > MAX_LOAD_STREAMS {
+        return Err(ExtractError::Malformed(
+            "too many object streams".to_string(),
+        ));
+    }
     let options = LoadOptions {
-        max_decompressed_size: Some(report_cap.max(sidecar_cap).saturating_add(1)),
+        max_decompressed_size: Some(LOAD_STREAM_CAP),
         ..LoadOptions::default()
     };
     let doc = Document::load_mem_with_options(pdf, options)
@@ -101,7 +112,11 @@ fn file_specs(doc: &Document) -> Result<Vec<ObjectId>, ExtractError> {
         .and_then(|names| names.get(b"EmbeddedFiles"))
         .and_then(|o| resolve(doc, o)?.as_dict());
     if let Ok(tree) = tree {
-        name_tree(doc, tree, 0, &mut specs)?;
+        let mut walk = Walk {
+            specs: &mut specs,
+            visited: BTreeSet::new(),
+        };
+        walk.node(doc, tree, 0)?;
     }
     if specs.len() > MAX_FILE_SPECS {
         return Err(ExtractError::Malformed(
@@ -111,35 +126,96 @@ fn file_specs(doc: &Document) -> Result<Vec<ObjectId>, ExtractError> {
     Ok(specs.into_iter().collect())
 }
 
-/// The leaves of a name tree, its `Names` pairs and its `Kids`.
-fn name_tree(
-    doc: &Document,
-    node: &Dictionary,
-    depth: usize,
-    specs: &mut BTreeSet<ObjectId>,
-) -> Result<(), ExtractError> {
-    if depth > MAX_NAME_TREE_DEPTH || specs.len() > MAX_FILE_SPECS {
-        return Err(ExtractError::Malformed(
-            "name tree too deep or too large".to_string(),
-        ));
-    }
-    if let Ok(names) = node.get(b"Names").and_then(|o| resolve(doc, o)?.as_array()) {
-        specs.extend(
-            names
-                .iter()
-                .skip(1)
-                .step_by(2)
-                .filter_map(|o| o.as_reference().ok()),
-        );
-    }
-    if let Ok(kids) = node.get(b"Kids").and_then(|o| resolve(doc, o)?.as_array()) {
+/// A name tree walk that visits each node once, under a global budget.
+struct Walk<'a> {
+    specs: &'a mut BTreeSet<ObjectId>,
+    visited: BTreeSet<ObjectId>,
+}
+
+impl Walk<'_> {
+    /// The leaves of a name tree, its `Names` pairs and its `Kids`.
+    fn node(
+        &mut self,
+        doc: &Document,
+        node: &Dictionary,
+        depth: usize,
+    ) -> Result<(), ExtractError> {
+        if depth > MAX_NAME_TREE_DEPTH || self.specs.len() > MAX_FILE_SPECS {
+            return Err(ExtractError::Malformed(
+                "name tree too deep or too large".to_string(),
+            ));
+        }
+        if let Ok(names) = node.get(b"Names").and_then(|o| resolve(doc, o)?.as_array()) {
+            self.specs.extend(
+                names
+                    .iter()
+                    .skip(1)
+                    .step_by(2)
+                    .filter_map(|o| o.as_reference().ok()),
+            );
+        }
+        let Ok(kids) = node.get(b"Kids").and_then(|o| resolve(doc, o)?.as_array()) else {
+            return Ok(());
+        };
         for kid in kids {
-            if let Ok(kid) = resolve(doc, kid).and_then(Object::as_dict) {
-                name_tree(doc, kid, depth + 1, specs)?;
+            let Ok(id) = kid.as_reference() else {
+                continue;
+            };
+            if !self.visited.insert(id) {
+                continue;
+            }
+            if self.visited.len() > MAX_NAME_TREE_NODES {
+                return Err(ExtractError::Malformed("name tree too large".to_string()));
+            }
+            if let Ok(kid) = doc.get_object(id).and_then(Object::as_dict) {
+                self.node(doc, kid, depth + 1)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// How many object and cross-reference streams the file declares, its
+/// names read as the parser reads them, `#xx` escapes decoded. Neither can
+/// sit inside an object stream, so the raw bytes hold them all.
+fn load_streams(pdf: &[u8]) -> usize {
+    let mut count = 0;
+    let mut at = 0;
+    while let Some(offset) = pdf[at..].iter().position(|b| *b == b'/') {
+        let start = at + offset + 1;
+        let end = pdf[start..]
+            .iter()
+            .position(|b| b.is_ascii_whitespace() || b"/<>[]()%{}".contains(b))
+            .map_or(pdf.len(), |len| start + len);
+        let name = decode_name(&pdf[start..end]);
+        if name == b"ObjStm" || name == b"XRef" {
+            count += 1;
+        }
+        at = end;
+    }
+    count
+}
+
+fn decode_name(raw: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < raw.len() {
+        let hex = raw
+            .get(index + 1..index + 3)
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        match (raw[index], hex) {
+            (b'#', Some(byte)) => {
+                out.push(byte);
+                index += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                index += 1;
             }
         }
     }
-    Ok(())
+    out
 }
 
 fn resolve<'a>(doc: &'a Document, object: &'a Object) -> lopdf::Result<&'a Object> {

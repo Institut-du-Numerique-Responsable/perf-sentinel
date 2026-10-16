@@ -494,6 +494,71 @@ mod extraction {
     }
 
     #[test]
+    fn a_name_tree_that_loops_on_itself_is_walked_once() {
+        let (pdf, ..) = rendered();
+        let mut doc = lopdf::Document::load_mem(&pdf).expect("load");
+        let node = doc.new_object_id();
+        let mut tree = lopdf::Dictionary::new();
+        // Ten references to itself: each node is walked once, the loop ignored.
+        tree.set("Kids", vec![lopdf::Object::Reference(node); 10]);
+        doc.objects.insert(node, lopdf::Object::Dictionary(tree));
+        let mut names = lopdf::Dictionary::new();
+        names.set("EmbeddedFiles", node);
+        doc.catalog_mut().expect("catalog").set("Names", names);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("save");
+        let started = std::time::Instant::now();
+        let result = extract_attachments(&bytes, 1 << 20, 1 << 20);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn a_wide_name_tree_shared_between_levels_is_walked_once() {
+        let (pdf, ..) = rendered();
+        let mut doc = lopdf::Document::load_mem(&pdf).expect("load");
+        // Five levels, each node listing the next one 200 times: 200^4 walks
+        // without a visited set, five with one.
+        let mut below = doc.add_object(lopdf::Dictionary::new());
+        for _ in 0..4 {
+            let mut node = lopdf::Dictionary::new();
+            node.set("Kids", vec![lopdf::Object::Reference(below); 200]);
+            below = doc.add_object(node);
+        }
+        let mut names = lopdf::Dictionary::new();
+        names.set("EmbeddedFiles", below);
+        doc.catalog_mut().expect("catalog").set("Names", names);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("save");
+        let started = std::time::Instant::now();
+        let result = extract_attachments(&bytes, 1 << 20, 1 << 20);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn too_many_object_streams_are_refused_before_decoding() {
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        for index in 0..100 {
+            // `#4F` is an escaped `O`: the count reads names as the parser does.
+            pdf.extend_from_slice(
+                format!("{index} 0 obj << /Type /#4FbjStm >> endobj\n").as_bytes(),
+            );
+        }
+        assert!(
+            matches!(extract_attachments(&pdf, 1 << 20, 1 << 20), Err(ExtractError::Malformed(m)) if m.contains("object streams"))
+        );
+    }
+
+    #[test]
     fn an_attachment_over_the_cap_is_too_large() {
         let (pdf, ..) = rendered();
         assert!(matches!(

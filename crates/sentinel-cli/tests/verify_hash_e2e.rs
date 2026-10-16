@@ -317,6 +317,10 @@ fn verify_hash_on_the_pdf_matches_verify_hash_on_the_json() {
         )
     };
     assert_eq!(verdicts(&from_json), verdicts(&from_pdf));
+    let text = run_verify(&["--report", pdf.to_str().unwrap()]);
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    assert!(stdout.contains("attached report.json"), "{stdout}");
+    assert!(stdout.contains("not its printed pages"), "{stdout}");
     assert_eq!(
         "ok",
         verdicts(&from_pdf).0["attestation_binding"]["status"]

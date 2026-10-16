@@ -95,6 +95,8 @@ struct Outcome {
     attestation_binding: Status,
     signature: Status,
     binary_attestation: Status,
+    /// The report came out of a PDF: its printed pages were not checked.
+    from_pdf: bool,
 }
 
 /// A report as read, with the bytes it was parsed from: an attestation
@@ -104,6 +106,7 @@ struct LoadedReport {
     bytes: Vec<u8>,
     display: String,
     fetched: FetchedPaths,
+    from_pdf: bool,
 }
 
 /// Signer identity expectation, fed by the CLI flags
@@ -133,6 +136,7 @@ pub async fn cmd_verify_hash(
         bytes,
         display,
         fetched,
+        from_pdf,
     } = match load_report(report_path, url).await {
         Ok(v) => v,
         Err(code) => return code,
@@ -159,6 +163,7 @@ pub async fn cmd_verify_hash(
         attestation_binding,
         signature,
         binary_attestation,
+        from_pdf,
     };
 
     match format {
@@ -212,7 +217,8 @@ fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
         EXIT_INPUT_ERROR
     })?;
     let display = path.display().to_string();
-    let (bytes, fetched) = if bytes.starts_with(b"%PDF-") {
+    let from_pdf = bytes.starts_with(b"%PDF-");
+    let (bytes, fetched) = if from_pdf {
         unpack_pdf(&bytes, &display)?
     } else {
         (
@@ -229,6 +235,7 @@ fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
         bytes,
         display,
         fetched,
+        from_pdf,
     })
 }
 
@@ -328,6 +335,7 @@ async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
         bytes,
         display: url.to_string(),
         fetched,
+        from_pdf: false,
     })
 }
 
@@ -852,6 +860,11 @@ fn print_text(outcome: &Outcome) {
     println!("perf-sentinel verify-hash {}", env!("CARGO_PKG_VERSION"));
     println!();
     println!("Report: {}", outcome.report_path);
+    if outcome.from_pdf {
+        println!(
+            "  Verified: the attached report.json, not its printed pages. Compare the printed figures with it."
+        );
+    }
     println!(
         "  Period: {} to {}",
         outcome.report.period.from_date, outcome.report.period.to_date
@@ -896,7 +909,7 @@ fn format_status(label: &str, s: &Status) -> String {
 }
 
 fn print_json(outcome: &Outcome) {
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "report_path": outcome.report_path,
         "report_metadata": {
             "intent": intent_label(outcome.report.report_metadata.intent),
@@ -917,6 +930,9 @@ fn print_json(outcome: &Outcome) {
         },
         "overall": overall_label(outcome),
     });
+    if outcome.from_pdf {
+        body["verified_from"] = "pdf_attachment".into();
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&body).unwrap_or_default()
@@ -1283,6 +1299,7 @@ mod tests {
             attestation_binding: Status::Ok("names".to_string()),
             signature: Status::Ok("valid".to_string()),
             binary_attestation: Status::Skip("metadata present, unverified".to_string()),
+            from_pdf: false,
         };
         assert_eq!(overall_label(&outcome), "PARTIAL");
     }
@@ -1301,6 +1318,7 @@ mod tests {
             attestation_binding: Status::Ok("names".to_string()),
             signature: Status::Ok("valid".to_string()),
             binary_attestation: Status::NotProvided,
+            from_pdf: false,
         };
         assert_eq!(overall_label(&outcome), "TRUSTED");
     }
@@ -1316,6 +1334,7 @@ mod tests {
             attestation_binding,
             signature: Status::Ok("valid".to_string()),
             binary_attestation: Status::NotProvided,
+            from_pdf: false,
         }
     }
 
