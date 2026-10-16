@@ -464,7 +464,6 @@ config:
     # api_key_file = "/run/secrets/perf-sentinel-hub-api-key"
     # batch_size = 100
     # flush_interval_secs = 5
-    # request_timeout_secs = 10
     # max_pending = 10000
 
   # -- Ordered TOML fragments, rendered into a second ConfigMap and mounted
