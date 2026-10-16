@@ -2925,7 +2925,7 @@ intent = "official"
 #[test]
 fn reporting_disclose_output_path_accepted_but_unused() {
     // disclose_output_path is reserved for daemon-triggered
-    // periodic disclosures (planned for 0.8.0). Today it is
+    // periodic disclosures, not implemented yet. Today it is
     // accepted by the parser but unused at runtime, and the
     // validator logs a tracing::warn so operators do not silently
     // depend on a no-op. The test confirms the field round-trips

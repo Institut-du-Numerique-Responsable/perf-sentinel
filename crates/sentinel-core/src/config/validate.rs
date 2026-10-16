@@ -4,7 +4,7 @@
 mod daemon;
 mod green;
 
-use super::{Config, RESERVED_DISCLOSE_OUTPUT_PATH_VERSION};
+use super::Config;
 
 fn check_range<T: PartialOrd + std::fmt::Display>(
     name: &str,
@@ -294,9 +294,8 @@ impl Config {
         {
             tracing::warn!(
                 "[reporting] disclose_output_path is set but currently unused. \
-                 Reserved for daemon-triggered periodic disclosures (planned for {}). \
-                 Reports today are produced exclusively via `perf-sentinel disclose --output`.",
-                RESERVED_DISCLOSE_OUTPUT_PATH_VERSION
+                 Reserved for daemon-triggered periodic disclosures, not implemented yet. \
+                 Reports today are produced exclusively via `perf-sentinel disclose --output`."
             );
         }
     }
