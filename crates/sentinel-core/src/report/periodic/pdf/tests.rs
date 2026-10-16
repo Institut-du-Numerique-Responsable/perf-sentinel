@@ -393,6 +393,150 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn the_cover_names_the_report_and_when_it_was_generated() {
+        let (report, _) = baked_report();
+        let cover = page_text(&layout_pages(&PageContext::for_report(&report))[0]);
+        assert!(
+            cover.contains(&report.report_metadata.report_uuid.to_string()),
+            "{cover}"
+        );
+        assert!(cover.contains("2026-04-05T12:00:00Z"), "{cover}");
+    }
+
+    #[test]
+    fn the_header_carries_the_vat_number_and_the_opencorporates_page() {
+        let (mut report, _) = baked_report();
+        report.organisation.identifiers.vat = Some("FR12123456789".to_string());
+        report.organisation.identifiers.opencorporates_url =
+            Some("https://opencorporates.com/companies/fr/123456789".to_string());
+        let cover = page_text(&layout_pages(&PageContext::for_report(&report))[0]);
+        assert!(cover.contains("VAT FR12123456789"), "{cover}");
+        assert!(
+            cover.contains("opencorporates.com/companies/fr/123456789"),
+            "{cover}"
+        );
+    }
+
+    #[test]
+    fn each_waste_reading_prints_its_avoidable_energy() {
+        let (mut report, _) = baked_report();
+        report.aggregate.canonical_waste.energy_kwh = 3.27;
+        report.aggregate.operational_waste.energy_kwh = 1.84;
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("3.27 kWh"), "{all}");
+        assert!(all.contains("1.84 kWh"), "{all}");
+    }
+
+    #[test]
+    fn the_carbon_breakdown_is_printed_with_the_figures_outside_the_total() {
+        let (mut report, _) = baked_report();
+        report.aggregate.carbon_breakdown =
+            Some(crate::report::periodic::schema::CarbonBreakdown {
+                operational_kgco2eq: Some(1.71),
+                embodied_kgco2eq: Some(0.2),
+                database_kgco2eq_out_of_total: Some(0.12),
+                messaging_kgco2eq_out_of_total: None,
+                transport_kgco2eq: Some(0.04),
+                transport_kgco2eq_low: Some(0.01),
+                transport_kgco2eq_high: Some(0.04),
+            });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("operational 1.71 kg"), "{all}");
+        assert!(all.contains("embodied 0.20 kg"), "{all}");
+        assert!(all.contains("network transport 0.04 kg"), "{all}");
+        assert!(all.contains("database 0.12 kg"), "{all}");
+        assert!(!all.contains("broker"), "{all}");
+    }
+
+    #[test]
+    fn the_crosswalk_prints_its_caveats() {
+        let (mut report, _) = baked_report();
+        report.methodology.standard_crosswalk =
+            Some(crate::report::periodic::schema::StandardCrosswalk {
+                standard: "ESRS E1".to_string(),
+                mappings: vec![],
+                caveats: vec!["Location-based only, no market-based figure.".to_string()],
+            });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            all.contains("Location-based only, no market-based figure."),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn excluded_environments_are_printed_with_their_reason() {
+        let (mut report, _) = baked_report();
+        report.scope_manifest.environments_excluded.push(
+            crate::report::periodic::schema::ExcludedEnv {
+                name: "staging".to_string(),
+                reason: "synthetic traffic only".to_string(),
+            },
+        );
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("staging"), "{all}");
+        assert!(all.contains("synthetic traffic only"), "{all}");
+    }
+
+    #[test]
+    fn the_measuring_binary_row_carries_its_hash_and_provenance() {
+        let (mut report, _) = baked_report();
+        report.integrity.binary_hash = Some(format!("sha256:{}", "ab12".repeat(16)));
+        report.integrity.binary_attestation =
+            Some(crate::report::periodic::schema::BinaryAttestationMetadata {
+                format: "slsa-provenance-v1".to_string(),
+                attestation_url: "https://example.org/attestation".to_string(),
+                builder_id: "https://github.com/actions/runner".to_string(),
+                git_tag: "v0.31.0".to_string(),
+                git_commit: "568d9d96f0e1".to_string(),
+                slsa_level: "L3".to_string(),
+            });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("ab12 ab12"), "{all}");
+        assert!(all.contains("v0.31.0"), "{all}");
+        assert!(all.contains("568d9d96f0e1"), "{all}");
+        assert!(all.contains("SLSA L3"), "{all}");
+    }
+
+    #[test]
+    fn the_archive_row_names_unchained_dropped_and_outside_windows() {
+        let (mut report, _) = baked_report();
+        report.integrity.trace_integrity_chain = serde_json::json!({
+            "windows_verified": 160,
+            "windows_unchained": 2,
+            "breaks": 0,
+            "breaks_outside_period": 1,
+            "windows_dropped": 3,
+            "drop_counter_resets": 1
+        });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("160 scoring windows verified"), "{all}");
+        assert!(all.contains("2 written before chaining"), "{all}");
+        assert!(all.contains("1 break outside the period"), "{all}");
+        assert!(all.contains("3 windows not archived"), "{all}");
+        assert!(all.contains("1 daemon restart"), "{all}");
+    }
+
+    #[test]
+    fn reference_urls_other_than_transparency_are_listed() {
+        let (mut report, _) = baked_report();
+        report.notes.reference_urls.clear();
+        report.notes.reference_urls.insert(
+            "methodology".to_string(),
+            "https://example.org/METHODOLOGY.md".to_string(),
+        );
+        report.notes.reference_urls.insert(
+            "transparency".to_string(),
+            "https://example.org/transparency".to_string(),
+        );
+        let method = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            method.contains("methodology example.org/METHODOLOGY.md"),
+            "{method}"
+        );
+    }
+
+    #[test]
     fn no_coverage_bar_is_drawn_when_runtime_coverage_is_not_reported() {
         let (mut report, _) = baked_report();
         report.aggregate.runtime_windows_count = 0;

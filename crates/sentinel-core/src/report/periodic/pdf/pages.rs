@@ -10,7 +10,7 @@ use chrono::Datelike as _;
 use super::layout::{Face, fit, group4, text_width, wrap};
 use super::{PAGE_HEIGHT, PAGE_WIDTH};
 use crate::report::periodic::schema::{
-    IntegrityLevel, Period, PeriodType, ReportIntent, WasteTier,
+    CarbonBreakdown, IntegrityLevel, Period, PeriodType, ReportIntent, WasteTier,
 };
 use crate::report::periodic::{Application, AttestationBinding, Confidentiality, PeriodicReport};
 
@@ -591,6 +591,7 @@ fn header(w: &mut Writer, report: &PeriodicReport) {
     let ids = &report.organisation.identifiers;
     let parts: Vec<String> = [
         ids.siren.as_ref().map(|v| format!("SIREN {v}")),
+        ids.vat.as_ref().map(|v| format!("VAT {v}")),
         ids.lei.as_ref().map(|v| format!("LEI {v}")),
         Some(report.organisation.country.clone()),
         report
@@ -604,8 +605,22 @@ fn header(w: &mut Writer, report: &PeriodicReport) {
     .flatten()
     .filter(|part| !part.is_empty())
     .collect();
-    let ids = fit(&plain(&parts.join(" · ")), Face::Mono, 7.5, room);
-    w.line_right(RIGHT, 70.0, Face::Mono, 7.5, TEXT_2, &ids);
+    let line = fit(&plain(&parts.join(" · ")), Face::Mono, 7.5, room);
+    w.line_right(RIGHT, 70.0, Face::Mono, 7.5, TEXT_2, &line);
+    // A URL cut short would point nowhere, so it gets a line of its own.
+    if let Some(url) = ids
+        .opencorporates_url
+        .as_deref()
+        .filter(|url| !url.is_empty())
+    {
+        let url = fit(
+            &plain(url.trim_start_matches("https://")),
+            Face::Mono,
+            7.5,
+            room,
+        );
+        w.line_right(RIGHT, 82.0, Face::Mono, 7.5, TEXT_2, &url);
+    }
 }
 
 /// One figure card: label, value, unit and the line under it.
@@ -757,6 +772,22 @@ fn proof_block(w: &mut Writer, report: &PeriodicReport, verify_page: usize) {
         TEXT,
         &group4(&report.integrity.content_hash),
     );
+    w.y += 4.0;
+    w.block(
+        MARGIN,
+        column,
+        Face::Mono,
+        8.0,
+        TEXT,
+        &format!(
+            "report {} · generated {}",
+            report.report_metadata.report_uuid,
+            report
+                .report_metadata
+                .generated_at
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        ),
+    );
     if let Some(signature) = report.integrity.signature.as_ref() {
         w.y += 4.0;
         w.block(
@@ -870,6 +901,13 @@ fn at_a_glance(w: &mut Writer, report: &PeriodicReport) {
         "The method is a directional estimate with a ~2x bracket. The true value is likely to sit anywhere in the shaded band.",
     );
     uncertainty_band(w, carbon);
+    if let Some(text) = aggregate
+        .carbon_breakdown
+        .as_ref()
+        .and_then(carbon_breakdown)
+    {
+        w.para(8.5, TEXT_2, &text);
+    }
     w.heading("Avoidable waste, two readings of the same data");
     waste_bar(w, "Canonical", &aggregate.canonical_waste, BRAND);
     waste_bar(w, "Operational", &aggregate.operational_waste, INFO);
@@ -967,7 +1005,7 @@ fn waste_bar(w: &mut Writer, label: &str, tier: &WasteTier, color: Rgb) {
         &format!("{label}, N+1 from {}", tier.n_plus_one_threshold),
     );
     let track_x = MARGIN + 120.0;
-    let track_w = CONTENT_WIDTH - 120.0 - 92.0;
+    let track_w = CONTENT_WIDTH - 120.0 - 150.0;
     w.boxed(track_x, top + 3.0, track_w, 7.0, 3.5, Some(TRACK), None);
     #[allow(clippy::cast_possible_truncation)] // a ratio in [0, 1]
     let filled = track_w * tier.waste_ratio.clamp(0.0, 1.0) as f32;
@@ -981,8 +1019,9 @@ fn waste_bar(w: &mut Writer, label: &str, tier: &WasteTier, color: Rgb) {
         None,
     );
     let value = format!(
-        "{:.2} kg · {}",
+        "{:.2} kg · {:.2} kWh · {}",
         tier.carbon_kgco2eq,
+        tier.energy_kwh,
         percent(tier.waste_ratio)
     );
     w.line_right(RIGHT, top + 9.0, Face::Mono, 8.5, TEXT, &value);
@@ -1099,6 +1138,64 @@ fn crosswalk(w: &mut Writer, report: &PeriodicReport) {
             mappings.join(" ")
         ),
     );
+    if !crosswalk.caveats.is_empty() {
+        w.para(
+            8.5,
+            TEXT_2,
+            &format!(
+                "Before using these figures for {}: {}",
+                crosswalk.standard,
+                crosswalk.caveats.join(" ")
+            ),
+        );
+    }
+}
+
+/// The SCI terms the carbon total is made of, then what stays outside it.
+fn carbon_breakdown(breakdown: &CarbonBreakdown) -> Option<String> {
+    let transport = breakdown.transport_kgco2eq.map(|mid| {
+        match (
+            breakdown.transport_kgco2eq_low,
+            breakdown.transport_kgco2eq_high,
+        ) {
+            (Some(low), Some(high)) => {
+                format!("network transport {mid:.2} kg, a ceiling between {low:.2} and {high:.2}")
+            }
+            _ => format!("network transport {mid:.2} kg, a ceiling"),
+        }
+    });
+    let inside: Vec<String> = [
+        breakdown
+            .operational_kgco2eq
+            .map(|v| format!("operational {v:.2} kg")),
+        breakdown
+            .embodied_kgco2eq
+            .map(|v| format!("embodied {v:.2} kg")),
+        transport,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let outside: Vec<String> = [
+        breakdown
+            .database_kgco2eq_out_of_total
+            .map(|v| format!("database {v:.2} kg")),
+        breakdown
+            .messaging_kgco2eq_out_of_total
+            .map(|v| format!("broker {v:.2} kg")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let made_of = (!inside.is_empty()).then(|| format!("Made of {}.", inside.join(", ")));
+    let beside = (!outside.is_empty()).then(|| {
+        format!(
+            "Outside this total, as a different scope from the instrumented services: {}.",
+            outside.join(", ")
+        )
+    });
+    let text: Vec<String> = [made_of, beside].into_iter().flatten().collect();
+    (!text.is_empty()).then(|| text.join(" "))
 }
 
 // ---------------------------------------------------------------- page 3
@@ -1347,6 +1444,16 @@ fn scope_rows(w: &mut Writer, report: &PeriodicReport) {
             scope.environments_measured.join(", ")
         )
     };
+    let excluded = if scope.environments_excluded.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<String> = scope
+            .environments_excluded
+            .iter()
+            .map(|env| format!("{} ({})", env.name, env.reason))
+            .collect();
+        format!(" · excluded {}", names.join(", "))
+    };
     let declared_requests = scope.total_requests_in_period.map_or_else(
         || "requests in the period not declared".to_string(),
         |n| format!("{} requests in the period", grouped(n)),
@@ -1354,7 +1461,7 @@ fn scope_rows(w: &mut Writer, report: &PeriodicReport) {
     w.row(
         "Declared by the operator",
         &format!(
-            "{} applications · {environments} · {declared_requests}",
+            "{} applications · {environments}{excluded} · {declared_requests}",
             scope.total_applications_declared
         ),
         Face::Mono,
@@ -1429,6 +1536,9 @@ fn method(w: &mut Writer, report: &PeriodicReport) {
         Face::Mono,
     );
     w.row("Archive", &archive_summary(report), Face::Mono);
+    if let Some(references) = references(report) {
+        w.row("References", &references, Face::Mono);
+    }
     w.heading("Disclaimers, exactly as the report carries them");
     disclaimers(w, report);
     w.heading("What this document is");
@@ -1467,7 +1577,29 @@ fn measuring_binary(report: &PeriodicReport) -> String {
             .collect();
         parts.push(format!("energy models {}", models.join(", ")));
     }
+    if let Some(attestation) = report.integrity.binary_attestation.as_ref() {
+        parts.push(format!(
+            "built from {} at {}, SLSA {}",
+            attestation.git_tag, attestation.git_commit, attestation.slsa_level
+        ));
+    }
+    if let Some(hash) = report.integrity.binary_hash.as_deref() {
+        parts.push(format!("binary {}", group4(hash)));
+    }
     parts.join(" · ")
+}
+
+/// The report's reference links, the transparency page aside: the cover
+/// already prints it beside its QR code.
+fn references(report: &PeriodicReport) -> Option<String> {
+    let links: Vec<String> = report
+        .notes
+        .reference_urls
+        .iter()
+        .filter(|(key, _)| key.as_str() != "transparency")
+        .map(|(key, url)| format!("{key} {}", url.trim_start_matches("https://")))
+        .collect();
+    (!links.is_empty()).then(|| links.join(" · "))
 }
 
 fn disclaimers(w: &mut Writer, report: &PeriodicReport) {
@@ -1523,13 +1655,41 @@ fn detectors(report: &PeriodicReport) -> String {
 fn archive_summary(report: &PeriodicReport) -> String {
     let chain = &report.integrity.trace_integrity_chain;
     let field = |name: &str| chain.get(name).and_then(serde_json::Value::as_u64);
-    match (field("windows_verified"), field("breaks")) {
-        (Some(verified), Some(breaks)) => format!(
-            "{verified} scoring windows verified, hash-chained by the daemon · {breaks} break{}",
-            if breaks == 1 { "" } else { "s" }
-        ),
-        _ => NOT_REPORTED.to_string(),
+    let (Some(verified), Some(breaks)) = (field("windows_verified"), field("breaks")) else {
+        return NOT_REPORTED.to_string();
+    };
+    let mut parts = vec![
+        format!("{verified} scoring windows verified, hash-chained by the daemon"),
+        counted(breaks, "break", "breaks"),
+    ];
+    if let Some(unchained) = field("windows_unchained").filter(|n| *n > 0) {
+        parts.push(format!(
+            "{unchained} written before chaining, not attestable"
+        ));
     }
+    if let Some(outside) = field("breaks_outside_period").filter(|n| *n > 0) {
+        parts.push(format!(
+            "{} outside the period",
+            counted(outside, "break", "breaks")
+        ));
+    }
+    if let Some(dropped) = field("windows_dropped") {
+        parts.push(format!(
+            "{} not archived",
+            counted(dropped, "window", "windows")
+        ));
+    }
+    if let Some(resets) = field("drop_counter_resets").filter(|n| *n > 0) {
+        parts.push(format!(
+            "{}, so a lower bound",
+            counted(resets, "daemon restart", "daemon restarts")
+        ));
+    }
+    parts.join(" · ")
+}
+
+fn counted(n: u64, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 // ---------------------------------------------------------------- page 5
