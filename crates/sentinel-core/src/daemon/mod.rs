@@ -14,6 +14,7 @@ pub mod query_api;
 pub mod traces_store;
 
 mod event_loop;
+mod hub_correlation_export;
 mod hub_export;
 mod hub_incident_export;
 mod hub_table;
