@@ -2864,7 +2864,7 @@
           "type": "state-timeline",
           "id": 102,
           "title": "Épisodes de corrélation",
-          "description": "Une ligne par paire de findings qui se suivent, un segment par épisode : une période pendant laquelle le daemon a vu la paire se produire ensemble, close une fois la paire restée calme le temps de l'écart d'épisode (10 minutes sur la fenêtre par défaut). Lu depuis GET /api/correlations du Hub, donc au-delà de la fenêtre glissante du daemon. Un épisode ouvert court jusqu'à maintenant.\n\nDemande PerfSentinelHub 0.6.0 et un daemon Perf Sentinel 0.30.0 avec [daemon.hub_export] et [daemon.correlation] actifs. Un Hub plus ancien répond 404 et le panneau reste vide. Activez l'annotation Incidents du Hub pour confronter les incidents aux épisodes.",
+          "description": "Une ligne par paire de findings qui se suivent, un segment par épisode : une période pendant laquelle le daemon a vu la paire se produire ensemble, close une fois la paire restée calme le temps de l'écart d'épisode (10 minutes sur la fenêtre par défaut). Lu depuis GET /api/correlations du Hub, donc au-delà de la fenêtre glissante du daemon. Un épisode ouvert court jusqu'à maintenant.\n\nDemande PerfSentinelHub 0.6.0 et un daemon Perf Sentinel 0.30.0 avec [daemon.hub_export] et [daemon.correlation] actifs. Un Hub plus ancien répond 404 et le panneau reste vide. La lecture s'arrête à 1000 épisodes, donc une large période sur un parc chargé peut manquer les plus anciens. Activez l'annotation Incidents du Hub pour confronter les incidents aux épisodes.",
           "datasource": {
             "type": "yesoreyeram-infinity-datasource",
             "uid": "${DS_HUB}"

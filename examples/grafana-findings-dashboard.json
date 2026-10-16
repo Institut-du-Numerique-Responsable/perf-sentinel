@@ -2864,7 +2864,7 @@
           "type": "state-timeline",
           "id": 102,
           "title": "Correlation episodes",
-          "description": "One line per pair of findings that kept following each other, one segment per episode: a period during which the daemon saw the pair co-occur, cut once the pair stayed quiet for the episode gap (10 minutes on the default window). Read from the Hub's GET /api/correlations, so it reaches past the daemon's rolling window. An open episode runs to now.\n\nNeeds PerfSentinelHub 0.6.0 and a Perf Sentinel 0.30.0 daemon with [daemon.hub_export] and [daemon.correlation] on. An older Hub answers 404 and the panel stays empty. Turn on the Hub incidents annotation to set incidents against the episodes.",
+          "description": "One line per pair of findings that kept following each other, one segment per episode: a period during which the daemon saw the pair co-occur, cut once the pair stayed quiet for the episode gap (10 minutes on the default window). Read from the Hub's GET /api/correlations, so it reaches past the daemon's rolling window. An open episode runs to now.\n\nNeeds PerfSentinelHub 0.6.0 and a Perf Sentinel 0.30.0 daemon with [daemon.hub_export] and [daemon.correlation] on. An older Hub answers 404 and the panel stays empty. The read stops at 1000 episodes, so a wide range on a busy fleet can miss the older ones. Turn on the Hub incidents annotation to set incidents against the episodes.",
           "datasource": {
             "type": "yesoreyeram-infinity-datasource",
             "uid": "${DS_HUB}"
