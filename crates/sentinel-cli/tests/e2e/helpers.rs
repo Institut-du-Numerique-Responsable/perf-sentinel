@@ -82,3 +82,39 @@ pub(crate) const ORG_CONFIG_EXAMPLE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../docs/examples/perf-sentinel-org.toml"
 );
+
+/// Answers every instant query with an empty vector and hands back each
+/// request line, so a test can read the queries the binary sent.
+#[cfg(feature = "daemon")]
+pub(crate) fn spawn_prometheus_stub() -> (u16, std::sync::mpsc::Receiver<String>) {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok((mut stream, _)) = listener.accept() {
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut request_line = String::new();
+            if reader.read_line(&mut request_line).is_err() {
+                return;
+            }
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            // Recorded before the answer, so it is in the channel by the
+            // time the binary can exit.
+            if tx.send(request_line).is_err() {
+                return;
+            }
+            let body = r#"{"status":"success","data":{"resultType":"vector","result":[]}}"#;
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    (port, rx)
+}

@@ -187,6 +187,7 @@ fn cli_mysql_stat_series_flags_require_the_prometheus_endpoint() {
         ("--rows-sent-metric", "whatever"),
         ("--rows-examined-metric", "whatever"),
         ("--schema-label", "whatever"),
+        ("--selector", "a=\"b\""),
         ("--unit", "seconds"),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
@@ -259,6 +260,7 @@ fn cli_mysql_stat_help_lists_the_prometheus_flags() {
         "--rows-sent-metric",
         "--rows-examined-metric",
         "--schema-label",
+        "--selector",
         "--unit",
     ] {
         assert!(help.contains(flag), "mysql-stat --help should list {flag}");
@@ -288,4 +290,33 @@ fn cli_mysql_stat_rejects_an_unknown_unit() {
         stderr.contains("seconds") && stderr.contains("picoseconds"),
         "stderr should list the accepted units, got: {stderr}"
     );
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn cli_mysql_stat_selector_filters_every_query() {
+    let (port, requests) = crate::helpers::spawn_prometheus_stub();
+    Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "mysql-stat",
+            "--prometheus",
+            &format!("http://127.0.0.1:{port}"),
+            "--selector",
+            r#"namespace="shop""#,
+        ])
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("failed to execute perf-sentinel");
+    let sent: Vec<String> = requests.try_iter().collect();
+    assert_eq!(
+        sent.len(),
+        4,
+        "the ranked query and three counters: {sent:?}"
+    );
+    for request in &sent {
+        assert!(
+            request.contains("%7Bnamespace%3D%22shop%22%7D"),
+            "{request}"
+        );
+    }
 }

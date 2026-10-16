@@ -17,6 +17,11 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
   and Revoke go through that Hub's relay at the page's own origin with the reader's session,
   so no daemon key reaches the browser and the daemon needs no CORS entry. Exclusive with
   `--daemon-url`.
+- `pg-stat --selector`, `mysql-stat --selector`, `report --pg-stat-selector` and
+  `report --mysql-stat-selector` filter the Prometheus scrape on label matchers such as
+  `'namespace="shop",db_role="primary"'`, applied to the ranked query and to every counter
+  query, so an exporter serving several tenants or a primary with its replicas no longer
+  ranks their statements together.
 - `verify-hash --report report.pdf` verifies the report a disclosure PDF attaches, a copy
   re-saved by a tool that keeps attachments included, and says it checked that report and not
   the printed pages. PDFs over 4 MiB are refused before parsing.

@@ -85,6 +85,7 @@ fn cli_pg_stat_series_flags_require_the_prometheus_endpoint() {
         ("--metric", "whatever"),
         ("--query-label", "whatever"),
         ("--calls-metric", "whatever"),
+        ("--selector", "a=\"b\""),
         ("--unit", "milliseconds"),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
@@ -172,8 +173,57 @@ fn cli_pg_stat_help_lists_the_prometheus_flags() {
         "--metric",
         "--query-label",
         "--calls-metric",
+        "--selector",
         "--unit",
     ] {
         assert!(help.contains(flag), "pg-stat --help should list {flag}");
     }
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn cli_pg_stat_selector_filters_both_queries() {
+    let (port, requests) = crate::helpers::spawn_prometheus_stub();
+    Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "pg-stat",
+            "--prometheus",
+            &format!("http://127.0.0.1:{port}"),
+            "--selector",
+            r#"namespace="shop",db_role="primary""#,
+        ])
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("failed to execute perf-sentinel");
+    let sent: Vec<String> = requests.try_iter().collect();
+    assert_eq!(
+        sent.len(),
+        2,
+        "the ranked query and the calls query: {sent:?}"
+    );
+    for request in &sent {
+        assert!(
+            request.contains("%7Bnamespace%3D%22shop%22%2Cdb_role%3D%22primary%22%7D"),
+            "{request}"
+        );
+    }
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn cli_pg_stat_rejects_a_selector_that_is_not_quoted_matchers() {
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "pg-stat",
+            "--prometheus",
+            "http://127.0.0.1:1",
+            "--selector",
+            "db_role=primary",
+        ])
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("failed to execute perf-sentinel");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("double-quoted"), "{stderr}");
 }

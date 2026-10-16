@@ -276,6 +276,8 @@ async fn dispatch_command(command: Commands) {
             #[cfg(feature = "daemon")]
             calls_metric,
             #[cfg(feature = "daemon")]
+            selector,
+            #[cfg(feature = "daemon")]
             unit,
             top_n,
             traces,
@@ -290,7 +292,13 @@ async fn dispatch_command(command: Commands) {
                 #[cfg(feature = "daemon")]
                 auth_header,
                 #[cfg(feature = "daemon")]
-                &pg_stat_prometheus_opts(metric, query_label, calls_metric, unit.as_deref()),
+                &pg_stat_prometheus_opts(
+                    metric,
+                    query_label,
+                    calls_metric,
+                    selector,
+                    unit.as_deref(),
+                ),
                 top_n,
                 traces.as_deref(),
                 baseline.as_deref(),
@@ -314,6 +322,8 @@ async fn dispatch_command(command: Commands) {
             #[cfg(feature = "daemon")]
             calls_metric,
             #[cfg(feature = "daemon")]
+            selector,
+            #[cfg(feature = "daemon")]
             rows_sent_metric,
             #[cfg(feature = "daemon")]
             rows_examined_metric,
@@ -334,6 +344,7 @@ async fn dispatch_command(command: Commands) {
                     rows_sent: rows_sent_metric,
                     rows_examined: rows_examined_metric,
                 },
+                selector,
                 unit.as_deref(),
             );
             mysql_stat::dispatch_mysql_stat(
@@ -408,6 +419,8 @@ async fn dispatch_command(command: Commands) {
             #[cfg(feature = "daemon")]
             pg_stat_calls_metric,
             #[cfg(feature = "daemon")]
+            pg_stat_selector,
+            #[cfg(feature = "daemon")]
             pg_stat_unit,
             #[cfg(feature = "daemon")]
             pg_stat_query_label,
@@ -426,6 +439,8 @@ async fn dispatch_command(command: Commands) {
             mysql_stat_schema_label,
             #[cfg(feature = "daemon")]
             mysql_stat_calls_metric,
+            #[cfg(feature = "daemon")]
+            mysql_stat_selector,
             #[cfg(feature = "daemon")]
             mysql_stat_rows_sent_metric,
             #[cfg(feature = "daemon")]
@@ -447,6 +462,7 @@ async fn dispatch_command(command: Commands) {
                 pg_stat_metric,
                 pg_stat_query_label,
                 pg_stat_calls_metric,
+                pg_stat_selector,
                 pg_stat_unit.as_deref(),
             );
             #[cfg(feature = "daemon")]
@@ -459,6 +475,7 @@ async fn dispatch_command(command: Commands) {
                     rows_sent: mysql_stat_rows_sent_metric,
                     rows_examined: mysql_stat_rows_examined_metric,
                 },
+                mysql_stat_selector,
                 mysql_stat_unit.as_deref(),
             );
             cmd_report(
@@ -687,6 +704,7 @@ fn pg_stat_prometheus_opts(
     metric: Option<String>,
     query_label: Option<String>,
     calls_metric: Option<String>,
+    selector: Option<String>,
     unit: Option<&str>,
 ) -> sentinel_core::ingest::pg_stat::PrometheusPgStat {
     use sentinel_core::ingest::pg_stat::{PgStatTimeUnit, PrometheusPgStat};
@@ -697,6 +715,7 @@ fn pg_stat_prometheus_opts(
     if unit == Some("milliseconds") {
         opts.unit = PgStatTimeUnit::Milliseconds;
     }
+    opts.selector = selector;
     opts
 }
 
@@ -719,6 +738,7 @@ fn mysql_stat_prometheus_opts(
     query_label: Option<String>,
     schema_label: Option<String>,
     counters: MysqlCounterMetrics,
+    selector: Option<String>,
     unit: Option<&str>,
 ) -> sentinel_core::ingest::mysql_stat::PrometheusMySqlStat {
     use sentinel_core::ingest::mysql_stat::{MySqlStatTimeUnit, PrometheusMySqlStat};
@@ -743,6 +763,7 @@ fn mysql_stat_prometheus_opts(
         Some("picoseconds") => opts.unit = MySqlStatTimeUnit::Picoseconds,
         _ => {}
     }
+    opts.selector = selector;
     opts
 }
 

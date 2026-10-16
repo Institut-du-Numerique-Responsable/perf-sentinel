@@ -656,6 +656,9 @@ pub struct PrometheusPgStat {
     pub calls_series: Option<String>,
     /// Unit of [`Self::series`].
     pub unit: PgStatTimeUnit,
+    /// Label matchers both queries filter on, `name="value"` joined by commas,
+    /// such as `namespace="shop",db_role="primary"`. `None` reads every series.
+    pub selector: Option<String>,
 }
 
 #[cfg(any(feature = "daemon", feature = "tempo"))]
@@ -666,6 +669,7 @@ impl Default for PrometheusPgStat {
             query_label: "query".to_string(),
             calls_series: Some("pg_stat_statements_calls_total".to_string()),
             unit: PgStatTimeUnit::Seconds,
+            selector: None,
         }
     }
 }
@@ -683,6 +687,7 @@ impl PrometheusPgStat {
             query_label: query_label.unwrap_or(defaults.query_label),
             calls_series: defaults.calls_series,
             unit: defaults.unit,
+            selector: defaults.selector,
         }
     }
 }
@@ -711,10 +716,14 @@ const PG_IDENTITY: &[&str] = &["queryid", "instance", "job"];
 /// Build the `topk` instant query, aggregated on the statement identity plus
 /// the label carrying its text.
 #[cfg(any(feature = "daemon", feature = "tempo"))]
-fn build_prometheus_query(top_n: usize, opts: &PrometheusPgStat) -> String {
+fn build_prometheus_query(top_n: usize, opts: &PrometheusPgStat, selector: &str) -> String {
     let mut group_by = PG_IDENTITY.to_vec();
     group_by.push(opts.query_label.as_str());
-    crate::ingest::prometheus_scrape::build_topk_query(top_n, &opts.series, &group_by)
+    crate::ingest::prometheus_scrape::build_topk_query(
+        top_n,
+        &format!("{}{selector}", opts.series),
+        &group_by,
+    )
 }
 
 /// Fetch `pg_stat_statements` data from a Prometheus endpoint.
@@ -757,7 +766,14 @@ pub async fn fetch_from_prometheus(
         validate_series_name(series)?;
     }
 
-    let query = build_prometheus_query(top_n, opts);
+    let selector = opts
+        .selector
+        .as_deref()
+        .map(crate::ingest::prometheus_scrape::encode_selector)
+        .transpose()
+        .map_err(PgStatError::PrometheusRequest)?
+        .unwrap_or_default();
+    let query = build_prometheus_query(top_n, opts, &selector);
     let body = crate::ingest::prometheus_scrape::fetch_instant_query(
         endpoint,
         &query,
@@ -772,8 +788,11 @@ pub async fn fetch_from_prometheus(
     // report at all. The counts stay at zero and the CLI says so.
     let calls_body = match opts.calls_series.as_deref() {
         Some(series) => {
-            let calls_query =
-                crate::ingest::prometheus_scrape::build_counter_query(series, PG_IDENTITY, &query);
+            let calls_query = crate::ingest::prometheus_scrape::build_counter_query(
+                &format!("{series}{selector}"),
+                PG_IDENTITY,
+                &query,
+            );
             match crate::ingest::prometheus_scrape::fetch_instant_query(
                 endpoint,
                 &calls_query,
@@ -1479,7 +1498,7 @@ mod tests {
     fn prometheus_series_name_defaults_to_the_official_exporter() {
         let opts = PrometheusPgStat::default();
         assert!(
-            build_prometheus_query(10, &opts).contains("pg_stat_statements_seconds_total"),
+            build_prometheus_query(10, &opts, "").contains("pg_stat_statements_seconds_total"),
             "the postgres_exporter built-in series stays the default"
         );
     }
@@ -1493,12 +1512,22 @@ mod tests {
             series: "pg_stat_statements_total_exec_time".to_string(),
             ..PrometheusPgStat::default()
         };
-        let query = build_prometheus_query(10, &opts);
+        let query = build_prometheus_query(10, &opts, "");
         assert!(
             query.contains("pg_stat_statements_total_exec_time"),
             "{query}"
         );
         assert!(!query.contains("seconds_total"), "{query}");
+    }
+
+    #[cfg(any(feature = "daemon", feature = "tempo"))]
+    #[test]
+    fn a_selector_filters_the_ranked_series() {
+        let query = build_prometheus_query(10, &PrometheusPgStat::default(), "%7Ba%3D%22b%22%7D");
+        assert!(
+            query.contains("(pg_stat_statements_seconds_total%7Ba%3D%22b%22%7D)"),
+            "{query}"
+        );
     }
 
     #[cfg(any(feature = "daemon", feature = "tempo"))]

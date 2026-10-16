@@ -63,6 +63,11 @@ the CSV exports stay in UTC.
   time series counts: `pg_stat_statements` itself counts milliseconds,
   the exporter built-in converts to seconds, and reading one for the
   other is off by a factor of a thousand.
+  `--pg-stat-selector <MATCHERS>` filters both queries on labels, for an
+  exporter that serves several tenants or a primary and its replicas:
+  `'namespace="shop",db_role="primary"'`. Each matcher is `name`, then
+  `=`, `!=`, `=~` or `!~`, then a double-quoted value, and the list is
+  checked matcher by matcher before any request leaves.
 - `--mysql-stat <FILE>` embeds an `events_statements_summary_by_digest`
   CSV or JSON export (MySQL Performance Schema): the dashboard gains a
   `mysql_stat` tab with the same ranking sub-switcher (fourth ranking:
@@ -87,6 +92,8 @@ the CSV exports stay in UTC.
   ranking repeats the total. That identity is `digest` plus the schema
   label, so `--mysql-stat-schema-label <LABEL>` names it when a recording
   rule does, which otherwise merges two schemas into one row.
+  `--mysql-stat-selector <MATCHERS>` filters every query on labels, with
+  the same grammar as `--pg-stat-selector`.
   `--mysql-stat-unit seconds|milliseconds|picoseconds`
   states what the time series counts: Performance Schema counts
   `SUM_TIMER_WAIT` in picoseconds, the collector converts to seconds, and a

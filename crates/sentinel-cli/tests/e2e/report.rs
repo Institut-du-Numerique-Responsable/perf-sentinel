@@ -1618,6 +1618,9 @@ fn cli_report_help_lists_the_mysql_stat_prometheus_flags() {
         "--mysql-stat-auth-header",
         "--mysql-stat-metric",
         "--mysql-stat-query-label",
+        "--mysql-stat-selector",
+        "--pg-stat-selector",
+        "--hub-relay",
     ] {
         assert!(help.contains(flag), "report --help should list {flag}");
     }

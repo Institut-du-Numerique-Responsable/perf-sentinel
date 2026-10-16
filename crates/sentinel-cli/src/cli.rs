@@ -450,6 +450,12 @@ pub(crate) enum Commands {
         #[cfg(feature = "daemon")]
         #[arg(long, value_name = "SERIES", requires = "prometheus")]
         calls_metric: Option<String>,
+        /// Label matchers both queries filter on, `name="value"` joined by
+        /// commas with `=`, `!=`, `=~` or `!~`. Example:
+        /// `'namespace="shop",db_role="primary"'` keeps one tenant's primary.
+        #[cfg(feature = "daemon")]
+        #[arg(long, value_name = "MATCHERS", requires = "prometheus")]
+        selector: Option<String>,
         /// Unit of the time series: `seconds` (default, the
         /// `postgres_exporter` built-in) or `milliseconds`
         /// (`pg_stat_statements` counts in milliseconds, and a hand-written
@@ -529,6 +535,11 @@ pub(crate) enum Commands {
         #[cfg(feature = "daemon")]
         #[arg(long, value_name = "SERIES", requires = "prometheus")]
         calls_metric: Option<String>,
+        /// Label matchers every query filters on, `name="value"` joined by
+        /// commas with `=`, `!=`, `=~` or `!~`. Example: `'namespace="shop"'`.
+        #[cfg(feature = "daemon")]
+        #[arg(long, value_name = "MATCHERS", requires = "prometheus")]
+        selector: Option<String>,
         /// Series holding `SUM_ROWS_SENT` (default:
         /// `mysql_perf_schema_events_statements_rows_sent_total`), fetched and
         /// joined like the call counter. An empty value skips that query and
@@ -715,6 +726,12 @@ pub(crate) enum Commands {
         #[cfg(feature = "daemon")]
         #[arg(long, value_name = "SERIES", requires = "pg_stat_prometheus")]
         pg_stat_calls_metric: Option<String>,
+        /// Label matchers both queries filter on, `name="value"` joined by
+        /// commas with `=`, `!=`, `=~` or `!~`. Example:
+        /// `'namespace="shop",db_role="primary"'` keeps one tenant's primary.
+        #[cfg(feature = "daemon")]
+        #[arg(long, value_name = "MATCHERS", requires = "pg_stat_prometheus")]
+        pg_stat_selector: Option<String>,
         /// Unit of the time series: `seconds` (default, the
         /// `postgres_exporter` built-in) or `milliseconds`
         /// (`pg_stat_statements` counts in milliseconds, and a hand-written
@@ -784,6 +801,11 @@ pub(crate) enum Commands {
         #[cfg(feature = "daemon")]
         #[arg(long, value_name = "SERIES", requires = "mysql_stat_prometheus")]
         mysql_stat_calls_metric: Option<String>,
+        /// Label matchers every query filters on, `name="value"` joined by
+        /// commas with `=`, `!=`, `=~` or `!~`. Example: `'namespace="shop"'`.
+        #[cfg(feature = "daemon")]
+        #[arg(long, value_name = "MATCHERS", requires = "mysql_stat_prometheus")]
+        mysql_stat_selector: Option<String>,
         /// Series holding `SUM_ROWS_SENT` (default:
         /// `mysql_perf_schema_events_statements_rows_sent_total`), fetched and
         /// joined like the call counter. An empty value skips that query and
