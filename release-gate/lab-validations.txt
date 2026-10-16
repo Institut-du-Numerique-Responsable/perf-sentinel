@@ -583,3 +583,21 @@ v0.29.0	6c7dfdb	2026-10-15	PASS
 # the query client and one detector's template, not the ingest paths or the
 # energy backends.
 v0.30.0	7593c1e	2026-10-16	PASS
+# v0.31.0, 2026-10-16. Targeted pass on the final release tree. Daemon image
+# perf-sentinel:0.31.0-568d9d96 built from feat/hub-disclosures, Hub image
+# perf-sentinel-hub:0.6.1-ff6753e-engine-0.31.0-568d9d96 built from the Hub
+# branch carrying disclosures and the ack relay, around that engine:
+# validate-findings 12/12, pg-stat (Prometheus path), mysql-stat, disclose
+# 10/10, verify-hash-roundtrip, verify-hash-fail-closed, daemon-ack-workflow,
+# hub-ingestion, hub-source-reachability, hub-derived-status,
+# hub-incidents-push, hub-correlations-push, hub-disclosures (disclose-pdf and
+# verify-hash on the PDF through the Hub), daemon-sigterm-drain, all green.
+# grafana-dashboard first failed on the lab's findings dashboard copy, which
+# predated 0.30.0, and passed once the lab resynced it at bf31096.
+# output-formats-coverage passed after ci-shift-left, its prerequisite. The lab
+# ran with local, uncommitted image pins in the daemon and Hub manifests, the
+# three Java services seeded first. Not run: the limit-*, failure-mode-*,
+# template-*, ci-e2e-* and energy families. The release touches the CLI
+# (disclose-pdf, verify-hash, report, pg-stat, mysql-stat) and the daemon's Hub
+# export timeout, not the detectors, the ingest paths or the energy backends.
+v0.31.0	bf31096	2026-10-16	PASS
