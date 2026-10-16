@@ -20,7 +20,13 @@
 // Hub checkout: $PERF_SENTINEL_HUB, else ../../RiderProjects/PerfSentinelHub.
 // Fixtures come from that checkout's tests/browser/demo/fixtures/hub-embed.json,
 // written by its Playwright global-setup against a real populated Hub.
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// The disclosures' PDFs are not in the fixtures: the engine renders them from the
+// replayed report.json, so this script needs it too ($PERF_SENTINEL, else
+// ../perf-sentinel/target/release/perf-sentinel, else `perf-sentinel` on PATH).
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,6 +36,8 @@ const SIBLING = resolve(ROOT, '../../RiderProjects/PerfSentinelHub');
 const HUB = process.env.PERF_SENTINEL_HUB || SIBLING;
 const WWWROOT = join(HUB, 'PerfSentinelHub/wwwroot');
 const FIXTURES = join(HUB, 'tests/browser/demo/fixtures/hub-embed.json');
+const ENGINE_SIBLING = resolve(ROOT, '../perf-sentinel/target/release/perf-sentinel');
+const ENGINE = process.env.PERF_SENTINEL || (existsSync(ENGINE_SIBLING) ? ENGINE_SIBLING : 'perf-sentinel');
 
 const die = (message) => {
   console.error(`[embed-hub] ${message}`);
@@ -86,10 +94,76 @@ if (!source.includes('id="theme-toggle"')) {
   die('the launcher no longer carries #theme-toggle; the framed stylesheet would hide nothing and the embed would ship a stale theme control. Re-check the patch against the launcher.');
 }
 
+
+// The Hub renders a disclosure's PDF with the attestation it received, which the
+// fixtures do not carry. A statement that names the report is all disclose-pdf
+// checks, so it is rebuilt from the report, as `disclose --emit-attestation` writes
+// it (build_in_toto_statement in the engine's attestation.rs).
+function statement(report) {
+  const ids = report.organisation.identifiers || {};
+  const identifiers = {};
+  for (const key of ['siren', 'vat', 'lei', 'opencorporates_url', 'domain']) if (ids[key] != null) identifiers[key] = ids[key];
+  const core = [...report.methodology.core_patterns_required].sort().join(':');
+  const organisation = { name: report.organisation.name, country: report.organisation.country };
+  if (Object.keys(identifiers).length > 0) organisation.identifiers = identifiers;
+  return {
+    _type: 'https://in-toto.io/Statement/v1',
+    predicateType: 'https://perf-sentinel.io/attestation/v1',
+    subject: [{ name: 'perf-sentinel-report.json', digest: { sha256: report.integrity.content_hash.replace(/^sha256:/, '') } }],
+    predicate: {
+      perf_sentinel_version: report.report_metadata.perf_sentinel_version,
+      report_uuid: report.report_metadata.report_uuid,
+      period: { from_date: report.period.from_date, to_date: report.period.to_date },
+      intent: report.report_metadata.intent,
+      confidentiality_level: report.report_metadata.confidentiality_level,
+      organisation,
+      methodology_summary: {
+        sci_specification: report.methodology.sci_specification,
+        conformance: report.methodology.conformance,
+        calibration_applied: report.methodology.calibration_inputs.calibration_applied,
+        period_coverage: report.aggregate.period_coverage,
+        core_patterns_count: report.methodology.core_patterns_required.length,
+        enabled_patterns_count: (report.methodology.enabled_patterns || []).length,
+        disabled_patterns_count: (report.methodology.disabled_patterns || []).length,
+        core_patterns_hash: createHash('sha256').update(core).digest('hex'),
+      },
+      subject_binding: 'content_hash',
+    },
+  };
+}
+
+const pdfDir = mkdtempSync(join(tmpdir(), 'embed-hub-pdf-'));
+const pdfIds = [];
+for (const [route, report] of Object.entries(fixtures.routes)) {
+  const id = (route.match(/^\/api\/disclosures\/([0-9a-f]{16})\/files\/report\.json$/) || [])[1];
+  if (!id) continue;
+  const detail = fixtures.routes[`/api/disclosures/${id}`];
+  if (!detail || !detail.disclosure.files.pdf) continue;
+  const reportPath = join(pdfDir, `${id}.json`);
+  writeFileSync(reportPath, JSON.stringify(report));
+  const args = ['disclose-pdf', '--report', reportPath, '--output', join(pdfDir, `${id}.pdf`)];
+  if (detail.disclosure.files.attestation) {
+    const attestationPath = join(pdfDir, `${id}.intoto.jsonl`);
+    writeFileSync(attestationPath, `${JSON.stringify(statement(report))}\n`);
+    args.push('--attestation', attestationPath);
+  }
+  if (detail.checks && detail.checks.expected_identity) {
+    args.push('--expected-identity', detail.checks.expected_identity, '--expected-issuer', detail.checks.expected_issuer);
+  }
+  try {
+    execFileSync(ENGINE, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  } catch (error) {
+    die(`${ENGINE} disclose-pdf refused disclosure ${id}: ${String(error.stderr || error.message).trim()}`);
+  }
+  pdfIds.push(id);
+}
+
 const PATCH = `<script>
 (function () {
   var F = ${JSON.stringify(fixtures).replace(/</g, '\\u003c')};
   var ROUTES = F.routes;
+  // Disclosures whose PDF the site serves beside this page, rendered at build time.
+  var PDFS = ${JSON.stringify(pdfIds)};
   // A captured moment is stored against a fixed epoch, so one offset moves the
   // whole set onto now and every gap between them survives. Without this a run
   // captured today reads as eight months old next spring.
@@ -243,6 +317,9 @@ const PATCH = `<script>
                          : Promise.resolve(new Response('{}', { status: 404 }));
     }
 
+    var pdf = path.match(/^\\/api\\/disclosures\\/([0-9a-f]{16})\\/files\\/report\\.pdf$/);
+    if (pdf && PDFS.indexOf(pdf[1]) !== -1) return realFetch('files/' + pdf[1] + '.pdf');
+
     if (ROUTES[path]) return json(shift(ROUTES[path]));
     // The launcher asks for exactly the routes the fixtures carry. Anything else
     // is a change upstream, and answering it with a plausible empty body would
@@ -313,8 +390,12 @@ const PATCH = `<script>
 rmSync(OUT_DIR, { recursive: true, force: true });
 mkdirSync(OUT_DIR, { recursive: true });
 cpSync(WWWROOT, OUT_DIR, { recursive: true });
+mkdirSync(join(OUT_DIR, 'files'), { recursive: true });
+for (const id of pdfIds) cpSync(join(pdfDir, `${id}.pdf`), join(OUT_DIR, 'files', `${id}.pdf`));
+rmSync(pdfDir, { recursive: true, force: true });
 
 const patched = `${source.slice(0, headEnd)}${PATCH}\n${source.slice(headEnd)}`;
 writeFileSync(join(OUT_DIR, 'index.html'), patched);
 console.log(`[embed-hub] wrote exemple/hub/ from ${WWWROOT}`);
 console.log(`[embed-hub] ${Object.keys(fixtures.routes).length} routes replayed, patch injected before </head>`);
+console.log(`[embed-hub] ${pdfIds.length} disclosure PDF(s) rendered by ${ENGINE}`);
