@@ -24,3 +24,6 @@
 # entries below cover the commit already on main.
 18b2bb183fc60458ec1da4fe953098f8395631a3:scripts/test/chart-render-guards-test.sh:generic-api-key:87
 18b2bb183fc60458ec1da4fe953098f8395631a3:scripts/test/chart-render-guards-test.sh:generic-api-key:116
+
+# A test pair key (32 hex characters) quoted in the correlation Hub plan.
+a68834539fc9e01af666a7c2e1d99ae1f4dddf54:docs/superpowers/plans/2026-10-15-correlation-push-hub.md:generic-api-key:126
