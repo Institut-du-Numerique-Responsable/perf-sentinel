@@ -68,6 +68,12 @@ horodatage exact. Le JSON embarqué et les exports CSV restent en UTC.
   `pg_stat_statements` lui-même compte en millisecondes, la requête
   intégrée de l'exporter convertit en secondes, et lire l'une pour
   l'autre se trompe d'un facteur mille.
+  `--pg-stat-selector <MATCHERS>` filtre les deux requêtes sur des
+  labels, pour un exporter qui sert plusieurs tenants ou un primaire et
+  ses réplicas : `'namespace="shop",db_role="primary"'`. Chaque matcher
+  est un `name`, puis `=`, `!=`, `=~` ou `!~`, puis une valeur entre
+  guillemets doubles, et la liste est vérifiée matcher par matcher avant
+  qu'aucune requête ne parte.
 - `--mysql-stat <FILE>` embarque un export
   `events_statements_summary_by_digest` CSV ou JSON (MySQL Performance
   Schema) : le dashboard gagne un onglet `mysql_stat` avec le même
@@ -93,6 +99,8 @@ horodatage exact. Le JSON embarqué et les exports CSV restent en UTC.
   `digest` plus le label de schéma, donc
   `--mysql-stat-schema-label <LABEL>` le nomme quand une recording rule le
   renomme, faute de quoi deux schémas fusionnent en une ligne.
+  `--mysql-stat-selector <MATCHERS>` filtre toutes les requêtes sur des
+  labels, avec la même grammaire que `--pg-stat-selector`.
   `--mysql-stat-unit seconds|milliseconds|picoseconds` déclare ce que
   compte la série de temps : Performance Schema compte `SUM_TIMER_WAIT` en
   picosecondes, le collecteur convertit en secondes, et une recording rule
@@ -270,6 +278,21 @@ Un `Ack` réussi affiche un toast avec un bouton `Undo` pendant huit
 secondes : un clic supprime l'acquittement directement, sans la
 boîte de confirmation. Le bouton `Revoke` d'une ligne garde sa
 confirmation.
+
+### À travers un Hub
+
+Un rapport qu'un Hub perf-sentinel rend pour une source daemon prend
+`--hub-relay <source_id>` au lieu de `--daemon-url`. La page parle alors
+au Hub qui la sert, à sa propre origine et avec la session Hub du
+lecteur : elle liste les acquittements par `GET /api/sources/{id}/acks`,
+acquitte par `POST /api/sources/{id}/acks` et révoque par
+`POST /api/sources/{id}/acks/revoke`. Aucune clé du daemon n'arrive dans
+le navigateur et le daemon n'a besoin d'aucune entrée CORS : le Hub garde
+la clé et vérifie les droits du lecteur. Un refus affiche la raison
+donnée par le Hub, et un 401 invite le lecteur à se connecter au Hub. Les
+deux options s'excluent, la CSP reçoit seulement `connect-src 'self'`, et
+l'identifiant de source doit correspondre à `[A-Za-z0-9._-]{1,64}`, hors
+`.` et `..`.
 
 ### CSP en mode live
 

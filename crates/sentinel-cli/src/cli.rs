@@ -450,6 +450,12 @@ pub(crate) enum Commands {
         #[cfg(feature = "daemon")]
         #[arg(long, value_name = "SERIES", requires = "prometheus")]
         calls_metric: Option<String>,
+        /// Label matchers both queries filter on, `name="value"` joined by
+        /// commas with `=`, `!=`, `=~` or `!~`. Example:
+        /// `'namespace="shop",db_role="primary"'` keeps one tenant's primary.
+        #[cfg(feature = "daemon")]
+        #[arg(long, value_name = "MATCHERS", requires = "prometheus")]
+        selector: Option<String>,
         /// Unit of the time series: `seconds` (default, the
         /// `postgres_exporter` built-in) or `milliseconds`
         /// (`pg_stat_statements` counts in milliseconds, and a hand-written
@@ -529,6 +535,11 @@ pub(crate) enum Commands {
         #[cfg(feature = "daemon")]
         #[arg(long, value_name = "SERIES", requires = "prometheus")]
         calls_metric: Option<String>,
+        /// Label matchers every query filters on, `name="value"` joined by
+        /// commas with `=`, `!=`, `=~` or `!~`. Example: `'namespace="shop"'`.
+        #[cfg(feature = "daemon")]
+        #[arg(long, value_name = "MATCHERS", requires = "prometheus")]
+        selector: Option<String>,
         /// Series holding `SUM_ROWS_SENT` (default:
         /// `mysql_perf_schema_events_statements_rows_sent_total`), fetched and
         /// joined like the call counter. An empty value skips that query and
@@ -715,6 +726,12 @@ pub(crate) enum Commands {
         #[cfg(feature = "daemon")]
         #[arg(long, value_name = "SERIES", requires = "pg_stat_prometheus")]
         pg_stat_calls_metric: Option<String>,
+        /// Label matchers both queries filter on, `name="value"` joined by
+        /// commas with `=`, `!=`, `=~` or `!~`. Example:
+        /// `'namespace="shop",db_role="primary"'` keeps one tenant's primary.
+        #[cfg(feature = "daemon")]
+        #[arg(long, value_name = "MATCHERS", requires = "pg_stat_prometheus")]
+        pg_stat_selector: Option<String>,
         /// Unit of the time series: `seconds` (default, the
         /// `postgres_exporter` built-in) or `milliseconds`
         /// (`pg_stat_statements` counts in milliseconds, and a hand-written
@@ -784,6 +801,11 @@ pub(crate) enum Commands {
         #[cfg(feature = "daemon")]
         #[arg(long, value_name = "SERIES", requires = "mysql_stat_prometheus")]
         mysql_stat_calls_metric: Option<String>,
+        /// Label matchers every query filters on, `name="value"` joined by
+        /// commas with `=`, `!=`, `=~` or `!~`. Example: `'namespace="shop"'`.
+        #[cfg(feature = "daemon")]
+        #[arg(long, value_name = "MATCHERS", requires = "mysql_stat_prometheus")]
+        mysql_stat_selector: Option<String>,
         /// Series holding `SUM_ROWS_SENT` (default:
         /// `mysql_perf_schema_events_statements_rows_sent_total`), fetched and
         /// joined like the call counter. An empty value skips that query and
@@ -833,8 +855,14 @@ pub(crate) enum Commands {
         /// query string, userinfo (`user@host`) and trailing slashes
         /// are rejected at parse time.
         #[cfg(feature = "daemon")]
-        #[arg(long, value_name = "URL")]
+        #[arg(long, value_name = "URL", conflicts_with = "hub_relay")]
         daemon_url: Option<String>,
+        /// Hub source id for the relay live mode, for a report a
+        /// perf-sentinel Hub serves. Ack and Revoke go through that Hub at
+        /// the page's own origin, with the reader's Hub session: no daemon
+        /// key in the browser, no CORS. Exclusive with `--daemon-url`.
+        #[arg(long, value_name = "SOURCE_ID", value_parser = parse_hub_source_id)]
+        hub_relay: Option<String>,
     },
 
     /// Compare two trace sets and emit a delta report (regressions and improvements).
@@ -1022,6 +1050,35 @@ pub(crate) enum Commands {
         /// check. Use only for internal self-checks.
         #[arg(long)]
         no_identity_check: bool,
+    },
+    /// Render a periodic report as a PDF/A-3b carrying its source files.
+    ///
+    /// Recomputes the report's `content_hash` and, with `--attestation`,
+    /// checks that the attestation names it. Renders only when both hold,
+    /// so a rendered PDF stands for those two checks. The report, the
+    /// attestation and the bundle are attached byte for byte. Prints one
+    /// JSON line naming the result and, on failure, a reason.
+    #[cfg(feature = "pdf")]
+    #[command(after_help = help_examples::DISCLOSE_PDF)]
+    DisclosePdf {
+        /// The periodic report to render.
+        #[arg(long, value_name = "PATH")]
+        report: PathBuf,
+        /// The in-toto attestation to check and attach.
+        #[arg(long, value_name = "PATH")]
+        attestation: Option<PathBuf>,
+        /// The Sigstore bundle to attach.
+        #[arg(long, value_name = "PATH")]
+        bundle: Option<PathBuf>,
+        /// Signer identity printed in the verify command of the last page.
+        #[arg(long, value_name = "ID", requires = "expected_issuer")]
+        expected_identity: Option<String>,
+        /// OIDC issuer printed in the verify command of the last page.
+        #[arg(long, value_name = "URL", requires = "expected_identity")]
+        expected_issuer: Option<String>,
+        /// Where to write the PDF. Nothing is written unless it renders.
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
     },
     /// Compute and bake the canonical `content_hash` into a periodic report.
     ///
@@ -1315,7 +1372,26 @@ mod help_examples {
   perf-sentinel verify-hash --report report.json --attestation report.intoto.jsonl --bundle report.sig --expected-identity release@example.com --expected-issuer https://accounts.google.com
 
   # Recompute the content hash of a published report
-  perf-sentinel verify-hash --url https://example.com/perf-sentinel-report.json --no-identity-check";
+  perf-sentinel verify-hash --url https://example.com/perf-sentinel-report.json --no-identity-check
+
+Exit codes:
+  0  TRUSTED, every check passed
+  1  UNTRUSTED, a check failed
+  2  PARTIAL, no failure but a check could not complete
+  3  input error, the report is unreadable or a flag is missing
+  4  network error on --url
+  5  the report's schema is newer than this engine, upgrade perf-sentinel";
+
+    #[cfg(feature = "pdf")]
+    pub const DISCLOSE_PDF: &str = "Examples:
+  # Render a signed disclosure for readers who will not open the JSON
+  perf-sentinel disclose-pdf --report report.json --attestation attestation.intoto.jsonl --bundle bundle.sig --expected-identity release@example.com --expected-issuer https://accounts.google.com --output report.pdf
+
+Exit codes, with one JSON line on stdout:
+  0  rendered
+  1  refused, the report is not what it claims (content_hash_mismatch, binding_mismatch)
+  3  input error (missing_file, file_too_large, malformed_report, output_unwritable)
+  5  cannot render, though nothing says the report is wrong (unsupported_schema_version, unsupported_characters, pdf_export_failed)";
 
     pub const HASH_BAKE: &str = "Examples:
   # Bake the canonical content hash into a report in place
@@ -1331,4 +1407,20 @@ mod help_examples {
     pub const MAN: &str = "Examples:
   # Install the man page into the system man path
   perf-sentinel man > /usr/local/share/man/man1/perf-sentinel.1";
+}
+
+/// A Hub source id as the Hub's own configuration accepts it, minus the two
+/// ids a browser would resolve as path segments.
+fn parse_hub_source_id(raw: &str) -> Result<String, String> {
+    let valid = (1..=64).contains(&raw.len())
+        && raw
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        && raw != "."
+        && raw != "..";
+    if valid {
+        Ok(raw.to_string())
+    } else {
+        Err("expected 1 to 64 of [A-Za-z0-9._-], not . or ..".to_string())
+    }
 }

@@ -10,6 +10,22 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.31.0]
+
+### Added
+
+- **`appVersion` moves to `0.31.0`.** `[daemon.hub_export] request_timeout_secs`,
+  from 1 to 60 seconds and 10 by default as before, bounds one push of
+  findings, incidents or correlations to PerfSentinelHub. A Hub slowed down
+  while catching up no longer makes every push time out, back off up to five
+  minutes and drop findings from a full pending table.
+
+### Changed
+
+- The `values.yaml` comment on `[daemon.hub_export]` shows
+  `request_timeout_secs`. No `values.yaml` key is added or removed, and no
+  template changes.
+
 ## [0.30.0]
 
 ### Added

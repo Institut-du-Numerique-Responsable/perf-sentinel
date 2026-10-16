@@ -102,6 +102,70 @@ pub(crate) fn validate_label_name(label: &str) -> Result<(), String> {
     ))
 }
 
+/// Rebuild an operator's label selector, `name="value"` matchers joined by
+/// commas with `=`, `!=`, `=~` or `!~`, as the percent-encoded `{...}` that
+/// follows a series name. Each matcher is checked rather than the raw string:
+/// a stray brace or quote would otherwise rewrite the query around it.
+pub(crate) fn encode_selector(raw: &str) -> Result<String, String> {
+    let mut matchers = Vec::new();
+    let mut rest = raw.trim_start();
+    loop {
+        let name_len = rest
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            .count();
+        let (name, after) = rest.split_at(name_len);
+        validate_label_name(name)?;
+        let after = after.trim_start();
+        let op = ["=~", "!~", "!=", "="]
+            .into_iter()
+            .find(|op| after.starts_with(op))
+            .ok_or_else(|| format!("expected =, !=, =~ or !~ after `{name}`"))?;
+        let (value, after) = quoted(after[op.len()..].trim_start())
+            .ok_or_else(|| format!("the value of `{name}` must be a double-quoted string"))?;
+        matchers.push(format!("{name}{op}{value}"));
+        let after = after.trim_start();
+        if after.is_empty() {
+            break;
+        }
+        rest = after
+            .strip_prefix(',')
+            .ok_or_else(|| format!("expected a comma after the `{name}` matcher"))?
+            .trim_start();
+    }
+    let selector = format!("{{{}}}", matchers.join(","));
+    let mut encoded = String::with_capacity(selector.len() * 3);
+    for b in selector.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(b));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(b"0123456789ABCDEF"[usize::from(b >> 4)]));
+            encoded.push(char::from(b"0123456789ABCDEF"[usize::from(b & 0x0f)]));
+        }
+    }
+    Ok(encoded)
+}
+
+/// The leading `"..."` of `s`, quotes included, and what follows it. `None`
+/// when unterminated or carrying a control character.
+fn quoted(s: &str) -> Option<(&str, &str)> {
+    let body = s.strip_prefix('"')?;
+    let mut escaped = false;
+    for (i, c) in body.char_indices() {
+        if c.is_control() {
+            return None;
+        }
+        match (escaped, c) {
+            (true, _) => escaped = false,
+            (false, '\\') => escaped = true,
+            (false, '"') => return Some((&s[..i + 2], &body[i + 1..])),
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Encode a `by (...)` clause over validated label names, deduplicated so an
 /// operator naming an identity label as the query label cannot repeat it.
 fn by_clause(labels: &[&str]) -> String {
@@ -299,6 +363,38 @@ mod tests {
              topk(10%2C%20sum%20by%20(queryid%2C%20query)%20(pg_seconds_total))"
         );
         assert!(!query.contains(' '), "a raw space would break the URL");
+    }
+
+    #[test]
+    fn a_selector_is_rebuilt_matcher_by_matcher_and_fully_encoded() {
+        assert_eq!(
+            encode_selector(r#" namespace = "shop" , db_role!~"rep.*" "#).unwrap(),
+            "%7Bnamespace%3D%22shop%22%2Cdb_role%21~%22rep.%2A%22%7D"
+        );
+        assert_eq!(
+            encode_selector(r#"a!="x\"y""#).unwrap(),
+            "%7Ba%21%3D%22x%5C%22y%22%7D",
+            "an escaped quote stays inside the value"
+        );
+        assert_eq!(encode_selector(r#"a=~"b""#).unwrap(), "%7Ba%3D~%22b%22%7D");
+    }
+
+    #[test]
+    fn a_selector_refuses_anything_but_quoted_matchers() {
+        for bad in [
+            "",
+            "a=x",
+            r#"1a="x""#,
+            r#"a=="x""#,
+            r#"a="x"b="y""#,
+            r#"a="x","#,
+            r#"a="x"#,
+            "a=\"x\u{7}\"",
+            r#"{a="x"}"#,
+            r#"a="x"} or vector(1)"#,
+        ] {
+            assert!(encode_selector(bad).is_err(), "{bad:?} must be refused");
+        }
     }
 
     #[test]

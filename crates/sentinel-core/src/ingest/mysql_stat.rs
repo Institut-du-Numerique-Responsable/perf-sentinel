@@ -576,6 +576,9 @@ pub struct PrometheusMySqlStat {
     pub schema_label: String,
     /// Unit of `series`. The collector built-in publishes seconds.
     pub unit: MySqlStatTimeUnit,
+    /// Label matchers every query filters on, `name="value"` joined by commas,
+    /// such as `namespace="shop"`. `None` reads every series.
+    pub selector: Option<String>,
 }
 
 #[cfg(any(feature = "daemon", feature = "tempo"))]
@@ -593,6 +596,7 @@ impl Default for PrometheusMySqlStat {
             query_label: "digest_text".to_string(),
             schema_label: "schema".to_string(),
             unit: MySqlStatTimeUnit::Seconds,
+            selector: None,
         }
     }
 }
@@ -612,6 +616,7 @@ impl PrometheusMySqlStat {
             rows_examined_series: d.rows_examined_series,
             schema_label: d.schema_label,
             unit: d.unit,
+            selector: d.selector,
         }
     }
 
@@ -674,7 +679,14 @@ pub async fn fetch_from_prometheus(
     let identity = opts.identity();
     let mut group_by = identity.to_vec();
     group_by.push(opts.query_label.as_str());
-    let query = scrape::build_topk_query(top_n, &opts.series, &group_by);
+    let selector = opts
+        .selector
+        .as_deref()
+        .map(scrape::encode_selector)
+        .transpose()
+        .map_err(MySqlStatError::PrometheusRequest)?
+        .unwrap_or_default();
+    let query = scrape::build_topk_query(top_n, &format!("{}{selector}", opts.series), &group_by);
     let body =
         scrape::fetch_instant_query(endpoint, &query, auth_header, "perf-sentinel/mysql-stat")
             .await
@@ -691,6 +703,7 @@ pub async fn fetch_from_prometheus(
             &query,
             opts.calls_series.as_deref(),
             &identity,
+            &selector,
         ),
         fetch_counter(
             endpoint,
@@ -698,6 +711,7 @@ pub async fn fetch_from_prometheus(
             &query,
             opts.rows_sent_series.as_deref(),
             &identity,
+            &selector,
         ),
         fetch_counter(
             endpoint,
@@ -705,6 +719,7 @@ pub async fn fetch_from_prometheus(
             &query,
             opts.rows_examined_series.as_deref(),
             &identity,
+            &selector,
         ),
     );
     let counters = ScrapedCounters {
@@ -736,11 +751,12 @@ async fn fetch_counter(
     ranked_query: &str,
     series: Option<&str>,
     identity: &[&str],
+    selector: &str,
 ) -> Option<bytes::Bytes> {
     use crate::ingest::prometheus_scrape as scrape;
 
     let series = series?;
-    let query = scrape::build_counter_query(series, identity, ranked_query);
+    let query = scrape::build_counter_query(&format!("{series}{selector}"), identity, ranked_query);
     match scrape::fetch_instant_query(endpoint, &query, auth_header, "perf-sentinel/mysql-stat")
         .await
     {

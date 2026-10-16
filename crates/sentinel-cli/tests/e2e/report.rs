@@ -846,6 +846,90 @@ fn cli_report_malformed_daemon_url_exits_tooling_error() {
 }
 
 #[test]
+fn cli_report_hub_relay_embeds_source() {
+    let fixture = format!(
+        "{}/../../tests/fixtures/report_realistic.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out_path = dir.path().join("report.html");
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "report",
+            "--input",
+            &fixture,
+            "--output",
+            out_path.to_str().unwrap(),
+            "--hub-relay",
+            "prod-eu",
+        ])
+        .output()
+        .expect("spawn");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let html = std::fs::read_to_string(&out_path).unwrap();
+    assert!(html.contains(r#""hub_relay":{"source":"prod-eu"}"#));
+}
+
+#[test]
+fn cli_report_hub_relay_refuses_a_path_like_source() {
+    let fixture = format!(
+        "{}/../../tests/fixtures/report_realistic.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out_path = dir.path().join("report.html");
+    for bad in ["..", "a/b", "", "x y"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+            .args([
+                "report",
+                "--input",
+                &fixture,
+                "--output",
+                out_path.to_str().unwrap(),
+                "--hub-relay",
+                bad,
+            ])
+            .output()
+            .expect("spawn");
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "--hub-relay {bad:?} must be a usage error"
+        );
+    }
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn cli_report_hub_relay_conflicts_with_daemon_url() {
+    let fixture = format!(
+        "{}/../../tests/fixtures/report_realistic.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out_path = dir.path().join("report.html");
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "report",
+            "--input",
+            &fixture,
+            "--output",
+            out_path.to_str().unwrap(),
+            "--hub-relay",
+            "prod",
+            "--daemon-url",
+            "http://localhost:4318",
+        ])
+        .output()
+        .expect("spawn");
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
 fn cli_report_renders_correlations_from_daemon_shape() {
     // A daemon `Report` carrying `correlations` must surface the
     // Correlations tab in the HTML output. Constructs the daemon-shape
@@ -1534,6 +1618,9 @@ fn cli_report_help_lists_the_mysql_stat_prometheus_flags() {
         "--mysql-stat-auth-header",
         "--mysql-stat-metric",
         "--mysql-stat-query-label",
+        "--mysql-stat-selector",
+        "--pg-stat-selector",
+        "--hub-relay",
     ] {
         assert!(help.contains(flag), "report --help should list {flag}");
     }

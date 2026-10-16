@@ -14,9 +14,12 @@ pub mod attestation;
 pub mod errors;
 pub mod hasher;
 pub mod org_config;
+#[cfg(feature = "pdf")]
+pub mod pdf;
 pub(crate) mod rollup;
 pub mod schema;
 pub mod validator;
+pub mod version;
 
 #[cfg(test)]
 mod test_fixtures;
@@ -59,3 +62,4 @@ pub use validator::{
     LOW_TEMPORAL_COVERAGE_WARN_THRESHOLD, MIN_PERIOD_COVERAGE_FOR_OFFICIAL, validate_content_hash,
     validate_official,
 };
+pub use version::{SUPPORTED_SCHEMA_VERSIONS, SchemaVersionError, check_schema_version};

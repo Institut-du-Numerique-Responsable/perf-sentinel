@@ -4,13 +4,51 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-16
+
+A minor release for new subcommands and flags, with public API additions only. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. `disclose-pdf` turns a periodic disclosure into a PDF/A-3b a reader opens without a terminal, and `verify-hash` checks the report such a PDF carries. A live report can acknowledge through a PerfSentinelHub relay instead of reaching the daemon from the browser, the `pg_stat` and `mysql_stat` scrapes filter on label matchers, and the daemon's Hub export takes a configurable request timeout. PerfSentinelHub 0.7.0 drives `disclose-pdf` and `--hub-relay`.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.31.0 touches the scoring code.
+
 ### Added
 
+- `perf-sentinel disclose-pdf` renders a periodic report as a PDF/A-3b for readers without a
+  terminal: A4 pages in English, five for most reports (figures, uncertainty band, applications, method and
+  disclaimers, how to verify), with the report, its attestation and its bundle attached byte
+  for byte. It renders only when the `content_hash` recomputes and the attestation names it,
+  prints one JSON line and exits 0 (rendered), 1 (refused), 3 (input error) or 5 (cannot
+  render: a newer schema, text outside the bundled fonts, or a document the PDF writer refuses). A `transparency` entry in
+  `[notes.reference_urls]` puts a QR code on the cover. veraPDF validates the output in CI.
+- `report --hub-relay <source_id>` renders a live report for a perf-sentinel Hub to serve: Ack
+  and Revoke go through that Hub's relay at the page's own origin with the reader's session,
+  so no daemon key reaches the browser and the daemon needs no CORS entry. Exclusive with
+  `--daemon-url`.
+- `pg-stat --selector`, `mysql-stat --selector`, `report --pg-stat-selector` and
+  `report --mysql-stat-selector` filter the Prometheus scrape on label matchers such as
+  `'namespace="shop",db_role="primary"'`, applied to the ranked query and to every counter
+  query, so an exporter serving several tenants or a primary with its replicas no longer
+  ranks their statements together.
+- `verify-hash --report report.pdf` verifies the report a disclosure PDF attaches, a copy
+  re-saved by a tool that keeps attachments included, and says it checked that report and not
+  the printed pages. PDFs over 4 MiB are refused before parsing.
+  `--format json` adds `verified_from: "pdf_attachment"`.
 - `[daemon.hub_export] request_timeout_secs` sets how long one push to PerfSentinelHub may
   take, 10 seconds by default as before, from 1 to 60. A Hub slowed down while catching up
   answered past the fixed 10 seconds, so the daemon timed out every push, backed off up to
   five minutes and dropped findings from a full pending table. It applies to the findings,
   incidents and correlations pushes alike.
+
+### Changed
+
+- `verify-hash` exits 5 on a report whose schema is newer than the binary, instead of a
+  misleading hash failure, and 3 on a `schema_version` that is not a version at all.
+- `--attestation` and `--bundle` now win over the files `verify-hash --url` finds beside the
+  report.
+- `verify-hash --url` writes the attestation and bundle it fetches into a private temporary
+  directory removed when the command returns, instead of fixed names in the shared temporary
+  directory left behind. A failed write is an input error (exit 3), no longer a silent PARTIAL.
+- The release binary gains about 3.4 MB for the `pdf` feature, embedded fonts included: 14.4 MB
+  to 17.8 MB on macOS arm64.
 
 ## [0.30.0] - 2026-10-16
 

@@ -63,6 +63,11 @@ the CSV exports stay in UTC.
   time series counts: `pg_stat_statements` itself counts milliseconds,
   the exporter built-in converts to seconds, and reading one for the
   other is off by a factor of a thousand.
+  `--pg-stat-selector <MATCHERS>` filters both queries on labels, for an
+  exporter that serves several tenants or a primary and its replicas:
+  `'namespace="shop",db_role="primary"'`. Each matcher is `name`, then
+  `=`, `!=`, `=~` or `!~`, then a double-quoted value, and the list is
+  checked matcher by matcher before any request leaves.
 - `--mysql-stat <FILE>` embeds an `events_statements_summary_by_digest`
   CSV or JSON export (MySQL Performance Schema): the dashboard gains a
   `mysql_stat` tab with the same ranking sub-switcher (fourth ranking:
@@ -87,6 +92,8 @@ the CSV exports stay in UTC.
   ranking repeats the total. That identity is `digest` plus the schema
   label, so `--mysql-stat-schema-label <LABEL>` names it when a recording
   rule does, which otherwise merges two schemas into one row.
+  `--mysql-stat-selector <MATCHERS>` filters every query on labels, with
+  the same grammar as `--pg-stat-selector`.
   `--mysql-stat-unit seconds|milliseconds|picoseconds`
   states what the time series counts: Performance Schema counts
   `SUM_TIMER_WAIT` in picoseconds, the collector converts to seconds, and a
@@ -252,6 +259,20 @@ A successful `Ack` shows a toast with an `Undo` button for eight
 seconds: one click deletes the acknowledgment straight away, without
 the confirmation dialog. The `Revoke` button on a row keeps its
 confirmation.
+
+### Through a Hub
+
+A report a perf-sentinel Hub renders for a daemon source takes
+`--hub-relay <source_id>` instead of `--daemon-url`. The page then talks
+to the Hub that serves it, at its own origin and with the reader's Hub
+session: it lists acknowledgments from `GET /api/sources/{id}/acks`,
+acknowledges through `POST /api/sources/{id}/acks` and revokes through
+`POST /api/sources/{id}/acks/revoke`. No daemon key reaches the browser
+and the daemon needs no CORS entry: the Hub holds the key and checks the
+reader's rights. A refusal shows the Hub's own reason, and a 401 asks the
+reader to sign in to the Hub. The two flags are exclusive, the CSP gets
+`connect-src 'self'` only, and the source id must match
+`[A-Za-z0-9._-]{1,64}`, `.` and `..` excluded.
 
 ### CSP under live mode
 

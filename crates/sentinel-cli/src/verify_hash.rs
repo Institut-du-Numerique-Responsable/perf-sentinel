@@ -31,7 +31,8 @@ use std::process::Command;
 
 use sentinel_core::report::periodic::schema::{IntegrityLevel, PeriodicReport, SignatureMetadata};
 use sentinel_core::report::periodic::{
-    AttestationBinding, InTotoStatement, check_attestation_binding, compute_content_hash,
+    AttestationBinding, InTotoStatement, SchemaVersionError, check_attestation_binding,
+    check_schema_version, compute_content_hash,
 };
 
 use crate::limits::{CappedRead, MAX_LOCAL_REPORT_BYTES, read_capped};
@@ -63,6 +64,8 @@ pub const EXIT_INPUT_ERROR: i32 = 3;
 /// Exit code: `--url` fetch failed (HTTP error, scheme rejected, body
 /// over the size cap).
 pub const EXIT_NETWORK_ERROR: i32 = 4;
+/// Exit code: the report's schema is newer than this engine reads.
+pub const EXIT_UNSUPPORTED: i32 = 5;
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum VerifyHashFormat {
@@ -92,6 +95,8 @@ struct Outcome {
     attestation_binding: Status,
     signature: Status,
     binary_attestation: Status,
+    /// The report came out of a PDF: its printed pages were not checked.
+    from_pdf: bool,
 }
 
 /// A report as read, with the bytes it was parsed from: an attestation
@@ -101,6 +106,7 @@ struct LoadedReport {
     bytes: Vec<u8>,
     display: String,
     fetched: FetchedPaths,
+    from_pdf: bool,
 }
 
 /// Signer identity expectation, fed by the CLI flags
@@ -130,19 +136,21 @@ pub async fn cmd_verify_hash(
         bytes,
         display,
         fetched,
+        from_pdf,
     } = match load_report(report_path, url).await {
         Ok(v) => v,
         Err(code) => return code,
     };
 
-    let attestation = fetched.attestation.as_deref().or(attestation_path);
+    // An explicit flag wins over a file found beside the report.
+    let attestation = attestation_path.or(fetched.attestation.as_deref());
     let content_hash = verify_content_hash(&report);
     let core_patterns = verify_core_patterns(&report);
     let attestation_binding = verify_attestation_binding(&report, &bytes, attestation);
     let signature = verify_signature(
         &report,
         attestation,
-        fetched.bundle.as_deref().or(bundle_path),
+        bundle_path.or(fetched.bundle.as_deref()),
         identity,
     );
     let binary_attestation = verify_binary_attestation(&report, verify_binary);
@@ -155,6 +163,7 @@ pub async fn cmd_verify_hash(
         attestation_binding,
         signature,
         binary_attestation,
+        from_pdf,
     };
 
     match format {
@@ -165,9 +174,48 @@ pub async fn cmd_verify_hash(
     exit_code(&outcome)
 }
 
+/// The attestation and bundle that came with the report, written for the
+/// checks that read paths into a private directory removed on drop.
 struct FetchedPaths {
     attestation: Option<PathBuf>,
     bundle: Option<PathBuf>,
+    _dir: Option<tempfile::TempDir>,
+}
+
+impl FetchedPaths {
+    const NONE: Self = Self {
+        attestation: None,
+        bundle: None,
+        _dir: None,
+    };
+
+    fn spill(attestation: Option<&[u8]>, bundle: Option<&[u8]>) -> std::io::Result<Self> {
+        if attestation.is_none() && bundle.is_none() {
+            return Ok(Self::NONE);
+        }
+        let dir = tempfile::Builder::new()
+            .prefix("perf-sentinel-verify-")
+            .tempdir()?;
+        let write = |data: Option<&[u8]>, name: &str| {
+            data.map(|data| {
+                let path = dir.path().join(name);
+                std::fs::write(&path, data).map(|()| path)
+            })
+            .transpose()
+        };
+        Ok(Self {
+            attestation: write(attestation, "attestation.intoto.jsonl")?,
+            bundle: write(bundle, "bundle.sig")?,
+            _dir: Some(dir),
+        })
+    }
+}
+
+fn spill_or_exit(attestation: Option<&[u8]>, bundle: Option<&[u8]>) -> Result<FetchedPaths, i32> {
+    FetchedPaths::spill(attestation, bundle).map_err(|e| {
+        eprintln!("Error: write the attestation and bundle to a temporary directory: {e}");
+        EXIT_INPUT_ERROR
+    })
 }
 
 async fn load_report(report_path: Option<&Path>, url: Option<&str>) -> Result<LoadedReport, i32> {
@@ -202,26 +250,71 @@ fn load_local_report(path: &Path) -> Result<LoadedReport, i32> {
             return Err(EXIT_INPUT_ERROR);
         }
     };
-    let report = parse_report(&bytes).map_err(|e| {
-        eprintln!(
-            "Error: parse {}: {e}",
-            sanitise_for_terminal(&path.display().to_string())
-        );
-        EXIT_INPUT_ERROR
-    })?;
+    let display = path.display().to_string();
+    let from_pdf = bytes.starts_with(b"%PDF-");
+    let (bytes, fetched) = if from_pdf {
+        unpack_pdf(&bytes, &display)?
+    } else {
+        (bytes, FetchedPaths::NONE)
+    };
+    let report = parse_gated(&bytes, &display)?;
     Ok(LoadedReport {
         report,
         bytes,
-        display: path.display().to_string(),
-        fetched: FetchedPaths {
-            attestation: None,
-            bundle: None,
-        },
+        display,
+        fetched,
+        from_pdf,
     })
+}
+
+/// The report a disclosure PDF attaches, with its attestation and bundle.
+#[cfg(feature = "pdf")]
+fn unpack_pdf(pdf: &[u8], display: &str) -> Result<(Vec<u8>, FetchedPaths), i32> {
+    let files = sentinel_core::report::periodic::pdf::extract_attachments(
+        pdf,
+        MAX_LOCAL_REPORT_BYTES,
+        MAX_ATTESTATION_BYTES,
+    )
+    .map_err(|e| {
+        eprintln!("Error: {}: {e}", sanitise_for_terminal(display));
+        EXIT_INPUT_ERROR
+    })?;
+    let fetched = spill_or_exit(files.attestation.as_deref(), files.bundle.as_deref())?;
+    Ok((files.report, fetched))
+}
+
+#[cfg(not(feature = "pdf"))]
+fn unpack_pdf(_pdf: &[u8], display: &str) -> Result<(Vec<u8>, FetchedPaths), i32> {
+    eprintln!(
+        "Error: {}: this build cannot read PDF disclosures, use the attached report.json",
+        sanitise_for_terminal(display)
+    );
+    Err(EXIT_INPUT_ERROR)
 }
 
 fn parse_report(bytes: &[u8]) -> Result<PeriodicReport, serde_json::Error> {
     serde_json::from_slice(bytes)
+}
+
+/// Refuse a schema this engine does not read before parsing: a newer
+/// report would lose its new fields and fail the hash for the wrong reason.
+fn parse_gated(bytes: &[u8], source: &str) -> Result<PeriodicReport, i32> {
+    let source = sanitise_for_terminal(source);
+    match check_schema_version(bytes) {
+        Err(e @ SchemaVersionError::Unsupported(_)) => {
+            eprintln!("Error: {source}: {}", sanitise_for_terminal(&e.to_string()));
+            return Err(EXIT_UNSUPPORTED);
+        }
+        Err(e @ SchemaVersionError::Unknown(_)) => {
+            eprintln!("Error: {source}: {}", sanitise_for_terminal(&e.to_string()));
+            return Err(EXIT_INPUT_ERROR);
+        }
+        _ => {}
+    }
+    parse_report(bytes).map_err(|e| {
+        eprintln!("Error: parse {source}: {e}");
+        EXIT_INPUT_ERROR
+    })
 }
 
 async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
@@ -229,66 +322,31 @@ async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
         eprintln!("Error: fetch {url}: {e}");
         EXIT_NETWORK_ERROR
     })?;
-    let report = parse_report(&bytes).map_err(|e| {
-        eprintln!("Error: parse {url}: {e}");
-        EXIT_INPUT_ERROR
-    })?;
+    let report = parse_gated(&bytes, url)?;
     let attestation_url = derive_sidecar_url(url, "attestation.intoto.jsonl");
     let bundle_url = derive_sidecar_url(url, "bundle.sig");
-    let mut fetched = FetchedPaths {
-        attestation: None,
-        bundle: None,
-    };
-    let pid = std::process::id();
+    let mut attestation = None;
     if let Some(a_url) = attestation_url {
         match http_get(&a_url).await {
-            Ok(data) => {
-                let path = std::env::temp_dir().join(format!(
-                    "perf-sentinel-verify-attestation-{pid}.intoto.jsonl"
-                ));
-                if write_temp_no_follow(&path, &data).is_ok() {
-                    fetched.attestation = Some(path);
-                }
-            }
+            Ok(data) => attestation = Some(data),
             Err(e) => eprintln!("Note: could not fetch attestation sidecar: {e}"),
         }
     }
+    let mut bundle = None;
     if let Some(b_url) = bundle_url {
         match http_get(&b_url).await {
-            Ok(data) => {
-                let path =
-                    std::env::temp_dir().join(format!("perf-sentinel-verify-bundle-{pid}.sig"));
-                if write_temp_no_follow(&path, &data).is_ok() {
-                    fetched.bundle = Some(path);
-                }
-            }
+            Ok(data) => bundle = Some(data),
             Err(e) => eprintln!("Note: could not fetch signature bundle: {e}"),
         }
     }
+    let fetched = spill_or_exit(attestation.as_deref(), bundle.as_deref())?;
     Ok(LoadedReport {
         report,
         bytes,
         display: url.to_string(),
         fetched,
+        from_pdf: false,
     })
-}
-
-/// Write `data` to `path` while refusing to follow a pre-existing
-/// symlink (defence in depth on shared `/tmp` setups). Uses
-/// `O_CREAT|O_EXCL|O_WRONLY` on Unix-likes via `create_new(true)`.
-/// On Windows there is no real symlink-attack surface for the
-/// system temp dir, so a plain `fs::write` is acceptable.
-fn write_temp_no_follow(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    // Best-effort: tolerate a residual file from a previous run with
-    // the same pid wrap-around by unlinking, then create_new to bind
-    // the inode atomically.
-    let _ = std::fs::remove_file(path);
-    let mut f = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)?;
-    f.write_all(data)
 }
 
 /// Fetch an `https://` URL through the shared core client, so the report
@@ -794,6 +852,11 @@ fn print_text(outcome: &Outcome) {
     println!("perf-sentinel verify-hash {}", env!("CARGO_PKG_VERSION"));
     println!();
     println!("Report: {}", outcome.report_path);
+    if outcome.from_pdf {
+        println!(
+            "  Verified: the attached report.json, not its printed pages. Compare the printed figures with it."
+        );
+    }
     println!(
         "  Period: {} to {}",
         outcome.report.period.from_date, outcome.report.period.to_date
@@ -838,7 +901,7 @@ fn format_status(label: &str, s: &Status) -> String {
 }
 
 fn print_json(outcome: &Outcome) {
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "report_path": outcome.report_path,
         "report_metadata": {
             "intent": intent_label(outcome.report.report_metadata.intent),
@@ -859,6 +922,9 @@ fn print_json(outcome: &Outcome) {
         },
         "overall": overall_label(outcome),
     });
+    if outcome.from_pdf {
+        body["verified_from"] = "pdf_attachment".into();
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&body).unwrap_or_default()
@@ -1225,6 +1291,7 @@ mod tests {
             attestation_binding: Status::Ok("names".to_string()),
             signature: Status::Ok("valid".to_string()),
             binary_attestation: Status::Skip("metadata present, unverified".to_string()),
+            from_pdf: false,
         };
         assert_eq!(overall_label(&outcome), "PARTIAL");
     }
@@ -1243,6 +1310,7 @@ mod tests {
             attestation_binding: Status::Ok("names".to_string()),
             signature: Status::Ok("valid".to_string()),
             binary_attestation: Status::NotProvided,
+            from_pdf: false,
         };
         assert_eq!(overall_label(&outcome), "TRUSTED");
     }
@@ -1258,6 +1326,7 @@ mod tests {
             attestation_binding,
             signature: Status::Ok("valid".to_string()),
             binary_attestation: Status::NotProvided,
+            from_pdf: false,
         }
     }
 

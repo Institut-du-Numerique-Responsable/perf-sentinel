@@ -122,6 +122,7 @@ fn opts(label: &str, cap: Option<usize>) -> RenderOptions {
         mysql_stat: None,
         diff: None,
         daemon_url: None,
+        hub_relay: None,
     }
 }
 
@@ -1883,7 +1884,7 @@ fn template_carries_csp_placeholder() {
 
 #[test]
 fn build_csp_static_mode_returns_strict_policy() {
-    let csp = build_csp(None);
+    let csp = build_csp(None, false);
     assert!(csp.contains("default-src 'none'"));
     assert!(csp.contains("base-uri 'none'"));
     assert!(
@@ -1894,7 +1895,7 @@ fn build_csp_static_mode_returns_strict_policy() {
 
 #[test]
 fn build_csp_live_mode_appends_connect_src() {
-    let csp = build_csp(Some("http://localhost:4318"));
+    let csp = build_csp(Some("http://localhost:4318"), false);
     assert!(csp.contains("default-src 'none'"));
     assert!(
         csp.contains("connect-src 'self' http://localhost:4318"),
@@ -1904,7 +1905,7 @@ fn build_csp_live_mode_appends_connect_src() {
 
 #[test]
 fn build_csp_live_mode_only_whitelists_provided_url() {
-    let csp = build_csp(Some("https://daemon.example.com"));
+    let csp = build_csp(Some("https://daemon.example.com"), false);
     // Wildcard `connect-src *` would defeat the purpose. The
     // directive must only allow same-origin and the daemon.
     assert!(!csp.contains("connect-src *"));
@@ -1959,6 +1960,18 @@ fn rendered_html_in_live_mode_carries_daemon_field_and_connect_src() {
         html.contains("connect-src 'self' http://localhost:4318"),
         "live-mode CSP must whitelist 'self' plus the daemon URL"
     );
+}
+
+#[test]
+fn rendered_html_in_hub_relay_mode_carries_source_and_same_origin_csp() {
+    let f = finding("t1", "svc", "/ep", "SELECT 1");
+    let report = minimal_report(vec![f]);
+    let mut options = opts("normal.json", None);
+    options.hub_relay = Some("prod-eu".to_string());
+    let (html, _) = render(&report, &[], &options);
+    assert!(html.contains(r#""hub_relay":{"source":"prod-eu"}"#));
+    assert!(!html.contains(r#""daemon":"#));
+    assert!(html.contains("connect-src 'self'\""));
 }
 
 #[cfg(any(feature = "daemon", feature = "tempo"))]

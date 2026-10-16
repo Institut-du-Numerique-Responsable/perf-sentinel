@@ -1,0 +1,79 @@
+name: PDF/A
+
+# Renders two disclosures with disclose-pdf, the official G2 example alone
+# and one carrying its attestation, a bundle and a QR code, and validates
+# both with veraPDF against the PDF/A-3B profile, the conformance the Hub and
+# an archive rely on. krilla checks most clauses itself: this is the
+# independent validator. The manifests are watched for a krilla bump.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/sentinel-core/src/report/periodic/pdf/**'
+      - 'crates/sentinel-cli/src/disclose_pdf.rs'
+      - 'crates/sentinel-core/Cargo.toml'
+      - 'crates/sentinel-cli/Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/pdf-a.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pdf-a-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate a rendered disclosure as PDF/A-3B
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+
+      - name: Render the G2 example, then a disclosure with every attachment
+        env:
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          cargo build --quiet -p perf-sentinel --locked
+          bin=target/debug/perf-sentinel
+          mkdir -p work
+          "$bin" hash-bake --report docs/schemas/examples/example-official-public-G2.json \
+            --output work/report.json
+          "$bin" disclose-pdf --report work/report.json --output work/report.pdf
+
+          "$bin" analyze --format json --input tests/fixtures/n_plus_one_sql.json > work/window.json
+          for ts in 2026-01-01T09:00:00Z 2026-01-20T09:00:00Z; do
+            jq -c --arg ts "$ts" '{ts: $ts, report: .}' work/window.json
+          done > work/archive.ndjson
+          sed 's|^# transparency = |transparency = |' docs/examples/perf-sentinel-org.toml > work/org.toml
+          "$bin" disclose --intent internal --confidentiality public \
+            --period-type custom --from 2026-01-01 --to 2026-01-31 \
+            --input work/archive.ndjson --org-config work/org.toml \
+            --output work/full.json --emit-attestation work/attestation.intoto.jsonl
+          # veraPDF checks how the bundle is attached, not what it says.
+          echo '{}' > work/bundle.sig
+          "$bin" disclose-pdf --report work/full.json \
+            --attestation work/attestation.intoto.jsonl --bundle work/bundle.sig \
+            --expected-identity "$IDENTITY" \
+            --expected-issuer https://token.actions.githubusercontent.com \
+            --output work/full.pdf
+
+      - name: veraPDF, PDF/A-3B profile
+        run: |
+          set -euo pipefail
+          for pdf in report full; do
+            docker run --rm -v "$PWD/work:/data" \
+              verapdf/cli:v1.30.2@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb \
+              --flavour 3b "/data/$pdf.pdf" > "work/verapdf-$pdf.xml"
+            grep -q 'isCompliant="true"' "work/verapdf-$pdf.xml" || {
+              echo "$pdf.pdf is not PDF/A-3B"
+              grep -o '<rule [^>]*status="failed"[^>]*>' "work/verapdf-$pdf.xml"
+              exit 1
+            }
+          done

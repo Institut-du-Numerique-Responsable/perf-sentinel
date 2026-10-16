@@ -1254,3 +1254,63 @@ test("45. a read key refused on an ack stays stored, and the prompt then takes t
   await expect(status).toHaveText("Connected");
   expect(await storedKey()).toBe(ACK_KEY);
 });
+
+test("46. through the Hub relay, the report lists, acks and revokes with the session, and shows a refusal's reason", async ({ page }) => {
+  const acks: Array<Record<string, string>> = [];
+  const writes: Array<{ url: string; headers: Record<string, string>; body: any }> = [];
+  let refuse = false;
+  await page.route("**/api/sources/demo/acks**", async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(acks) });
+      return;
+    }
+    const body = request.postDataJSON();
+    writes.push({ url: request.url(), headers: request.headers(), body });
+    if (refuse) {
+      await route.fulfill({
+        status: 403, contentType: "application/json",
+        body: JSON.stringify({ detail: "You may not acknowledge findings at this source." })
+      });
+      return;
+    }
+    if (request.url().endsWith("/revoke")) acks.splice(acks.findIndex((a) => a.signature === body.signature), 1);
+    else acks.push({ signature: body.signature, by: "alice", reason: body.reason, at: "2026-10-16T10:00:00Z" });
+    await route.fulfill({ status: 204 });
+  });
+  const status = page.locator("#ps-daemon-status-text");
+
+  await page.goto("/dashboard-relay.html#findings");
+  await page.waitForSelector("[role=tablist]");
+  await expect(status).toHaveText("Connected through the Hub");
+  await expect(page.locator("#ps-logout-btn")).toBeHidden();
+
+  const button = page.locator("#findings-list .ps-fin-action-btn").first();
+  await button.click();
+  await expect(page.locator("#ack-modal-by")).toBeHidden();
+  await page.locator("#ack-modal-reason").fill("tracked in ops/1234");
+  await page.locator("#ack-modal-submit").click();
+  await expect(page.locator("#ack-modal")).toBeHidden();
+  expect(writes[0].url).toMatch(/\/api\/sources\/demo\/acks$/);
+  expect(writes[0].headers["x-api-key"]).toBeUndefined();
+  expect(writes[0].body.reason).toBe("tracked in ops/1234");
+  expect(writes[0].body.by).toBeUndefined();
+  expect(typeof writes[0].body.signature).toBe("string");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.goto("/dashboard-relay.html#acknowledgments");
+  await expect(page.locator("#acks-body tr")).toHaveCount(1);
+  await expect(page.locator("#acks-body")).toContainText("alice");
+  await page.locator("#acks-body .ps-fin-action-btn.revoke").first().click();
+  await expect(page.locator("#acks-body tr")).toHaveCount(0);
+  expect(writes[1].url).toMatch(/\/acks\/revoke$/);
+  expect(writes[1].body).toEqual({ signature: writes[0].body.signature });
+
+  refuse = true;
+  await page.locator("#tab-findings").click();
+  await page.locator("#findings-list .ps-fin-action-btn").first().click();
+  await page.locator("#ack-modal-reason").fill("no rights");
+  await page.locator("#ack-modal-submit").click();
+  await expect(page.locator("#ack-modal-error")).toHaveText("You may not acknowledge findings at this source.");
+  await expect(page.locator("#auth-modal")).toBeHidden();
+});

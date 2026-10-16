@@ -19,7 +19,7 @@ path = "src/main.rs"
 workspace = true
 
 [features]
-default = ["tui", "daemon", "tempo", "jaeger-query"]
+default = ["tui", "daemon", "tempo", "jaeger-query", "pdf"]
 tui = ["ratatui", "crossterm"]
 daemon = [
     "perf-sentinel-core/daemon",
@@ -30,9 +30,10 @@ daemon = [
 ]
 tempo = ["perf-sentinel-core/tempo"]
 jaeger-query = ["perf-sentinel-core/jaeger-query"]
+pdf = ["perf-sentinel-core/pdf"]
 
 [dependencies]
-perf-sentinel-core = { version = "0.30.0", path = "../sentinel-core" }
+perf-sentinel-core = { version = "0.31.0", path = "../sentinel-core" }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 clap_complete = "4.6.11"
 clap_mangen = "0.3.3"
@@ -64,6 +65,9 @@ hyper = { version = "1.11.1", optional = true }
 bytes = { version = "1.12.1", optional = true }
 humantime = { version = "2.4.0", optional = true }
 rpassword = { version = "7.5.4", optional = true }
+# verify-hash writes the attestation and bundle it reads into a private
+# temporary directory, removed when the command returns.
+tempfile = "3.27.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"
@@ -75,4 +79,3 @@ mimalloc = "0.1.52"
 
 [dev-dependencies]
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
-tempfile = "3.27.0"

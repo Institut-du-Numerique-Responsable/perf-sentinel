@@ -253,3 +253,168 @@ fn verify_hash_local_report_over_size_cap_returns_input_error() {
     let stderr = String::from_utf8_lossy(&v.stderr);
     assert!(stderr.contains("exceeds"), "stderr: {stderr}");
 }
+
+#[test]
+fn verify_hash_refuses_a_newer_schema_with_exit_5() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_example_with_fixed_hash(dir.path());
+    let mut report: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    report["schema_version"] = "perf-sentinel-report/v1.8".into();
+    fs::write(&path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+
+    let out = run_verify(&["--report", path.to_str().unwrap()]);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(5), "stderr: {stderr}");
+    assert!(stderr.contains("perf-sentinel-report/v1.8"), "{stderr}");
+    assert!(stderr.contains("upgrade perf-sentinel"), "{stderr}");
+}
+
+/// A recipient holding only the PDF gets the same verdict as one holding
+/// the JSON and the attestation.
+#[cfg(feature = "pdf")]
+#[test]
+fn verify_hash_on_the_pdf_matches_verify_hash_on_the_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let report_path = write_example_with_fixed_hash(dir.path());
+    let report: PeriodicReport = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    let attestation = dir.path().join("attestation.intoto.jsonl");
+    write_attestation_for(&report, &attestation);
+    let pdf = dir.path().join("report.pdf");
+    let render = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["disclose-pdf", "--report"])
+        .arg(&report_path)
+        .arg("--attestation")
+        .arg(&attestation)
+        .arg("--output")
+        .arg(&pdf)
+        .output()
+        .unwrap();
+    assert_eq!(
+        Some(0),
+        render.status.code(),
+        "{}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+
+    let from_json = run_verify(&[
+        "--report",
+        report_path.to_str().unwrap(),
+        "--attestation",
+        attestation.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    let from_pdf = run_verify(&["--report", pdf.to_str().unwrap(), "--format", "json"]);
+
+    let verdicts = |out: &std::process::Output| {
+        let value: serde_json::Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)));
+        (
+            value["verifications"].clone(),
+            value["overall"].clone(),
+            out.status.code(),
+        )
+    };
+    assert_eq!(verdicts(&from_json), verdicts(&from_pdf));
+    let text = run_verify(&["--report", pdf.to_str().unwrap()]);
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    assert!(stdout.contains("attached report.json"), "{stdout}");
+    assert!(stdout.contains("not its printed pages"), "{stdout}");
+    assert_eq!(
+        "ok",
+        verdicts(&from_pdf).0["attestation_binding"]["status"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+    );
+}
+
+/// The attestation and bundle read out of a PDF go to a private directory
+/// that is gone when the command returns.
+#[cfg(feature = "pdf")]
+#[test]
+fn verify_hash_on_a_pdf_leaves_no_temporary_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let report_path = write_example_with_fixed_hash(dir.path());
+    let report: PeriodicReport = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    let attestation = dir.path().join("attestation.intoto.jsonl");
+    write_attestation_for(&report, &attestation);
+    let pdf = dir.path().join("report.pdf");
+    let render = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["disclose-pdf", "--report"])
+        .arg(&report_path)
+        .arg("--attestation")
+        .arg(&attestation)
+        .arg("--output")
+        .arg(&pdf)
+        .output()
+        .unwrap();
+    assert_eq!(Some(0), render.status.code());
+
+    let out = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .env("TMPDIR", tmp.path())
+        .args(["verify-hash", "--report"])
+        .arg(&pdf)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        Some(2),
+        out.status.code(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let left: Vec<_> = fs::read_dir(tmp.path()).unwrap().collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+/// The command page 5 prints must parse: placeholders swapped for real
+/// values, it reaches a verdict instead of a usage error.
+#[cfg(feature = "pdf")]
+#[test]
+fn the_printed_verify_command_parses() {
+    let dir = tempfile::tempdir().unwrap();
+    let report_path = write_example_with_fixed_hash(dir.path());
+    let report: PeriodicReport = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    assert!(
+        report.integrity.binary_hash.is_some(),
+        "the example declares a binary hash"
+    );
+    let pdf = dir.path().join("report.pdf");
+    let render = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["disclose-pdf", "--report"])
+        .arg(&report_path)
+        .arg("--output")
+        .arg(&pdf)
+        .output()
+        .unwrap();
+    assert_eq!(Some(0), render.status.code());
+    let words = sentinel_core::report::periodic::pdf::verify_command_words(
+        &report,
+        Some("ci@example.org"),
+        Some("https://issuer.example"),
+    );
+    assert_eq!(Some("perf-sentinel"), words.first().map(String::as_str));
+    let args: Vec<String> = words
+        .iter()
+        .skip(1)
+        .map(|word| match word.as_str() {
+            "report.pdf" => pdf.to_str().unwrap().to_string(),
+            w if w.starts_with('<') => env!("CARGO_BIN_EXE_perf-sentinel").to_string(),
+            w => w.to_string(),
+        })
+        .collect();
+    let out = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(&args)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stdout.contains("Overall:"),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(!stderr.contains("Usage:"), "{stderr}");
+}

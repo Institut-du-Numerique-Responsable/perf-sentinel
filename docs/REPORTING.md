@@ -575,6 +575,51 @@ See `docs/design/10-SIGSTORE-ATTESTATION.md` for the full
 methodology, failure modes, and privacy considerations on Rekor
 public.
 
+## Rendering a PDF for readers (`disclose-pdf`)
+
+`perf-sentinel disclose-pdf` renders a report as a PDF/A-3b a reader without a terminal can follow: A4 pages in English, five unless a section runs onto the next page, with the figures, the uncertainty band, the applications, the method and its disclaimers, and how to verify the document. The report, its attestation and its bundle travel inside the PDF as attachments, byte for byte.
+
+```bash
+perf-sentinel disclose-pdf \
+    --report report.json \
+    --attestation attestation.intoto.jsonl \
+    --bundle bundle.sig \
+    --expected-identity release@example.fr \
+    --expected-issuer https://accounts.google.com \
+    --output report.pdf
+```
+
+It renders only when the `content_hash` recomputes and, with `--attestation`, when the attestation names that hash, so a rendered PDF stands for those two checks. It never checks the signature: the last page prints the `verify-hash` command, with the identity and issuer passed here, for the reader to run. The document code is the report's `content_hash`, printed in full and grouped by four characters on the cover and the verify page, and shortened in the footer of every page. Add `transparency` to `[notes.reference_urls]` in the org config and the cover draws a QR code to the page where you publish your reports. Without it, no QR code is drawn.
+
+The command prints one JSON line on stdout and exits with a fixed code, a contract PerfSentinelHub relies on:
+
+| Exit | `result`       | `reason`                                                                    |
+|------|----------------|-----------------------------------------------------------------------------|
+| 0    | `rendered`     | none                                                                        |
+| 1    | `refused`      | `content_hash_mismatch`, `binding_mismatch`                                 |
+| 3    | `input_error`  | `missing_file`, `file_too_large`, `malformed_report`, `output_unwritable`   |
+| 5    | `unrenderable` | `unsupported_schema_version`, `unsupported_characters`, `pdf_export_failed` |
+
+`file_too_large` means the report is over 64 MiB, or the attestation or the bundle over 1 MiB.
+
+Exit 5 means nothing says the report is wrong, the engine just cannot draw it: a schema newer than this binary reads, text outside the bundled DM Sans and JetBrains Mono fonts (Latin scripts, no emoji) listed on stderr, or a document the PDF writer refuses. Newlines and tabs in report strings are drawn as spaces. Characters are never replaced on an official document.
+
+The command needs the `pdf` Cargo feature, on in the release binary and the image.
+
+## Publishing to a Perf Sentinel Hub
+
+A Hub with disclosures on (PerfSentinelHub 0.7.0 or later, `Hub:Disclosures:ImportKey` set) keeps a disclosure, renders its PDF with the engine it embeds, and hands it on through a restricted screen, expiring share links and signed webhooks. The last step of the job that produces and signs the report sends the three files as one multipart request:
+
+```bash
+curl --fail -H "X-API-Key: $HUB_DISCLOSURES_KEY" \
+  -F report=@report.json \
+  -F attestation=@attestation.intoto.jsonl \
+  -F bundle=@bundle.sig \
+  https://hub.example.com/api/import/disclosures
+```
+
+The Hub runs `disclose-pdf` before it keeps anything. A report whose hash does not recompute, or whose attestation names another hash, is refused with 422 and the engine's reason. An unsigned report is accepted and shown as such, and publishing the signed copy of the same report later replaces it. The Hub never checks a signature: whoever receives the PDF runs `verify-hash` on it. See the Hub's `API.md` for the responses.
+
 ## Verifying a published disclosure
 
 A third party verifies a published file with one command:
@@ -638,6 +683,10 @@ attestation stays unverified and the result caps at PARTIAL rather than
 TRUSTED. Pass `--verify-binary <path>` to run `gh attestation verify`
 against the producing binary (needs the `gh` CLI and network) so the
 provenance is checked and exit `0` reflects it.
+
+### Verifying a PDF
+
+`verify-hash --report report.pdf` reads the report, the attestation and the bundle out of the PDF and runs the same checks, so a recipient who only holds the PDF can verify it. A copy re-saved by a tool that keeps attachments still verifies: the reader follows the PDF's own structure, not the layout the renderer wrote. Some viewers drop attachments when they save, macOS Preview among them: verify the original file. The check covers the attached report, not the printed pages: `verify-hash` says so, and the reader compares the printed figures with that report. `--attestation` and `--bundle` passed on the command line win over the attached files, here and in `--url` mode. A report whose schema is newer than the binary exits 5: upgrade perf-sentinel.
 
 ### Sidecar URL convention in `--url` mode
 

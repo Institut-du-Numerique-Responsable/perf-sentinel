@@ -21,6 +21,7 @@ on:
       - 'crates/sentinel-cli/src/disclose/**'
       - 'crates/sentinel-cli/src/verify_hash.rs'
       - 'crates/sentinel-cli/src/hash_bake.rs'
+      - 'crates/sentinel-cli/src/disclose_pdf.rs'
       - '.github/workflows/disclosure-signing.yml'
 
 permissions:
@@ -110,6 +111,26 @@ jobs:
           grep -q '\[OK\] Signature' work/trusted.txt
           grep -q 'Overall: TRUSTED' work/trusted.txt
 
+      - name: The rendered PDF verifies TRUSTED on its own
+        env:
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          bin=target/release/perf-sentinel
+          "$bin" disclose-pdf --report work/signed.json \
+            --attestation work/attestation.intoto.jsonl --bundle work/bundle.sig \
+            --expected-identity "$IDENTITY" \
+            --expected-issuer https://token.actions.githubusercontent.com \
+            --output work/report.pdf
+          # Only the PDF: the attestation and the bundle come out of it.
+          "$bin" verify-hash --report work/report.pdf \
+            --expected-identity "$IDENTITY" \
+            --expected-issuer https://token.actions.githubusercontent.com \
+            | tee work/pdf-trusted.txt
+          grep -q '\[OK\] Attestation binding' work/pdf-trusted.txt
+          grep -q '\[OK\] Signature' work/pdf-trusted.txt
+          grep -q 'Overall: TRUSTED' work/pdf-trusted.txt
+
       - name: Figures edited after signing verify UNTRUSTED
         env:
           IDENTITY: https://github.com/${{ github.workflow_ref }}
@@ -131,3 +152,11 @@ jobs:
           grep -q '\[OK\] Signature' work/untrusted.txt
           grep -q '\[FAIL\] Attestation binding' work/untrusted.txt
           grep -q 'Overall: UNTRUSTED' work/untrusted.txt
+          # And disclose-pdf refuses to render the edited figures at all.
+          rc=0
+          target/release/perf-sentinel disclose-pdf --report work/rebaked.json \
+            --attestation work/attestation.intoto.jsonl --output work/edited.pdf \
+            > work/refused.json || rc=$?
+          test "$rc" -eq 1
+          grep -q '"reason":"binding_mismatch"' work/refused.json
+          test ! -e work/edited.pdf

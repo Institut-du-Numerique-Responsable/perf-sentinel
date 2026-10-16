@@ -12,6 +12,8 @@ mod capture;
 mod demo;
 mod diff;
 mod disclose;
+#[cfg(feature = "pdf")]
+mod disclose_pdf;
 mod explain;
 #[cfg(feature = "daemon")]
 mod hub;

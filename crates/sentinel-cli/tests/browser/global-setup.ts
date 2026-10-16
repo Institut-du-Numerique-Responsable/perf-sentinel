@@ -43,6 +43,7 @@ const DEMO_EVENTS = join(FIXTURE_DIR, "traces.json");
 // fixture instead would ripple into the Rust e2e suite.
 const MANY_EVENTS = join(FIXTURE_DIR, "many-findings-traces.json");
 const MANY_HTML = join(FIXTURE_DIR, "dashboard-many.html");
+const RELAY_HTML = join(FIXTURE_DIR, "dashboard-relay.html");
 const MANY_COPIES = 4;
 
 // Inject a cloud_region on every event before the demo render so the
@@ -230,6 +231,13 @@ function renderFixtures() {
   execFileSync(
     BINARY,
     ["report", "--input", MANY_EVENTS, "--output", MANY_HTML],
+    { stdio: "inherit" }
+  );
+  // A report a Hub serves: live mode through the Hub's relay at the page's
+  // own origin. The spec mocks the Hub routes with page.route.
+  execFileSync(
+    BINARY,
+    ["report", "--input", FIXTURE_JSON, "--hub-relay", "demo", "--output", RELAY_HTML],
     { stdio: "inherit" }
   );
 }

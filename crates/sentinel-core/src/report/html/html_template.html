@@ -622,6 +622,7 @@
   .ps-refresh-btn { display: none; padding: 0 14px; height: 34px; box-sizing: border-box; font-size: 12px; border-radius: 999px; border: 1px solid var(--btn-bd); background: var(--surface-2); color: var(--btn-fg); cursor: pointer; font-family: var(--font-ui); font-weight: 600; }
   body.ps-live .ps-refresh-btn { display: inline-flex; align-items: center; gap: 6px; }
   body.ps-live .ps-refresh-btn[hidden] { display: none; }
+  dialog.ps-modal [hidden] { display: none; }
   .ps-refresh-btn:hover { border-color: var(--brand); color: var(--brand-2); background: var(--accent-bg); }
   .ps-refresh-btn:disabled { cursor: not-allowed; opacity: 0.6; }
   .ps-refresh-ico { flex: none; }
@@ -1028,7 +1029,7 @@
       <option value="7d" selected>7 days</option>
       <option value="30d">30 days</option>
     </select>
-    <label for="ack-modal-by">Acknowledged by</label>
+    <label for="ack-modal-by" id="ack-modal-by-label">Acknowledged by</label>
     <input type="text" id="ack-modal-by" placeholder="optional" />
     <div class="ps-modal-error" id="ack-modal-error" role="alert"></div>
     <div class="ps-modal-actions">
@@ -1773,7 +1774,7 @@
     var meta = CONFIDENCE_CONTEXT[conf];
     if (!meta) {
       // No findings to read confidence from: fall back to mode only.
-      meta = payload.daemon && payload.daemon.url
+      meta = payloadIsLive()
         ? { label: "daemon · live", tone: "ok" }
         : { label: "batch", tone: "neutral" };
     }
@@ -6005,7 +6006,7 @@
       // only when the confidence itself says nothing.
       var daemonRun = CONFIDENCE_CONTEXT[conf]
         ? (conf === "daemon_staging" || conf === "daemon_production")
-        : !!(payload.daemon && payload.daemon.url);
+        : payloadIsLive();
       registerDisabledTab("correlations", "Correlations", daemonRun
         ? "The daemon reported no cross-trace correlation: `[daemon.correlation]` may be disabled in the config, or none was detected in the window."
         : "Cross-trace correlations are a daemon-only output (`perf-sentinel watch`). This report came from a batch run, which analyzes each trace alone.");
@@ -6013,7 +6014,7 @@
     // Always registered: a disabled Carbon tab explains itself instead
     // of disappearing.
     registerTab("green", "Carbon", null);
-    if (payload.daemon && payload.daemon.url) {
+    if (payloadIsLive()) {
       registerTab("acknowledgments", "Acknowledgments", function () {
         return liveAcksCount();
       });
@@ -6225,7 +6226,9 @@
   // pure overhead.
   //
   // Activation: only when the embedded payload carries
-  // `payload.daemon.url`. Static reports (the default) never
+  // `payload.daemon.url`, or `payload.hub_relay.source` for a report a
+  // Hub serves: the page then talks to that Hub at its own origin, with
+  // the reader's session and no key. Static reports (the default) never
   // touch this code path.
   //
   // Security:
@@ -6242,6 +6245,7 @@
   var liveState = {
     enabled: false,
     daemonUrl: null,
+    relaySource: null,
     apiKey: null,
     acks: [],
     acksBySig: Object.create(null),
@@ -6306,7 +6310,7 @@
     }
     headers["Accept"] = "application/json";
     var key = "key" in options ? options.key : liveState.apiKey;
-    if (key) {
+    if (key && !liveState.relaySource) {
       headers["X-API-Key"] = key;
     }
     // Bound every request with an AbortController so a hung daemon
@@ -6316,8 +6320,8 @@
     var init = {
       method: options.method || "GET",
       headers: headers,
-      credentials: "omit",
-      mode: "cors"
+      credentials: liveState.relaySource ? "same-origin" : "omit",
+      mode: liveState.relaySource ? "same-origin" : "cors"
     };
     if (options.body !== undefined && options.body !== null) {
       init.body = options.body;
@@ -6330,6 +6334,58 @@
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, DAEMON_FETCH_TIMEOUT_MS) : null;
     return fetch(liveDaemonBase() + path, init).finally(function () {
       if (timer) clearTimeout(timer);
+    });
+  }
+
+  function networkErrorText() {
+    return "Network error reaching the " + (liveState.relaySource ? "Hub." : "daemon.");
+  }
+
+  function relayAcksPath() {
+    return "/api/sources/" + encodeURIComponent(liveState.relaySource) + "/acks";
+  }
+
+  // Acks `sig` with `body`, or revokes it without one, at whichever peer
+  // the page talks to. The Hub takes the signature in the body and names
+  // the author from the session.
+  function sendAck(sig, body) {
+    var json = { method: "POST", headers: { "Content-Type": "application/json" } };
+    if (liveState.relaySource) {
+      json.body = JSON.stringify(Object.assign({ signature: sig }, body || {}));
+      return fetchWithAuth(relayAcksPath() + (body ? "" : "/revoke"), json);
+    }
+    var path = "/api/findings/" + encodeURIComponent(sig) + "/ack";
+    if (!body) return fetchWithAuth(path, { method: "DELETE" });
+    json.body = JSON.stringify(body);
+    return fetchWithAuth(path, json);
+  }
+
+  // The daemon answers a created ack 201, the Hub relay 204, and both
+  // answer a revoke 204.
+  function ackSucceeded(response, created) {
+    return response.status === (created && !liveState.relaySource ? 201 : 204);
+  }
+
+  function setRelayStatus(status) {
+    if (status === 200) setDaemonStatus("connected", "Connected through the Hub");
+    else if (status === 401) setDaemonStatus("unauthorized", "Sign in to the Hub");
+    else if (status === 403) setDaemonStatus("unauthorized", "Not allowed");
+    else if (status === 404) setDaemonStatus("disconnected", "Not available");
+    else setDaemonStatus("disconnected", "HTTP " + status);
+  }
+
+  // A Hub refusal carries its reason as `detail`, which already tells the
+  // reader what they lack. A 401 means no session at all.
+  function showRelayRefusal(response, errEl, opLabel) {
+    var fallback = "HTTP " + response.status + " on " + opLabel;
+    var text = response.status === 401
+      ? Promise.resolve("Sign in to the Hub to acknowledge findings.")
+      : response.json().then(function (p) {
+        return (p && typeof p.detail === "string" && p.detail) || fallback;
+      }, function () { return fallback; });
+    return text.then(function (msg) {
+      if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
+      else showToast("error", msg);
     });
   }
 
@@ -6366,9 +6422,8 @@
     var undo = el("button", "ps-toast-undo", "Undo");
     undo.type = "button";
     function undoAck() {
-      var path = "/api/findings/" + encodeURIComponent(sig) + "/ack";
-      return fetchWithAuth(path, { method: "DELETE" }).then(function (r) {
-        if (r.status === 204) {
+      return sendAck(sig, null).then(function (r) {
+        if (ackSucceeded(r, false)) {
           showToast("success", "Acknowledgment undone.");
           return refreshLiveState();
         }
@@ -6376,7 +6431,7 @@
         // instead of dead-ending on a rotated key.
         return handleAuthRetry(r, undoAck, null, "revoke");
       }).catch(function () {
-        showToast("error", "Network error reaching the daemon.");
+        showToast("error", networkErrorText());
       });
     }
     undo.addEventListener("click", function () {
@@ -6438,8 +6493,9 @@
   }
 
   function handleAcksResponse(r) {
+    if (liveState.relaySource) setRelayStatus(r.status);
     if (!r.ok) {
-      if (r.status === 401) {
+      if (r.status === 401 && !liveState.relaySource) {
         setDaemonStatus("unauthorized", "Authentication required");
       }
       clearAcksState();
@@ -6449,7 +6505,11 @@
   }
 
   function fetchAcks() {
-    return fetchWithAuth("/api/acks").then(handleAcksResponse).catch(clearAcksState);
+    var path = liveState.relaySource ? relayAcksPath() : "/api/acks";
+    return fetchWithAuth(path).then(handleAcksResponse).catch(function () {
+      clearAcksState();
+      if (liveState.relaySource) setDaemonStatus("disconnected", "Unreachable");
+    });
   }
 
   function renderAcksPanel() {
@@ -6619,39 +6679,34 @@
   }
 
   function postAck(sig, body, errEl) {
-    var path = "/api/findings/" + encodeURIComponent(sig) + "/ack";
-    fetchWithAuth(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }).then(function (r) {
-      if (r.status === 201) {
+    sendAck(sig, body).then(function (r) {
+      if (ackSucceeded(r, true)) {
         closeAckModal();
         showUndoAckToast(sig);
         return refreshLiveState();
       }
       return handleAuthRetry(r, function () { postAck(sig, body, errEl); }, errEl, "create");
     }).catch(function () {
-      if (errEl) { errEl.textContent = "Network error reaching the daemon."; errEl.style.display = "block"; }
+      if (errEl) { errEl.textContent = networkErrorText(); errEl.style.display = "block"; }
     });
   }
 
   function revokeAck(sig) {
     if (!sig) return;
     if (!globalThis.confirm || !globalThis.confirm("Revoke acknowledgment for " + sig + "?")) return;
-    var path = "/api/findings/" + encodeURIComponent(sig) + "/ack";
-    fetchWithAuth(path, { method: "DELETE" }).then(function (r) {
-      if (r.status === 204) {
+    sendAck(sig, null).then(function (r) {
+      if (ackSucceeded(r, false)) {
         showToast("success", "Acknowledgment revoked.");
         return refreshLiveState();
       }
       return handleAuthRetry(r, function () { revokeAck(sig); }, null, "revoke");
     }).catch(function () {
-      showToast("error", "Network error reaching the daemon.");
+      showToast("error", networkErrorText());
     });
   }
 
   function handleAuthRetry(response, retry, errEl, opLabel) {
+    if (liveState.relaySource) return showRelayRefusal(response, errEl, opLabel);
     if (response.status === 401) {
       liveState.pendingAuthRetry = retry;
       // Tell apart the first 401 (no key cached) from a retry-after-
@@ -6734,7 +6789,9 @@
   }
 
   function refreshLiveState() {
-    return Promise.all([pingStatus(), fetchAcks()]).then(function () {
+    // Through the Hub, the list read is the status: there is no key to probe.
+    var reads = liveState.relaySource ? [fetchAcks()] : [pingStatus(), fetchAcks()];
+    return Promise.all(reads).then(function () {
       renderAcksPanel();
       // Acks changed, so which findings pass applyFilters changed too:
       // re-render (which re-wires the action buttons at its exit) rather
@@ -6853,12 +6910,26 @@
     return s.substring(0, end);
   }
 
+  function payloadIsLive() {
+    return !!((payload.daemon && payload.daemon.url) || (payload.hub_relay && payload.hub_relay.source));
+  }
+
   function bootLiveMode() {
-    if (!payload.daemon || !payload.daemon.url) return;
+    if (!payloadIsLive()) return;
+    var relay = payload.hub_relay && payload.hub_relay.source;
     liveState.enabled = true;
-    liveState.daemonUrl = stripTrailingSlashes(String(payload.daemon.url));
-    var stored = sessionGet(DAEMON_API_KEY_STORAGE);
-    if (stored) liveState.apiKey = stored;
+    if (relay) {
+      liveState.relaySource = String(relay);
+      // The Hub names the author from the session.
+      ["ack-modal-by", "ack-modal-by-label"].forEach(function (id) {
+        var node = document.getElementById(id);
+        if (node) node.hidden = true;
+      });
+    } else {
+      liveState.daemonUrl = stripTrailingSlashes(String(payload.daemon.url));
+      var stored = sessionGet(DAEMON_API_KEY_STORAGE);
+      if (stored) liveState.apiKey = stored;
+    }
     document.body.classList.add("ps-live");
 
     wireRefreshButton();
