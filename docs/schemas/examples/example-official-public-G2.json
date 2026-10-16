@@ -216,8 +216,8 @@
     }
   ],
   "integrity": {
-    "content_hash": "sha256:45586bd44e1c71e706ca5580133bb5c2b7b6a5f5da053c1ecaf630189b67e078",
-    "binary_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "content_hash": "sha256:dddad99a21a6bac95a679282d26acac7d0dca9fb4c5c642009fa29102a0cdd0f",
+    "binary_hash": "sha256:02d61ce95b84b397e5d02dd3e9f38846f9d4b11616d70c4b4b83f95aed528410",
     "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.31.0",
     "trace_integrity_chain": {
       "breaks": 0,
