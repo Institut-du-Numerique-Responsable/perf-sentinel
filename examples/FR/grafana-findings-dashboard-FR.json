@@ -47,6 +47,12 @@
       "id": "table",
       "name": "table",
       "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "state-timeline",
+      "name": "State timeline",
+      "version": ""
     }
   ],
   "title": "perf-sentinel findings",
@@ -518,6 +524,33 @@
         "options": [],
         "hide": 0,
         "description": "Environnement de la ligne Historique (Hub), parmi ceux que déclarent les sources du Hub, listés depuis le label environment de perf_sentinel_hub_findings : Prometheus doit donc scraper le Hub. All envoie une simple espace, que le Hub lit comme tout le parc ou, avec son contrôle d'accès actif, tous les findings que le jeton de la datasource atteint. Le Hub répond 400 à un environnement qu'il ne connaît pas et, avec son contrôle d'accès actif, à un environnement où le jeton de la datasource n'atteint aucune source."
+      },
+      {
+        "name": "hub_source",
+        "label": "Source Hub",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(perf_sentinel_hub_source_last_import_seconds, source)",
+        "query": {
+          "query": "label_values(perf_sentinel_hub_source_last_import_seconds, source)",
+          "refId": "hub_source"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": " ",
+        "multi": false,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Daemon des panneaux Épisodes de corrélation et Paires corrélées et de l'annotation Incidents du Hub, parmi les identifiants de source du Hub, listés depuis le label source de perf_sentinel_hub_source_last_import_seconds : Prometheus doit donc scraper le Hub, et seuls les daemons qui poussent y figurent. All envoie une simple espace, que le Hub lit comme toutes les sources que le jeton du datasource atteint."
       },
       {
         "name": "hub_offset",
@@ -2826,6 +2859,295 @@
               }
             }
           ]
+        },
+        {
+          "type": "state-timeline",
+          "id": 102,
+          "title": "Épisodes de corrélation",
+          "description": "Une ligne par paire de findings qui se suivent, un segment par épisode : une période pendant laquelle le daemon a vu la paire se produire ensemble, close une fois la paire restée calme le temps de l'écart d'épisode (10 minutes sur la fenêtre par défaut). Lu depuis GET /api/correlations du Hub, donc au-delà de la fenêtre glissante du daemon. Un épisode ouvert court jusqu'à maintenant.\n\nDemande PerfSentinelHub 0.6.0 et un daemon Perf Sentinel 0.30.0 avec [daemon.hub_export] et [daemon.correlation] actifs. Un Hub plus ancien répond 404 et le panneau reste vide. Activez l'annotation Incidents du Hub pour confronter les incidents aux épisodes.",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_HUB}"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 85
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "${DS_HUB}"
+              },
+              "type": "json",
+              "source": "url",
+              "parser": "backend",
+              "format": "table",
+              "url": "/api/correlations?from=${__from}&to=${__to}&service=${service}&source_id=${hub_source}&limit=1000",
+              "url_options": {
+                "method": "GET"
+              },
+              "root_selector": "$count($) > 0 ? $reduce($, function($rows, $e) {($p := $e.source.service & \" \" & $e.source.finding_type & \" -> \" & $e.target.service & \" \" & $e.target.finding_type & \" (\" & $substring($e.pair_key, 0, 6) & \", \" & $e.source_id & \")\"; $append($rows, [{\"time\": $e.started_at_ms, \"pair\": $p, \"state\": \"active\"}, {\"time\": $e.ended_at_ms ? $e.ended_at_ms : $millis(), \"pair\": $p, \"state\": \"quiet\"}]))}, []) : []",
+              "columns": [
+                {
+                  "selector": "time",
+                  "text": "time",
+                  "type": "timestamp_epoch"
+                },
+                {
+                  "selector": "pair",
+                  "text": "pair",
+                  "type": "string"
+                },
+                {
+                  "selector": "state",
+                  "text": "state",
+                  "type": "string"
+                }
+              ]
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "displayName": "${__field.labels.pair}",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "transparent"
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "active": {
+                      "text": "Actif",
+                      "color": "orange",
+                      "index": 0
+                    },
+                    "quiet": {
+                      "text": "Calme",
+                      "color": "transparent",
+                      "index": 1
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "options": {
+            "showValue": "never",
+            "mergeValues": true,
+            "alignValue": "left",
+            "rowHeight": 0.8,
+            "legend": {
+              "showLegend": false,
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "transformations": [
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "time",
+                    "desc": false
+                  }
+                ]
+              }
+            },
+            {
+              "id": "partitionByValues",
+              "options": {
+                "fields": [
+                  "pair"
+                ],
+                "keepFields": false,
+                "naming": {
+                  "asLabels": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "id": 103,
+          "title": "Paires corrélées",
+          "description": "Une ligne par paire sur la période du dashboard, regroupée depuis les mêmes épisodes : combien d'épisodes, la plus haute confiance atteinte par l'un d'eux, le début du plus récent et s'il en reste un ouvert. Paire ouvre l'écran Corrélations du Hub sur cette paire, une fois URL du Hub renseignée.\n\nDemande PerfSentinelHub 0.6.0. La lecture s'arrête à 1000 épisodes, donc une large période sur un parc chargé peut manquer des paires plus anciennes.",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_HUB}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 95
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "${DS_HUB}"
+              },
+              "type": "json",
+              "source": "url",
+              "parser": "backend",
+              "format": "table",
+              "url": "/api/correlations?from=${__from}&to=${__to}&service=${service}&source_id=${hub_source}&limit=1000",
+              "url_options": {
+                "method": "GET"
+              },
+              "root_selector": "$count($) > 0 ? $each($ {pair_key: $}, function($v, $k) {($f := $v[0]; {\"pair\": $f.source.service & \" \" & $f.source.finding_type & \" -> \" & $f.target.service & \" \" & $f.target.finding_type, \"episodes\": $count($v), \"peak_confidence\": $max($v.peak_confidence), \"last_episode\": $max($v.started_at_ms), \"status\": $count($v[$not($exists(ended_at_ms)) or ended_at_ms = null]) > 0 ? \"active\" : \"closed\", \"daemon\": $f.source_name ? $f.source_name : $f.source_id, \"pair_key\": $k})}) : []",
+              "columns": [
+                {
+                  "selector": "pair",
+                  "text": "Paire",
+                  "type": "string"
+                },
+                {
+                  "selector": "status",
+                  "text": "Statut",
+                  "type": "string"
+                },
+                {
+                  "selector": "episodes",
+                  "text": "Épisodes",
+                  "type": "number"
+                },
+                {
+                  "selector": "peak_confidence",
+                  "text": "Confiance maximale",
+                  "type": "number"
+                },
+                {
+                  "selector": "last_episode",
+                  "text": "Dernier épisode",
+                  "type": "timestamp_epoch"
+                },
+                {
+                  "selector": "daemon",
+                  "text": "Daemon",
+                  "type": "string"
+                },
+                {
+                  "selector": "pair_key",
+                  "text": "pair_key",
+                  "type": "string"
+                }
+              ]
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Paire"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 520
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Ouvrir cette paire dans le Hub",
+                        "url": "${hub_url}/#/correlations?pair_key=${__data.fields.pair_key:percentencode}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Statut"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "active": {
+                            "text": "Actif",
+                            "color": "orange",
+                            "index": 0
+                          },
+                          "closed": {
+                            "text": "Terminé",
+                            "color": "blue",
+                            "index": 1
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Dernier épisode",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "pair_key": true
+                },
+                "indexByName": {
+                  "Paire": 0,
+                  "Statut": 1,
+                  "Épisodes": 2,
+                  "Confiance maximale": 3,
+                  "Dernier épisode": 4,
+                  "Daemon": 5,
+                  "pair_key": 6
+                },
+                "renameByName": {}
+              }
+            }
+          ]
         }
       ]
     }
@@ -2847,5 +3169,57 @@
     }
   ],
   "timezone": "browser",
-  "version": 14
+  "version": 15,
+  "annotations": {
+    "list": [
+      {
+        "name": "Incidents du Hub",
+        "enable": false,
+        "hide": false,
+        "iconColor": "red",
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "${DS_HUB}"
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_HUB}"
+          },
+          "type": "json",
+          "source": "url",
+          "parser": "backend",
+          "format": "table",
+          "url": "/api/incidents?service=${service}&source_id=${hub_source}&limit=200",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "$count($) > 0 ? $map($, function($i) {{\"time\": $i.at_ms, \"timeEnd\": $i.ended_at_ms ? $i.ended_at_ms : $i.at_ms, \"title\": $i.service & \" \" & $i.kind, \"text\": $i.source_id}}) : []",
+          "columns": [
+            {
+              "selector": "time",
+              "text": "time",
+              "type": "timestamp_epoch"
+            },
+            {
+              "selector": "timeEnd",
+              "text": "timeEnd",
+              "type": "timestamp_epoch"
+            },
+            {
+              "selector": "title",
+              "text": "title",
+              "type": "string"
+            },
+            {
+              "selector": "text",
+              "text": "text",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    ]
+  }
 }
