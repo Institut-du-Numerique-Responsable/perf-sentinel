@@ -914,8 +914,26 @@ fn at_a_glance(w: &mut Writer, report: &PeriodicReport) {
         w.para(8.5, TEXT_2, &text);
     }
     w.heading("Avoidable waste, two readings of the same data");
-    waste_bar(w, "Canonical", &aggregate.canonical_waste, BRAND);
-    waste_bar(w, "Operational", &aggregate.operational_waste, INFO);
+    // Both bars share one track length, sized from the wider value, so their
+    // fills stay comparable.
+    let value_room = [&aggregate.canonical_waste, &aggregate.operational_waste]
+        .into_iter()
+        .map(|tier| text_width(Face::Mono, 8.5, &waste_value(tier)) + 16.0)
+        .fold(0.0_f32, f32::max);
+    waste_bar(
+        w,
+        "Canonical",
+        &aggregate.canonical_waste,
+        BRAND,
+        value_room,
+    );
+    waste_bar(
+        w,
+        "Operational",
+        &aggregate.operational_waste,
+        INFO,
+        value_room,
+    );
     w.para(
         8.5,
         TEXT_2,
@@ -986,7 +1004,16 @@ fn uncertainty_band(w: &mut Writer, carbon: f64) {
     w.y = base + 6.0;
 }
 
-fn waste_bar(w: &mut Writer, label: &str, tier: &WasteTier, color: Rgb) {
+fn waste_value(tier: &WasteTier) -> String {
+    format!(
+        "{:.2} kg · {:.2} kWh · {}",
+        tier.carbon_kgco2eq,
+        tier.energy_kwh,
+        percent(tier.waste_ratio)
+    )
+}
+
+fn waste_bar(w: &mut Writer, label: &str, tier: &WasteTier, color: Rgb, value_room: f32) {
     w.ensure(18.0);
     let top = w.y + 2.0;
     if tier.is_default() {
@@ -1010,7 +1037,7 @@ fn waste_bar(w: &mut Writer, label: &str, tier: &WasteTier, color: Rgb) {
         &format!("{label}, N+1 from {}", tier.n_plus_one_threshold),
     );
     let track_x = MARGIN + 120.0;
-    let track_w = CONTENT_WIDTH - 120.0 - 150.0;
+    let track_w = CONTENT_WIDTH - 120.0 - value_room;
     w.boxed(track_x, top + 3.0, track_w, 7.0, 3.5, Some(TRACK), None);
     #[allow(clippy::cast_possible_truncation)] // a ratio in [0, 1]
     let filled = track_w * tier.waste_ratio.clamp(0.0, 1.0) as f32;
@@ -1023,13 +1050,7 @@ fn waste_bar(w: &mut Writer, label: &str, tier: &WasteTier, color: Rgb) {
         Some(color),
         None,
     );
-    let value = format!(
-        "{:.2} kg · {:.2} kWh · {}",
-        tier.carbon_kgco2eq,
-        tier.energy_kwh,
-        percent(tier.waste_ratio)
-    );
-    w.line_right(RIGHT, top + 9.0, Face::Mono, 8.5, TEXT, &value);
+    w.line_right(RIGHT, top + 9.0, Face::Mono, 8.5, TEXT, &waste_value(tier));
     w.y = top + 17.0;
 }
 

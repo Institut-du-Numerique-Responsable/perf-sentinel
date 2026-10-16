@@ -588,6 +588,39 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn a_large_waste_value_stays_clear_of_its_bar() {
+        let (mut report, _) = baked_report();
+        report.aggregate.canonical_waste.carbon_kgco2eq = 1234.56;
+        report.aggregate.canonical_waste.energy_kwh = 12345.67;
+        let pages = layout_pages(&PageContext::for_report(&report));
+        let page = &pages[1];
+        let (value_x, value_y) = page
+            .iter()
+            .find_map(|op| match op {
+                Op::Text { x, y, text, .. } if text.contains("12345.67 kWh") => Some((*x, *y)),
+                _ => None,
+            })
+            .expect("the canonical value");
+        // The track of the same row sits 6 points above the value's baseline.
+        let track_end = page
+            .iter()
+            .filter_map(|op| match op {
+                Op::Box { x, y, w, h, .. }
+                    if (*h - 7.0).abs() < f32::EPSILON && (value_y - 6.0 - y).abs() < 0.5 =>
+                {
+                    Some(x + w)
+                }
+                _ => None,
+            })
+            .fold(0.0_f32, f32::max);
+        assert!(track_end > 0.0, "no track on the value's row");
+        assert!(
+            value_x > track_end,
+            "value at {value_x}, track ends at {track_end}"
+        );
+    }
+
+    #[test]
     fn reference_urls_other_than_transparency_are_listed() {
         let (mut report, _) = baked_report();
         report.notes.reference_urls.clear();
