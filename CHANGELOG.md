@@ -13,6 +13,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
   prints one JSON line and exits 0 (rendered), 1 (refused), 3 (input error) or 5 (cannot
   render: a newer schema, text outside the bundled fonts, or a document the PDF writer refuses). A `transparency` entry in
   `[notes.reference_urls]` puts a QR code on the cover. veraPDF validates the output in CI.
+- `report --hub-relay <source_id>` renders a live report for a perf-sentinel Hub to serve: Ack
+  and Revoke go through that Hub's relay at the page's own origin with the reader's session,
+  so no daemon key reaches the browser and the daemon needs no CORS entry. Exclusive with
+  `--daemon-url`.
 - `verify-hash --report report.pdf` verifies the report a disclosure PDF attaches, a copy
   re-saved by a tool that keeps attachments included, and says it checked that report and not
   the printed pages. PDFs over 4 MiB are refused before parsing.

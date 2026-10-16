@@ -156,6 +156,11 @@ pub struct RenderOptions {
     /// fetch retry) live in the live-mode IIFE block at the bottom
     /// of `crates/sentinel-core/src/report/html_template.html`.
     pub daemon_url: Option<String>,
+    /// Hub source id for the relay live mode: the page acknowledges through
+    /// the Hub that serves it, at its own origin, with the reader's session.
+    /// Exclusive with `daemon_url`. The caller validates the id
+    /// (`[A-Za-z0-9._-]`, not `.` or `..`) since it lands in a URL path.
+    pub hub_relay: Option<String>,
 }
 
 /// Counters describing how many candidate traces ended up embedded in
@@ -243,7 +248,7 @@ pub fn render(report: &Report, traces: &[Trace], options: &RenderOptions) -> (St
     // `&'static str` or `String` only.
     let json = serde_json::to_string(&payload).expect("payload always serializes");
     let title = derive_page_title(&sanitized_label);
-    let csp = build_csp(options.daemon_url.as_deref());
+    let csp = build_csp(options.daemon_url.as_deref(), options.hub_relay.is_some());
     let html = inject(&json, &title, &csp);
     (html, RenderStats { kept, total })
 }
@@ -294,6 +299,8 @@ struct Payload<'a> {
     diff: Option<&'a DiffReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     daemon: Option<DaemonHandle<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hub_relay: Option<HubRelayHandle<'a>>,
 }
 
 /// Live-mode handle embedded in the JSON payload. Presence flips the JS
@@ -303,6 +310,11 @@ struct Payload<'a> {
 #[derive(Debug, Serialize)]
 struct DaemonHandle<'a> {
     url: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct HubRelayHandle<'a> {
+    source: &'a str,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -378,9 +390,10 @@ fn inject(json: &str, title: &str, csp: &str) -> String {
 /// directive value. The `inject` `assert!(!csp.contains("{{"))`
 /// is the fallback in case `validate_url` is ever relaxed.
 #[must_use]
-fn build_csp(daemon_url: Option<&str>) -> String {
+fn build_csp(daemon_url: Option<&str>, hub_relay: bool) -> String {
     match daemon_url {
         Some(url) => format!("{STATIC_CSP}; connect-src 'self' {url}"),
+        None if hub_relay => format!("{STATIC_CSP}; connect-src 'self'"),
         None => STATIC_CSP.to_string(),
     }
 }
@@ -800,6 +813,10 @@ fn build_payload_with_label<'a>(
             .daemon_url
             .as_deref()
             .map(|url| DaemonHandle { url }),
+        hub_relay: options
+            .hub_relay
+            .as_deref()
+            .map(|source| HubRelayHandle { source }),
     }
 }
 
@@ -1108,6 +1125,10 @@ fn trim_to_size_target<'a>(
             .daemon_url
             .as_deref()
             .map(|url| DaemonHandle { url }),
+        hub_relay: options
+            .hub_relay
+            .as_deref()
+            .map(|source| HubRelayHandle { source }),
     };
     let envelope_len = serde_json::to_string(&envelope).map_or(usize::MAX, |s| s.len());
 

@@ -253,6 +253,20 @@ seconds: one click deletes the acknowledgment straight away, without
 the confirmation dialog. The `Revoke` button on a row keeps its
 confirmation.
 
+### Through a Hub
+
+A report a perf-sentinel Hub renders for a daemon source takes
+`--hub-relay <source_id>` instead of `--daemon-url`. The page then talks
+to the Hub that serves it, at its own origin and with the reader's Hub
+session: it lists acknowledgments from `GET /api/sources/{id}/acks`,
+acknowledges through `POST /api/sources/{id}/acks` and revokes through
+`POST /api/sources/{id}/acks/revoke`. No daemon key reaches the browser
+and the daemon needs no CORS entry: the Hub holds the key and checks the
+reader's rights. A refusal shows the Hub's own reason, and a 401 asks the
+reader to sign in to the Hub. The two flags are exclusive, the CSP gets
+`connect-src 'self'` only, and the source id must match
+`[A-Za-z0-9._-]{1,64}`, `.` and `..` excluded.
+
 ### CSP under live mode
 
 Live mode rewrites the rendered Content-Security-Policy meta tag to

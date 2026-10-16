@@ -833,8 +833,14 @@ pub(crate) enum Commands {
         /// query string, userinfo (`user@host`) and trailing slashes
         /// are rejected at parse time.
         #[cfg(feature = "daemon")]
-        #[arg(long, value_name = "URL")]
+        #[arg(long, value_name = "URL", conflicts_with = "hub_relay")]
         daemon_url: Option<String>,
+        /// Hub source id for the relay live mode, for a report a
+        /// perf-sentinel Hub serves. Ack and Revoke go through that Hub at
+        /// the page's own origin, with the reader's Hub session: no daemon
+        /// key in the browser, no CORS. Exclusive with `--daemon-url`.
+        #[arg(long, value_name = "SOURCE_ID", value_parser = parse_hub_source_id)]
+        hub_relay: Option<String>,
     },
 
     /// Compare two trace sets and emit a delta report (regressions and improvements).
@@ -1379,4 +1385,20 @@ Exit codes, with one JSON line on stdout:
     pub const MAN: &str = "Examples:
   # Install the man page into the system man path
   perf-sentinel man > /usr/local/share/man/man1/perf-sentinel.1";
+}
+
+/// A Hub source id as the Hub's own configuration accepts it, minus the two
+/// ids a browser would resolve as path segments.
+fn parse_hub_source_id(raw: &str) -> Result<String, String> {
+    let valid = (1..=64).contains(&raw.len())
+        && raw
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        && raw != "."
+        && raw != "..";
+    if valid {
+        Ok(raw.to_string())
+    } else {
+        Err("expected 1 to 64 of [A-Za-z0-9._-], not . or ..".to_string())
+    }
 }

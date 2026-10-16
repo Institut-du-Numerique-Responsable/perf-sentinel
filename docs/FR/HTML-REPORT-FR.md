@@ -271,6 +271,21 @@ secondes : un clic supprime l'acquittement directement, sans la
 boîte de confirmation. Le bouton `Revoke` d'une ligne garde sa
 confirmation.
 
+### À travers un Hub
+
+Un rapport qu'un Hub perf-sentinel rend pour une source daemon prend
+`--hub-relay <source_id>` au lieu de `--daemon-url`. La page parle alors
+au Hub qui la sert, à sa propre origine et avec la session Hub du
+lecteur : elle liste les acquittements par `GET /api/sources/{id}/acks`,
+acquitte par `POST /api/sources/{id}/acks` et révoque par
+`POST /api/sources/{id}/acks/revoke`. Aucune clé du daemon n'arrive dans
+le navigateur et le daemon n'a besoin d'aucune entrée CORS : le Hub garde
+la clé et vérifie les droits du lecteur. Un refus affiche la raison
+donnée par le Hub, et un 401 invite le lecteur à se connecter au Hub. Les
+deux options s'excluent, la CSP reçoit seulement `connect-src 'self'`, et
+l'identifiant de source doit correspondre à `[A-Za-z0-9._-]{1,64}`, hors
+`.` et `..`.
+
 ### CSP en mode live
 
 Le mode live réécrit la balise meta Content-Security-Policy rendue pour

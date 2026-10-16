@@ -438,6 +438,7 @@ async fn dispatch_command(command: Commands) {
             show_acknowledged,
             #[cfg(feature = "daemon")]
             daemon_url,
+            hub_relay,
         } => {
             #[cfg(feature = "daemon")]
             let daemon_url = validate_daemon_url_or_exit(daemon_url);
@@ -492,6 +493,7 @@ async fn dispatch_command(command: Commands) {
                 show_acknowledged,
                 #[cfg(feature = "daemon")]
                 daemon_url,
+                hub_relay,
             )
             .await;
         }
@@ -1285,6 +1287,7 @@ async fn cmd_report(
     no_acknowledgments: bool,
     show_acknowledged: bool,
     #[cfg(feature = "daemon")] daemon_url: Option<String>,
+    hub_relay: Option<String>,
 ) {
     let config = load_config(config_path);
 
@@ -1402,6 +1405,7 @@ async fn cmd_report(
     {
         options.daemon_url = daemon_url;
     }
+    options.hub_relay = hub_relay;
 
     let (html, stats) = sentinel_core::report::html::render(&report, &traces, &options);
     if let Err(e) = write_file_no_follow(output, html.as_bytes()) {
