@@ -21,7 +21,8 @@ pub fn detect_fanout(trace: &Trace, indices: &TraceIndices<'_>, max_fanout: u32)
 
 /// Same detection, also returning the ids of the children that make up the
 /// fanout. The HTML sink highlights them, since the finding's template
-/// names the parent and would otherwise light the container alone.
+/// names the parent when it is in the trace and would otherwise light the
+/// container alone.
 #[must_use]
 pub(crate) fn detect_fanout_with_spans<'a>(
     trace: &'a Trace,
@@ -272,6 +273,27 @@ mod tests {
 
         assert_eq!(a.pattern.template, "SELECT * FROM t WHERE id = ?");
         assert_eq!(a.signature, b.signature);
+    }
+
+    #[test]
+    fn dominant_template_breaks_ties_on_the_smallest() {
+        let events: Vec<_> = ["SELECT b", "SELECT a", "SELECT b", "SELECT a"]
+            .iter()
+            .enumerate()
+            .map(|(i, sql)| {
+                make_sql_event(
+                    "trace-1",
+                    &format!("s-{i}"),
+                    sql,
+                    "2025-07-10T14:32:01.000Z",
+                )
+            })
+            .collect();
+        let trace = make_trace(events);
+
+        assert_eq!(dominant_template(&trace, &[0, 1, 2, 3]), "SELECT a");
+        assert_eq!(dominant_template(&trace, &[3, 2, 1, 0]), "SELECT a");
+        assert_eq!(dominant_template(&trace, &[0, 1, 2]), "SELECT b");
     }
 
     #[test]
