@@ -293,6 +293,7 @@ struct HubExportSection {
     api_key_file: Option<String>,
     batch_size: Option<usize>,
     flush_interval_secs: Option<u64>,
+    request_timeout_secs: Option<u64>,
     max_pending: Option<usize>,
 }
 
@@ -715,6 +716,11 @@ impl From<RawConfig> for Config {
                         .hub_export
                         .flush_interval_secs
                         .unwrap_or(daemon_defaults.hub_export.flush_interval_secs),
+                    request_timeout_secs: raw
+                        .daemon
+                        .hub_export
+                        .request_timeout_secs
+                        .unwrap_or(daemon_defaults.hub_export.request_timeout_secs),
                     max_pending: raw
                         .daemon
                         .hub_export

@@ -381,6 +381,8 @@ pub struct DaemonHubExportConfig {
     pub api_key_file: Option<String>,
     pub batch_size: usize,
     pub flush_interval_secs: u64,
+    /// How long one push may take before the daemon gives up and retries.
+    pub request_timeout_secs: u64,
     pub max_pending: usize,
 }
 
@@ -628,6 +630,7 @@ impl Default for DaemonHubExportConfig {
             api_key_file: None,
             batch_size: 100,
             flush_interval_secs: 5,
+            request_timeout_secs: 10,
             max_pending: 10_000,
         }
     }

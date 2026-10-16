@@ -296,6 +296,12 @@ impl Config {
             &300,
         )?;
         check_range(
+            "hub_export.request_timeout_secs",
+            &export.request_timeout_secs,
+            &1,
+            &60,
+        )?;
+        check_range(
             "hub_export.max_pending",
             &export.max_pending,
             &1,

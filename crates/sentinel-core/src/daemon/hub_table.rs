@@ -10,7 +10,7 @@ use std::time::Duration;
 use prometheus::{Gauge, IntCounter};
 
 use super::hub_export::{
-    ExportOutcome, bounded_body, classify, evict_by_order, next_delay, post_batch,
+    ExportOutcome, HubClient, bounded_body, classify, evict_by_order, next_delay, post_batch,
     snapshot_by_order,
 };
 use crate::http_client;
@@ -199,7 +199,7 @@ impl<V: Keyed + Clone + 'static> RouteExport<V> {
     /// no such route.
     pub(crate) async fn round(
         &mut self,
-        client: &http_client::HttpClientWithBody,
+        client: &HubClient,
         api_key: &str,
         metrics: &MetricsState,
         flush_interval: Duration,
