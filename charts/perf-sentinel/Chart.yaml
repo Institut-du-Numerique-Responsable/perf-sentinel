@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.30.0
-appVersion: "0.30.0"
+version: 0.31.0
+appVersion: "0.31.0"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -37,14 +37,12 @@ annotations:
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
     - kind: added
-      description: "appVersion 0.30.0. With [daemon.hub_export] and [daemon.correlation] both enabled, the image pushes its cross-trace correlations to PerfSentinelHub's /api/import/correlations as episodes, each period during which a pair kept co-occurring, so a correlation outlives the rolling window. Upgrade the Hub to 0.6.0 first: an older Hub with sign-in on answers 401, which the daemon retries and logs. New label-free metrics perf_sentinel_hub_export_correlations_pending and perf_sentinel_hub_export_correlations_dropped_total."
+      description: "appVersion 0.31.0. [daemon.hub_export] request_timeout_secs, 1 to 60 seconds and 10 by default as before, bounds one push of findings, incidents or correlations to PerfSentinelHub. A Hub slowed down while catching up no longer makes every push time out, back off up to five minutes and drop findings from a full pending table."
     - kind: changed
-      description: "The values.yaml comment on [daemon.hub_export] says correlation episodes travel through the same block. No values.yaml key is added or removed, and no template changes."
-    - kind: fixed
-      description: "An excessive_fanout whose parent span is outside the trace keeps one signature from trace to trace instead of one per trace, which filled a Hub's volume and broke its acknowledgments. These findings change signature once."
+      description: "The values.yaml comment on [daemon.hub_export] shows request_timeout_secs. No values.yaml key is added or removed, and no template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.30.0
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.31.0
       platforms:
         - linux/amd64
         - linux/arm64

@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-16
+
+A minor release for new subcommands and flags, with public API additions only. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. `disclose-pdf` turns a periodic disclosure into a PDF/A-3b a reader opens without a terminal, and `verify-hash` checks the report such a PDF carries. A live report can acknowledge through a PerfSentinelHub relay instead of reaching the daemon from the browser, the `pg_stat` and `mysql_stat` scrapes filter on label matchers, and the daemon's Hub export takes a configurable request timeout. PerfSentinelHub 0.7.0 drives `disclose-pdf` and `--hub-relay`.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.31.0 touches the scoring code.
+
 ### Added
 
 - `perf-sentinel disclose-pdf` renders a periodic report as a PDF/A-3b for readers without a
