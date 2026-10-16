@@ -29,6 +29,13 @@ the chart version, to know which daemon image ships.
   episodes travel through the same block. No `values.yaml` key is added or
   removed, and no template changes.
 
+### Fixed
+
+- An `excessive_fanout` whose parent span is outside the trace keeps one
+  signature from trace to trace instead of one per trace, which filled a
+  Hub's volume and broke its acknowledgments. These findings change
+  signature once.
+
 ## [0.29.0]
 
 ### Added

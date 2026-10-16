@@ -40,6 +40,8 @@ annotations:
       description: "appVersion 0.30.0. With [daemon.hub_export] and [daemon.correlation] both enabled, the image pushes its cross-trace correlations to PerfSentinelHub's /api/import/correlations as episodes, each period during which a pair kept co-occurring, so a correlation outlives the rolling window. Upgrade the Hub to 0.6.0 first: an older Hub with sign-in on answers 401, which the daemon retries and logs. New label-free metrics perf_sentinel_hub_export_correlations_pending and perf_sentinel_hub_export_correlations_dropped_total."
     - kind: changed
       description: "The values.yaml comment on [daemon.hub_export] says correlation episodes travel through the same block. No values.yaml key is added or removed, and no template changes."
+    - kind: fixed
+      description: "An excessive_fanout whose parent span is outside the trace keeps one signature from trace to trace instead of one per trace, which filled a Hub's volume and broke its acknowledgments. These findings change signature once."
   artifacthub.io/images: |
     - name: perf-sentinel
       image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.30.0

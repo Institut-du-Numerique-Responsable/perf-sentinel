@@ -6,7 +6,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [0.30.0] - 2026-10-16
 
-A minor release for a new daemon behavior, with no public API change. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The Hub's long memory now covers cross-trace correlations: a daemon that exports findings to PerfSentinelHub and runs the correlator pushes each pair's active periods as episodes, so a correlation outlives the rolling window. Upgrade the Hub to 0.6.0 before the daemons.
+A minor release for a new daemon behavior, with no public API change. One family of finding signatures changes, once. An `excessive_fanout` whose parent span is outside the trace, the usual case in production, took that span's id into its signature, so each occurrence got its own. It now keeps one signature from trace to trace: these findings show up once under a new signature, and an acknowledgment taken on one of the old ones, which never matched twice anyway, stops matching. No other detector, normalizer or signature changes. The Hub's long memory now covers cross-trace correlations: a daemon that exports findings to PerfSentinelHub and runs the correlator pushes each pair's active periods as episodes, so a correlation outlives the rolling window. Upgrade the Hub to 0.6.0 before the daemons.
 
 The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.30.0 touches the scoring code.
 
@@ -31,6 +31,12 @@ The embedded reference data keeps its vintages for this release: the SPECpower i
 
 ### Fixed
 
+- An `excessive_fanout` whose parent span is not in the trace no longer takes
+  `parent:<span id>` as its template. The span id differs in every trace, so each
+  occurrence got its own signature: acknowledgments never matched twice, and a Hub fed
+  by such a daemon stored one finding per trace until its volume filled. The template is
+  now the most frequent child template, the same in every trace. These findings change
+  signature once, and an acknowledgment taken on one of them never matched again anyway.
 - A transport failure now names its cause. `query`, the scrapers and every other user of the
   shared HTTP client printed a bare `HTTP transport error`, so a TLS handshake against a plain
   HTTP port, a refused connection or a DNS failure all read the same. The message now carries
