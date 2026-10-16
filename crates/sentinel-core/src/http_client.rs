@@ -266,8 +266,10 @@ pub fn redact_endpoint_str(raw: &str) -> String {
 pub enum FetchError {
     #[error("failed to build HTTP request")]
     RequestBuild(#[source] hyper::http::Error),
-    #[error("HTTP transport error")]
-    Transport(#[source] hyper_util::client::legacy::Error),
+    /// The causes ride in the message, so every caller names the TLS, DNS
+    /// or connect failure, not only those that walk `source()`.
+    #[error("HTTP transport error: {}", cause_chain(.0))]
+    Transport(hyper_util::client::legacy::Error),
     #[error("body read failed: {0}")]
     BodyRead(String),
     /// The response outgrew [`MAX_BODY_BYTES`]. Distinct from
@@ -281,6 +283,18 @@ pub enum FetchError {
     HttpStatus(u16),
     #[error("request timed out")]
     Timeout,
+}
+
+/// `error: cause: cause ...`, down the whole source chain.
+fn cause_chain(e: &hyper_util::client::legacy::Error) -> String {
+    use std::fmt::Write as _;
+    let mut out = e.to_string();
+    let mut source = std::error::Error::source(e);
+    while let Some(cause) = source {
+        let _ = write!(out, ": {cause}");
+        source = cause.source();
+    }
+    out
 }
 
 /// Tell a body that outgrew [`MAX_BODY_BYTES`] apart from a transfer that

@@ -21,7 +21,8 @@ pub fn detect_fanout(trace: &Trace, indices: &TraceIndices<'_>, max_fanout: u32)
 
 /// Same detection, also returning the ids of the children that make up the
 /// fanout. The HTML sink highlights them, since the finding's template
-/// names the parent and would otherwise light the container alone.
+/// names the parent when it is in the trace and would otherwise light the
+/// container alone.
 #[must_use]
 pub(crate) fn detect_fanout_with_spans<'a>(
     trace: &'a Trace,
@@ -78,9 +79,13 @@ fn fanout_impl<'a>(
         let first_ts = first_ts.to_string();
         let last_ts = last_ts.to_string();
 
-        // Parent template (operation name or span template)
-        let template =
-            parent_span.map_or_else(|| format!("parent:{parent_id}"), |s| s.template.to_string());
+        // Parent template, else the dominant child template: a span id would make
+        // every trace's signature unique, and a parent outside the trace is the
+        // usual case when the server span is not a captured event.
+        let template = parent_span.map_or_else(
+            || dominant_template(trace, child_indices).to_string(),
+            |s| s.template.to_string(),
+        );
 
         let child_span_ids = crate::detect::member_span_ids(trace, child_indices, collect_spans);
         findings.push((
@@ -118,6 +123,19 @@ fn fanout_impl<'a>(
     }
 
     findings
+}
+
+/// The most frequent template among the children, ties going to the smallest,
+/// so the same fanout yields the same template in every trace.
+fn dominant_template<'t>(trace: &'t Trace, child_indices: &[usize]) -> &'t str {
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for &i in child_indices {
+        *counts.entry(&trace.spans[i].template).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(a.0)))
+        .map_or("", |(template, _)| template)
 }
 
 #[cfg(test)]
@@ -224,6 +242,58 @@ mod tests {
         assert_eq!(findings.len(), 1);
         // Service and endpoint should come from the first child span
         assert_eq!(findings[0].service, "order-svc");
+    }
+
+    #[test]
+    fn parent_not_in_trace_keeps_signature_stable_across_traces() {
+        let orphan = |trace_id: &str, parent_id: &str| {
+            let mut events = Vec::new();
+            for i in 0..25 {
+                let sql = if i < 3 {
+                    format!("SELECT * FROM audit WHERE id = {i}")
+                } else {
+                    format!("SELECT * FROM t WHERE id = {i}")
+                };
+                let mut child = make_sql_event(
+                    trace_id,
+                    &format!("{trace_id}-child-{i}"),
+                    &sql,
+                    &format!("2025-07-10T14:32:01.{:03}Z", (i + 1) * 10),
+                );
+                child.parent_span_id = Some(parent_id.to_string());
+                events.push(child);
+            }
+            let trace = make_trace(events);
+            let mut findings = detect_fanout(&trace, &TraceIndices::build(&trace), 20);
+            crate::acknowledgments::enrich_with_signatures(&mut findings);
+            findings.remove(0)
+        };
+        let a = orphan("trace-1", "bccb4bfc238eae4a");
+        let b = orphan("trace-2", "b78d2dd43064b89c");
+
+        assert_eq!(a.pattern.template, "SELECT * FROM t WHERE id = ?");
+        assert_eq!(a.signature, b.signature);
+    }
+
+    #[test]
+    fn dominant_template_breaks_ties_on_the_smallest() {
+        let events: Vec<_> = ["SELECT b", "SELECT a", "SELECT b", "SELECT a"]
+            .iter()
+            .enumerate()
+            .map(|(i, sql)| {
+                make_sql_event(
+                    "trace-1",
+                    &format!("s-{i}"),
+                    sql,
+                    "2025-07-10T14:32:01.000Z",
+                )
+            })
+            .collect();
+        let trace = make_trace(events);
+
+        assert_eq!(dominant_template(&trace, &[0, 1, 2, 3]), "SELECT a");
+        assert_eq!(dominant_template(&trace, &[3, 2, 1, 0]), "SELECT a");
+        assert_eq!(dominant_template(&trace, &[0, 1, 2]), "SELECT b");
     }
 
     #[test]

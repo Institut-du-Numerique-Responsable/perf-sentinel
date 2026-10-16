@@ -1053,7 +1053,7 @@ async fn a_resolved_alert_queues_the_closed_incident() {
 
     let batch = buffer.snapshot(10);
     assert_eq!(1, batch.len());
-    assert!(batch[0].incident.ended_at_ms.is_some());
+    assert!(batch[0].value.ended_at_ms.is_some());
 }
 
 #[tokio::test]

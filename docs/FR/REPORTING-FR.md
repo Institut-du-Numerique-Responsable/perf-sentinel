@@ -194,8 +194,8 @@ Lorsque le daemon est configuré avec `[reporting] intent = "official"`, il refu
 intent = "official"
 confidentiality_level = "public"
 org_config_path = "/etc/perf-sentinel/org.toml"
-# Réservé pour 0.8.0 (divulgations périodiques déclenchées par le
-# daemon), actuellement un no-op. Renseigner ce champ aujourd'hui
+# Réservé aux divulgations périodiques déclenchées par le daemon, pas
+# encore implémentées : un no-op. Renseigner ce champ aujourd'hui
 # émet un warning au démarrage. Les rapports sont produits
 # exclusivement via `perf-sentinel disclose --output`.
 disclose_output_path = "/var/lib/perf-sentinel/last-disclosure.json"

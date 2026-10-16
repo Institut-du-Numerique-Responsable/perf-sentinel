@@ -14,8 +14,10 @@ pub mod query_api;
 pub mod traces_store;
 
 mod event_loop;
+mod hub_correlation_export;
 mod hub_export;
 mod hub_incident_export;
+mod hub_table;
 #[cfg(unix)]
 mod json_socket;
 mod listeners;
@@ -262,12 +264,16 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     // a mounted ConfigMap applies without restarting the pod. Aborts on drop,
     // like the memory watcher above.
     let _ack_reload = spawn_ack_toml_reload(&config, toml_acks.clone());
+    // Built before the exporter, which reads it to push correlation episodes.
+    let correlator = setup_correlator(&config);
     let hub_export = hub_export::HubExporter::spawn(
         &config.daemon.hub_export,
         metrics.clone(),
         toml_acks.clone(),
         ack_store.clone(),
         config.daemon.incidents.enabled,
+        correlator.clone(),
+        &config.daemon.correlation,
     )?;
     let hub_export_buffer = hub_export.as_ref().map(hub_export::HubExporter::buffer);
     // Masked span trees for the findings the store keeps, so an exported
@@ -283,7 +289,6 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         traces_capacity,
         config.daemon.max_events_per_trace,
     ));
-    let correlator = setup_correlator(&config);
     // Shared cell mutated by the event loop after each batch and read
     // by the /api/export/report handler. Initialized to disabled(0):
     // the cold-start guard (`events_processed == 0 -> 503`) ensures

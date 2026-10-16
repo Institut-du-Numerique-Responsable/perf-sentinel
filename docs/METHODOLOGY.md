@@ -144,7 +144,7 @@ A disclosure carries:
 - `integrity.content_hash`: SHA-256 over the canonical JSON form (sorted object keys, compact serialisation, UTF-8) with `content_hash` blanked to an empty string. A consumer recomputes by setting their copy's `content_hash` to `""` and hashing.
 - `integrity.binary_hash`: SHA-256 of the Perf Sentinel binary that produced the file, taken via `std::env::current_exe()`. Pair with `binary_verification_url` to assert the binary matches a published release.
 
-The hash chain in `integrity.trace_integrity_chain` is reserved for a future revision and is always `null` in schema v1.0.
+`integrity.trace_integrity_chain` carries the archive's hash-chain verdict since schema v1.6: how many windows verified, how many carry no chain, and how many breaks were found. It is `null` on reports written before v1.6. See [SCHEMA.md](SCHEMA.md).
 
 ## Cryptographic integrity (0.7.0+)
 

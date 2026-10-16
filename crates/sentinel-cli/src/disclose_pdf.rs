@@ -1,13 +1,12 @@
 //! `perf-sentinel disclose-pdf`: the exit codes and the JSON line are a
 //! contract the Hub reads, never its stderr.
 
-use std::io::Read as _;
 use std::path::Path;
 
 use sentinel_core::report::periodic::pdf::{PdfInputs, RenderError, render_disclosure_pdf};
 use serde::Serialize;
 
-use crate::limits::MAX_LOCAL_REPORT_BYTES;
+use crate::limits::{CappedRead, MAX_LOCAL_REPORT_BYTES, read_capped};
 
 /// A statement or a bundle is a few KB.
 const MAX_SIDECAR_BYTES: u64 = 1024 * 1024;
@@ -87,21 +86,20 @@ fn refuse(error: &RenderError) -> i32 {
     finish(error.result(), Some(error.reason()))
 }
 
-/// Read through one handle, never past `cap`: a file swapped after a size
-/// check cannot be loaded past it.
+/// A capped read through one handle, its failure named in the contract's terms.
 fn read(path: &Path, cap: u64) -> Result<Vec<u8>, &'static str> {
-    let file = std::fs::File::open(path).map_err(|e| {
-        eprintln!("Error: read {}: {e}", path.display());
-        "missing_file"
-    })?;
-    let mut bytes = Vec::new();
-    file.take(cap + 1).read_to_end(&mut bytes).map_err(|e| {
-        eprintln!("Error: read {}: {e}", path.display());
-        "missing_file"
-    })?;
-    if bytes.len() as u64 > cap {
-        eprintln!("Error: {} exceeds the {cap}-byte cap", path.display());
-        return Err("file_too_large");
+    match read_capped(path, cap) {
+        Ok(CappedRead::Bytes(bytes)) => Ok(bytes),
+        Ok(CappedRead::TooLarge(len)) => {
+            eprintln!(
+                "Error: {} is {len} bytes, exceeds the {cap}-byte cap",
+                path.display()
+            );
+            Err("file_too_large")
+        }
+        Err(e) => {
+            eprintln!("Error: read {}: {e}", path.display());
+            Err("missing_file")
+        }
     }
-    Ok(bytes)
 }

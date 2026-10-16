@@ -451,6 +451,8 @@ config:
     # and perf_sentinel_hub_export_dropped_total counts what was evicted.
     # With [daemon.incidents] on as well, the same block pushes incidents to
     # /api/import/incidents (PerfSentinelHub 0.5.0+) from perf-sentinel 0.29.0.
+    # With [daemon.correlation] on as well, it pushes correlation episodes to
+    # /api/import/correlations (PerfSentinelHub 0.6.0+) from perf-sentinel 0.30.0.
     #
     # api_key_file must point at a Secret-backed file, never at a value in
     # this file: the config lands in a ConfigMap, which is not a secret store.

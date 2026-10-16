@@ -47,6 +47,12 @@
       "id": "table",
       "name": "table",
       "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "state-timeline",
+      "name": "State timeline",
+      "version": ""
     }
   ],
   "title": "perf-sentinel findings",
@@ -518,6 +524,33 @@
         "options": [],
         "hide": 0,
         "description": "Environment of the History (Hub) row, one of the environments the Hub's sources declare, listed from the environment label of perf_sentinel_hub_findings, so Prometheus has to scrape the Hub. All sends a single space, which the Hub reads as the whole fleet, or with its access control on, every finding the datasource's token reaches. The Hub answers 400 to an environment it does not know and, with its access control on, to one where the datasource's token reaches no source."
+      },
+      {
+        "name": "hub_source",
+        "label": "Hub source",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(perf_sentinel_hub_source_last_import_seconds, source)",
+        "query": {
+          "query": "label_values(perf_sentinel_hub_source_last_import_seconds, source)",
+          "refId": "hub_source"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": " ",
+        "multi": false,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Daemon of the Correlation episodes and Correlated pairs panels and of the Hub incidents annotation, one of the Hub's source ids, listed from the source label of perf_sentinel_hub_source_last_import_seconds, so Prometheus has to scrape the Hub and only daemons that push appear. All sends a single space, which the Hub reads as every source the datasource's token reaches."
       },
       {
         "name": "hub_offset",
@@ -2826,6 +2859,305 @@
               }
             }
           ]
+        },
+        {
+          "type": "state-timeline",
+          "id": 102,
+          "title": "Correlation episodes",
+          "description": "One line per pair of findings that kept following each other, one segment per episode: a period during which the daemon saw the pair co-occur, cut once the pair stayed quiet for the episode gap (10 minutes on the default window). Read from the Hub's GET /api/correlations, so it reaches past the daemon's rolling window. An open episode runs to now.\n\nNeeds PerfSentinelHub 0.6.0 and a Perf Sentinel 0.30.0 daemon with [daemon.hub_export] and [daemon.correlation] on. An older Hub answers 404 and the panel stays empty. The read stops at 1000 episodes, so a wide range on a busy fleet can miss the older ones. Turn on the Hub incidents annotation to set incidents against the episodes.",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_HUB}"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 85
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "${DS_HUB}"
+              },
+              "type": "json",
+              "source": "url",
+              "parser": "backend",
+              "format": "table",
+              "url": "/api/correlations?from=${__from}&to=${__to}&service=${service}&source_id=${hub_source}&limit=1000",
+              "url_options": {
+                "method": "GET"
+              },
+              "root_selector": "$count($) > 0 ? $reduce($, function($rows, $e) {($p := $e.source.service & \" \" & $e.source.finding_type & \" -> \" & $e.target.service & \" \" & $e.target.finding_type & \" (\" & $substring($e.pair_key, 0, 6) & \", \" & $e.source_id & \")\"; $append($rows, [{\"time\": $e.started_at_ms, \"pair\": $p, \"state\": \"active\"}, {\"time\": $e.ended_at_ms ? $e.ended_at_ms : $millis(), \"pair\": $p, \"state\": \"quiet\"}]))}, []) : []",
+              "columns": [
+                {
+                  "selector": "time",
+                  "text": "time",
+                  "type": "timestamp_epoch"
+                },
+                {
+                  "selector": "pair",
+                  "text": "pair",
+                  "type": "string"
+                },
+                {
+                  "selector": "state",
+                  "text": "state",
+                  "type": "string"
+                }
+              ]
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "displayName": "${__field.labels.pair}",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "transparent"
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "active": {
+                      "text": "Active",
+                      "color": "orange",
+                      "index": 0
+                    },
+                    "quiet": {
+                      "text": "Quiet",
+                      "color": "transparent",
+                      "index": 1
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "options": {
+            "showValue": "never",
+            "mergeValues": true,
+            "alignValue": "left",
+            "rowHeight": 0.8,
+            "legend": {
+              "showLegend": false,
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "transformations": [
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "time",
+                    "desc": false
+                  }
+                ]
+              }
+            },
+            {
+              "id": "partitionByValues",
+              "options": {
+                "fields": [
+                  "pair"
+                ],
+                "keepFields": false,
+                "naming": {
+                  "asLabels": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "id": 103,
+          "title": "Correlated pairs",
+          "description": "One row per pair and daemon over the dashboard's time range, grouped from the same episodes: how many episodes, the highest confidence any of them reached, when the latest one started and whether one is still open. Pair opens the Hub's Correlations screen on that pair, once Hub URL is set.\n\nNeeds PerfSentinelHub 0.6.0. The read stops at 1000 episodes, so a wide range on a busy fleet can miss older pairs.",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_HUB}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 95
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "${DS_HUB}"
+              },
+              "type": "json",
+              "source": "url",
+              "parser": "backend",
+              "format": "table",
+              "url": "/api/correlations?from=${__from}&to=${__to}&service=${service}&source_id=${hub_source}&limit=1000",
+              "url_options": {
+                "method": "GET"
+              },
+              "root_selector": "$count($) > 0 ? $each($ {pair_key & \"|\" & source_id: $}, function($v, $k) {($f := $v[0]; {\"pair\": $f.source.service & \" \" & $f.source.finding_type & \" -> \" & $f.target.service & \" \" & $f.target.finding_type, \"episodes\": $count($v), \"peak_confidence\": $max($v.peak_confidence), \"last_episode\": $max($v.started_at_ms), \"status\": $count($v[$not($exists(ended_at_ms)) or ended_at_ms = null]) > 0 ? \"active\" : \"closed\", \"daemon\": $f.source_name ? $f.source_name : $f.source_id, \"pair_key\": $f.pair_key})}) : []",
+              "columns": [
+                {
+                  "selector": "pair",
+                  "text": "Pair",
+                  "type": "string"
+                },
+                {
+                  "selector": "status",
+                  "text": "Status",
+                  "type": "string"
+                },
+                {
+                  "selector": "episodes",
+                  "text": "Episodes",
+                  "type": "number"
+                },
+                {
+                  "selector": "peak_confidence",
+                  "text": "Peak confidence",
+                  "type": "number"
+                },
+                {
+                  "selector": "last_episode",
+                  "text": "Last episode",
+                  "type": "timestamp_epoch"
+                },
+                {
+                  "selector": "daemon",
+                  "text": "Daemon",
+                  "type": "string"
+                },
+                {
+                  "selector": "pair_key",
+                  "text": "pair_key",
+                  "type": "string"
+                }
+              ]
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Pair"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 520
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Open this pair in the Hub",
+                        "url": "${hub_url}/#/correlations?pair_key=${__data.fields.pair_key:percentencode}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Status"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "active": {
+                            "text": "Active",
+                            "color": "orange",
+                            "index": 0
+                          },
+                          "closed": {
+                            "text": "Closed",
+                            "color": "blue",
+                            "index": 1
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "pair_key"
+                },
+                "properties": [
+                  {
+                    "id": "custom.hidden",
+                    "value": true
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Last episode",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {},
+                "indexByName": {
+                  "Pair": 0,
+                  "Status": 1,
+                  "Episodes": 2,
+                  "Peak confidence": 3,
+                  "Last episode": 4,
+                  "Daemon": 5,
+                  "pair_key": 6
+                },
+                "renameByName": {}
+              }
+            }
+          ]
         }
       ]
     }
@@ -2847,5 +3179,57 @@
     }
   ],
   "timezone": "browser",
-  "version": 14
+  "version": 15,
+  "annotations": {
+    "list": [
+      {
+        "name": "Hub incidents",
+        "enable": false,
+        "hide": false,
+        "iconColor": "red",
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "${DS_HUB}"
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_HUB}"
+          },
+          "type": "json",
+          "source": "url",
+          "parser": "backend",
+          "format": "table",
+          "url": "/api/incidents?service=${service}&source_id=${hub_source}&limit=200",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "$count($) > 0 ? $map($, function($i) {{\"time\": $i.at_ms, \"timeEnd\": $i.ended_at_ms ? $i.ended_at_ms : $i.at_ms, \"title\": $i.service & \" \" & $i.kind, \"text\": $i.source_id}}) : []",
+          "columns": [
+            {
+              "selector": "time",
+              "text": "time",
+              "type": "timestamp_epoch"
+            },
+            {
+              "selector": "timeEnd",
+              "text": "timeEnd",
+              "type": "timestamp_epoch"
+            },
+            {
+              "selector": "title",
+              "text": "title",
+              "type": "string"
+            },
+            {
+              "selector": "text",
+              "text": "text",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    ]
+  }
 }

@@ -126,7 +126,7 @@ sum by (signature, type, severity, service) (
 
 The query follows the Grafana time picker and asks nothing of the daemon. It has three costs. It stores one line per detection, so a hot N+1 weighs on the log volume the way it weighs on the ring. It carries no acknowledgment state, since a log line never changes once written. And the backend's own query limits (`max_query_length` and `max_query_series` for Loki) bound how far back and how many signatures one query reaches, so check them before counting on a long range. The Hub is the supported path to findings history. This recipe suits a fleet that already pays for log retention.
 
-**Cross-trace correlations cannot be recovered after the fact.** The archived `Report` carries an empty `correlations` array by construction, and batch `analyze` never produces correlations at all, so a Tempo replay will not rebuild them either. If a correlation matters for an incident, it has to be captured while the daemon still holds it. Once the correlator's rolling window has moved on, that output is gone for good.
+**Cross-trace correlations cannot be recovered after the fact.** The archived `Report` carries an empty `correlations` array by construction, and batch `analyze` never produces correlations at all, so a Tempo replay will not rebuild them either. If a correlation matters for an incident, it has to be captured while the daemon still holds it. Once the correlator's rolling window has moved on, that output is gone for good. The exception, from 0.30.0, is a daemon with `[daemon.hub_export]` on and a Hub on PerfSentinelHub 0.6.0 or later: the daemon pushes each pair's active periods as episodes, and the Hub keeps them past the window.
 
 **Capturing correlations on a schedule.** The rolling window makes a periodic scrape reliable: a correlation stays active for `[daemon.correlation] window_ms` (600000, 10 minutes by default), so polling at half that interval cannot miss one.
 
@@ -849,8 +849,8 @@ The legacy `Report.warnings: Vec<String>` field (0.5.16+) still ships
 for backward compatibility. CLI and HTML renderers prefer
 `warning_details` when non-empty and fall back to `warnings`
 otherwise. The HTML dashboard exposes `warning_details` in the
-embedded JSON payload (`payload.report.warning_details`). A dedicated
-banner in the dashboard UI is on the roadmap.
+embedded JSON payload (`payload.report.warning_details`) and shows it
+in a banner above the panels, one `[kind] message` row per warning.
 
 When acknowledging findings via the daemon ack API (since 0.5.20), no
 warning kind is affected by acks: they reflect daemon state, not
