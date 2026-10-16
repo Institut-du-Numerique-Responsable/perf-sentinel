@@ -45,7 +45,7 @@ const fixtures = JSON.parse(readFileSync(FIXTURES, 'utf8'));
 // Guard the fixture shape rather than discovering a missing route as an empty
 // screen in the browser. /api/status is the hard gate: without it the launcher
 // renders one red banner and nothing else.
-const required = ['/api/status', '/api/sources', '/api/analyses?limit=500'];
+const required = ['/api/status', '/api/sources', '/api/analyses?limit=500', '/api/incidents?limit=100&offset=0'];
 for (const route of required) {
   if (!fixtures.routes || !(route in fixtures.routes)) die(`fixtures carry no ${route}`);
 }
