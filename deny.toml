@@ -10,11 +10,20 @@
 all-features = true
 
 [advisories]
-# No ignores are needed. Both rand versions in the tree (0.8.6 and 0.9.3) sit in
-# RUSTSEC-2026-0097's patched range (>= 0.8.6 below 0.9.0, and >= 0.9.3 below
-# 0.10.0), so the advisory matches nothing here. The withdrawn advisories on
-# dirs, humantime and ring are not flagged either.
-ignore = []
+# Both rand versions in the tree (0.8.6 and 0.9.3) sit in RUSTSEC-2026-0097's
+# patched range (>= 0.8.6 below 0.9.0, and >= 0.9.3 below 0.10.0), so the
+# advisory matches nothing here. The withdrawn advisories on dirs, humantime and
+# ring are not flagged either.
+#
+# The two ignores are unmaintained notices, not vulnerabilities, on crates that
+# krilla 0.8.2, the latest release, pulls in behind the `pdf` feature. They shape
+# and parse only the fonts embedded in the binary, never a font from outside.
+# No release of krilla avoids them, so lift both once it moves to harfrust and
+# skrifa.
+ignore = [
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz unmaintained, via krilla 0.8.2 (pdf feature), embedded fonts only, no fixed krilla release" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained, via rustybuzz and krilla 0.8.2 (pdf feature), embedded fonts only, no fixed krilla release" },
+]
 
 [licenses]
 # AGPL-3.0-only is copyleft. Every dependency below is license-compatible with
