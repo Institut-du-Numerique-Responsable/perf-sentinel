@@ -6,9 +6,9 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Changed
 
-- `disclose-pdf` ends on an annex that prints every field the schema defines, in the order of
-  the report, and `not reported` in the warning colour for each field the report does not
-  carry or carries empty, so what a report leaves out shows. A test derives the field list
+- `disclose-pdf` ends on an annex that prints every field the schema defines, in schema order
+  and as the attached report.json carries it, with `not reported` in the warning colour for
+  each field the report does not carry or carries empty, so what a report leaves out shows. A test derives the field list
   from `schema.rs`, so a field added to the schema without the annex fails the build. Since
   every field is now printed, a character outside the bundled fonts anywhere in the report
   makes it unrenderable (exit 5, `unsupported_characters`).

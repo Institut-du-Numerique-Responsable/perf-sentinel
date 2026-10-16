@@ -577,7 +577,7 @@ public.
 
 ## Rendering a PDF for readers (`disclose-pdf`)
 
-`perf-sentinel disclose-pdf` renders a report as a PDF/A-3b a reader without a terminal can follow: A4 pages in English, five unless a section runs onto the next page, with the figures, the uncertainty band, the applications, the method and its disclaimers, and how to verify the document. An annex follows that prints every field the schema defines, in the order of the report, and `not reported` for each field the report does not carry or carries empty, so what a report leaves out shows instead of disappearing. The report, its attestation and its bundle travel inside the PDF as attachments, byte for byte.
+`perf-sentinel disclose-pdf` renders a report as a PDF/A-3b a reader without a terminal can follow: A4 pages in English, five unless a section runs onto the next page, with the figures, the uncertainty band, the applications, the method and its disclaimers, and how to verify the document. An annex follows that prints every field the current schema defines, in the order it defines them and as the attached report.json carries them, with `not reported` for each field the report does not carry or carries empty, so what a report leaves out shows instead of disappearing. The report, its attestation and its bundle travel inside the PDF as attachments, byte for byte.
 
 ```bash
 perf-sentinel disclose-pdf \
