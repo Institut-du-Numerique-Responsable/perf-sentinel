@@ -262,15 +262,21 @@ impl EpisodeTracker {
     }
 
     fn forget_oldest_closed(&mut self) {
+        let excess = self
+            .pairs
+            .values()
+            .filter(|track| track.open.is_none())
+            .count()
+            .saturating_sub(self.max_closed);
+        if excess == 0 {
+            return;
+        }
         let mut closed: Vec<(u64, String)> = self
             .pairs
             .iter()
             .filter(|(_, track)| track.open.is_none())
             .filter_map(|(key, track)| Some((track.closed_seen_ms?, key.clone())))
             .collect();
-        let Some(excess) = closed.len().checked_sub(self.max_closed) else {
-            return;
-        };
         closed.sort_unstable();
         for (_, key) in closed.into_iter().take(excess) {
             self.pairs.remove(&key);
