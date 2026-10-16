@@ -29,6 +29,24 @@ The embedded reference data keeps its vintages for this release: the SPECpower i
   variable in its History (Hub) row, read from PerfSentinelHub 0.6.0. Its daemon floor does
   not move.
 
+### Fixed
+
+- A transport failure now names its cause. `query`, the scrapers and every other user of the
+  shared HTTP client printed a bare `HTTP transport error`, so a TLS handshake against a plain
+  HTTP port, a refused connection or a DNS failure all read the same. The message now carries
+  the whole cause chain.
+- `query` refuses a 2xx body it cannot read on every route. `query status`, `query
+  correlations`, `query explain`, `query inspect` and `--format json` printed `null`, an empty
+  status or "No active cross-trace correlations" for a proxy's HTML page. They now exit 1 with
+  `<route>: malformed response`, as `query findings` and `query incidents` already did.
+- `jaeger-query` names the URL of an answer it cannot parse, and says so when the answer is an
+  HTML page, usually the Jaeger UI port or a proxy rather than the query API.
+- `hash-bake` and `verify-hash --report` read the report through one file handle, its size
+  checked on that handle and the read bounded by the 64 MiB cap. A file swapped between the size
+  check and the read could be loaded past the cap, and a device or pipe read without bound.
+- The warning for `[reporting] disclose_output_path` no longer says the field is planned for
+  0.8.0. It stays reserved and unused.
+
 ## [0.29.0] - 2026-10-15
 
 This release bumps the minor rather than the patch: `sentinel_core::daemon::query_api::QueryApiState` gains a crate-private field and is not `#[non_exhaustive]`, so code that builds it with a literal stops compiling. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The theme is the Hub's long memory: a daemon that exports findings to PerfSentinelHub now exports its incidents as well, so the Hub keeps one even when the daemon's ring evicts it between two polls. Upgrade the Hub to 0.5.0 before the daemons.
