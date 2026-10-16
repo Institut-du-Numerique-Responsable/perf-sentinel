@@ -30,11 +30,13 @@ tempo = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes", "dep:
 jaeger-query = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes", "dep:hyper-rustls", "dep:rustls", "dep:webpki-roots"]
 # Render a periodic disclosure as a PDF/A-3b and read one back (`disclose-pdf`,
 # `verify-hash --report report.pdf`).
-pdf = ["dep:krilla", "dep:fast_qr", "dep:lopdf"]
+pdf = ["dep:krilla", "dep:fast_qr", "dep:lopdf", "dep:skrifa"]
 
 [dependencies]
 krilla = { version = "0.8.2", optional = true, default-features = false, features = ["simple-text"] }
-fast_qr = { version = "0.14.0", optional = true }
+fast_qr = { version = "0.14.0", optional = true, default-features = false }
+# Glyph coverage and advances for line breaking, the version krilla draws with.
+skrifa = { version = "0.42.1", optional = true }
 lopdf = { version = "0.45.0", optional = true }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_path_to_error = "0.1.20"

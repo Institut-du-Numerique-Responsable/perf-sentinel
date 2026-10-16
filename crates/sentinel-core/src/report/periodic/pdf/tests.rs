@@ -218,3 +218,173 @@ fn exit_contract_reasons() {
         assert_eq!((result, reason), (err.result(), err.reason()));
     }
 }
+
+mod layout_and_pages {
+    use super::super::layout::{Face, group4, text_width, wrap};
+    use super::super::pages::{Op, PageContext, layout_pages};
+    use super::*;
+
+    fn rebaked(mut report: PeriodicReport) -> (PeriodicReport, Vec<u8>) {
+        report.integrity.content_hash = compute_content_hash(&report).expect("hash");
+        let bytes = serde_json::to_vec_pretty(&report).expect("serialise");
+        (report, bytes)
+    }
+
+    fn texts(pages: &[Vec<Op>]) -> Vec<String> {
+        pages.iter().map(|page| page_text(page)).collect()
+    }
+
+    fn page_text(page: &[Op]) -> String {
+        page.iter()
+            .filter_map(|op| match op {
+                Op::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn has_qr(page: &[Op]) -> bool {
+        page.iter().any(|op| matches!(op, Op::Qr { .. }))
+    }
+
+    #[test]
+    fn wrap_breaks_on_spaces_within_the_width() {
+        let width = text_width(Face::Regular, 10.0, "alpha beta").max(text_width(
+            Face::Regular,
+            10.0,
+            "gamma delta",
+        )) + 0.5;
+        assert!(width < text_width(Face::Regular, 10.0, "alpha beta gamma"));
+        let lines = wrap("alpha beta gamma delta", Face::Regular, 10.0, width);
+        assert_eq!(vec!["alpha beta", "gamma delta"], lines);
+    }
+
+    #[test]
+    fn wrap_splits_a_word_longer_than_the_line() {
+        let width = text_width(Face::Mono, 10.0, "abcd") + 0.1;
+        assert_eq!(
+            vec!["abcd", "efgh", "ij"],
+            wrap("abcdefghij", Face::Mono, 10.0, width)
+        );
+    }
+
+    #[test]
+    fn wrap_keeps_hash_groups_whole() {
+        let code = group4(&format!("sha256:{}", "0123456789abcdef".repeat(4)));
+        let width = text_width(Face::Mono, 9.0, "sha256: 0123 4567 89ab") + 0.1;
+        let lines = wrap(&code, Face::Mono, 9.0, width);
+        assert!(lines.len() > 1);
+        for token in lines.iter().flat_map(|line| line.split(' ')).skip(1) {
+            assert_eq!(4, token.len(), "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn an_organisation_in_cyrillic_is_unrenderable() {
+        let (mut report, _) = baked_report();
+        report.organisation.name = "Сбербанк".to_string();
+        let (_, bytes) = rebaked(report);
+        let err = render_disclosure_pdf(&inputs(&bytes, None, None)).expect_err("cyrillic");
+        assert!(
+            matches!(err, RenderError::UnsupportedCharacters(ref chars) if chars.contains(&'С')),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn an_emoji_in_a_disclaimer_is_unrenderable() {
+        let (mut report, _) = baked_report();
+        report
+            .notes
+            .disclaimers
+            .push("Greener every quarter 🌍".to_string());
+        let (_, bytes) = rebaked(report);
+        let err = render_disclosure_pdf(&inputs(&bytes, None, None)).expect_err("emoji");
+        assert!(
+            matches!(err, RenderError::UnsupportedCharacters(ref chars) if chars == &vec!['🌍']),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn latin_extended_renders() {
+        let (mut report, _) = baked_report();
+        report.organisation.name = "Société Générale Łódź Ærø".to_string();
+        let (_, bytes) = rebaked(report);
+        render_disclosure_pdf(&inputs(&bytes, None, None)).expect("latin extended renders");
+    }
+
+    #[test]
+    fn a_v1_0_report_renders_its_missing_sections_as_not_reported() {
+        let (mut report, _) = baked_report();
+        report.schema_version = "perf-sentinel-report/v1.0".to_string();
+        report.aggregate.canonical_waste = crate::report::periodic::schema::WasteTier::default();
+        report.aggregate.operational_waste = crate::report::periodic::schema::WasteTier::default();
+        report.aggregate.carbon_breakdown = None;
+        report.methodology.standard_crosswalk = None;
+        report.integrity.trace_integrity_chain = serde_json::Value::Null;
+        let (report, bytes) = rebaked(report);
+        render_disclosure_pdf(&inputs(&bytes, None, None)).expect("v1.0 renders");
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("Not reported"), "{all}");
+    }
+
+    #[test]
+    fn the_cover_carries_the_document_code_and_no_qr_without_a_transparency_url() {
+        let (report, _) = baked_report();
+        let pages = layout_pages(&PageContext::for_report(&report));
+        let hex = report.integrity.content_hash.trim_start_matches("sha256:");
+        assert!(page_text(&pages[0]).contains(&hex[..4]));
+        assert!(page_text(&pages[0]).contains(&hex[60..]));
+        assert!(!has_qr(&pages[0]));
+    }
+
+    #[test]
+    fn a_transparency_url_draws_a_qr() {
+        let (mut report, _) = baked_report();
+        report.notes.reference_urls.insert(
+            "transparency".to_string(),
+            "https://example.org/transparency".to_string(),
+        );
+        let pages = layout_pages(&PageContext::for_report(&report));
+        assert!(has_qr(&pages[0]));
+        assert!(pages.iter().skip(1).all(|page| !has_qr(page)));
+    }
+
+    #[test]
+    fn page_five_fills_the_verify_command_with_the_expected_identity() {
+        let (report, _) = baked_report();
+        let mut context = PageContext::for_report(&report);
+        context.expected_identity =
+            Some("https://github.com/acme/ci/.github/workflows/disclose.yml@refs/heads/main");
+        context.expected_issuer = Some("https://token.actions.githubusercontent.com");
+        let pages = layout_pages(&context);
+        let last = page_text(pages.last().expect("pages"));
+        assert!(last.contains("--expected-identity"), "{last}");
+        assert!(
+            last.contains("token.actions.githubusercontent.com"),
+            "{last}"
+        );
+        assert!(last.contains("acme/ci"), "{last}");
+    }
+
+    #[test]
+    fn every_disclaimer_is_copied_verbatim() {
+        let (mut report, _) = baked_report();
+        report
+            .notes
+            .disclaimers
+            .push("Figures exclude the staging environment, measured separately.".to_string());
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        for disclaimer in &report.notes.disclaimers {
+            assert!(all.contains(disclaimer.as_str()), "missing {disclaimer}");
+        }
+    }
+
+    #[test]
+    fn five_pages_at_least() {
+        let (report, _) = baked_report();
+        assert!(layout_pages(&PageContext::for_report(&report)).len() >= 5);
+    }
+}

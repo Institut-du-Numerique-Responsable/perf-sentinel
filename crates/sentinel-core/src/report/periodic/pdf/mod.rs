@@ -3,24 +3,31 @@
 //! A rendered PDF stands for two checks: the content hash recomputes, and
 //! the attestation, when given, names it.
 
+mod layout;
+mod pages;
+
 use chrono::{Datelike, Timelike};
+use krilla::color::rgb;
 use krilla::configure::{Archival, ConfigurationBuilder};
 use krilla::embed::{AssociationKind, EmbeddedFile, MimeType};
-use krilla::geom::Point;
+use krilla::geom::{PathBuilder, Point, Rect};
 use krilla::metadata::{DateTime, Metadata};
 use krilla::page::PageSettings;
+use krilla::paint::Fill;
+use krilla::surface::Surface;
 use krilla::text::{Font, TextDirection};
 use krilla::{Document, SerializeSettings};
+use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
+
+use layout::{Face, missing_glyphs};
+use pages::{Op, PageContext, Rgb, layout_pages};
 
 use super::version::{SchemaVersionError, check_schema_version};
 use super::{
     AttestationBinding, InTotoStatement, PeriodicReport, check_attestation_binding,
     compute_content_hash,
 };
-
-const DM_SANS_REGULAR: &[u8] = include_bytes!("fonts/DMSans-Regular.ttf");
-const DM_SANS_BOLD: &[u8] = include_bytes!("fonts/DMSans-Bold.ttf");
-const JETBRAINS_MONO: &[u8] = include_bytes!("fonts/JetBrainsMono-Regular.ttf");
 
 /// A4 in points.
 const PAGE_WIDTH: f32 = 595.28;
@@ -100,12 +107,49 @@ fn describe_chars(chars: &[char]) -> String {
 ///
 /// See [`RenderError`]: nothing is rendered unless both checks pass.
 pub fn render_disclosure_pdf(inputs: &PdfInputs<'_>) -> Result<Vec<u8>, RenderError> {
-    let report = checked_report(inputs)?;
-    build_document(&report, inputs)
+    let (report, binding) = checked_report(inputs)?;
+    let context = PageContext {
+        report: &report,
+        attachments: attachment_digests(inputs),
+        binding,
+        expected_identity: inputs.expected_identity,
+        expected_issuer: inputs.expected_issuer,
+    };
+    let sheets = layout_pages(&context);
+    let missing = missing_glyphs(sheets.iter().flatten().filter_map(|op| match op {
+        Op::Text { face, text, .. } => Some((*face, text.as_str())),
+        _ => None,
+    }));
+    if !missing.is_empty() {
+        return Err(RenderError::UnsupportedCharacters(missing));
+    }
+    build_document(&report, inputs, &sheets)
 }
 
-/// The report, once its schema, hash and binding are known good.
-fn checked_report(inputs: &PdfInputs<'_>) -> Result<PeriodicReport, RenderError> {
+fn attachment_digests(inputs: &PdfInputs<'_>) -> Vec<(&'static str, String)> {
+    let digest = |bytes: &[u8]| {
+        Sha256::digest(bytes)
+            .iter()
+            .fold(String::with_capacity(64), |mut out, byte| {
+                let _ = write!(out, "{byte:02x}");
+                out
+            })
+    };
+    let mut out = vec![("report.json", digest(inputs.report_bytes))];
+    if let Some(attestation) = inputs.attestation {
+        out.push(("attestation.intoto.jsonl", digest(attestation)));
+    }
+    if let Some(bundle) = inputs.bundle {
+        out.push(("bundle.sig", digest(bundle)));
+    }
+    out
+}
+
+/// The report, once its schema, hash and binding are known good, with the
+/// binding found (`None` without an attestation).
+fn checked_report(
+    inputs: &PdfInputs<'_>,
+) -> Result<(PeriodicReport, Option<AttestationBinding>), RenderError> {
     match check_schema_version(inputs.report_bytes) {
         Ok(()) => {}
         Err(SchemaVersionError::Unsupported(version)) => {
@@ -122,15 +166,16 @@ fn checked_report(inputs: &PdfInputs<'_>) -> Result<PeriodicReport, RenderError>
     if recomputed != report.integrity.content_hash {
         return Err(RenderError::Refused(RefusalReason::ContentHashMismatch));
     }
-    if let Some(attestation) = inputs.attestation {
-        let statement = parse_statement(attestation)?;
-        let binding = check_attestation_binding(&report, inputs.report_bytes, &statement)
-            .map_err(|e| RenderError::Malformed(e.to_string()))?;
-        if matches!(binding, AttestationBinding::Mismatch(_)) {
-            return Err(RenderError::Refused(RefusalReason::BindingMismatch));
-        }
+    let Some(attestation) = inputs.attestation else {
+        return Ok((report, None));
+    };
+    let statement = parse_statement(attestation)?;
+    let binding = check_attestation_binding(&report, inputs.report_bytes, &statement)
+        .map_err(|e| RenderError::Malformed(e.to_string()))?;
+    if matches!(binding, AttestationBinding::Mismatch(_)) {
+        return Err(RenderError::Refused(RefusalReason::BindingMismatch));
     }
-    Ok(report)
+    Ok((report, Some(binding)))
 }
 
 /// The first statement of an in-toto `.jsonl`.
@@ -142,24 +187,36 @@ fn parse_statement(attestation: &[u8]) -> Result<InTotoStatement, RenderError> {
     serde_json::from_slice(line).map_err(|e| RenderError::Malformed(format!("attestation: {e}")))
 }
 
-pub(crate) struct Fonts {
-    pub(crate) regular: Font,
-    pub(crate) bold: Font,
-    pub(crate) mono: Font,
+struct Fonts {
+    regular: Font,
+    bold: Font,
+    mono: Font,
 }
 
 impl Fonts {
     fn load() -> Self {
-        let load = |bytes: &'static [u8]| Font::new(bytes.into(), 0).expect("bundled font parses");
+        let load = |face: Face| Font::new(face.bytes().into(), 0).expect("bundled font parses");
         Self {
-            regular: load(DM_SANS_REGULAR),
-            bold: load(DM_SANS_BOLD),
-            mono: load(JETBRAINS_MONO),
+            regular: load(Face::Regular),
+            bold: load(Face::Bold),
+            mono: load(Face::Mono),
+        }
+    }
+
+    fn get(&self, face: Face) -> Font {
+        match face {
+            Face::Regular => self.regular.clone(),
+            Face::Bold => self.bold.clone(),
+            Face::Mono => self.mono.clone(),
         }
     }
 }
 
-fn build_document(report: &PeriodicReport, inputs: &PdfInputs<'_>) -> Result<Vec<u8>, RenderError> {
+fn build_document(
+    report: &PeriodicReport,
+    inputs: &PdfInputs<'_>,
+    sheets: &[Vec<Op>],
+) -> Result<Vec<u8>, RenderError> {
     let configuration = ConfigurationBuilder::new()
         .with_archival_validator(Archival::A3_B)
         .finish()
@@ -213,39 +270,89 @@ fn build_document(report: &PeriodicReport, inputs: &PdfInputs<'_>) -> Result<Vec
         );
     }
     let fonts = Fonts::load();
-    let mut page = document.start_page_with(
-        PageSettings::from_wh(PAGE_WIDTH, PAGE_HEIGHT).expect("A4 is a valid page"),
-    );
-    let mut surface = page.surface();
-    surface.draw_text(
-        Point::from_xy(56.0, 56.0),
-        fonts.bold.clone(),
-        18.0,
-        "Energy and carbon disclosure",
-        false,
-        TextDirection::Auto,
-    );
-    surface.draw_text(
-        Point::from_xy(56.0, 68.0),
-        fonts.regular.clone(),
-        11.0,
-        &report.organisation.name,
-        false,
-        TextDirection::Auto,
-    );
-    surface.draw_text(
-        Point::from_xy(56.0, 80.0),
-        fonts.mono.clone(),
-        9.0,
-        &report.integrity.content_hash,
-        false,
-        TextDirection::Auto,
-    );
-    surface.finish();
-    page.finish();
+    for sheet in sheets {
+        let mut page = document.start_page_with(
+            PageSettings::from_wh(PAGE_WIDTH, PAGE_HEIGHT).expect("A4 is a valid page"),
+        );
+        let mut surface = page.surface();
+        for op in sheet {
+            draw(&mut surface, &fonts, op);
+        }
+        surface.finish();
+        page.finish();
+    }
     document
         .finish()
         .map_err(|e| RenderError::Malformed(format!("PDF export: {e:?}")))
+}
+
+fn draw(surface: &mut Surface<'_>, fonts: &Fonts, op: &Op) {
+    match op {
+        Op::Text {
+            x,
+            y,
+            face,
+            size,
+            color,
+            text,
+        } => {
+            fill(surface, *color);
+            surface.draw_text(
+                Point::from_xy(*x, *y),
+                fonts.get(*face),
+                *size,
+                text,
+                false,
+                TextDirection::Auto,
+            );
+        }
+        Op::Rect { x, y, w, h, color } => {
+            fill(surface, *color);
+            draw_rect(surface, *x, *y, *w, *h);
+        }
+        Op::Qr {
+            x,
+            y,
+            side,
+            modules,
+        } => {
+            fill(surface, (0, 0, 0));
+            #[allow(clippy::cast_precision_loss)] // at most 177 modules a side
+            let unit = side / modules.len().max(1) as f32;
+            for (row, line) in modules.iter().enumerate() {
+                for (col, dark) in line.iter().enumerate() {
+                    if *dark {
+                        #[allow(clippy::cast_precision_loss)]
+                        draw_rect(
+                            surface,
+                            x + col as f32 * unit,
+                            y + row as f32 * unit,
+                            unit,
+                            unit,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn fill(surface: &mut Surface<'_>, (r, g, b): Rgb) {
+    surface.set_fill(Some(Fill {
+        paint: rgb::Color::new(r, g, b).into(),
+        ..Fill::default()
+    }));
+}
+
+fn draw_rect(surface: &mut Surface<'_>, x: f32, y: f32, w: f32, h: f32) {
+    let Some(rect) = Rect::from_xywh(x, y, w, h) else {
+        return;
+    };
+    let mut builder = PathBuilder::new();
+    builder.push_rect(rect);
+    if let Some(path) = builder.finish() {
+        surface.draw_path(&path);
+    }
 }
 
 fn embed(
