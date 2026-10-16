@@ -282,9 +282,16 @@ fn parse_report(bytes: &[u8]) -> Result<PeriodicReport, serde_json::Error> {
 /// report would lose its new fields and fail the hash for the wrong reason.
 fn parse_gated(bytes: &[u8], source: &str) -> Result<PeriodicReport, i32> {
     let source = sanitise_for_terminal(source);
-    if let Err(e @ SchemaVersionError::Unsupported(_)) = check_schema_version(bytes) {
-        eprintln!("Error: {source}: {}", sanitise_for_terminal(&e.to_string()));
-        return Err(EXIT_UNSUPPORTED);
+    match check_schema_version(bytes) {
+        Err(e @ SchemaVersionError::Unsupported(_)) => {
+            eprintln!("Error: {source}: {}", sanitise_for_terminal(&e.to_string()));
+            return Err(EXIT_UNSUPPORTED);
+        }
+        Err(e @ SchemaVersionError::Unknown(_)) => {
+            eprintln!("Error: {source}: {}", sanitise_for_terminal(&e.to_string()));
+            return Err(EXIT_INPUT_ERROR);
+        }
+        _ => {}
     }
     parse_report(bytes).map_err(|e| {
         eprintln!("Error: parse {source}: {e}");

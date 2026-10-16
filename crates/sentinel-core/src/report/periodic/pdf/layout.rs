@@ -139,7 +139,7 @@ pub(crate) fn group4(hash: &str) -> String {
 }
 
 /// Characters some drawn text needs that its face cannot draw, sorted and
-/// deduplicated. Whitespace is never drawn as a glyph.
+/// deduplicated. Pages turn every other whitespace into U+0020 first.
 pub(crate) fn missing_glyphs<'a>(texts: impl Iterator<Item = (Face, &'a str)>) -> Vec<char> {
     let charmaps =
         [Face::Regular, Face::Bold, Face::Mono].map(|face| (face, face.font().charmap()));
@@ -151,7 +151,7 @@ pub(crate) fn missing_glyphs<'a>(texts: impl Iterator<Item = (Face, &'a str)>) -
             .expect("every face has a charmap");
         missing.extend(
             text.chars()
-                .filter(|c| !c.is_whitespace() && charmap.map(*c).is_none()),
+                .filter(|c| *c != ' ' && charmap.map(*c).is_none()),
         );
     }
     missing.sort_unstable();

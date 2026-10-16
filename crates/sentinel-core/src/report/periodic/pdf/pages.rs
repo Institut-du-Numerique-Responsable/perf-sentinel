@@ -182,7 +182,7 @@ impl Writer {
             face,
             size,
             color,
-            text: text.to_string(),
+            text: plain(text),
         });
     }
 
@@ -231,7 +231,7 @@ impl Writer {
     /// Wrapped text at `x`, `width` wide, advancing the cursor.
     fn block(&mut self, x: f32, width: f32, face: Face, size: f32, color: Rgb, text: &str) {
         let line_height = size * 1.5;
-        for line in wrap(text, face, size, width) {
+        for line in wrap(&plain(text), face, size, width) {
             self.ensure(line_height);
             self.line(x, self.y + size, face, size, color, &line);
             self.y += line_height;
@@ -365,7 +365,15 @@ impl Writer {
     }
 }
 
-/// `sha256:3f9c…a71e`, as the footer and the claims print it.
+/// Every whitespace as U+0020: a newline, a tab or a line separator in a
+/// report string has no glyph to draw.
+fn plain(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .collect()
+}
+
+/// `sha256:3f9c…a71e`, as the footer prints it.
 fn short_code(hash: &str) -> String {
     let hex: Vec<char> = hash.trim_start_matches("sha256:").chars().collect();
     let head: String = hex.iter().take(4).collect();
@@ -1473,12 +1481,37 @@ fn verify(w: &mut Writer, context: &PageContext<'_>) {
         TEXT_2,
         "It reads the attachments out of the PDF itself. TRUSTED needs cosign and gh on the PATH, perf-sentinel alone stops at PARTIAL.",
     );
+    tamper_callout(w, context);
+}
+
+/// What a forger meets, said only as far as this document can back it.
+fn tamper_callout(w: &mut Writer, context: &PageContext<'_>) {
+    let org = &context.report.organisation.name;
+    let bound = matches!(
+        context.binding,
+        Some(AttestationBinding::ContentHash | AttestationBinding::FileBytes)
+    );
+    let editor = "The code covers the attached report.json only: a PDF editor can change the printed figures without changing it, so compare the figures with the attached report.";
+    if is_signed(context.report) && bound {
+        w.callout(
+            (OK_FG, OK_BG, OK_BD),
+            "What a tampered copy looks like",
+            &format!(
+                "A changed figure in the attached report changes the document code, so it fails step 2. A forger who prints the new code instead fails the command: the signed attestation names the original code, and the signature sits in a public, append-only log that neither {org} nor the forger can edit. {editor}"
+            ),
+        );
+        return;
+    }
+    let why = if is_signed(context.report) {
+        "No attestation attached here ties the signature to these figures"
+    } else {
+        "This report is not signed"
+    };
     w.callout(
-        (OK_FG, OK_BG, OK_BD),
-        "What a tampered copy looks like",
+        (WARN_FG, WARN_BG, WARN_BD),
+        "What this document cannot prove",
         &format!(
-            "A changed number changes the document code, so it fails step 2. A forger who prints the new code instead fails the command: the signed attestation names the original code, and the signature sits in a public, append-only log that neither {} nor the forger can edit. A PDF stripped of its attachments still prints the code, so steps 1 and 2 still work.",
-            report.organisation.name
+            "{why}, so nothing but the page where {org} publishes its codes ties it to {org}. {editor}"
         ),
     );
 }
@@ -1497,7 +1530,7 @@ fn claims(w: &mut Writer, context: &PageContext<'_>) {
         (
             format!(
                 "The figures match document code {}",
-                short_code(&report.integrity.content_hash)
+                group4(&report.integrity.content_hash)
             ),
             rendered,
         ),
@@ -1627,10 +1660,7 @@ fn steps(w: &mut Writer, report: &PeriodicReport) {
     );
     let steps = [
         first,
-        format!(
-            "Compare that code with the one printed in the footer of every page: {}. A different code means a different report. A matching code is only as good as the page you compared it with.",
-            short_code(&report.integrity.content_hash)
-        ),
+        "Compare that code with the document code printed in full on page 1 and in the table above, every group. A different code means a different report. A matching code is only as good as the page you compared it with.".to_string(),
         "For proof, hand this PDF to anyone with a terminal. The steps below need free tools and no account.".to_string(),
     ];
     for (index, step) in steps.iter().enumerate() {
@@ -1663,22 +1693,48 @@ fn steps(w: &mut Writer, report: &PeriodicReport) {
     }
 }
 
+/// The verify command page 5 prints, as words, placeholders in angle
+/// brackets where the reader fills in a value.
+pub fn verify_command_words(
+    report: &PeriodicReport,
+    identity: Option<&str>,
+    issuer: Option<&str>,
+) -> Vec<String> {
+    let mut words: Vec<String> = ["perf-sentinel", "verify-hash", "--report", "report.pdf"]
+        .map(String::from)
+        .to_vec();
+    if report.integrity.binary_hash.is_some() {
+        words.push("--verify-binary".to_string());
+        words.push("<perf-sentinel-binary>".to_string());
+    }
+    words.extend([
+        "--expected-issuer".to_string(),
+        issuer.unwrap_or("<issuer>").to_string(),
+        "--expected-identity".to_string(),
+        identity.unwrap_or("<identity>").to_string(),
+    ]);
+    words
+}
+
 fn command_box(w: &mut Writer, context: &PageContext<'_>) {
     let report = context.report;
-    let binary = if report.integrity.binary_hash.is_some() {
-        " --verify-binary"
-    } else {
-        ""
-    };
-    let command = [
-        format!("perf-sentinel verify-hash --report report.pdf{binary} \\"),
-        format!(
-            "  --expected-issuer {} \\",
-            context.expected_issuer.unwrap_or("<issuer>")
-        ),
-        "  --expected-identity \\".to_string(),
-        format!("  '{}'", context.expected_identity.unwrap_or("<identity>")),
-    ];
+    let words = verify_command_words(report, context.expected_identity, context.expected_issuer);
+    // One option per line, the identity quoted on its own line.
+    let mut command = vec![format!("{} \\", words[..4].join(" "))];
+    let mut rest = words[4..].chunks(2).peekable();
+    while let Some(pair) = rest.next() {
+        let last = rest.peek().is_none();
+        if pair[0] == "--expected-identity" {
+            command.push("  --expected-identity \\".to_string());
+            command.push(format!("  '{}'", pair[1]));
+        } else {
+            command.push(format!(
+                "  {}{}",
+                pair.join(" "),
+                if last { "" } else { " \\" }
+            ));
+        }
+    }
     let inner = CONTENT_WIDTH - 24.0;
     let mut lines: Vec<String> = command
         .iter()

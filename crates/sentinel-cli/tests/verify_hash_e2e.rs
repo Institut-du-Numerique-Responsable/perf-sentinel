@@ -329,3 +329,52 @@ fn verify_hash_on_the_pdf_matches_verify_hash_on_the_json() {
             .to_lowercase()
     );
 }
+
+/// The command page 5 prints must parse: placeholders swapped for real
+/// values, it reaches a verdict instead of a usage error.
+#[cfg(feature = "pdf")]
+#[test]
+fn the_printed_verify_command_parses() {
+    let dir = tempfile::tempdir().unwrap();
+    let report_path = write_example_with_fixed_hash(dir.path());
+    let report: PeriodicReport = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    assert!(
+        report.integrity.binary_hash.is_some(),
+        "the example declares a binary hash"
+    );
+    let pdf = dir.path().join("report.pdf");
+    let render = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["disclose-pdf", "--report"])
+        .arg(&report_path)
+        .arg("--output")
+        .arg(&pdf)
+        .output()
+        .unwrap();
+    assert_eq!(Some(0), render.status.code());
+    let words = sentinel_core::report::periodic::pdf::verify_command_words(
+        &report,
+        Some("ci@example.org"),
+        Some("https://issuer.example"),
+    );
+    assert_eq!(Some("perf-sentinel"), words.first().map(String::as_str));
+    let args: Vec<String> = words
+        .iter()
+        .skip(1)
+        .map(|word| match word.as_str() {
+            "report.pdf" => pdf.to_str().unwrap().to_string(),
+            w if w.starts_with('<') => env!("CARGO_BIN_EXE_perf-sentinel").to_string(),
+            w => w.to_string(),
+        })
+        .collect();
+    let out = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(&args)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stdout.contains("Overall:"),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(!stderr.contains("Usage:"), "{stderr}");
+}

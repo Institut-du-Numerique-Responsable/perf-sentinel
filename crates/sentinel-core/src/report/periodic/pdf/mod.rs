@@ -23,8 +23,9 @@ use krilla::{Document, SerializeSettings};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 
-pub use extract::{ExtractError, PdfAttachments, extract_attachments};
+pub use extract::{ExtractError, MAX_PDF_BYTES, PdfAttachments, extract_attachments};
 use layout::{Face, missing_glyphs};
+pub use pages::verify_command_words;
 use pages::{Op, Outline, PageContext, Rgb, layout_pages};
 
 use super::version::{SchemaVersionError, check_schema_version};
@@ -63,6 +64,10 @@ pub enum RenderError {
     UnsupportedSchema(String),
     #[error("the bundled fonts cannot draw {}", describe_chars(.0))]
     UnsupportedCharacters(Vec<char>),
+    /// The PDF writer refused the document, a renderer limit rather than a
+    /// fault of the report.
+    #[error("the PDF writer refused the document: {0}")]
+    ExportFailed(String),
 }
 
 impl RefusalReason {
@@ -83,6 +88,7 @@ impl RenderError {
             Self::Malformed(_) => "malformed_report",
             Self::UnsupportedSchema(_) => "unsupported_schema_version",
             Self::UnsupportedCharacters(_) => "unsupported_characters",
+            Self::ExportFailed(_) => "pdf_export_failed",
         }
     }
 
@@ -92,7 +98,9 @@ impl RenderError {
         match self {
             Self::Refused(_) => "refused",
             Self::Malformed(_) => "input_error",
-            Self::UnsupportedSchema(_) | Self::UnsupportedCharacters(_) => "unrenderable",
+            Self::UnsupportedSchema(_) | Self::UnsupportedCharacters(_) | Self::ExportFailed(_) => {
+                "unrenderable"
+            }
         }
     }
 }
@@ -167,7 +175,7 @@ fn checked_report(
         Err(SchemaVersionError::Unsupported(version)) => {
             return Err(RenderError::UnsupportedSchema(version));
         }
-        Err(SchemaVersionError::Missing) => {
+        Err(SchemaVersionError::Missing | SchemaVersionError::Unknown(_)) => {
             return Err(RenderError::Malformed("no schema_version".to_string()));
         }
     }
@@ -295,7 +303,7 @@ fn build_document(
     }
     document
         .finish()
-        .map_err(|e| RenderError::Malformed(format!("PDF export: {e:?}")))
+        .map_err(|e| RenderError::ExportFailed(format!("{e:?}")))
 }
 
 fn draw(surface: &mut Surface<'_>, fonts: &Fonts, op: &Op) {

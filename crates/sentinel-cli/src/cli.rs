@@ -1363,7 +1363,7 @@ Exit codes, with one JSON line on stdout:
   0  rendered
   1  refused, the report is not what it claims (content_hash_mismatch, binding_mismatch)
   3  input error (missing_file, malformed_report, output_unwritable)
-  5  cannot render, though nothing says the report is wrong (unsupported_schema_version, unsupported_characters)";
+  5  cannot render, though nothing says the report is wrong (unsupported_schema_version, unsupported_characters, pdf_export_failed)";
 
     pub const HASH_BAKE: &str = "Examples:
   # Bake the canonical content hash into a report in place

@@ -25,6 +25,9 @@ pub enum SchemaVersionError {
     Missing,
     #[error("schema {0} is newer than this engine reads, upgrade perf-sentinel")]
     Unsupported(String),
+    /// Not a `perf-sentinel-report/vMAJOR.MINOR` string at all.
+    #[error("schema {0} is not a perf-sentinel report version")]
+    Unknown(String),
 }
 
 #[derive(Deserialize)]
@@ -45,9 +48,21 @@ pub fn check_schema_version(raw: &[u8]) -> Result<(), SchemaVersionError> {
         .and_then(|value| value.as_str().map(str::to_owned))
         .ok_or(SchemaVersionError::Missing)?;
     if SUPPORTED_SCHEMA_VERSIONS.contains(&version.as_str()) {
-        Ok(())
-    } else {
+        return Ok(());
+    }
+    // Only a well-formed version this engine does not list is a newer one.
+    let well_formed = version
+        .strip_prefix("perf-sentinel-report/v")
+        .and_then(|rest| rest.split_once('.'))
+        .is_some_and(|(major, minor)| {
+            [major, minor]
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+        });
+    if well_formed {
         Err(SchemaVersionError::Unsupported(version))
+    } else {
+        Err(SchemaVersionError::Unknown(version))
     }
 }
 
@@ -87,6 +102,43 @@ mod tests {
             check_schema_version(br#"{"schema_version":7}"#),
             Err(SchemaVersionError::Missing)
         ));
+    }
+
+    #[test]
+    fn an_unknown_version_string_is_not_called_newer() {
+        for raw in [
+            "garbage",
+            "v0.9",
+            "perf-sentinel-report/v1",
+            "perf-sentinel-report/vx.y",
+        ] {
+            let json = format!(r#"{{"schema_version":"{raw}"}}"#);
+            assert!(
+                matches!(
+                    check_schema_version(json.as_bytes()),
+                    Err(SchemaVersionError::Unknown(_))
+                ),
+                "{raw}"
+            );
+        }
+        for raw in ["perf-sentinel-report/v1.9", "perf-sentinel-report/v2.0"] {
+            let json = format!(r#"{{"schema_version":"{raw}"}}"#);
+            assert!(
+                matches!(
+                    check_schema_version(json.as_bytes()),
+                    Err(SchemaVersionError::Unsupported(_))
+                ),
+                "{raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_supported_list_has_no_gap() {
+        let minors: Vec<String> = (0..SUPPORTED_SCHEMA_VERSIONS.len())
+            .map(|minor| format!("perf-sentinel-report/v1.{minor}"))
+            .collect();
+        assert_eq!(minors, SUPPORTED_SCHEMA_VERSIONS);
     }
 
     #[test]

@@ -213,6 +213,11 @@ fn exit_contract_reasons() {
             "unrenderable",
             "unsupported_characters",
         ),
+        (
+            RenderError::ExportFailed(String::new()),
+            "unrenderable",
+            "pdf_export_failed",
+        ),
     ];
     for (err, result, reason) in cases {
         assert_eq!((result, reason), (err.result(), err.reason()));
@@ -387,6 +392,55 @@ mod layout_and_pages {
             "{last}"
         );
         assert!(last.contains("acme/ci"), "{last}");
+    }
+
+    #[test]
+    fn newlines_and_tabs_in_text_render() {
+        let (mut report, _) = baked_report();
+        report
+            .notes
+            .disclaimers
+            .push("line one\nline two".to_string());
+        report.notes.disclaimers.push("a\r\nb\tc".to_string());
+        report.organisation.name = "Example\u{2028}SAS\u{85}".to_string();
+        let (_, bytes) = rebaked(report);
+        render_disclosure_pdf(&inputs(&bytes, None, None)).expect("whitespace renders as spaces");
+    }
+
+    #[test]
+    fn a_control_character_is_unrenderable() {
+        let (mut report, _) = baked_report();
+        report.notes.disclaimers.push("bell\u{7}".to_string());
+        let (_, bytes) = rebaked(report);
+        let err =
+            render_disclosure_pdf(&inputs(&bytes, None, None)).expect_err("control character");
+        assert!(
+            matches!(err, RenderError::UnsupportedCharacters(ref chars) if chars == &vec!['\u{7}']),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn page_five_prints_the_full_document_code() {
+        let (report, _) = baked_report();
+        let pages = layout_pages(&PageContext::for_report(&report));
+        let last = page_text(pages.last().expect("pages"));
+        let hex = report.integrity.content_hash.trim_start_matches("sha256:");
+        for group in hex.as_bytes().chunks(4) {
+            assert!(last.contains(std::str::from_utf8(group).unwrap()), "{last}");
+        }
+    }
+
+    #[test]
+    fn an_unsigned_report_does_not_claim_a_signature_stops_forgers() {
+        let (report, _) = baked_report();
+        let pages = layout_pages(&PageContext::for_report(&report));
+        let last = page_text(pages.last().expect("pages"));
+        assert!(
+            !last.contains("signed attestation names the original code"),
+            "{last}"
+        );
+        assert!(last.contains("PDF editor"), "{last}");
     }
 
     #[test]
@@ -570,6 +624,35 @@ mod extraction {
         assert!(
             matches!(extract_attachments(&pdf, 1 << 20, 1 << 20), Err(ExtractError::Malformed(m)) if m.contains("object streams"))
         );
+    }
+
+    #[test]
+    fn a_pdf_over_the_input_cap_is_refused_before_parsing() {
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        pdf.resize(MAX_PDF_BYTES + 1, b' ');
+        assert!(matches!(
+            extract_attachments(&pdf, 1 << 20, 1 << 20),
+            Err(ExtractError::TooLarge("the PDF"))
+        ));
+    }
+
+    #[test]
+    fn no_report_names_the_viewer_that_dropped_it() {
+        let mut doc = lopdf::Document::with_version("1.7");
+        let mut pages = lopdf::Dictionary::new();
+        pages.set("Type", lopdf::Object::Name(b"Pages".to_vec()));
+        pages.set("Kids", Vec::<lopdf::Object>::new());
+        pages.set("Count", 0);
+        let pages = doc.add_object(pages);
+        let mut catalog = lopdf::Dictionary::new();
+        catalog.set("Type", lopdf::Object::Name(b"Catalog".to_vec()));
+        catalog.set("Pages", pages);
+        let catalog = doc.add_object(catalog);
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("save");
+        let err = extract_attachments(&bytes, 1 << 20, 1 << 20).expect_err("no report");
+        assert!(err.to_string().contains("original file"), "{err}");
     }
 
     #[test]

@@ -18,7 +18,9 @@ pub struct PdfAttachments {
 pub enum ExtractError {
     #[error("not a PDF")]
     NotAPdf,
-    #[error("the PDF carries no report.json")]
+    #[error(
+        "the PDF carries no report.json: a viewer that saved it again may have dropped its attachments, use the original file"
+    )]
     NoReport,
     #[error("the PDF carries {0} twice")]
     Duplicate(&'static str),
@@ -42,6 +44,9 @@ const MAX_NAME_TREE_NODES: usize = 1024;
 /// `LOAD_STREAM_CAP`: lopdf bounds one stream, these bound them all.
 const MAX_LOAD_STREAMS: usize = 32;
 const LOAD_STREAM_CAP: usize = 4 * 1024 * 1024;
+/// The largest PDF read: lopdf holds every object in memory, about sixty
+/// times the input. A render is a few tens of KB, attachments compressed.
+pub const MAX_PDF_BYTES: usize = 4 * 1024 * 1024;
 /// What ends a name, as ISO 32000 defines it: NUL is whitespace too.
 const PDF_WHITESPACE: &[u8] = b" \t\n\r\x0C\0";
 const PDF_DELIMITERS: &[u8] = b"/<>[]()%{}";
@@ -59,6 +64,9 @@ pub fn extract_attachments(
 ) -> Result<PdfAttachments, ExtractError> {
     if !pdf.starts_with(b"%PDF-") {
         return Err(ExtractError::NotAPdf);
+    }
+    if pdf.len() > MAX_PDF_BYTES {
+        return Err(ExtractError::TooLarge("the PDF"));
     }
     let report_cap = usize::try_from(report_cap).unwrap_or(usize::MAX);
     let sidecar_cap = usize::try_from(sidecar_cap).unwrap_or(usize::MAX);
