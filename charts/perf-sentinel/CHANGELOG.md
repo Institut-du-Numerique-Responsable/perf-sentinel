@@ -10,6 +10,25 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.30.0]
+
+### Added
+
+- **`appVersion` moves to `0.30.0`.** With `[daemon.hub_export]` and
+  `[daemon.correlation]` both enabled, the image pushes its cross-trace
+  correlations to PerfSentinelHub's `/api/import/correlations` as episodes,
+  each period during which a pair kept co-occurring, so a correlation
+  outlives the rolling window. Upgrade the Hub to 0.6.0 first: an older Hub
+  with sign-in on answers 401, which the daemon retries and logs. Two
+  label-free metrics are new, `perf_sentinel_hub_export_correlations_pending`
+  and `perf_sentinel_hub_export_correlations_dropped_total`.
+
+### Changed
+
+- The `values.yaml` comment on `[daemon.hub_export]` says correlation
+  episodes travel through the same block. No `values.yaml` key is added or
+  removed, and no template changes.
+
 ## [0.29.0]
 
 ### Added

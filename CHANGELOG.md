@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-16
+
+A minor release for a new daemon behavior, with no public API change. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The Hub's long memory now covers cross-trace correlations: a daemon that exports findings to PerfSentinelHub and runs the correlator pushes each pair's active periods as episodes, so a correlation outlives the rolling window. Upgrade the Hub to 0.6.0 before the daemons.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.30.0 touches the scoring code.
+
 ### Added
 
 - The Hub export pushes cross-trace correlations too, as episodes. With
