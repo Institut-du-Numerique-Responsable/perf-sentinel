@@ -945,7 +945,7 @@ fn at_a_glance(w: &mut Writer, report: &PeriodicReport) {
     ));
     // period_coverage reads 1.0 when absent, so a bar would show a full
     // measure the card beside it calls not reported.
-    if aggregate.runtime_windows_count + aggregate.fallback_windows_count > 0 {
+    if aggregate.runtime_windows_count > 0 || aggregate.fallback_windows_count > 0 {
         coverage_bar(w, aggregate.period_coverage);
     }
     coverage_cards(w, report);
