@@ -288,6 +288,7 @@
 <li>Skip groups where the parent has <code class="ps-ic">max_fanout</code> or fewer children (default 20)</li>
 <li>For each parent exceeding the threshold, emit an <code class="ps-ic">ExcessiveFanout</code> finding</li>
 <li>Severity: Warning if &gt; <code class="ps-ic">max_fanout</code>, Critical if &gt; 3x <code class="ps-ic">max_fanout</code></li>
+<li>Template: the parent's template, or the most frequent child template (ties to the smallest) when the parent is not in the trace, the usual case when the server span is not a captured event. Never the parent's span id, which differs in every trace and would give each occurrence its own signature</li>
 </ol>
 <p class="ps-p">The fanout detector uses a <code class="ps-ic">HashMap&lt;&amp;str, usize&gt;</code> span index for O(1) parent lookup and <code class="ps-ic">compute_window_and_bounds</code> to compute the chronological span of child timestamps in a single pass.</p>
 <h3 id="not-part-of-waste-ratio-2" class="ps-h3">Not part of waste ratio</h3>

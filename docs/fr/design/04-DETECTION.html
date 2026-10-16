@@ -288,6 +288,7 @@
 <li>Ignorer les groupes où le parent a <code class="ps-ic">max_fanout</code> ou moins d'enfants (défaut 20)</li>
 <li>Pour chaque parent dépassant le seuil, émettre un finding <code class="ps-ic">ExcessiveFanout</code></li>
 <li>Sévérité : Warning si &gt; <code class="ps-ic">max_fanout</code>, Critical si &gt; 3x <code class="ps-ic">max_fanout</code></li>
+<li>Template : celui du parent, ou le template enfant le plus fréquent (le plus petit en cas d'égalité) quand le parent n'est pas dans la trace, cas courant quand le span serveur n'est pas un événement capturé. Jamais l'identifiant du span parent, qui change à chaque trace et donnerait à chaque occurrence sa propre signature</li>
 </ol>
 <p class="ps-p">Le détecteur de fanout utilise un index de spans <code class="ps-ic">HashMap&lt;&amp;str, usize&gt;</code> pour retrouver le parent en O(1) et <code class="ps-ic">compute_window_and_bounds</code> pour calculer l'étendue chronologique des horodatages des enfants en une seule passe.</p>
 <h3 id="pas-dans-le-ratio-de-gaspillage" class="ps-h3">Pas dans le ratio de gaspillage</h3>

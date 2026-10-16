@@ -230,7 +230,7 @@
 <li><code class="ps-ic">integrity.content_hash</code>: SHA-256 over the canonical JSON form (sorted object keys, compact serialisation, UTF-8) with <code class="ps-ic">content_hash</code> blanked to an empty string. A consumer recomputes by setting their copy's <code class="ps-ic">content_hash</code> to <code class="ps-ic">""</code> and hashing.</li>
 <li><code class="ps-ic">integrity.binary_hash</code>: SHA-256 of the Perf Sentinel binary that produced the file, taken via <code class="ps-ic">std::env::current_exe()</code>. Pair with <code class="ps-ic">binary_verification_url</code> to assert the binary matches a published release.</li>
 </ul>
-<p class="ps-p">The hash chain in <code class="ps-ic">integrity.trace_integrity_chain</code> is reserved for a future revision and is always <code class="ps-ic">null</code> in schema v1.0.</p>
+<p class="ps-p"><code class="ps-ic">integrity.trace_integrity_chain</code> carries the archive's hash-chain verdict since schema v1.6: how many windows verified, how many carry no chain, and how many breaks were found. It is <code class="ps-ic">null</code> on reports written before v1.6. See <a href="/docs/SCHEMA">Schema</a>.</p>
 <h2 id="cryptographic-integrity-070" class="ps-h2">Cryptographic integrity (0.7.0+)</h2>
 <blockquote class="ps-bq"><strong>See also.</strong> The <a href="/docs/SUPPLY-CHAIN#background-sigstore-primer">Sigstore primer</a> in the supply-chain doc defines Cosign, Fulcio, Rekor, in-toto, OIDC and SLSA used throughout this section.</blockquote>
 <p class="ps-p">Two optional primitives layered on top of the content hash anchor a published disclosure in public infrastructure.</p>
