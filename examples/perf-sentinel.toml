@@ -404,6 +404,7 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # api_key_file = "/run/secrets/perf-sentinel-hub-api-key"
 # batch_size = 100                 # default 100, bounds 1..100
 # flush_interval_secs = 5          # default 5, bounds 1..300
+# request_timeout_secs = 10        # default 10, bounds 1..60
 # max_pending = 10000              # default 10000, bounds 1..1000000
 
 # --- /!\ Browser access to the query API ------------------------------------

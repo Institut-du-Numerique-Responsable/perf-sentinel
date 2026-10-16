@@ -779,6 +779,7 @@ a hot issue does not create one network request per detection.
 | `api_key_file`        | string  | *(absent)* | File containing the source import key. Required when enabled. The key must contain at least 32 characters |
 | `batch_size`          | integer | `100`      | Findings per request, from 1 to 100                                                                       |
 | `flush_interval_secs` | integer | `5`        | Maximum normal batching delay, from 1 to 300 seconds                                                      |
+| `request_timeout_secs`| integer | `10`       | How long one push may take before the daemon gives up and retries, from 1 to 60 seconds                   |
 | `max_pending`         | integer | `10000`    | Maximum distinct pending signatures, from 1 to 1,000,000                                                  |
 
 ```toml
@@ -789,8 +790,14 @@ source_id = "production-a"
 api_key_file = "/run/secrets/perf-sentinel-hub-api-key"
 batch_size = 100
 flush_interval_secs = 5
+request_timeout_secs = 10
 max_pending = 10000
 ```
+
+`request_timeout_secs` applies to the findings, incidents and correlations pushes alike.
+Raise it for a Hub that answers slowly while it catches up, rather than let every push
+time out, back off up to five minutes and fill the pending table. A graceful shutdown
+still gives the drain 10 seconds, so a longer timeout can leave a push cut off there.
 
 The pending structure is a latest-value table, not an unbounded queue. A
 signature is sent immediately when first discovered or when its severity

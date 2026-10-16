@@ -798,6 +798,7 @@ par détection.
 | `api_key_file`        | chaîne  | *(absent)* | Fichier contenant la clé d'import de la source. Requis si activé. La clé doit contenir au moins 32 caractères |
 | `batch_size`          | entier  | `100`      | Findings par requête, de 1 à 100                                                                              |
 | `flush_interval_secs` | entier  | `5`        | Délai normal maximal de regroupement, de 1 à 300 secondes                                                     |
+| `request_timeout_secs`| entier  | `10`       | Durée maximale d'un envoi avant que le daemon abandonne et réessaie, de 1 à 60 secondes                       |
 | `max_pending`         | entier  | `10000`    | Nombre maximal de signatures distinctes en attente, de 1 à 1 000 000                                          |
 
 ```toml
@@ -808,8 +809,15 @@ source_id = "production-a"
 api_key_file = "/run/secrets/perf-sentinel-hub-api-key"
 batch_size = 100
 flush_interval_secs = 5
+request_timeout_secs = 10
 max_pending = 10000
 ```
+
+`request_timeout_secs` s'applique aux envois de findings, d'incidents et de corrélations.
+Augmentez-le pour un Hub qui répond lentement pendant un rattrapage, plutôt que de laisser
+chaque envoi expirer, reculer jusqu'à cinq minutes et remplir la table en attente. Un arrêt
+propre laisse toujours 10 secondes à la vidange, donc un délai plus long peut y couper un
+envoi.
 
 La structure en attente est une table de dernières valeurs, pas une file
 illimitée. Une signature est envoyée dès sa première découverte ou si sa

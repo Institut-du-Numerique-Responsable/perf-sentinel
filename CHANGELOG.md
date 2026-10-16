@@ -4,6 +4,14 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- `[daemon.hub_export] request_timeout_secs` sets how long one push to PerfSentinelHub may
+  take, 10 seconds by default as before, from 1 to 60. A Hub slowed down while catching up
+  answered past the fixed 10 seconds, so the daemon timed out every push, backed off up to
+  five minutes and dropped findings from a full pending table. It applies to the findings,
+  incidents and correlations pushes alike.
+
 ## [0.30.0] - 2026-10-16
 
 A minor release for a new daemon behavior, with no public API change. One family of finding signatures changes, once. An `excessive_fanout` whose parent span is outside the trace, the usual case in production, took that span's id into its signature, so each occurrence got its own. It now keeps one signature from trace to trace: these findings show up once under a new signature, and an acknowledgment taken on one of the old ones, which never matched twice anyway, stops matching. No other detector, normalizer or signature changes. The Hub's long memory now covers cross-trace correlations: a daemon that exports findings to PerfSentinelHub and runs the correlator pushes each pair's active periods as episodes, so a correlation outlives the rolling window. Upgrade the Hub to 0.6.0 before the daemons.

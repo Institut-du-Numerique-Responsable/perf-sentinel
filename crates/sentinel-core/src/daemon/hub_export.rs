@@ -86,7 +86,8 @@ pub(super) struct HubExporter {
 /// Bounded because an unreachable Hub must not hold the daemon past
 /// the orchestrator's grace period, where the next signal is SIGKILL and
 /// nothing gets flushed at all. Ten seconds is one full request timeout
-/// plus room for the retry the flush may need.
+/// plus room for the retry the flush may need, at the default
+/// `request_timeout_secs`: a longer timeout can leave a request cut off here.
 const SHUTDOWN_DRAIN_BUDGET: Duration = Duration::from_secs(10);
 
 impl HubExporter {
@@ -148,6 +149,7 @@ impl HubExporter {
             api_key,
             config.batch_size,
             Duration::from_secs(config.flush_interval_secs),
+            HubClient::new(Duration::from_secs(config.request_timeout_secs)),
             AckSources {
                 toml: toml_acks,
                 store: ack_store,
@@ -477,11 +479,11 @@ async fn run_exporter(
     api_key: String,
     batch_size: usize,
     flush_interval: Duration,
+    client: HubClient,
     acks: AckSources,
     incidents: Option<IncidentExport>,
     correlations: Option<CorrelationExport>,
 ) {
-    let client = http_client::build_client_with_body();
     let start = tokio::time::Instant::now();
     let mut halves = Halves {
         findings: FindingsExport {
@@ -560,7 +562,7 @@ impl Halves {
     /// True when one of them sent a batch.
     async fn round(
         &mut self,
-        client: &http_client::HttpClientWithBody,
+        client: &HubClient,
         api_key: &str,
         metrics: &MetricsState,
         flush_interval: Duration,
@@ -603,7 +605,7 @@ impl FindingsExport {
     /// was pending.
     async fn round(
         &mut self,
-        client: &http_client::HttpClientWithBody,
+        client: &HubClient,
         api_key: &str,
         metrics: &MetricsState,
         flush_interval: Duration,
@@ -642,20 +644,36 @@ impl FindingsExport {
     }
 }
 
+/// The client every half of the exporter posts with, and how long one
+/// request may take (`request_timeout_secs`).
+pub(crate) struct HubClient {
+    http: http_client::HttpClientWithBody,
+    timeout: Duration,
+}
+
+impl HubClient {
+    pub(crate) fn new(timeout: Duration) -> Self {
+        Self {
+            http: http_client::build_client_with_body(),
+            timeout,
+        }
+    }
+}
+
 /// POST one JSON batch to a Hub import route: the status the Hub answered,
 /// or the transport error.
 pub(super) async fn post_batch(
-    client: &http_client::HttpClientWithBody,
+    client: &HubClient,
     uri: &http_client::Uri,
     api_key: &str,
     body: Vec<u8>,
 ) -> Result<hyper::StatusCode, String> {
     http_client::fetch_with_body(
-        client,
+        &client.http,
         hyper::Method::POST,
         uri,
         "perf-sentinel-hub-export",
-        Duration::from_secs(10),
+        client.timeout,
         Some(api_key),
         Bytes::from(body),
     )
@@ -842,6 +860,44 @@ mod tests {
     use super::*;
     use crate::daemon::query_api::{AckSource, ResolvedTomlAck};
     use crate::detect::{Confidence, Finding, FindingType, Pattern, Severity};
+
+    /// A Hub that accepts the connection and never answers: the push gives
+    /// up after the configured timeout, not after a fixed ten seconds.
+    #[tokio::test]
+    async fn a_push_gives_up_after_the_configured_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        let silent = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.expect("accept");
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        let uri = format!("http://{address}/api/import/findings?source_id=a")
+            .parse::<http_client::Uri>()
+            .expect("uri");
+
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            post_batch(
+                &HubClient::new(Duration::from_millis(300)),
+                &uri,
+                &"k".repeat(32),
+                b"[]".to_vec(),
+            ),
+        )
+        .await
+        .expect("the push gives up on its own");
+        silent.abort();
+
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+    }
 
     fn finding(signature: &str, trace_id: &str) -> Finding {
         Finding {
@@ -1130,6 +1186,7 @@ mod tests {
             "k".repeat(32),
             100,
             Duration::from_hours(1),
+            HubClient::new(Duration::from_secs(10)),
             acks(None),
             None,
             None,
@@ -1164,6 +1221,7 @@ mod tests {
             "k".repeat(32),
             100,
             Duration::from_hours(1),
+            HubClient::new(Duration::from_secs(10)),
             acks(None),
             None,
             None,
@@ -1205,6 +1263,7 @@ mod tests {
             "k".repeat(32),
             100,
             Duration::from_hours(1),
+            HubClient::new(Duration::from_secs(10)),
             acks(None),
             Some(IncidentExport::new(
                 incidents.clone(),
@@ -1282,6 +1341,7 @@ mod tests {
             "k".repeat(32),
             100,
             flush_interval,
+            HubClient::new(Duration::from_secs(10)),
             acks(None),
             Some(crate::daemon::hub_incident_export::IncidentExport::new(
                 incidents.clone(),
@@ -1391,6 +1451,7 @@ mod tests {
             "k".repeat(32),
             100,
             flush_interval,
+            HubClient::new(Duration::from_secs(10)),
             acks(None),
             Some(IncidentExport::new(
                 incidents.clone(),

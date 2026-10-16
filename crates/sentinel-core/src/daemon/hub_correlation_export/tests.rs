@@ -466,7 +466,7 @@ async fn a_round_posts_the_open_episode_to_the_correlations_route() {
     let correlator = correlator_with_one_pair().await;
     let buffer = Arc::new(CorrelationExportBuffer::new(10));
     let metrics = MetricsState::new();
-    let client = http_client::build_client_with_body();
+    let client = HubClient::new(Duration::from_secs(10));
 
     let sent = export(&base, &correlator, &buffer)
         .round(
@@ -502,7 +502,7 @@ async fn an_episode_over_the_cap_alone_is_dropped_and_counted() {
     big.source.template = "x".repeat(MAX_EPISODE_BODY_BYTES);
     buffer.push(&big);
     let metrics = MetricsState::new();
-    let client = http_client::build_client_with_body();
+    let client = HubClient::new(Duration::from_secs(10));
 
     export(&base, &empty_correlator(), &buffer)
         .round(
@@ -526,7 +526,7 @@ async fn a_hub_without_the_route_stops_correlation_export_for_good() {
     let buffer = Arc::new(CorrelationExportBuffer::new(10));
     buffer.push(&episode("a"));
     let metrics = MetricsState::new();
-    let client = http_client::build_client_with_body();
+    let client = HubClient::new(Duration::from_secs(10));
     let mut export = export(&base, &correlator, &buffer);
 
     // The reading queues the live pair beside "a", then the 404 drops both.
@@ -559,7 +559,7 @@ async fn a_failing_route_keeps_reading_the_correlator_on_its_own_clock() {
     let correlator = correlator_with_one_pair().await;
     let buffer = Arc::new(CorrelationExportBuffer::new(10));
     let metrics = MetricsState::new();
-    let client = http_client::build_client_with_body();
+    let client = HubClient::new(Duration::from_secs(10));
     let flush = Duration::from_millis(50);
     let mut export = export(&base, &correlator, &buffer);
 

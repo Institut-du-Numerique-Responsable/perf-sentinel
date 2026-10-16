@@ -87,6 +87,7 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::daemon::hub_export::HubClient;
 
     pub(crate) type Seen = Arc<Mutex<Vec<(String, Option<String>, Vec<u8>)>>>;
 
@@ -169,7 +170,7 @@ pub(crate) mod tests {
         let buffer = Arc::new(IncidentExportBuffer::new(10));
         buffer.push(&incident("a", None));
         let metrics = MetricsState::new();
-        let client = http_client::build_client_with_body();
+        let client = HubClient::new(Duration::from_secs(10));
 
         let next = export(&base, &buffer)
             .round(&client, &"k".repeat(32), &metrics, Duration::from_secs(5))
@@ -190,7 +191,7 @@ pub(crate) mod tests {
     async fn an_empty_table_sends_nothing() {
         let (base, seen) = fake_hub(200).await;
         let buffer = Arc::new(IncidentExportBuffer::new(10));
-        let client = http_client::build_client_with_body();
+        let client = HubClient::new(Duration::from_secs(10));
 
         let next = export(&base, &buffer)
             .round(
@@ -212,7 +213,7 @@ pub(crate) mod tests {
         buffer.push(&incident("a", None));
         buffer.push(&incident("b", None));
         let metrics = MetricsState::new();
-        let client = http_client::build_client_with_body();
+        let client = HubClient::new(Duration::from_secs(10));
         let mut export = export(&base, &buffer);
 
         assert!(
@@ -244,7 +245,7 @@ pub(crate) mod tests {
         big.detail = Some("x".repeat(MAX_INCIDENT_BODY_BYTES));
         buffer.push(&big);
         let metrics = MetricsState::new();
-        let client = http_client::build_client_with_body();
+        let client = HubClient::new(Duration::from_secs(10));
 
         export(&base, &buffer)
             .round(&client, &"k".repeat(32), &metrics, Duration::from_secs(5))
@@ -260,7 +261,7 @@ pub(crate) mod tests {
         let (base, _seen) = fake_hub(503).await;
         let buffer = Arc::new(IncidentExportBuffer::new(10));
         buffer.push(&incident("a", None));
-        let client = http_client::build_client_with_body();
+        let client = HubClient::new(Duration::from_secs(10));
 
         let next = export(&base, &buffer)
             .round(
