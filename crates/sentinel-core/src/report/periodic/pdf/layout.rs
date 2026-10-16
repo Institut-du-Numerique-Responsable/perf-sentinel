@@ -122,6 +122,24 @@ pub(crate) fn wrap(text: &str, face: Face, size: f32, width: f32) -> Vec<String>
     lines
 }
 
+/// `text` cut to `width` behind an ellipsis, for a line that cannot wrap.
+pub(crate) fn fit(text: &str, face: Face, size: f32, width: f32) -> String {
+    let measure = Measure::new(face, size);
+    if measure.width(text) <= width {
+        return text.to_string();
+    }
+    let room = width - measure.advance('…');
+    let mut used = 0.0;
+    let kept: String = text
+        .chars()
+        .take_while(|c| {
+            used += measure.advance(*c);
+            used <= room
+        })
+        .collect();
+    format!("{}…", kept.trim_end())
+}
+
 /// `sha256:abcd…` as `sha256: abcd efgh …`, to read aloud and compare.
 pub(crate) fn group4(hash: &str) -> String {
     let (prefix, hex) = hash.split_once(':').unwrap_or(("", hash));

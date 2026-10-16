@@ -175,8 +175,8 @@ fn checked_report(
         Err(SchemaVersionError::Unsupported(version)) => {
             return Err(RenderError::UnsupportedSchema(version));
         }
-        Err(SchemaVersionError::Missing | SchemaVersionError::Unknown(_)) => {
-            return Err(RenderError::Malformed("no schema_version".to_string()));
+        Err(e @ (SchemaVersionError::Missing | SchemaVersionError::Unknown(_))) => {
+            return Err(RenderError::Malformed(e.to_string()));
         }
     }
     let report: PeriodicReport = serde_json::from_slice(inputs.report_bytes)

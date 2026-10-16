@@ -5,9 +5,13 @@
 
 use serde::Serialize;
 
-use super::layout::{Face, group4, text_width, wrap};
+use chrono::Datelike as _;
+
+use super::layout::{Face, fit, group4, text_width, wrap};
 use super::{PAGE_HEIGHT, PAGE_WIDTH};
-use crate::report::periodic::schema::{IntegrityLevel, PeriodType, ReportIntent, WasteTier};
+use crate::report::periodic::schema::{
+    IntegrityLevel, Period, PeriodType, ReportIntent, WasteTier,
+};
 use crate::report::periodic::{Application, AttestationBinding, Confidentiality, PeriodicReport};
 
 pub(crate) type Rgb = (u8, u8, u8);
@@ -131,8 +135,18 @@ impl<'a> PageContext<'a> {
 
 /// Every page of the document, in order.
 pub(crate) fn layout_pages(context: &PageContext<'_>) -> Vec<Vec<Op>> {
+    let (pages, verify_page) = lay_out(context, 5);
+    if verify_page == 5 {
+        return pages;
+    }
+    // The cover names the verify page, and that number never moves it.
+    lay_out(context, verify_page).0
+}
+
+/// The pages, and the number of the one the verify section starts on.
+fn lay_out(context: &PageContext<'_>, verify_page: usize) -> (Vec<Vec<Op>>, usize) {
     let mut writer = Writer::default();
-    cover(&mut writer, context);
+    cover(&mut writer, context, verify_page);
     writer.new_page();
     at_a_glance(&mut writer, context.report);
     writer.new_page();
@@ -140,8 +154,9 @@ pub(crate) fn layout_pages(context: &PageContext<'_>) -> Vec<Vec<Op>> {
     writer.new_page();
     method(&mut writer, context.report);
     writer.new_page();
+    let actual = writer.pages.len();
     verify(&mut writer, context);
-    writer.finish(context.report)
+    (writer.finish(context.report), actual)
 }
 
 struct Writer {
@@ -196,8 +211,9 @@ impl Writer {
         color: Rgb,
         text: &str,
     ) {
-        let x = right - text_width(face, size, text);
-        self.line(x, baseline, face, size, color, text);
+        let text = plain(text);
+        let x = right - text_width(face, size, &text);
+        self.line(x, baseline, face, size, color, &text);
     }
 
     /// A single line centred on `centre`.
@@ -210,8 +226,9 @@ impl Writer {
         color: Rgb,
         text: &str,
     ) {
-        let x = centre - text_width(face, size, text) / 2.0;
-        self.line(x, baseline, face, size, color, text);
+        let text = plain(text);
+        let x = centre - text_width(face, size, &text) / 2.0;
+        self.line(x, baseline, face, size, color, &text);
     }
 
     /// Upper-case text with wide tracking, one glyph at a time. Returns
@@ -290,7 +307,9 @@ impl Writer {
 
     /// A label in the left column and its value wrapped in the right one.
     fn row(&mut self, label: &str, value: &str, value_face: Face) {
-        self.ensure(16.0);
+        let label_height = block_height(label, Face::Regular, 8.5, LABEL_WIDTH - 8.0);
+        let value_height = block_height(value, value_face, 8.5, CONTENT_WIDTH - LABEL_WIDTH);
+        self.ensure((label_height.max(value_height) + 1.5).max(16.0));
         let top = self.y;
         self.block(MARGIN, LABEL_WIDTH - 8.0, Face::Regular, 8.5, TEXT_2, label);
         let label_bottom = self.y;
@@ -309,7 +328,7 @@ impl Writer {
     /// A coloured box holding a bold title and a paragraph.
     fn callout(&mut self, (fg, bg, bd): (Rgb, Rgb, Rgb), title: &str, body: &str) {
         let inner = CONTENT_WIDTH - 24.0;
-        let lines = wrap(body, Face::Regular, 9.0, inner).len();
+        let lines = wrap(&plain(body), Face::Regular, 9.0, inner).len();
         #[allow(clippy::cast_precision_loss)] // a few lines
         let height = 40.0 + lines as f32 * 13.5;
         self.ensure(height + 8.0);
@@ -341,6 +360,13 @@ impl Writer {
             report.schema_version
         );
         let base = PAGE_HEIGHT - 40.0;
+        let right_width = |index: usize| {
+            text_width(
+                Face::Mono,
+                7.0,
+                &format!("{short} · page {} of {total}", index + 1),
+            )
+        };
         self.pages
             .into_iter()
             .enumerate()
@@ -350,6 +376,8 @@ impl Writer {
                     y: 0.0,
                 };
                 footer.rule(MARGIN, base - 14.0, CONTENT_WIDTH);
+                let room = CONTENT_WIDTH - right_width(index) - 12.0;
+                let left = fit(&plain(&left), Face::Mono, 7.0, room);
                 footer.line(MARGIN, base, Face::Mono, 7.0, TEXT_2, &left);
                 footer.line_right(
                     RIGHT,
@@ -371,6 +399,13 @@ fn plain(text: &str) -> String {
     text.chars()
         .map(|c| if c.is_whitespace() { ' ' } else { c })
         .collect()
+}
+
+/// The height `Writer::block` takes to draw `text`.
+fn block_height(text: &str, face: Face, size: f32, width: f32) -> f32 {
+    #[allow(clippy::cast_precision_loss)] // a few lines
+    let lines = wrap(&plain(text), face, size, width).len() as f32;
+    lines * size * 1.5
 }
 
 /// `sha256:3f9c…a71e`, as the footer prints it.
@@ -470,7 +505,7 @@ fn is_signed(report: &PeriodicReport) -> bool {
 
 // ---------------------------------------------------------------- page 1
 
-fn cover(w: &mut Writer, context: &PageContext<'_>) {
+fn cover(w: &mut Writer, context: &PageContext<'_>, verify_page: usize) {
     let report = context.report;
     header(w, report);
     w.y = 160.0;
@@ -491,17 +526,24 @@ fn cover(w: &mut Writer, context: &PageContext<'_>) {
         TEXT,
         "What our software consumed,",
     );
-    let span = format!(
-        "{} to {}",
-        period.from_date.format("%B"),
-        period.to_date.format("%B %Y")
+    w.block(
+        MARGIN,
+        CONTENT_WIDTH,
+        Face::Bold,
+        26.0,
+        TEXT,
+        &period_span(period),
     );
-    w.block(MARGIN, CONTENT_WIDTH, Face::Bold, 26.0, TEXT, &span);
     w.y += 4.0;
+    let from = if period.from_date.year() == period.to_date.year() {
+        "%-d %B"
+    } else {
+        "%-d %B %Y"
+    };
     let subtitle = format!(
         "{}, {} to {}, {} days. Measured by Perf Sentinel {}.",
         capitalised(&wire(&period.period_type).replace('-', " ")),
-        period.from_date.format("%-d %B"),
+        period.from_date.format(from),
         period.to_date.format("%-d %B %Y"),
         period.days_covered,
         metadata.perf_sentinel_version
@@ -519,23 +561,33 @@ fn cover(w: &mut Writer, context: &PageContext<'_>) {
     w.y += 22.0;
     w.rule(MARGIN, w.y, CONTENT_WIDTH);
     w.y += 18.0;
-    proof_block(w, report);
+    proof_block(w, report, verify_page);
+}
+
+/// The period as the cover title says it: `March 2026`, `January to
+/// March 2026`, `November 2025 to January 2026`.
+fn period_span(period: &Period) -> String {
+    let (from, to) = (period.from_date, period.to_date);
+    if from.year() != to.year() {
+        format!("{} to {}", from.format("%B %Y"), to.format("%B %Y"))
+    } else if from.month() == to.month() {
+        to.format("%B %Y").to_string()
+    } else {
+        format!("{} to {}", from.format("%B"), to.format("%B %Y"))
+    }
 }
 
 fn header(w: &mut Writer, report: &PeriodicReport) {
+    let height = 26.0;
     w.push(Op::Logo {
         x: MARGIN,
         y: 40.0,
-        height: 26.0,
+        height,
     });
-    w.line_right(
-        RIGHT,
-        56.0,
-        Face::Bold,
-        12.0,
-        TEXT,
-        &report.organisation.name,
-    );
+    let [_, _, logo_w, logo_h] = super::logo::logo().view_box;
+    let room = CONTENT_WIDTH - height * logo_w / logo_h - 16.0;
+    let name = fit(&plain(&report.organisation.name), Face::Bold, 12.0, room);
+    w.line_right(RIGHT, 56.0, Face::Bold, 12.0, TEXT, &name);
     let ids = &report.organisation.identifiers;
     let parts: Vec<String> = [
         ids.siren.as_ref().map(|v| format!("SIREN {v}")),
@@ -552,7 +604,8 @@ fn header(w: &mut Writer, report: &PeriodicReport) {
     .flatten()
     .filter(|part| !part.is_empty())
     .collect();
-    w.line_right(RIGHT, 70.0, Face::Mono, 7.5, TEXT_2, &parts.join(" · "));
+    let ids = fit(&plain(&parts.join(" · ")), Face::Mono, 7.5, room);
+    w.line_right(RIGHT, 70.0, Face::Mono, 7.5, TEXT_2, &ids);
 }
 
 /// One figure card: label, value, unit and the line under it.
@@ -652,7 +705,7 @@ fn cover_cards(w: &mut Writer, report: &PeriodicReport) {
 }
 
 /// The declared level, what proves the document, the code and the QR.
-fn proof_block(w: &mut Writer, report: &PeriodicReport) {
+fn proof_block(w: &mut Writer, report: &PeriodicReport, verify_page: usize) {
     let org = &report.organisation.name;
     let top = w.y;
     let qr_side = 110.0;
@@ -686,10 +739,12 @@ fn proof_block(w: &mut Writer, report: &PeriodicReport) {
     w.y = top + 26.0;
     let proof = if is_signed(report) {
         format!(
-            "This document carries the machine-readable report it was rendered from, as an attachment, with the signature {org}'s pipeline placed on it in a public log. The printed code alone proves nothing: the proof is that signature, checked against the signer {org} publishes. Page 5 shows how, in five minutes."
+            "This document carries the machine-readable report it was rendered from, as an attachment, with the signature {org}'s pipeline placed on it in a public log. The printed code alone proves nothing: the proof is that signature, checked against the signer {org} publishes. Page {verify_page} shows how, in five minutes."
         )
     } else {
-        "This document carries the machine-readable report it was rendered from, as an attachment. The printed code alone proves nothing: the proof is the attached report, rechecked with the command on page 5. This report is not signed.".to_string()
+        format!(
+            "This document carries the machine-readable report it was rendered from, as an attachment. The printed code alone proves nothing: the proof is the attached report, rechecked with the command on page {verify_page}. This report is not signed."
+        )
     };
     w.block(MARGIN, column, Face::Regular, 9.0, TEXT_2, &proof);
     w.y += 6.0;
@@ -746,8 +801,11 @@ fn transparency(w: &mut Writer, report: &PeriodicReport, x: f32, side: f32) {
     let mut baseline = top + side + 12.0;
     let lines = wrap(&caption, Face::Regular, 7.5, side + 20.0)
         .into_iter()
-        .chain(std::iter::once(
-            url.trim_start_matches("https://").to_string(),
+        .chain(wrap(
+            url.trim_start_matches("https://"),
+            Face::Regular,
+            7.5,
+            side + 20.0,
         ));
     for line in lines {
         w.line_centred(x + side / 2.0, baseline, Face::Regular, 7.5, TEXT_2, &line);
@@ -830,8 +888,7 @@ fn at_a_glance(w: &mut Writer, report: &PeriodicReport) {
     crosswalk(w, report);
 }
 
-/// The 2x band on a log scale from a quarter to four times the total, so
-/// the band and the total always sit at the same places.
+/// The 2x band, drawn at fixed places around the total, not to scale.
 fn uncertainty_band(w: &mut Writer, carbon: f64) {
     w.ensure(36.0);
     let top = w.y + 4.0;
@@ -1107,6 +1164,11 @@ fn applications(w: &mut Writer, report: &PeriodicReport) {
     );
 }
 
+/// The height of a table row, its name wrapped in the first column.
+fn row_height(name: &str) -> f32 {
+    (6.0 + block_height(name, Face::Bold, 9.0, NAME_WIDTH)).max(23.0) + 3.0
+}
+
 /// A table row: the name in bold, then the right-aligned figures.
 fn table_row(w: &mut Writer, name: &str, requests: &str, figures: [&str; 4]) {
     let top = w.y;
@@ -1171,13 +1233,14 @@ fn table_header(w: &mut Writer) {
 fn application_table(w: &mut Writer, report: &PeriodicReport) {
     table_header(w);
     let total_energy = report.aggregate.total_energy_kwh;
-    let mut totals = (0_u64, 0.0_f64, 0_u64);
+    // Carbon totals only when every row carries it, as G2 rows do.
+    let mut totals = (0_u64, Some(0.0_f64), 0_u64);
     for application in &report.applications {
         let app = application_figures(application);
         totals.0 += app.requests;
-        totals.1 += app.carbon.unwrap_or(0.0);
+        totals.1 = totals.1.zip(app.carbon).map(|(sum, carbon)| sum + carbon);
         totals.2 += app.patterns;
-        w.ensure(26.0);
+        w.ensure(row_height(app.name));
         let share = if total_energy > 0.0 {
             app.energy / total_energy
         } else {
@@ -1197,8 +1260,15 @@ fn application_table(w: &mut Writer, report: &PeriodicReport) {
             ],
         );
     }
+    let reason_width = CONTENT_WIDTH - NAME_WIDTH - 14.0;
     for excluded in &report.scope_manifest.applications_excluded {
-        w.ensure(30.0);
+        let reason = format!(
+            "Excluded by the operator: {}. Declared, not measured.",
+            excluded.reason
+        );
+        let name_height = block_height(&excluded.service_name, Face::Bold, 9.0, NAME_WIDTH);
+        let reason_height = block_height(&reason, Face::Regular, 8.5, reason_width);
+        w.ensure(6.0 + name_height.max(reason_height) + 10.0);
         let top = w.y;
         w.y = top + 6.0;
         w.block(
@@ -1213,26 +1283,25 @@ fn application_table(w: &mut Writer, report: &PeriodicReport) {
         w.y = top + 6.0;
         w.block(
             MARGIN + NAME_WIDTH + 14.0,
-            CONTENT_WIDTH - NAME_WIDTH - 14.0,
+            reason_width,
             Face::Regular,
             8.5,
             TEXT_2,
-            &format!(
-                "Excluded by the operator: {}. Declared, not measured.",
-                excluded.reason
-            ),
+            &reason,
         );
         w.y = w.y.max(name_bottom) + 4.0;
         w.rule(MARGIN, w.y, CONTENT_WIDTH);
     }
-    w.ensure(26.0);
+    w.ensure(row_height("Total"));
     table_row(
         w,
         "Total",
         &grouped(totals.0),
         [
             &format!("{total_energy:.2}"),
-            &format!("{:.2}", totals.1),
+            &totals
+                .1
+                .map_or_else(|| "-".to_string(), |carbon| format!("{carbon:.2}")),
             &format!("{:.1}", report.aggregate.aggregate_efficiency_score),
             &totals.2.to_string(),
         ],
@@ -1570,18 +1639,18 @@ fn claims(w: &mut Writer, context: &PageContext<'_>) {
     w.line(split, w.y + 9.0, Face::Regular, 7.5, TEXT_2, "Checked by");
     w.y += 15.0;
     w.rule(MARGIN, w.y, CONTENT_WIDTH);
+    let claim_width = split - MARGIN - 12.0;
     for (claim, by) in &rows {
-        w.ensure(22.0);
+        let height = block_height(claim, Face::Bold, 8.5, claim_width).max(block_height(
+            by,
+            Face::Regular,
+            8.5,
+            RIGHT - split,
+        ));
+        w.ensure((height + 7.0).max(22.0));
         let top = w.y + 5.0;
         w.y = top;
-        w.block(
-            MARGIN + 4.0,
-            split - MARGIN - 12.0,
-            Face::Bold,
-            8.5,
-            TEXT,
-            claim,
-        );
+        w.block(MARGIN + 4.0, claim_width, Face::Bold, 8.5, TEXT, claim);
         let claim_bottom = w.y;
         w.y = top;
         w.block(split, RIGHT - split, Face::Regular, 8.5, TEXT, by);
@@ -1735,32 +1804,56 @@ fn command_box(w: &mut Writer, context: &PageContext<'_>) {
             ));
         }
     }
-    let inner = CONTENT_WIDTH - 24.0;
-    let mut lines: Vec<String> = command
-        .iter()
-        .flat_map(|line| {
-            let indent = line.len() - line.trim_start().len();
-            let pad = " ".repeat(indent);
-            let room = inner - text_width(Face::Mono, 7.5, &pad);
-            wrap(line, Face::Mono, 7.5, room)
-                .into_iter()
-                .map(move |piece| format!("{pad}{piece}"))
-        })
-        .collect();
-    lines.push("# TRUSTED    code, signature and binary all check out".to_string());
-    lines.push(format!(
+    command.push("# TRUSTED    code, signature and binary all check out".to_string());
+    command.push(format!(
         "# UNTRUSTED  something was altered, or the signer is not {}'s",
-        report.organisation.name
+        plain(&report.organisation.name)
     ));
+    let inner = CONTENT_WIDTH - 24.0;
+    let lines: Vec<(String, f32)> = command
+        .iter()
+        .flat_map(|line| command_lines(line, inner))
+        .collect();
     #[allow(clippy::cast_precision_loss)] // a few lines
     let height = 20.0 + lines.len() as f32 * 11.0;
     w.ensure(height + 8.0);
     let top = w.y + 4.0;
     w.boxed(MARGIN, top, CONTENT_WIDTH, height, 7.0, Some(TRACK), None);
     let mut baseline = top + 17.0;
-    for line in &lines {
-        w.line(MARGIN + 12.0, baseline, Face::Mono, 7.5, TEXT, line);
+    for (line, size) in &lines {
+        w.line(MARGIN + 12.0, baseline, Face::Mono, *size, TEXT, line);
         baseline += 11.0;
     }
     w.y = top + height + 8.0;
+}
+
+/// One line of the command at 7.5 pt, smaller when it does not fit: a
+/// token broken across lines no longer matches once copied. Wrapped only
+/// below 5.5 pt, a comment's next lines starting with `#` again.
+fn command_lines(line: &str, width: f32) -> Vec<(String, f32)> {
+    let mut size = 7.5;
+    while size > 5.5 && text_width(Face::Mono, size, line) > width {
+        size -= 0.25;
+    }
+    if text_width(Face::Mono, size, line) <= width {
+        return vec![(line.to_string(), size)];
+    }
+    let pad = if line.starts_with('#') {
+        "# ".to_string()
+    } else {
+        " ".repeat(line.len() - line.trim_start().len())
+    };
+    let room = width - text_width(Face::Mono, size, &pad);
+    wrap(line, Face::Mono, size, room)
+        .into_iter()
+        .enumerate()
+        .map(|(index, piece)| {
+            let lead = if index == 0 && line.starts_with('#') {
+                ""
+            } else {
+                pad.as_str()
+            };
+            (format!("{lead}{piece}"), size)
+        })
+        .collect()
 }
