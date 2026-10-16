@@ -200,8 +200,8 @@ fn build_findings_path(
     format!("/api/findings?{}", params.join("&"))
 }
 
-fn print_pretty_json(body: &[u8]) {
-    let json: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+fn print_pretty_json(body: &[u8], route: &str) {
+    let json: serde_json::Value = parse_or_exit(body, route);
     println!(
         "{}",
         serde_json::to_string_pretty(&json).unwrap_or_default()
@@ -215,7 +215,7 @@ pub(crate) fn render_findings_response(
     sort: Option<crate::render::FindingsSort>,
 ) {
     match format {
-        QueryOutputFormat::Json => print_pretty_json(body),
+        QueryOutputFormat::Json => print_pretty_json(body, "GET /api/findings"),
         QueryOutputFormat::Text => print_findings_text(body, daemon_url, sort),
     }
 }
@@ -323,7 +323,7 @@ fn stored_recurrence_index(
 
 fn render_explain_response(body: &[u8], format: QueryOutputFormat) {
     match format {
-        QueryOutputFormat::Json => print_pretty_json(body),
+        QueryOutputFormat::Json => print_pretty_json(body, "GET /api/explain"),
         QueryOutputFormat::Text => print_explain_text(body),
     }
 }
@@ -334,8 +334,8 @@ fn print_explain_text(body: &[u8]) {
         println!("{text}");
         return;
     }
-    // Daemon returned an error response (or unparseable JSON).
-    let json: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    // Daemon returned an error response.
+    let json: serde_json::Value = parse_or_exit(body, "GET /api/explain");
     if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
         eprintln!("Error: {err}");
     } else {
@@ -348,14 +348,14 @@ fn print_explain_text(body: &[u8]) {
 
 fn render_correlations_response(body: &[u8], format: QueryOutputFormat) {
     match format {
-        QueryOutputFormat::Json => print_pretty_json(body),
+        QueryOutputFormat::Json => print_pretty_json(body, "GET /api/correlations"),
         QueryOutputFormat::Text => print_correlations_text(body),
     }
 }
 
 fn print_correlations_text(body: &[u8]) {
     let correlations: Vec<sentinel_core::detect::correlate_cross::CrossTraceCorrelation> =
-        serde_json::from_slice(body).unwrap_or_default();
+        parse_or_exit(body, "GET /api/correlations");
     if correlations.is_empty() {
         let AnsiColors { green, reset, .. } = ansi_colors(false);
         println!("{green}No active cross-trace correlations.{reset}");
@@ -426,13 +426,13 @@ fn print_correlation_entry(
 
 fn render_status_response(body: &[u8], format: QueryOutputFormat) {
     match format {
-        QueryOutputFormat::Json => print_pretty_json(body),
+        QueryOutputFormat::Json => print_pretty_json(body, "GET /api/status"),
         QueryOutputFormat::Text => print_status_text(body),
     }
 }
 
 fn print_status_text(body: &[u8]) {
-    let json: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    let json: serde_json::Value = parse_or_exit(body, "GET /api/status");
     let AnsiColors {
         bold,
         cyan,
@@ -656,7 +656,7 @@ async fn fetch_incidents_body(base_url: &str, path: &str, api_key: Option<&str>)
 
 pub(crate) fn render_incidents_response(body: &[u8], format: QueryOutputFormat, daemon_url: &str) {
     match format {
-        QueryOutputFormat::Json => print_pretty_json(body),
+        QueryOutputFormat::Json => print_pretty_json(body, "GET /api/incidents"),
         QueryOutputFormat::Text => print_incidents_text(body, daemon_url),
     }
 }
@@ -860,7 +860,7 @@ async fn run_inspect_action(
     sort: Option<crate::render::FindingsSort>,
 ) {
     let responses: Vec<sentinel_core::daemon::query_api::FindingResponse> =
-        serde_json::from_slice(body).unwrap_or_default();
+        parse_or_exit(body, "GET /api/findings");
     let acks_by_signature: std::collections::HashMap<
         String,
         sentinel_core::daemon::query_api::AckSource,
