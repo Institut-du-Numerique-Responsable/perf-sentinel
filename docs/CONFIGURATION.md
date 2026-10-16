@@ -771,16 +771,16 @@ Bounded, asynchronous export of live findings to PerfSentinelHub. The daemon
 coalesces repeated findings by signature and keeps only their latest value, so
 a hot issue does not create one network request per detection.
 
-| Field                 | Type    | Default    | Description                                                                                               |
-|-----------------------|---------|------------|-----------------------------------------------------------------------------------------------------------|
-| `enabled`             | boolean | `false`    | Enable Hub export. Detection remains non-blocking when the Hub is unavailable                             |
-| `endpoint`            | string  | *(absent)* | Hub URL ending in `/api/import/findings`                                                                  |
-| `source_id`           | string  | *(absent)* | Hub source identifier: 1-64 ASCII letters, digits, `.`, `_` or `-`                                        |
-| `api_key_file`        | string  | *(absent)* | File containing the source import key. Required when enabled. The key must contain at least 32 characters |
-| `batch_size`          | integer | `100`      | Findings per request, from 1 to 100                                                                       |
-| `flush_interval_secs` | integer | `5`        | Maximum normal batching delay, from 1 to 300 seconds                                                      |
-| `request_timeout_secs`| integer | `10`       | How long one push may take before the daemon gives up and retries, from 1 to 60 seconds                   |
-| `max_pending`         | integer | `10000`    | Maximum distinct pending signatures, from 1 to 1,000,000                                                  |
+| Field                  | Type    | Default    | Description                                                                                               |
+|------------------------|---------|------------|-----------------------------------------------------------------------------------------------------------|
+| `enabled`              | boolean | `false`    | Enable Hub export. Detection remains non-blocking when the Hub is unavailable                             |
+| `endpoint`             | string  | *(absent)* | Hub URL ending in `/api/import/findings`                                                                  |
+| `source_id`            | string  | *(absent)* | Hub source identifier: 1-64 ASCII letters, digits, `.`, `_` or `-`                                        |
+| `api_key_file`         | string  | *(absent)* | File containing the source import key. Required when enabled. The key must contain at least 32 characters |
+| `batch_size`           | integer | `100`      | Findings per request, from 1 to 100                                                                       |
+| `flush_interval_secs`  | integer | `5`        | Maximum normal batching delay, from 1 to 300 seconds                                                      |
+| `request_timeout_secs` | integer | `10`       | How long one push may take before the daemon gives up and retries, from 1 to 60 seconds                   |
+| `max_pending`          | integer | `10000`    | Maximum distinct pending signatures, from 1 to 1,000,000                                                  |
 
 ```toml
 [daemon.hub_export]
@@ -797,7 +797,9 @@ max_pending = 10000
 `request_timeout_secs` applies to the findings, incidents and correlations pushes alike.
 Raise it for a Hub that answers slowly while it catches up, rather than let every push
 time out, back off up to five minutes and fill the pending table. A graceful shutdown
-still gives the drain 10 seconds, so a longer timeout can leave a push cut off there.
+still gives the drain 10 seconds, so a longer timeout can leave a push cut off there. One
+task sends the three kinds in turn, so while a push waits on the Hub the incidents and the
+correlation reads wait with it: give the Hub the time it needs and no more.
 
 The pending structure is a latest-value table, not an unbounded queue. A
 signature is sent immediately when first discovered or when its severity

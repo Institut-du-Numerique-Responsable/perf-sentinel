@@ -892,6 +892,12 @@ mod tests {
         silent.abort();
 
         assert!(outcome.is_err(), "{outcome:?}");
+        // It waited for the timeout, rather than failing for another reason.
+        assert!(
+            started.elapsed() >= Duration::from_millis(250),
+            "{:?}",
+            started.elapsed()
+        );
         assert!(
             started.elapsed() < Duration::from_secs(3),
             "{:?}",
