@@ -1615,14 +1615,14 @@ fn measuring_binary(report: &PeriodicReport) -> String {
     parts.join(" · ")
 }
 
-/// The report's reference links, the transparency page aside: the cover
+/// The report's reference links, the transparency page aside when the cover
 /// already prints it beside its QR code.
 fn references(report: &PeriodicReport) -> Option<String> {
     let links: Vec<String> = report
         .notes
         .reference_urls
         .iter()
-        .filter(|(key, _)| key.as_str() != "transparency")
+        .filter(|(key, url)| key.as_str() != "transparency" || qr_modules(url).is_none())
         .map(|(key, url)| format!("{key} {}", url.trim_start_matches("https://")))
         .collect();
     (!links.is_empty()).then(|| links.join(" · "))

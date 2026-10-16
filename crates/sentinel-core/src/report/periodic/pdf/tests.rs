@@ -623,6 +623,20 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn a_transparency_url_without_a_qr_code_is_listed_with_the_references() {
+        let (mut report, _) = baked_report();
+        let url = format!("https://example.org/{}", "t".repeat(4000));
+        report
+            .notes
+            .reference_urls
+            .insert("transparency".to_string(), url);
+        let pages = layout_pages(&PageContext::for_report(&report));
+        assert!(!has_qr(&pages[0]), "too long for a QR code");
+        let all = texts(&pages).join(" ");
+        assert!(all.contains("· transparency example.org/"), "{all}");
+    }
+
+    #[test]
     fn reference_urls_other_than_transparency_are_listed() {
         let (mut report, _) = baked_report();
         report.notes.reference_urls.clear();
