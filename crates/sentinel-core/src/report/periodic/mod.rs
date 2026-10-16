@@ -14,6 +14,8 @@ pub mod attestation;
 pub mod errors;
 pub mod hasher;
 pub mod org_config;
+#[cfg(feature = "pdf")]
+pub mod pdf;
 pub(crate) mod rollup;
 pub mod schema;
 pub mod validator;
