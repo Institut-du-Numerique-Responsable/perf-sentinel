@@ -1183,8 +1183,7 @@
             state.correlationFilter.pair_key = PSL.readCorrelationPair(location.hash);
             if (state.correlationFilter.pair_key) state.correlationFilter.range = PSL.CORRELATION_RANGES[PSL.CORRELATION_RANGES.length - 1];
             loadCorrelations();
-        }
-        else if (screen === 'disclosures') loadDisclosures();
+        } else if (screen === 'disclosures') loadDisclosures();
         else if (screen === 'disclosure') {
             const id = PSL.readDisclosureId(location.hash);
             // A note and a token belong to the disclosure they were made on.
@@ -1195,15 +1194,13 @@
             }
             if (id) loadDisclosure(id);
             else state.disclosureError = true;
-        }
-        else if (screen === 'ack') loadAck(false);
+        } else if (screen === 'ack') loadAck(false);
         else if (screen === 'run' || screen === 'report') {
             const id = currentRunId();
             if (id && (!state.run || state.run.id !== id)) {
                 state.runReadFailures = 0;
                 loadRun(id);
-            }
-            else if (id) {
+            } else if (id) {
                 // The render above already mounted the report frame: a second one would load it twice.
                 if (screen === 'run') render();
                 // The report frame cannot say its session lapsed: a 401 there is
@@ -1775,8 +1772,9 @@
                 [gaugeText(view.traces), 'active traces', PSL.gaugeTone(pct(view.traces)), moves.traces],
                 [gaugeText(view.analysis_queue), 'analysis queue',
                     PSL.gaugeTone(pct(view.analysis_queue)), moves.analysis_queue],
-                [gaugeText(view.findings), 'findings stored',
-                    PSL.gaugeTone(pct(view.findings)), moves.findings],
+                // No tone: the ring fills on any daemon that runs long enough, and
+                // the Hub keeps what it evicts. A poll that missed some says so in the hints.
+                [gaugeText(view.findings), 'findings stored', null, moves.findings],
                 // No cap and only one direction: an uptime that grows every read is
                 // not news, and a tone would say it is running out of something. Down to
                 // the minute, because two units hide a whole day: a daemon up for 10 d
@@ -5519,7 +5517,13 @@
                 + PSL.dtHuman(incident.at_ms)
         });
         link.addEventListener('click', function () {
-            state.incidentFilter = {service: '', namespace: '', kind: '', environment: '', source_id: incident.source_id};
+            state.incidentFilter = {
+                service: '',
+                namespace: '',
+                kind: '',
+                environment: '',
+                source_id: incident.source_id
+            };
             state.panelOpen[foldKey(incident)] = true;
             saveFolds();
         });
@@ -5576,7 +5580,10 @@
         } else if (held === 'error') {
             // Shown once: the next render of this panel, a refold or a re-read, asks again.
             delete state.incidentCorrelations[cacheKey];
-            block.appendChild(el('p', {class: 'table-muted', text: 'The Hub did not return the correlations of this window.'}));
+            block.appendChild(el('p', {
+                class: 'table-muted',
+                text: 'The Hub did not return the correlations of this window.'
+            }));
         } else if (held.rows.length > 0) {
             block.appendChild(el('div', {class: 'sources-wrap'}, [incidentEpisodesTable(held.rows)]));
         } else {
@@ -6061,8 +6068,14 @@
     /** What this Hub recomputed, solid. Anything it did not check reads as muted text, never a mark. */
     function checkChip(label, outcome) {
         if (outcome === 'checked') return el('span', {class: 'chip disc-checked'}, [el('span', {text: label}), checkGlyph()]);
-        if (outcome === 'declared') return el('span', {class: 'chip chip-declared disc-level', text: label + ' declared'});
-        return el('span', {class: 'chip disc-unchecked', text: outcome === 'absent' ? 'no ' + label : label + ' not checked'});
+        if (outcome === 'declared') return el('span', {
+            class: 'chip chip-declared disc-level',
+            text: label + ' declared'
+        });
+        return el('span', {
+            class: 'chip disc-unchecked',
+            text: outcome === 'absent' ? 'no ' + label : label + ' not checked'
+        });
     }
 
     function disclosureChips(item) {
@@ -6077,7 +6090,10 @@
         } else {
             chips.push(el('span', {class: 'chip disc-unchecked', text: 'not checked here'}));
         }
-        if (item.confidentiality === 'internal') chips.push(el('span', {class: 'chip chip-declared', text: 'never shared'}));
+        if (item.confidentiality === 'internal') chips.push(el('span', {
+            class: 'chip chip-declared',
+            text: 'never shared'
+        }));
         return chips;
     }
 
@@ -6102,9 +6118,11 @@
         if (!notch) return el('span', {class: 'disc-figure-sub', text: 'not reported'});
         const fill = el('span', {class: 'disc-track-fill'});
         fill.style.width = Math.min(100, notch.percent) + '%';
-        return el('div', {class: 'disc-track', 'data-below': notch.below ? 'true' : null, role: 'img',
+        return el('div', {
+            class: 'disc-track', 'data-below': notch.below ? 'true' : null, role: 'img',
             'aria-label': notch.percent + ' % runtime coverage, ' + (notch.below ? 'under' : 'at or over')
-                + ' the 75 % an official report needs'}, [
+                + ' the 75 % an official report needs'
+        }, [
             fill,
             el('span', {class: 'disc-track-notch'}),
             el('span', {class: 'disc-track-mark', text: '75 % official'})
@@ -6184,7 +6202,10 @@
                     + (RENDER_REASONS[item.render_reason] || item.render_reason || 'no render yet')
                     + '. The files are kept as they arrived, and the figures are the report\'s own.'
             });
-            banners.push(el('div', {class: 'banner', 'data-tone': refused ? 'crit' : 'info'}, refused ? [critGlyph(16), text] : [text]));
+            banners.push(el('div', {
+                class: 'banner',
+                'data-tone': refused ? 'crit' : 'info'
+            }, refused ? [critGlyph(16), text] : [text]));
         }
         return banners;
     }
@@ -6196,7 +6217,10 @@
             downloadButton(item.id, 'report.json', false, status),
             item.files.attestation ? downloadButton(item.id, 'attestation.intoto.jsonl', false, status) : null,
             item.files.bundle ? downloadButton(item.id, 'bundle.sig', false, status) : null,
-            el('a', {class: 'pill-button pill-sm disc-open', href: '#/disclosures/' + item.id}, [el('span', {text: 'Details'})]),
+            el('a', {
+                class: 'pill-button pill-sm disc-open',
+                href: '#/disclosures/' + item.id
+            }, [el('span', {text: 'Details'})]),
             status
         ];
         return el('article', {class: 'card disc-card', 'data-withdrawn': item.withdrawn ? 'true' : null}, [
@@ -6204,8 +6228,10 @@
                 el('h2', {class: 'disc-card-title'}, [
                     el('a', {href: '#/disclosures/' + item.id, text: periodLabel(item.period)})
                 ]),
-                el('span', {class: 'disc-dates',
-                    text: longDate(item.period.from) + ' → ' + longDate(item.period.to) + ' · ' + periodDays(item.period) + ' days'}),
+                el('span', {
+                    class: 'disc-dates',
+                    text: longDate(item.period.from) + ' → ' + longDate(item.period.to) + ' · ' + periodDays(item.period) + ' days'
+                }),
                 el('span', {class: 'disc-chips'}, disclosureChips(item))
             ]),
             el('div', {class: 'disc-card-body'}, disclosureBanners(item).concat([disclosureFigures(item.figures), disclosureFacts(item)])),
@@ -6221,7 +6247,10 @@
                 : cell.state === 'internal' ? 'internal'
                     : cell.state === 'withdrawn' ? 'withdrawn'
                         : cell.state === 'current' ? 'closes in ' + cell.daysLeft + ' d' : 'not published';
-            const body = [el('span', {class: 'disc-rail-label', text: cell.label}), el('span', {class: 'disc-rail-caption', text: caption})];
+            const body = [el('span', {
+                class: 'disc-rail-label',
+                text: cell.label
+            }), el('span', {class: 'disc-rail-caption', text: caption})];
             return el('li', {class: 'disc-rail-cell', 'data-state': cell.state}, cell.id
                 ? [el('a', {href: '#/disclosures/' + cell.id}, body)]
                 : body);
@@ -6234,9 +6263,11 @@
             levelChip('hash-only'), levelChip('signed'), levelChip('signed-with-attestation'),
             el('span', {class: 'disc-legend-label', text: 'checked here'}),
             checkChip('hash', 'checked'), checkChip('bound', 'checked'),
-            el('p', {class: 'disc-legend-note', text: 'A dashed level is what the report declares about itself. A solid '
-                + 'mark is what this Hub recomputed when it arrived: the content hash, and an attestation that names it. '
-                + 'The signature is checked on your machine, never here.'})
+            el('p', {
+                class: 'disc-legend-note', text: 'A dashed level is what the report declares about itself. A solid '
+                    + 'mark is what this Hub recomputed when it arrived: the content hash, and an attestation that names it. '
+                    + 'The signature is checked on your machine, never here.'
+            })
         ]);
     }
 
@@ -6247,8 +6278,8 @@
             text: PSL.publishCommand(location.origin),
             copyLabel: 'Copy the publish command',
             notes: ['Publishing takes the import key `Hub:Disclosures:ImportKey`, like a daemon\'s findings import. '
-                + 'Reading this page needs `disclosures.read`, sharing and withdrawing need `disclosures.manage`. '
-                + 'Neither is in the built-in reader or member role.']
+            + 'Reading this page needs `disclosures.read`, sharing and withdrawing need `disclosures.manage`. '
+            + 'Neither is in the built-in reader or member role.']
         });
     }
 
@@ -6256,10 +6287,12 @@
         const section = el('section', {class: 'disc'}, [
             ruledOverline('// disclosures'),
             el('h1', {class: 'page-title', text: 'Energy and carbon, period by period'}),
-            el('p', {class: 'page-sub', text: 'Each report was produced and signed outside the Hub by perf-sentinel '
-                + 'disclose, then published here by CI. The Hub recomputed its content hash on arrival and keeps the '
-                + 'files as they were sent. Public transparency, not regulatory-grade: every carbon figure carries a '
-                + '~2× bracket.'})
+            el('p', {
+                class: 'page-sub', text: 'Each report was produced and signed outside the Hub by perf-sentinel '
+                    + 'disclose, then published here by CI. The Hub recomputed its content hash on arrival and keeps the '
+                    + 'files as they were sent. Public transparency, not regulatory-grade: every carbon figure carries a '
+                    + '~2× bracket.'
+            })
         ]);
         if (state.disclosures === null) {
             section.appendChild(el('div', {class: 'card skeleton', style: 'height:220px'}));
@@ -6275,8 +6308,11 @@
         if (state.disclosures.length === 0) {
             section.appendChild(el('div', {class: 'empty-state'}, [
                 el('p', {class: 'empty-title', text: 'No disclosure published yet.'}),
-                el('p', {text: 'A CI job publishes one with the import key, as below. It shows here once the Hub '
-                    + 'has checked and kept it.'})
+                el('p', {
+                    text: 'A scheduled job builds one from the daemons\' archives and publishes it '
+                        + 'with the import key, as below. It shows here once the Hub '
+                        + 'has checked and kept it.'
+                })
             ]));
             section.appendChild(publishPanel());
             return section;
@@ -6307,7 +6343,11 @@
     function simpleTable(columns, rows, right) {
         return el('div', {class: 'sources-wrap'}, [el('table', {class: 'table'}, [
             el('thead', {}, [el('tr', {}, columns.map(function (name) {
-                return el('th', {scope: 'col', text: name, 'data-align': (right || []).indexOf(name) >= 0 ? 'right' : null});
+                return el('th', {
+                    scope: 'col',
+                    text: name,
+                    'data-align': (right || []).indexOf(name) >= 0 ? 'right' : null
+                });
             }))]),
             el('tbody', {}, rows)
         ])]);
@@ -6318,8 +6358,10 @@
         if (carbon == null || carbon <= 0) return null;
         return el('div', {class: 'disc-bracket'}, [
             el('span', {class: 'disc-figure-label', text: 'Carbon with its ~2× bracket, log scale'}),
-            el('div', {class: 'disc-bracket-track', role: 'img',
-                'aria-label': fixed(carbon, 2) + ' kgCO₂eq, likely between ' + fixed(carbon / 2, 2) + ' and ' + fixed(carbon * 2, 2)}, [
+            el('div', {
+                class: 'disc-bracket-track', role: 'img',
+                'aria-label': fixed(carbon, 2) + ' kgCO₂eq, likely between ' + fixed(carbon / 2, 2) + ' and ' + fixed(carbon * 2, 2)
+            }, [
                 el('span', {class: 'disc-bracket-band'}),
                 el('span', {class: 'disc-bracket-dot'})
             ]),
@@ -6343,21 +6385,36 @@
             bar.style.width = Math.round(share * 100) + '%';
             return el('tr', {}, [
                 el('td', {class: 'table-strong', text: app.display_name || app.service_name}),
-                el('td', {class: 'table-mono', 'data-align': 'right', text: app.total_requests == null ? '' : Number(app.total_requests).toLocaleString('en')}),
+                el('td', {
+                    class: 'table-mono',
+                    'data-align': 'right',
+                    text: app.total_requests == null ? '' : Number(app.total_requests).toLocaleString('en')
+                }),
                 el('td', {}, [el('span', {class: 'disc-share'}, [el('span', {class: 'disc-share-track'}, [bar]),
                     el('span', {class: 'table-mono', text: Math.round(share * 100) + ' %'})])]),
                 el('td', {class: 'table-mono', 'data-align': 'right', text: fixed(app.energy_kwh, 2)}),
                 el('td', {class: 'table-mono', 'data-align': 'right', text: fixed(app.carbon_kgco2eq, 2)}),
-                el('td', {class: 'table-mono', 'data-align': 'right', text: app.anti_patterns_detected_count == null ? '' : String(app.anti_patterns_detected_count)})
+                el('td', {
+                    class: 'table-mono',
+                    'data-align': 'right',
+                    text: app.anti_patterns_detected_count == null ? '' : String(app.anti_patterns_detected_count)
+                })
             ]);
         });
         const excluded = report.scope_manifest && Array.isArray(report.scope_manifest.applications_excluded)
             ? report.scope_manifest.applications_excluded : [];
         excluded.forEach(function (app) {
             rows.push(el('tr', {}, [
-                el('td', {}, [el('span', {class: 'table-strong', text: (app && (app.service_name || app.name)) || String(app)}), document.createTextNode(' '),
+                el('td', {}, [el('span', {
+                    class: 'table-strong',
+                    text: (app && (app.service_name || app.name)) || String(app)
+                }), document.createTextNode(' '),
                     el('span', {class: 'chip chip-declared', text: 'excluded'})]),
-                el('td', {class: 'table-muted', colspan: '5', text: (app && app.reason) || 'Declared by the operator, not measured.'})
+                el('td', {
+                    class: 'table-muted',
+                    colspan: '5',
+                    text: (app && app.reason) || 'Declared by the operator, not measured.'
+                })
             ]));
         });
         const declared = figures && figures.applications_declared;
@@ -6372,7 +6429,10 @@
         const rows = PSL.checkRows(detail).map(function (row) {
             const outcome = row.outcome === 'checked' ? checkChip('checked', 'checked')
                 : row.outcome === 'declared' ? el('span', {class: 'chip chip-declared disc-level', text: 'declared'})
-                    : el('span', {class: 'chip disc-unchecked', text: row.outcome === 'not_checked' ? 'not checked' : row.outcome});
+                    : el('span', {
+                        class: 'chip disc-unchecked',
+                        text: row.outcome === 'not_checked' ? 'not checked' : row.outcome
+                    });
             return el('tr', {}, [
                 el('td', {class: 'table-strong', text: row.claim}),
                 el('td', {class: 'table-mono', text: row.by}),
@@ -6388,9 +6448,11 @@
                 el('dl', {class: 'disc-defs'}, [
                     el('dt', {text: 'content_hash'}), el('dd', {class: 'table-mono', text: item.content_hash}),
                     el('dt', {text: 'report_uuid'}), el('dd', {class: 'table-mono', text: item.report_uuid}),
-                    el('dt', {text: 'expected signer'}), el('dd', {class: 'table-mono',
+                    el('dt', {text: 'expected signer'}), el('dd', {
+                        class: 'table-mono',
                         text: detail.expected_identity ? detail.expected_identity + ' · ' + detail.expected_issuer
-                            : 'none in this Hub\'s configuration'})
+                            : 'none in this Hub\'s configuration'
+                    })
                 ]),
                 terminalBlock({
                     head: '// verify on your machine',
@@ -6398,7 +6460,7 @@
                     text: PSL.verifyCommand(detail),
                     copyLabel: 'Copy the verify command',
                     notes: ['TRUSTED needs a signed report and an expected signer. The expected signer comes from this '
-                        + 'Hub\'s configuration, never from the report.']
+                    + 'Hub\'s configuration, never from the report.']
                 })
             ]);
     }
@@ -6416,7 +6478,7 @@
         });
         return detailPanel('// files', 'Exactly what was published, kept in the Hub\'s database so its backup carries '
             + 'them. The PDF is the one file this Hub produced, with the engine it embeds.',
-        [simpleTable(['File', 'Role', ''], rows), status]);
+            [simpleTable(['File', 'Role', ''], rows), status]);
     }
 
     function linkState(link) {
@@ -6438,7 +6500,10 @@
                 el('td', {class: 'table-mono', text: PSL.dur(Date.now() - link.created_at_ms) + ' ago'}),
                 el('td', {class: 'table-mono', text: linkState(link)}),
                 el('td', {class: 'table-mono', 'data-align': 'right', text: String(link.downloads)}),
-                el('td', {class: 'table-mono', text: link.last_used_at_ms ? PSL.dur(Date.now() - link.last_used_at_ms) + ' ago' : 'never'}),
+                el('td', {
+                    class: 'table-mono',
+                    text: link.last_used_at_ms ? PSL.dur(Date.now() - link.last_used_at_ms) + ' ago' : 'never'
+                }),
                 el('td', {'data-align': 'right'}, [revoke])
             ]);
         });
@@ -6451,8 +6516,10 @@
         }));
         children.push(rows.length
             ? simpleTable(['Created by', 'Created', 'State', 'Uses', 'Last use', ''], rows, ['Uses'])
-            : el('p', {class: 'sources-note', text: item.confidentiality === 'internal'
-                ? 'An internal report is never shared.' : 'No share link yet.'}));
+            : el('p', {
+                class: 'sources-note', text: item.confidentiality === 'internal'
+                    ? 'An internal report is never shared.' : 'No share link yet.'
+            }));
         return detailPanel('// share links', 'A share link serves this disclosure\'s PDF and its three files under their '
             + 'fixed names to whoever holds it, with no session. It expires within 30 days and counts its uses.', children);
     }
@@ -6469,17 +6536,22 @@
             return el('tr', {}, [
                 el('td', {class: 'table-strong', text: delivery.webhook}),
                 el('td', {class: 'table-mono', text: delivery.event}),
-                el('td', {class: 'table-mono', text: delivery.last_attempt_ms ? PSL.dur(Date.now() - delivery.last_attempt_ms) + ' ago' : 'not yet'}),
-                el('td', {}, [el('span', {class: 'status-pill', 'data-status': delivery.state === 'delivered' ? 'succeeded'
-                    : delivery.state === 'failed' ? 'failed' : 'queued',
-                text: delivery.state + (delivery.last_status ? ' · ' + delivery.last_status : '')
-                    + ' · ' + delivery.attempts + ' tries'})]),
+                el('td', {
+                    class: 'table-mono',
+                    text: delivery.last_attempt_ms ? PSL.dur(Date.now() - delivery.last_attempt_ms) + ' ago' : 'not yet'
+                }),
+                el('td', {}, [el('span', {
+                    class: 'status-pill', 'data-status': delivery.state === 'delivered' ? 'succeeded'
+                        : delivery.state === 'failed' ? 'failed' : 'queued',
+                    text: delivery.state + (delivery.last_status ? ' · ' + delivery.last_status : '')
+                        + ' · ' + delivery.attempts + ' tries'
+                })]),
                 el('td', {'data-align': 'right'}, [retry])
             ]);
         });
         return detailPanel('// deliveries', 'Webhooks declared in the Hub\'s configuration, one signed POST each at '
             + 'publication and at withdrawal. The Hub shows their names, never their URLs.',
-        [simpleTable(['Webhook', 'Event', 'Last attempt', 'Outcome', ''], rows)]);
+            [simpleTable(['Webhook', 'Event', 'Last attempt', 'Outcome', ''], rows)]);
     }
 
     function methodPanel(report) {
@@ -6506,8 +6578,10 @@
 
     /** A button that runs one write, says what came of it, and reloads the detail. */
     function actionButton(label, run, done, primary) {
-        const button = el('button', {type: 'button', class: 'pill-button pill-sm' + (primary ? ' pill-primary' : ''),
-            text: label});
+        const button = el('button', {
+            type: 'button', class: 'pill-button pill-sm' + (primary ? ' pill-primary' : ''),
+            text: label
+        });
         button.addEventListener('click', function () {
             if (state.disclosureBusy) return;
             state.disclosureBusy = true;
@@ -6524,15 +6598,23 @@
     }
 
     function withdrawForm(item) {
-        const reason = el('textarea', {class: 'disc-reason', rows: '2', maxlength: '500', 'aria-label': 'Reason for the withdrawal',
-            placeholder: 'Why, in a sentence: it is kept and sent with the withdrawal.'});
+        const reason = el('textarea', {
+            class: 'disc-reason', rows: '2', maxlength: '500', 'aria-label': 'Reason for the withdrawal',
+            placeholder: 'Why, in a sentence: it is kept and sent with the withdrawal.'
+        });
         const submit = actionButton('Withdraw this disclosure', function () {
-            if (!reason.value.trim()) return Promise.resolve({ok: false, status: 400, payload: {detail: 'Give a reason first.'}});
+            if (!reason.value.trim()) return Promise.resolve({
+                ok: false,
+                status: 400,
+                payload: {detail: 'Give a reason first.'}
+            });
             return sendDisclosure('/api/disclosures/' + item.id + '/withdraw', 'POST', {reason: reason.value.trim()});
         }, 'Withdrawn. Its share links are dead, and its webhooks are told.');
         return el('div', {class: 'disc-withdraw'}, [
-            el('p', {text: 'Withdrawing is final. The files stay, every share link dies, and each webhook told of the '
-                + 'publication is told of the withdrawal. Publish a corrected report under a new uuid.'}),
+            el('p', {
+                text: 'Withdrawing is final. The files stay, every share link dies, and each webhook told of the '
+                    + 'publication is told of the withdrawal. Publish a corrected report under a new uuid.'
+            }),
             reason,
             el('div', {class: 'disc-actions'}, [submit])
         ]);
@@ -6547,7 +6629,11 @@
                 return sendDisclosure('/api/disclosures/' + item.id + '/share-links', 'POST', {}).then(function (outcome) {
                     if (outcome.ok) {
                         const base = location.origin + outcome.payload.path;
-                        state.disclosureLink = {id: item.id, pdfUrl: base + 'report.pdf', reportUrl: base + 'report.json'};
+                        state.disclosureLink = {
+                            id: item.id,
+                            pdfUrl: base + 'report.pdf',
+                            reportUrl: base + 'report.json'
+                        };
                     }
                     return outcome;
                 });
@@ -6559,8 +6645,10 @@
             }, 'Rendered again.'));
         }
         if (manage && !item.withdrawn) {
-            const toggle = el('button', {type: 'button', class: 'pill-button pill-sm',
-                'aria-expanded': state.withdrawOpen ? 'true' : 'false', text: 'Withdraw'});
+            const toggle = el('button', {
+                type: 'button', class: 'pill-button pill-sm',
+                'aria-expanded': state.withdrawOpen ? 'true' : 'false', text: 'Withdraw'
+            });
             toggle.addEventListener('click', function () {
                 state.withdrawOpen = !state.withdrawOpen;
                 render();
@@ -6572,7 +6660,10 @@
     }
 
     function renderDisclosureScreen() {
-        const back = el('a', {class: 'pill-button pill-sm disc-back', href: '#/disclosures'}, [el('span', {text: 'Back to disclosures'})]);
+        const back = el('a', {
+            class: 'pill-button pill-sm disc-back',
+            href: '#/disclosures'
+        }, [el('span', {text: 'Back to disclosures'})]);
         const section = el('section', {class: 'disc'}, [back]);
         if (state.disclosureError) {
             section.appendChild(el('div', {class: 'banner', 'data-tone': 'crit'}, [critGlyph(16),
@@ -6589,13 +6680,17 @@
         const manage = detail.can_manage === true;
         [
             ruledOverline('// disclosure · ' + periodLabel(item.period)),
-            el('h1', {class: 'page-title', text: item.organisation + ', ' + longDate(item.period.from) + ' to '
-                + longDate(item.period.to)}),
-            el('p', {class: 'page-sub', text: item.intent.charAt(0).toUpperCase() + item.intent.slice(1) + ' intent, '
-                + item.confidentiality + ' confidentiality. Published to this Hub ' + PSL.dur(Date.now() - item.published_at_ms)
-                + ' ago' + (item.pdf === 'rendered'
-                    ? ', its content hash recomputed on arrival and its bytes kept as they came.'
-                    : ', kept as it came without a check here.')}),
+            el('h1', {
+                class: 'page-title', text: item.organisation + ', ' + longDate(item.period.from) + ' to '
+                    + longDate(item.period.to)
+            }),
+            el('p', {
+                class: 'page-sub', text: item.intent.charAt(0).toUpperCase() + item.intent.slice(1) + ' intent, '
+                    + item.confidentiality + ' confidentiality. Published to this Hub ' + PSL.dur(Date.now() - item.published_at_ms)
+                    + ' ago' + (item.pdf === 'rendered'
+                        ? ', its content hash recomputed on arrival and its bytes kept as they came.'
+                        : ', kept as it came without a check here.')
+            }),
             el('div', {class: 'disc-chips'}, disclosureChips(item)),
             detailActions(detail, manage),
             state.disclosureNote ? el('p', {class: 'disc-note', role: 'status', text: state.disclosureNote}) : null

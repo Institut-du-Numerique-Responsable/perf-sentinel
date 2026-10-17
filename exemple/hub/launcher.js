@@ -1690,7 +1690,13 @@
 
     function railCell(quarter, items, current, nowMs) {
         const year = Math.floor(quarter / 4);
-        const cell = {label: year + ' Q' + ((quarter % 4) + 1), state: 'missing', level: null, id: null, daysLeft: null};
+        const cell = {
+            label: year + ' Q' + ((quarter % 4) + 1),
+            state: 'missing',
+            level: null,
+            id: null,
+            daysLeft: null
+        };
         const live = items.find(function (item) {
             return !item.withdrawn && item.confidentiality !== 'internal';
         }) || items.find(function (item) {
@@ -1757,7 +1763,11 @@
                 by: checks.content_hash === 'checked' ? 'this Hub, perf-sentinel ' + checks.engine_version : 'not checked here',
                 outcome: checks.content_hash
             },
-            {claim: 'The attestation names this content hash', by: bindingBy[binding] || 'not checked here', outcome: binding},
+            {
+                claim: 'The attestation names this content hash',
+                by: bindingBy[binding] || 'not checked here',
+                outcome: binding
+            },
             {
                 claim: "The publisher's pipeline signed the attestation",
                 by: 'you, with verify-hash against the expected signer',
