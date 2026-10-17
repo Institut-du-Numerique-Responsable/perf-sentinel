@@ -24,9 +24,10 @@ The embedded reference data keeps its vintages for this release: the SPECpower i
   daemon lost and cannot recover. Its 30-minute window outlasts its 15-minute `for`, so a
   single drop fires.
 - `/api/status` reports `findings_stored_total`, the findings pushed into the ring since the
-  daemon started, evicted ones included. Between two reads of one process, the pushes beyond
-  `stored_findings` left the ring unread: a Hub that polls the daemon can count what it
-  missed.
+  daemon started, evicted ones included, back to zero on a restart. Between two reads by one
+  reader, the pushes beyond `stored_findings` left the ring before that reader saw them: a Hub
+  that polls the daemon can count what it missed. `stored_findings`, the total and
+  `oldest_finding_ms` now come from one read of the ring.
 - `/api/config` reports `hub_export_enabled`. `query monitor` shows it on the Config tab, and
   with the export on says that an eviction from the findings ring loses nothing the export
   delivered, on the `max_retained_findings` row and on the `findings_store` line of the
