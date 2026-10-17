@@ -206,6 +206,8 @@ struct ConfigSlim {
     #[serde(default)]
     incidents_enabled: Option<bool>,
     #[serde(default)]
+    hub_export_enabled: Option<bool>,
+    #[serde(default)]
     cors_allowed_origins: Vec<String>,
     #[serde(default)]
     archive_configured: bool,
@@ -1429,7 +1431,11 @@ fn build_config_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
         "max_retained_findings",
         &c.max_retained_findings.to_string(),
         &d.max_retained_findings.to_string(),
-        "Findings kept in the query ring buffer; oldest evicted past it. /api/findings folds them by signature for display.",
+        if c.hub_export_enabled == Some(true) {
+            "Findings kept in the query ring buffer; oldest evicted past it, the Hub already holds them, so a full ring loses no history. /api/findings folds them by signature for display."
+        } else {
+            "Findings kept in the query ring buffer; oldest evicted past it. /api/findings folds them by signature for display."
+        },
     );
     config_row(
         &mut lines,
@@ -1609,6 +1615,15 @@ fn push_subsystem_rows(
             on_off(enabled, "enabled", "disabled"),
             "disabled",
             "Incident store behind /api/incidents (0.20.0): the alerting posts a restart or memory event, the daemon freezes the findings of the window before it. Feeds the Incidents tab.",
+        );
+    }
+    if let Some(enabled) = c.hub_export_enabled {
+        config_row(
+            lines,
+            "hub_export",
+            on_off(enabled, "enabled", "disabled"),
+            "disabled",
+            "Pushes findings, incidents and correlations to PerfSentinelHub, which keeps them past the ring buffer. What it fails to deliver shows on the Advisor tab and in perf_sentinel_hub_export_*_dropped_total.",
         );
     }
     config_row(
@@ -1905,7 +1920,20 @@ fn draw_trends(f: &mut Frame, state: &MonitorState, area: Rect) {
         x_bounds,
         &span_label,
     );
-    draw_headroom_chart(f, rows[1], &series, x_bounds, &span_label);
+    let hub_keeps_history = state
+        .latest
+        .as_ref()
+        .and_then(|s| s.config.as_ref())
+        .and_then(|c| c.hub_export_enabled)
+        .unwrap_or(false);
+    draw_headroom_chart(
+        f,
+        rows[1],
+        &series,
+        x_bounds,
+        &span_label,
+        hub_keeps_history,
+    );
 
     // Light up the border under the cursor (or being dragged): a terminal
     // can't change the OS mouse pointer, so this is the grab affordance.
@@ -2075,6 +2103,7 @@ fn draw_headroom_chart(
     series: &TrendSeries,
     x_bounds: [f64; 2],
     span_label: &str,
+    hub_keeps_history: bool,
 ) {
     let dim = crate::tui::dim_style();
     if series.traces_pct.is_empty() && series.queue_pct.is_empty() && series.findings_pct.is_empty()
@@ -2172,7 +2201,15 @@ fn draw_headroom_chart(
             ),
             (
                 Color::Cyan,
-                format!("findings_store {:.0}%", last_pct(&series.findings_pct)),
+                format!(
+                    "findings_store {:.0}%{}",
+                    last_pct(&series.findings_pct),
+                    if hub_keeps_history {
+                        ", Hub keeps history"
+                    } else {
+                        ""
+                    }
+                ),
             ),
             (Color::Red, "advisor threshold 90%".to_string()),
         ],

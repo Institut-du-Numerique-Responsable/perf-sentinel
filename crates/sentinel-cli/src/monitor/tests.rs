@@ -483,6 +483,7 @@ fn full_config() -> ConfigSlim {
         // A 0.20.0 daemon reports both, at their defaults here.
         read_api_key_set: Some(d.read_api_key.is_some()),
         incidents_enabled: Some(d.incidents.enabled),
+        hub_export_enabled: Some(d.hub_export.enabled),
         ..Default::default()
     }
 }
@@ -589,6 +590,45 @@ fn config_shows_the_read_key_and_the_incident_store_switches() {
     let text = line_text(&build_config_lines(Some(&snapshot)));
     assert!(!text.contains("read_api_key ="), "got: {text}");
     assert!(!text.contains("incidents ="), "got: {text}");
+}
+
+#[test]
+fn config_says_the_hub_keeps_what_the_ring_evicts_when_the_export_is_on() {
+    let row_with_help = |text: &str, name: &str| {
+        let lines: Vec<&str> = text.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains(name))
+            .unwrap_or_else(|| panic!("{name} row: {text}"));
+        format!("{} {}", lines[at], lines[at + 1])
+    };
+    let mut snapshot = snapshot_with_warnings(Vec::new());
+    let mut cfg = full_config();
+    cfg.hub_export_enabled = Some(true);
+    snapshot.config = Some(cfg);
+    let text = line_text(&build_config_lines(Some(&snapshot)));
+    let export = row_with_help(&text, "hub_export =");
+    assert!(
+        export.contains("= enabled") && export.contains("modified"),
+        "{export}"
+    );
+    let ring = row_with_help(&text, "max_retained_findings =");
+    assert!(ring.contains("the Hub already holds"), "{ring}");
+
+    let mut snapshot = snapshot_with_warnings(Vec::new());
+    snapshot.config = Some(full_config());
+    let text = line_text(&build_config_lines(Some(&snapshot)));
+    assert!(row_with_help(&text, "hub_export =").contains("= disabled"));
+    assert!(!text.contains("the Hub already holds"), "{text}");
+
+    // A daemon before the field omits it: no row, no claim about the Hub.
+    let old: ConfigSlim = serde_json::from_str(r#"{"listen_port":4318}"#).unwrap();
+    assert!(old.hub_export_enabled.is_none());
+    let mut snapshot = snapshot_with_warnings(Vec::new());
+    snapshot.config = Some(old);
+    let text = line_text(&build_config_lines(Some(&snapshot)));
+    assert!(!text.contains("hub_export ="), "{text}");
+    assert!(!text.contains("the Hub already holds"), "{text}");
 }
 
 #[test]
