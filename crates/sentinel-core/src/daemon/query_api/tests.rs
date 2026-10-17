@@ -173,6 +173,7 @@ async fn config_exposes_daemon_params_without_secrets() {
     assert_eq!(cfg["ack_api_key_set"], false);
     assert_eq!(cfg["read_api_key_set"], false);
     assert_eq!(cfg["incidents_enabled"], false);
+    assert_eq!(cfg["hub_export_enabled"], false);
     assert!(cfg.get("api_key").is_none());
     assert!(cfg.get("cert_path").is_none());
     assert!(cfg.get("key_path").is_none());
@@ -3191,6 +3192,7 @@ async fn config_summarises_the_read_key_to_a_boolean() {
     let mut keyed_state = make_state().clone_for_test();
     keyed_state.daemon_config.read_api_key = Some("read-key-long-enough".to_string());
     keyed_state.daemon_config.incidents.enabled = true;
+    keyed_state.daemon_config.hub_export.enabled = true;
     let resp = query_api_router(Arc::new(keyed_state))
         .oneshot(get_request("/api/config"))
         .await
@@ -3203,6 +3205,7 @@ async fn config_summarises_the_read_key_to_a_boolean() {
     let cfg: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(cfg["read_api_key_set"], true);
     assert_eq!(cfg["incidents_enabled"], true);
+    assert_eq!(cfg["hub_export_enabled"], true);
 }
 
 #[tokio::test]

@@ -369,7 +369,7 @@ startup.
 `max_retained_traces`, `memory_high_water_pct`, `ingest_queue_capacity`,
 `analysis_queue_capacity`, `per_service_labels`, `per_grouping_labels`, `api_enabled`), the summarized sub-systems
 (`tls_configured`, `ack_enabled`, `ack_api_key_set`, `read_api_key_set`,
-`incidents_enabled`, `cors_allowed_origins`, `archive_configured`), and the correlation
+`incidents_enabled`, `hub_export_enabled`, `cors_allowed_origins`, `archive_configured`), and the correlation
 block (`correlation_enabled`, `correlation_window_ms`,
 `correlation_lag_threshold_ms`, `correlation_min_co_occurrences`,
 `correlation_min_confidence`, `correlation_max_tracked_pairs`).
@@ -394,6 +394,7 @@ curl -sS http://127.0.0.1:4318/api/config
   "ack_api_key_set": false,
   "read_api_key_set": false,
   "incidents_enabled": false,
+  "hub_export_enabled": false,
   "cors_allowed_origins": [],
   "archive_configured": false,
   "correlation_enabled": false,

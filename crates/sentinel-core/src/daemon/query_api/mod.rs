@@ -670,6 +670,9 @@ struct ConfigResponse {
     /// True when `[daemon.incidents]` is enabled, so a client knows
     /// whether `GET /api/incidents` has anything behind it.
     incidents_enabled: bool,
+    /// True when `[daemon.hub_export]` pushes to PerfSentinelHub, which
+    /// then keeps what the ring buffer evicts (since 0.31.2).
+    hub_export_enabled: bool,
     cors_allowed_origins: Vec<String>,
     archive_configured: bool,
     correlation_enabled: bool,
@@ -707,6 +710,7 @@ async fn handle_config(State(state): State<Arc<QueryApiState>>) -> Json<ConfigRe
         ack_api_key_set: d.ack.api_key.is_some(),
         read_api_key_set: d.read_api_key.is_some(),
         incidents_enabled: d.incidents.enabled,
+        hub_export_enabled: d.hub_export.enabled,
         cors_allowed_origins: d.cors.allowed_origins.clone(),
         archive_configured: d.archive.is_some(),
         correlation_enabled: d.correlation.enabled,
