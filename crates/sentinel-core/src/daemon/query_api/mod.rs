@@ -670,7 +670,7 @@ struct ConfigResponse {
     /// True when `[daemon.incidents]` is enabled, so a client knows
     /// whether `GET /api/incidents` has anything behind it.
     incidents_enabled: bool,
-    /// True when `[daemon.hub_export]` pushes to PerfSentinelHub, which
+    /// True when `[daemon.hub_export]` pushes to `PerfSentinelHub`, which
     /// then keeps what the ring buffer evicts (since 0.31.2).
     hub_export_enabled: bool,
     cors_allowed_origins: Vec<String>,

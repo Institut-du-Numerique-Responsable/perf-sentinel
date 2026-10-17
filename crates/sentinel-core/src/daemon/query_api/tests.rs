@@ -2080,7 +2080,7 @@ fn tuning_advisor_flags_hub_export_drops_only_when_the_export_is_on() {
 
     let off = crate::config::DaemonConfig::default();
     assert!(!off.hub_export.enabled, "default is opt-in");
-    assert!(tuning_messages(&metrics, &off).is_empty());
+    assert_eq!(tuning_messages(&metrics, &off), Vec::<String>::new());
 
     let mut on = crate::config::DaemonConfig::default();
     on.hub_export.enabled = true;
@@ -2092,6 +2092,7 @@ fn tuning_advisor_flags_hub_export_drops_only_when_the_export_is_on() {
         "40 findings, 3 incidents and 2 correlation episodes",
         "max_pending` (currently 500)",
         "request_timeout_secs` (currently 10)",
+        "upgrade a Hub that lacks the route",
     ] {
         assert!(msgs[0].contains(part), "{part}: {}", msgs[0]);
     }

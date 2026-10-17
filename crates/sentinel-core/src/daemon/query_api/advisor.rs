@@ -156,11 +156,12 @@ fn hub_export_drop_warning(
         format!(
             "{findings} findings, {incidents} incidents and {correlations} \
              correlation episodes never reached PerfSentinelHub since daemon \
-             start (evicted from a full pending table, oversized or \
-             rejected), so the Hub's history has gaps for them: raise \
+             start (evicted from a full pending table, oversized, rejected, \
+             or held for a Hub without the incident or correlation route), \
+             so the Hub's history has gaps for them: raise \
              `[daemon.hub_export] max_pending` (currently {}) or \
-             `request_timeout_secs` (currently {}), and check the daemon log \
-             for rejected batches",
+             `request_timeout_secs` (currently {}), upgrade a Hub that lacks \
+             the route, and check the daemon log for rejected batches",
             export.max_pending, export.request_timeout_secs
         ),
     ))
