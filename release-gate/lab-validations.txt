@@ -616,3 +616,18 @@ v0.31.0	bf31096	2026-10-16	PASS
 # dashboard's Total CO2 cards, not the detectors, the ingest paths, the Hub
 # export or the energy backends.
 v0.31.1	39c13c8	2026-10-17	PASS
+# v0.31.2, 2026-10-17. Targeted pass on the final release tree. Daemon image
+# perf-sentinel:0.31.2-d851b74c built from release/0.31.2 (the Hub export
+# loss advice, the PerfSentinelHubExportDropping rule and the 30m archive
+# rule window, /api/config hub_export_enabled, /api/status
+# findings_stored_total and the monitor's ring wording): validate-findings
+# 12/12, hybrid-daemon-batch, query-monitor-api, ci-shift-left,
+# output-formats-coverage, chart-prometheusrule-pdb, hub-ingestion and
+# daemon-sigterm-drain, all green. A first run on 777fa2b0 was stopped once
+# the ring counter landed, so it records nothing. The lab ran at 04d5a54
+# with a local, uncommitted image pin in the daemon manifest. Not run: the
+# limit-*, failure-mode-*, template-*, ci-e2e-* and energy families. The
+# release touches the daemon's advisor, two query API fields, the monitor
+# and the chart's rules, not the detectors, the ingest paths or the energy
+# backends.
+v0.31.2	04d5a54	2026-10-17	PASS
