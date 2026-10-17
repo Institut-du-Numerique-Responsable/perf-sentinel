@@ -173,6 +173,7 @@ async fn config_exposes_daemon_params_without_secrets() {
     assert_eq!(cfg["ack_api_key_set"], false);
     assert_eq!(cfg["read_api_key_set"], false);
     assert_eq!(cfg["incidents_enabled"], false);
+    assert_eq!(cfg["hub_export_enabled"], false);
     assert!(cfg.get("api_key").is_none());
     assert!(cfg.get("cert_path").is_none());
     assert!(cfg.get("key_path").is_none());
@@ -470,6 +471,7 @@ async fn status_reports_the_oldest_retained_finding() {
         .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value["oldest_finding_ms"], 4242);
+    assert_eq!(value["findings_stored_total"], 1);
 }
 
 /// One Alertmanager delivery as the handler receives it.
@@ -2071,6 +2073,33 @@ fn tuning_advisor_flags_pair_evictions_only_when_correlation_enabled() {
 }
 
 #[test]
+fn tuning_advisor_flags_hub_export_drops_only_when_the_export_is_on() {
+    let metrics = MetricsState::new();
+    metrics.hub_export_dropped_total.inc_by(40);
+    metrics.hub_export_incidents_dropped_total.inc_by(3);
+    metrics.hub_export_correlations_dropped_total.inc_by(2);
+
+    let off = crate::config::DaemonConfig::default();
+    assert!(!off.hub_export.enabled, "default is opt-in");
+    assert_eq!(tuning_messages(&metrics, &off), Vec::<String>::new());
+
+    let mut on = crate::config::DaemonConfig::default();
+    on.hub_export.enabled = true;
+    on.hub_export.max_pending = 500;
+    on.hub_export.request_timeout_secs = 10;
+    let msgs = tuning_messages(&metrics, &on);
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    for part in [
+        "40 findings, 3 incidents and 2 correlation episodes",
+        "max_pending` (currently 500)",
+        "request_timeout_secs` (currently 10)",
+        "upgrade a Hub that lacks the route",
+    ] {
+        assert!(msgs[0].contains(part), "{part}: {}", msgs[0]);
+    }
+}
+
+#[test]
 fn tuning_advisor_flags_zero_span_retention() {
     let metrics = MetricsState::new();
     metrics.otlp_spans_received_total.inc_by(10_000);
@@ -3165,6 +3194,7 @@ async fn config_summarises_the_read_key_to_a_boolean() {
     let mut keyed_state = make_state().clone_for_test();
     keyed_state.daemon_config.read_api_key = Some("read-key-long-enough".to_string());
     keyed_state.daemon_config.incidents.enabled = true;
+    keyed_state.daemon_config.hub_export.enabled = true;
     let resp = query_api_router(Arc::new(keyed_state))
         .oneshot(get_request("/api/config"))
         .await
@@ -3177,6 +3207,7 @@ async fn config_summarises_the_read_key_to_a_boolean() {
     let cfg: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(cfg["read_api_key_set"], true);
     assert_eq!(cfg["incidents_enabled"], true);
+    assert_eq!(cfg["hub_export_enabled"], true);
 }
 
 #[tokio::test]

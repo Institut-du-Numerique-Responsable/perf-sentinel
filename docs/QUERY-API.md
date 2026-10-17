@@ -304,6 +304,7 @@ cheapest way to verify the daemon is up.
 | `stored_findings`         | number | Findings currently retained in the query ring buffer                                        |
 | `max_retained_findings`   | number | Configured cap of that ring buffer (since 0.8.8)                                            |
 | `oldest_finding_ms`       | number | Detection time of the oldest retained finding, absent when the ring is empty (since 0.20.0) |
+| `findings_stored_total`   | number | Findings pushed into the ring since the daemon started, evicted ones included, reset by a restart (since 0.31.2) |
 | `disclosure_archive`      | object | Days held by the daily rollups, `{ oldest_day, days, last_closed_day }` (since 0.28.0)      |
 
 The three gauge/capacity pairs back the Headroom chart of
@@ -341,6 +342,7 @@ curl -sS http://127.0.0.1:4318/api/status
   "stored_findings": 5,
   "max_retained_findings": 10000,
   "oldest_finding_ms": 1757000400000,
+  "findings_stored_total": 5,
   "disclosure_archive": {
     "oldest_day": "2025-07-01",
     "days": 65,
@@ -369,7 +371,7 @@ startup.
 `max_retained_traces`, `memory_high_water_pct`, `ingest_queue_capacity`,
 `analysis_queue_capacity`, `per_service_labels`, `per_grouping_labels`, `api_enabled`), the summarized sub-systems
 (`tls_configured`, `ack_enabled`, `ack_api_key_set`, `read_api_key_set`,
-`incidents_enabled`, `cors_allowed_origins`, `archive_configured`), and the correlation
+`incidents_enabled`, `hub_export_enabled`, `cors_allowed_origins`, `archive_configured`), and the correlation
 block (`correlation_enabled`, `correlation_window_ms`,
 `correlation_lag_threshold_ms`, `correlation_min_co_occurrences`,
 `correlation_min_confidence`, `correlation_max_tracked_pairs`).
@@ -394,6 +396,7 @@ curl -sS http://127.0.0.1:4318/api/config
   "ack_api_key_set": false,
   "read_api_key_set": false,
   "incidents_enabled": false,
+  "hub_export_enabled": false,
   "cors_allowed_origins": [],
   "archive_configured": false,
   "correlation_enabled": false,

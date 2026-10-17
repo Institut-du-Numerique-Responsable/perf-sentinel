@@ -10,6 +10,7 @@
 //! history intact.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -333,6 +334,9 @@ pub struct FindingsFilter {
 pub struct FindingsStore {
     inner: RwLock<VecDeque<StoredFinding>>,
     max_size: usize,
+    /// Findings pushed since start, evicted ones included. Written under
+    /// the write lock so a read under the read lock matches the ring.
+    stored_total: AtomicU64,
 }
 
 impl FindingsStore {
@@ -351,6 +355,7 @@ impl FindingsStore {
         Self {
             inner: RwLock::new(VecDeque::with_capacity(capacity)),
             max_size,
+            stored_total: AtomicU64::new(0),
         }
     }
 
@@ -381,6 +386,8 @@ impl FindingsStore {
 
         let mut buf = self.inner.write().await;
         buf.extend(new_entries);
+        self.stored_total
+            .fetch_add(findings.len() as u64, Ordering::Relaxed);
         // Drop oldest entries if we exceeded capacity. `drain(..n)` on a
         // VecDeque is O(n), which is acceptable since n is typically small
         // (one batch's worth of excess, not the whole buffer).
@@ -456,17 +463,6 @@ impl FindingsStore {
         (coalesce_locked(&buf, filter), oldest)
     }
 
-    /// Detection time of the oldest retained finding, `None` when the
-    /// buffer is empty.
-    ///
-    /// Separates "nothing was firing in that window" from "the ring does
-    /// not reach that far back", which are otherwise the same empty answer
-    /// to a window query. The buffer is FIFO and one batch shares one
-    /// stamp, so the front is the oldest.
-    pub async fn oldest_ms(&self) -> Option<u64> {
-        self.inner.read().await.front().map(|sf| sf.stored_at_ms)
-    }
-
     /// Get every retained detection for a specific trace, newest first.
     ///
     /// Raw instances, not folded: this is the triage path for a trace
@@ -484,6 +480,22 @@ impl FindingsStore {
     /// Current count of stored findings.
     pub async fn len(&self) -> usize {
         self.inner.read().await.len()
+    }
+
+    /// The ring's length, the findings pushed since start and the oldest
+    /// stamp, from one read. Between two reads by one reader, the pushes
+    /// beyond the current length left the ring before that reader saw them.
+    /// The oldest stamp, `None` on an empty ring, separates "nothing fired
+    /// in that window" from "the ring does not reach that far back": the
+    /// buffer is FIFO and one batch shares one stamp, so the front is the
+    /// oldest.
+    pub async fn ring_counts(&self) -> (usize, u64, Option<u64>) {
+        let buf = self.inner.read().await;
+        (
+            buf.len(),
+            self.stored_total.load(Ordering::Relaxed),
+            buf.front().map(|sf| sf.stored_at_ms),
+        )
     }
 
     /// Whether the store is empty.
@@ -1061,9 +1073,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_stored_total_counts_every_push_the_evicted_ones_included() {
+        let store = FindingsStore::new(2);
+        assert_eq!(store.ring_counts().await, (0, 0, None));
+        for i in 0..3 {
+            let mut f = make_finding_with_template(
+                "svc",
+                FindingType::RedundantSql,
+                &format!("SELECT {i}"),
+            );
+            enrich_with_signatures(std::slice::from_mut(&mut f));
+            store.push_batch(&[f], 1000).await;
+        }
+        assert_eq!(store.ring_counts().await, (2, 3, Some(1000)));
+        let disabled = FindingsStore::new(0);
+        let f = make_finding_with_template("svc", FindingType::RedundantSql, "SELECT 1");
+        disabled.push_batch(&[f], 1000).await;
+        assert_eq!(disabled.ring_counts().await, (0, 0, None), "nothing stored");
+    }
+
+    #[tokio::test]
     async fn oldest_ms_reports_the_front_of_the_ring() {
         let store = FindingsStore::new(2);
-        assert_eq!(store.oldest_ms().await, None, "empty ring has no oldest");
+        assert_eq!(
+            store.ring_counts().await.2,
+            None,
+            "empty ring has no oldest"
+        );
         for (i, stamp) in [1000u64, 2000, 3000].iter().enumerate() {
             let mut f = make_finding_with_template(
                 "svc",
@@ -1074,7 +1110,7 @@ mod tests {
             store.push_batch(&[f], *stamp).await;
         }
         assert_eq!(
-            store.oldest_ms().await,
+            store.ring_counts().await.2,
             Some(2000),
             "eviction moves the front, which is what bounds a window query"
         );

@@ -316,6 +316,7 @@ ou comme moyen le moins coûteux de vérifier que le daemon tourne.
 | `stored_findings`         | number | Findings actuellement retenus dans le ring buffer de requêtage                                 |
 | `max_retained_findings`   | number | Plafond configuré de ce ring buffer (depuis 0.8.8)                                             |
 | `oldest_finding_ms`       | number | Instant de détection du plus ancien finding retenu, absent si le ring est vide (depuis 0.20.0) |
+| `findings_stored_total`   | number | Findings entrés dans le ring depuis le démarrage du daemon, évincés compris, remis à zéro par un redémarrage (depuis 0.31.2) |
 | `disclosure_archive`      | object | Jours détenus en cumuls quotidiens, `{ oldest_day, days, last_closed_day }` (depuis 0.28.0)    |
 
 Les trois paires gauge/plafond alimentent le graphe Headroom de
@@ -355,6 +356,7 @@ curl -sS http://127.0.0.1:4318/api/status
   "stored_findings": 5,
   "max_retained_findings": 10000,
   "oldest_finding_ms": 1757000400000,
+  "findings_stored_total": 5,
   "disclosure_archive": {
     "oldest_day": "2025-07-01",
     "days": 65,
@@ -383,7 +385,7 @@ jamais renvoyés. Les valeurs sont figées au démarrage du daemon.
 `max_retained_traces`, `memory_high_water_pct`, `ingest_queue_capacity`,
 `analysis_queue_capacity`, `per_service_labels`, `per_grouping_labels`, `api_enabled`), les sous-systèmes résumés
 (`tls_configured`, `ack_enabled`, `ack_api_key_set`, `read_api_key_set`,
-`incidents_enabled`, `cors_allowed_origins`, `archive_configured`) et le bloc de corrélation
+`incidents_enabled`, `hub_export_enabled`, `cors_allowed_origins`, `archive_configured`) et le bloc de corrélation
 (`correlation_enabled`, `correlation_window_ms`,
 `correlation_lag_threshold_ms`, `correlation_min_co_occurrences`,
 `correlation_min_confidence`, `correlation_max_tracked_pairs`).
@@ -408,6 +410,7 @@ curl -sS http://127.0.0.1:4318/api/config
   "ack_api_key_set": false,
   "read_api_key_set": false,
   "incidents_enabled": false,
+  "hub_export_enabled": false,
   "cors_allowed_origins": [],
   "archive_configured": false,
   "correlation_enabled": false,

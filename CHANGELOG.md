@@ -4,6 +4,41 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.31.2] - 2026-10-17
+
+A patch with no public API change. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. It is about what a daemon tells its operator once PerfSentinelHub keeps its history: the daemon's own findings ring is no longer where history is lost, the Hub export is. The tuning advisor and a new chart alert name what the export dropped, and `query monitor` says a ring eviction loses nothing the export delivered. `/api/status` and `/api/config` gain one field each.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.31.2 touches the scoring code.
+
+### Added
+
+- The daemon's `tuning` advisor flags what the Hub export dropped. With `[daemon.hub_export]`
+  on, a finding, incident or correlation episode evicted from a full pending table, too large
+  for a payload, rejected by the Hub or held for a Hub without the route never reaches its
+  long history, and the daemon cannot send it again. `/api/export/report` now names the three
+  counts, `max_pending` and `request_timeout_secs` with their values, the Hub upgrade a
+  missing route calls for, and the daemon log to read for rejected batches. The rule stays
+  silent while the export is off.
+- The chart's `PrometheusRule` gains `PerfSentinelHubExportDropping`, on the three
+  `perf_sentinel_hub_export*_dropped_total` counters, among the rules that fire on data the
+  daemon lost and cannot recover. Its 30-minute window outlasts its 15-minute `for`, so a
+  single drop fires.
+- `/api/status` reports `findings_stored_total`, the findings pushed into the ring since the
+  daemon started, evicted ones included, back to zero on a restart. Between two reads by one
+  reader, the pushes beyond `stored_findings` left the ring before that reader saw them: a Hub
+  that polls the daemon can count what it missed. `stored_findings`, the total and
+  `oldest_finding_ms` now come from one read of the ring.
+- `/api/config` reports `hub_export_enabled`. `query monitor` shows it on the Config tab, and
+  with the export on says that an eviction from the findings ring loses nothing the export
+  delivered, on the `max_retained_findings` row and on the `findings_store` line of the
+  headroom chart. What the export drops shows on the Advisor tab.
+
+### Fixed
+
+- The chart's `PerfSentinelArchiveDropping` rule never fired on a single dropped window, the
+  case its description names. Its 15-minute rate went back to zero before its 15-minute `for`
+  elapsed. The rate now spans 30 minutes.
+
 ## [0.31.1] - 2026-10-17
 
 A patch that adds API surface to `perf-sentinel-core`: `sentinel_core::score::carbon::co2_model_label`, the readable name of a carbon model tag. Nothing is removed and no public type changes shape. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The disclosure PDF now prints every field of the report it attaches, absent ones marked `not reported`, `verify-hash --url` reads a PDF, and the HTML dashboard names the carbon model on its Total CO2 cards.

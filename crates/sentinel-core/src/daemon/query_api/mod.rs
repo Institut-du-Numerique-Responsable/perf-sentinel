@@ -383,6 +383,12 @@ struct StatusResponse {
     /// route. Additive since 0.20.0.
     #[serde(skip_serializing_if = "Option::is_none")]
     oldest_finding_ms: Option<u64>,
+    /// Findings pushed into the ring since the daemon started, evicted ones
+    /// included, back to zero on a restart. Between two reads by one
+    /// reader, the pushes beyond `stored_findings` left the ring before
+    /// that reader saw them. Read with the length and the oldest stamp
+    /// in one lock. Additive since 0.31.2.
+    findings_stored_total: u64,
     /// Days the disclosure archive's daily rollups hold, absent until one
     /// has closed. A period starting before `oldest_day` cannot be
     /// disclosed officially from this archive. Additive since 0.28.0.
@@ -605,8 +611,8 @@ async fn handle_correlations(
 async fn handle_status(State(state): State<Arc<QueryApiState>>) -> Json<StatusResponse> {
     let uptime = state.start_time.elapsed().as_secs();
     let active_traces = state.window.lock().await.active_traces();
-    let stored_findings = state.findings_store.len().await;
-    let oldest_finding_ms = state.findings_store.oldest_ms().await;
+    let (stored_findings, findings_stored_total, oldest_finding_ms) =
+        state.findings_store.ring_counts().await;
     Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION"),
         uptime_seconds: uptime,
@@ -617,6 +623,7 @@ async fn handle_status(State(state): State<Arc<QueryApiState>>) -> Json<StatusRe
         stored_findings,
         max_retained_findings: state.daemon_config.max_retained_findings,
         oldest_finding_ms,
+        findings_stored_total,
         disclosure_archive: disclosure_archive_status(&state.metrics),
     })
 }
@@ -670,6 +677,9 @@ struct ConfigResponse {
     /// True when `[daemon.incidents]` is enabled, so a client knows
     /// whether `GET /api/incidents` has anything behind it.
     incidents_enabled: bool,
+    /// True when `[daemon.hub_export]` pushes to `PerfSentinelHub`, which
+    /// then keeps what the ring buffer evicts (since 0.31.2).
+    hub_export_enabled: bool,
     cors_allowed_origins: Vec<String>,
     archive_configured: bool,
     correlation_enabled: bool,
@@ -707,6 +717,7 @@ async fn handle_config(State(state): State<Arc<QueryApiState>>) -> Json<ConfigRe
         ack_api_key_set: d.ack.api_key.is_some(),
         read_api_key_set: d.read_api_key.is_some(),
         incidents_enabled: d.incidents.enabled,
+        hub_export_enabled: d.hub_export.enabled,
         cors_allowed_origins: d.cors.allowed_origins.clone(),
         archive_configured: d.archive.is_some(),
         correlation_enabled: d.correlation.enabled,
