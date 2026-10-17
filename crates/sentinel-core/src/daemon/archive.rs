@@ -940,7 +940,7 @@ mod tests {
         assert!(!is_rotation_stamp(""));
     }
 
-    fn daily_files(dir: &TempDir) -> Vec<std::path::PathBuf> {
+    fn daily_files(dir: &TempDir) -> Vec<PathBuf> {
         std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(Result::ok)

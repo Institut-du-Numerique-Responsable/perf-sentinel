@@ -401,7 +401,7 @@ fn disclosure_archive_status(metrics: &MetricsState) -> Option<DisclosureArchive
     let days = u64::try_from(metrics.archive_rollup_days.get())
         .ok()
         .filter(|d| *d > 0)?;
-    let day = |seconds: i64| chrono::DateTime::from_timestamp(seconds, 0).map(|t| t.date_naive());
+    let day = |seconds: i64| DateTime::from_timestamp(seconds, 0).map(|t| t.date_naive());
     Some(DisclosureArchiveStatus {
         oldest_day: day(metrics.archive_oldest_day_seconds.get())?,
         days,

@@ -338,7 +338,7 @@ async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
 async fn load_remote<F, Fut>(url: &str, get: F) -> Result<LoadedReport, i32>
 where
     F: Fn(String) -> Fut,
-    Fut: std::future::Future<Output = Result<Vec<u8>, String>>,
+    Fut: Future<Output = Result<Vec<u8>, String>>,
 {
     let bytes = get(url.to_string()).await.map_err(|e| {
         eprintln!("Error: fetch {url}: {e}");

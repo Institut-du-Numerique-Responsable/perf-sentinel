@@ -1333,7 +1333,7 @@ mod tests {
     fn spawn_with_incidents(
         base: &str,
         findings: &Arc<HubExportBuffer>,
-        incidents: &Arc<crate::daemon::hub_incident_export::IncidentExportBuffer>,
+        incidents: &Arc<IncidentExportBuffer>,
         flush_interval: Duration,
     ) -> (tokio::task::JoinHandle<()>, Arc<tokio::sync::Notify>) {
         let shutdown = Arc::new(tokio::sync::Notify::new());
@@ -1349,7 +1349,7 @@ mod tests {
             flush_interval,
             HubClient::new(Duration::from_secs(10)),
             acks(None),
-            Some(crate::daemon::hub_incident_export::IncidentExport::new(
+            Some(IncidentExport::new(
                 incidents.clone(),
                 format!("{base}/api/import/incidents?source_id=lab")
                     .parse()
@@ -1443,7 +1443,7 @@ mod tests {
     fn spawn_all(
         base: &str,
         findings: &Arc<HubExportBuffer>,
-        incidents: &Arc<crate::daemon::hub_incident_export::IncidentExportBuffer>,
+        incidents: &Arc<IncidentExportBuffer>,
         correlations: &Arc<CorrelationExportBuffer>,
         correlator: Arc<tokio::sync::Mutex<CrossTraceCorrelator>>,
         flush_interval: Duration,

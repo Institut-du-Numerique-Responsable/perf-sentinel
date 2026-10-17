@@ -990,7 +990,7 @@ mod layout_and_pages {
                 assert!(*x >= 20.0 && right <= PAGE_WIDTH - 20.0, "{op:?}");
             }
         }
-        let logo = super::super::logo::logo();
+        let logo = logo::logo();
         let logo_right = MARGIN + 26.0 * logo.view_box[2] / logo.view_box[3];
         let (x, right) = pages[0]
             .iter()
