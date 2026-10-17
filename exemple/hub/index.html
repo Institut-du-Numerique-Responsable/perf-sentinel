@@ -188,6 +188,21 @@
                          : Promise.resolve(new Response('{}', { status: 404 }));
     }
 
+    // The correlations screen asks for its range and filters in the query, so the
+    // captured episodes are filtered here the way the Hub's store would.
+    if (path.indexOf('/api/correlations?') === 0) {
+      var q = new URLSearchParams(path.split('?')[1]);
+      var service = q.get('service'), sourceId = q.get('source_id'), pairKey = q.get('pair_key');
+      var from = Number(q.get('from')) || 0;
+      return json(shift(ROUTES['/api/correlations']).filter(function (e) {
+        return (e.ended_at_ms === null || e.last_seen_ms >= from)
+          && (!service || e.source.service === service || e.target.service === service)
+          && (!sourceId || e.source_id === sourceId)
+          && (!pairKey || e.pair_key === pairKey)
+          && (q.get('active') !== 'true' || e.ended_at_ms === null);
+      }).slice(0, Number(q.get('limit')) || undefined));
+    }
+
     var pdf = path.match(/^\/api\/disclosures\/([0-9a-f]{16})\/files\/report\.pdf$/);
     if (pdf && PDFS.indexOf(pdf[1]) !== -1) return realFetch('files/' + pdf[1] + '.pdf');
 
