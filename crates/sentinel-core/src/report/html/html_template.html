@@ -1651,7 +1651,7 @@
     ]},
     total_co2: { t: "Total CO2", u: METHO_URL + "#uncertainty-bracket", s: [
       ["What it measures", "Everything the analyzed traffic emitted, by the SCI v1.0 numerator: operational `(E x I)` plus embodied `M` plus network transport `T`, summed over traces and scored per region when spans carry `cloud.region`."],
-      ["How the bracket works", "low is half the mid value, high is double: a log-symmetric bracket that says the estimate is trusted to a factor of two, not to a percent. The model tag after it is the window's carbon model: an energy backend (`kepler_ebpf` is Kepler, RAPL split by CPU time), the I/O proxy with its grid intensity (`io_proxy_v3` monthly x hourly, `v2` hourly, `v1` annual) or `electricity_maps_api` for live grid intensity, `+cal` when calibration rescaled the I/O model. The Energy card says how the energy figure was obtained, by an energy backend or from I/O counts."],
+      ["How the bracket works", "low is half the mid value, high is double: a log-symmetric bracket that says the estimate is trusted to a factor of two, not to a percent. The model tag after it is the window's carbon model: an energy backend (`kepler_ebpf` is Kepler, RAPL, active power only, the name is historical), the I/O proxy with its grid intensity (`io_proxy_v3` monthly x hourly, `v2` hourly, `v1` annual) or `electricity_maps_api` for live grid intensity, `+cal` when calibration rescaled the I/O model. The Energy card says how the energy figure was obtained, by an energy backend or from I/O counts."],
       ["Limits", "A directional estimate for comparing runs and finding waste, not a wattmeter reading, and the project says so in its methodology."]
     ]},
     energy: { t: "Energy", u: METHO_URL + "#energy-per-operation", s: [
