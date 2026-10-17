@@ -4,6 +4,22 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- The daemon's `tuning` advisor flags what the Hub export dropped. With `[daemon.hub_export]`
+  on, a finding, incident or correlation episode evicted from a full pending table, too large
+  for a payload or rejected by the Hub never reaches its long history, and the daemon cannot
+  send it again. `/api/export/report` now names the three counts, `max_pending` and
+  `request_timeout_secs` with their values, and the daemon log to read for rejected batches.
+  The rule stays silent while the export is off.
+- The chart's `PrometheusRule` gains `PerfSentinelHubExportDropping`, on the three
+  `perf_sentinel_hub_export*_dropped_total` counters, among the rules that fire on data the
+  daemon lost and cannot recover.
+- `/api/config` reports `hub_export_enabled`. `query monitor` shows it on the Config tab, and
+  with the export on says the Hub already holds what the findings ring evicts, on the
+  `max_retained_findings` row and on the `findings_store` line of the headroom chart: a full
+  ring then loses no history.
+
 ## [0.31.1] - 2026-10-17
 
 A patch that adds API surface to `perf-sentinel-core`: `sentinel_core::score::carbon::co2_model_label`, the readable name of a carbon model tag. Nothing is removed and no public type changes shape. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The disclosure PDF now prints every field of the report it attaches, absent ones marked `not reported`, `verify-hash --url` reads a PDF, and the HTML dashboard names the carbon model on its Total CO2 cards.
