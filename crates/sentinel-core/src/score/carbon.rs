@@ -88,8 +88,8 @@ pub const CO2_MODEL_ALUMET: &str = "alumet_rapl";
 /// RAPL-dependent).
 pub const CO2_MODEL_SCAPHANDRE: &str = "scaphandre_rapl";
 
-/// Carbon estimation model: Kepler measurement, RAPL split by CPU time.
-/// Sits between Scaphandre (RAPL) and the cloud `SPECpower` interpolation.
+/// Carbon estimation model: Kepler measurement, RAPL, active power only.
+/// Sits between Scaphandre (RAPL) and Redfish (BMC chassis power).
 /// The name is historical: since Kepler 0.10, the only version read, the
 /// source is RAPL (sysfs/powercap, hwmon experimental), not eBPF.
 pub const CO2_MODEL_KEPLER: &str = "kepler_ebpf";
