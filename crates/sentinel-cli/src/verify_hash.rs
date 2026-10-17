@@ -1036,10 +1036,9 @@ mod tests {
 
     #[test]
     fn content_hash_check_fails_on_mismatch() {
-        let report: PeriodicReport =
+        let mut report: PeriodicReport =
             serde_json::from_slice(&std::fs::read(example_g2()).unwrap()).unwrap();
-        // Example file ships with a zeroed placeholder hash that does not
-        // match the recomputed canonical value.
+        report.integrity.content_hash = format!("sha256:{}", "0".repeat(64));
         let s = verify_content_hash(&report);
         assert_matches!(s, Status::Fail(_));
     }

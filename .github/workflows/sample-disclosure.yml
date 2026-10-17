@@ -49,7 +49,15 @@ jobs:
           bin=target/release/perf-sentinel
           version=$("$bin" --version | awk '{print $2}')
           mkdir -p work
-          jq --arg v "$version" 'walk(if . == "0.7.0" then $v else . end)' \
+          binary=$(sha256sum "$bin" | cut -d' ' -f1)
+          jq --arg v "$version" --arg binary "sha256:$binary" '
+            .report_metadata.perf_sentinel_version = $v
+            | .report_metadata.binary_version = $v
+            | .methodology.perf_sentinel_version = $v
+            | .aggregate.binary_versions = [$v]
+            | .integrity.binary_hash = $binary
+            | .integrity.binary_verification_url =
+                "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v\($v)"' \
             docs/schemas/examples/example-official-public-G2.json > work/unsigned.json
           "$bin" hash-bake --report work/unsigned.json --output work/unsigned.json
 

@@ -242,7 +242,7 @@ mod layout_and_pages {
     use super::super::{PAGE_HEIGHT, PAGE_WIDTH};
     use super::*;
     use crate::report::periodic::Application;
-    use crate::report::periodic::schema::PeriodType;
+    use crate::report::periodic::schema::{PeriodType, SCHEMA_VERSION};
 
     fn rebaked(mut report: PeriodicReport) -> (PeriodicReport, Vec<u8>) {
         report.integrity.content_hash = compute_content_hash(&report).expect("hash");
@@ -262,6 +262,19 @@ mod layout_and_pages {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// The ops of the verify section, which the annex now follows.
+    fn verify_section(pages: &[Vec<Op>]) -> Vec<Op> {
+        let start = pages
+            .iter()
+            .position(|page| page_text(page).contains("Five minutes to know it was not altered"))
+            .expect("verify page");
+        let end = pages
+            .iter()
+            .position(|page| page_text(page).contains("Every field of the report"))
+            .expect("annex page");
+        pages[start..end].iter().flatten().cloned().collect()
     }
 
     fn has_qr(page: &[Op]) -> bool {
@@ -393,6 +406,313 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn the_cover_names_the_report_and_when_it_was_generated() {
+        let (report, _) = baked_report();
+        let cover = page_text(&layout_pages(&PageContext::for_report(&report))[0]);
+        assert!(
+            cover.contains(&report.report_metadata.report_uuid.to_string()),
+            "{cover}"
+        );
+        assert!(cover.contains("2026-04-05T12:00:00Z"), "{cover}");
+    }
+
+    #[test]
+    fn the_header_carries_the_vat_number_and_the_opencorporates_page() {
+        let (mut report, _) = baked_report();
+        report.organisation.identifiers.vat = Some("FR12123456789".to_string());
+        report.organisation.identifiers.opencorporates_url =
+            Some("https://opencorporates.com/companies/fr/123456789".to_string());
+        let cover = page_text(&layout_pages(&PageContext::for_report(&report))[0]);
+        assert!(cover.contains("VAT FR12123456789"), "{cover}");
+        assert!(
+            cover.contains("opencorporates.com/companies/fr/123456789"),
+            "{cover}"
+        );
+    }
+
+    #[test]
+    fn each_waste_reading_prints_its_avoidable_energy() {
+        let (mut report, _) = baked_report();
+        report.aggregate.canonical_waste.energy_kwh = 3.27;
+        report.aggregate.operational_waste.energy_kwh = 1.84;
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("3.27 kWh"), "{all}");
+        assert!(all.contains("1.84 kWh"), "{all}");
+    }
+
+    #[test]
+    fn the_carbon_breakdown_is_printed_with_the_figures_outside_the_total() {
+        let (mut report, _) = baked_report();
+        report.aggregate.carbon_breakdown =
+            Some(crate::report::periodic::schema::CarbonBreakdown {
+                operational_kgco2eq: Some(1.71),
+                embodied_kgco2eq: Some(0.2),
+                database_kgco2eq_out_of_total: Some(0.12),
+                messaging_kgco2eq_out_of_total: None,
+                transport_kgco2eq: Some(0.04),
+                transport_kgco2eq_low: Some(0.01),
+                transport_kgco2eq_high: Some(0.04),
+            });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("operational 1.71 kg"), "{all}");
+        assert!(all.contains("embodied 0.20 kg"), "{all}");
+        assert!(all.contains("network transport 0.04 kg"), "{all}");
+        assert!(all.contains("database 0.12 kg"), "{all}");
+        assert!(!all.contains("broker"), "{all}");
+    }
+
+    #[test]
+    fn the_crosswalk_prints_its_caveats() {
+        let (mut report, _) = baked_report();
+        report.methodology.standard_crosswalk =
+            Some(crate::report::periodic::schema::StandardCrosswalk {
+                standard: "ESRS E1".to_string(),
+                mappings: vec![],
+                caveats: vec!["Location-based only, no market-based figure.".to_string()],
+            });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            all.contains("Location-based only, no market-based figure."),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn no_coverage_bar_is_drawn_when_runtime_coverage_is_not_reported() {
+        let (mut report, _) = baked_report();
+        report.aggregate.runtime_windows_count = 0;
+        report.aggregate.fallback_windows_count = 0;
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("Runtime coverage: Not reported"), "{all}");
+        assert!(!all.contains("an official report needs 75"), "{all}");
+    }
+
+    #[test]
+    fn excluded_environments_are_printed_with_their_reason() {
+        let (mut report, _) = baked_report();
+        report.scope_manifest.environments_excluded.push(
+            crate::report::periodic::schema::ExcludedEnv {
+                name: "staging".to_string(),
+                reason: "synthetic traffic only".to_string(),
+            },
+        );
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("staging"), "{all}");
+        assert!(all.contains("synthetic traffic only"), "{all}");
+    }
+
+    #[test]
+    fn the_measuring_binary_row_carries_its_hash_and_provenance() {
+        let (mut report, _) = baked_report();
+        report.integrity.binary_hash = Some(format!("sha256:{}", "ab12".repeat(16)));
+        report.integrity.binary_attestation =
+            Some(crate::report::periodic::schema::BinaryAttestationMetadata {
+                format: "slsa-provenance-v1".to_string(),
+                attestation_url: "https://example.org/attestation".to_string(),
+                builder_id: "https://github.com/actions/runner".to_string(),
+                git_tag: "v0.31.0".to_string(),
+                git_commit: "568d9d96f0e1".to_string(),
+                slsa_level: "L3".to_string(),
+            });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("ab12 ab12"), "{all}");
+        assert!(all.contains("v0.31.0"), "{all}");
+        assert!(all.contains("568d9d96f0e1"), "{all}");
+        assert!(all.contains("SLSA L3"), "{all}");
+    }
+
+    #[test]
+    fn energy_models_print_a_readable_name_beside_their_tag() {
+        let (mut report, _) = baked_report();
+        report.methodology.calibration_inputs.energy_source_models =
+            ["io_proxy_v3", "kepler_ebpf", "vendor_meter"]
+                .into_iter()
+                .map(String::from)
+                .collect();
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            all.contains(
+                "energy models I/O proxy, monthly x hourly grid intensity (io_proxy_v3), Kepler, RAPL, active power only (kepler_ebpf), vendor_meter"
+            ),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn the_archive_row_names_unchained_dropped_and_outside_windows() {
+        let (mut report, _) = baked_report();
+        report.integrity.trace_integrity_chain = serde_json::json!({
+            "windows_verified": 160,
+            "windows_unchained": 2,
+            "breaks": 0,
+            "breaks_outside_period": 1,
+            "windows_dropped": 3,
+            "drop_counter_resets": 1
+        });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(all.contains("160 scoring windows verified"), "{all}");
+        assert!(all.contains("2 written before chaining"), "{all}");
+        assert!(all.contains("1 break outside the period"), "{all}");
+        assert!(
+            all.contains("3 windows not archived, a lower bound across 1 daemon restart"),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn an_annex_after_the_verify_page_prints_every_field_and_marks_the_absent_ones() {
+        let (report, _) = baked_report();
+        let pages = texts(&layout_pages(&PageContext::for_report(&report)));
+        let verify = pages
+            .iter()
+            .position(|page| page.contains("Five minutes to know it was not altered"))
+            .expect("verify page");
+        assert_eq!(verify, 4, "the annex must not move the verify page");
+        let annex = pages[verify + 1..].join(" ");
+        assert!(annex.contains("Every field of the report"), "{annex}");
+        assert!(
+            annex.contains(&format!(
+                "report_metadata.report_uuid {}",
+                report.report_metadata.report_uuid
+            )),
+            "{annex}"
+        );
+        assert!(
+            annex.contains("organisation.identifiers.lei not reported"),
+            "{annex}"
+        );
+        assert!(
+            annex.contains("applications[0].service_name checkout"),
+            "{annex}"
+        );
+    }
+
+    #[test]
+    fn the_longest_annex_paths_print_on_one_line() {
+        let (report, _) = baked_report();
+        let pages = layout_pages(&PageContext::for_report(&report));
+        for path in [
+            "methodology.calibration_inputs.binary_specpower_vintage",
+            "aggregate.carbon_breakdown.messaging_kgco2eq_out_of_total",
+            "methodology.standard_crosswalk.mappings[0].report_field",
+        ] {
+            assert!(
+                pages
+                    .iter()
+                    .flatten()
+                    .any(|op| matches!(op, Op::Text { text, .. } if text.trim() == path)),
+                "{path} is cut"
+            );
+        }
+    }
+
+    #[test]
+    fn the_annex_reads_the_attached_report_not_its_typed_defaults() {
+        let (report, _) = baked_report();
+        let mut context = PageContext::for_report(&report);
+        let mut source = serde_json::to_value(&report).expect("value");
+        let calibration = source["methodology"]["calibration_inputs"]
+            .as_object_mut()
+            .expect("calibration");
+        calibration.remove("scaphandre_used");
+        source["aggregate"]
+            .as_object_mut()
+            .expect("aggregate")
+            .remove("period_coverage");
+        context.source = source;
+        let all = texts(&layout_pages(&context)).join(" ");
+        assert!(
+            all.contains("methodology.calibration_inputs.scaphandre_used not reported"),
+            "{all}"
+        );
+        assert!(
+            all.contains("aggregate.period_coverage not reported"),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn the_annex_names_the_schema_it_lists_whatever_the_report_version() {
+        let (mut report, _) = baked_report();
+        report.schema_version = "perf-sentinel-report/v1.2".to_string();
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            all.contains(&format!("the {SCHEMA_VERSION} schema defines")),
+            "{all}"
+        );
+        assert!(
+            !all.contains("in the order of the attached report.json"),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn a_large_waste_value_stays_clear_of_its_bar() {
+        let (mut report, _) = baked_report();
+        report.aggregate.canonical_waste.carbon_kgco2eq = 1234.56;
+        report.aggregate.canonical_waste.energy_kwh = 12345.67;
+        let pages = layout_pages(&PageContext::for_report(&report));
+        let page = &pages[1];
+        let (value_x, value_y) = page
+            .iter()
+            .find_map(|op| match op {
+                Op::Text { x, y, text, .. } if text.contains("12345.67 kWh") => Some((*x, *y)),
+                _ => None,
+            })
+            .expect("the canonical value");
+        // The track of the same row sits 6 points above the value's baseline.
+        let track_end = page
+            .iter()
+            .filter_map(|op| match op {
+                Op::Box { x, y, w, h, .. }
+                    if (*h - 7.0).abs() < f32::EPSILON && (value_y - 6.0 - y).abs() < 0.5 =>
+                {
+                    Some(x + w)
+                }
+                _ => None,
+            })
+            .fold(0.0_f32, f32::max);
+        assert!(track_end > 0.0, "no track on the value's row");
+        assert!(
+            value_x > track_end,
+            "value at {value_x}, track ends at {track_end}"
+        );
+    }
+
+    #[test]
+    fn a_transparency_url_without_a_qr_code_is_listed_with_the_references() {
+        let (mut report, _) = baked_report();
+        let url = format!("https://example.org/{}", "t".repeat(4000));
+        report
+            .notes
+            .reference_urls
+            .insert("transparency".to_string(), url);
+        let pages = layout_pages(&PageContext::for_report(&report));
+        assert!(!has_qr(&pages[0]), "too long for a QR code");
+        let all = texts(&pages).join(" ");
+        assert!(all.contains("· transparency example.org/"), "{all}");
+    }
+
+    #[test]
+    fn reference_urls_other_than_transparency_are_listed() {
+        let (mut report, _) = baked_report();
+        report.notes.reference_urls.clear();
+        report.notes.reference_urls.insert(
+            "methodology".to_string(),
+            "https://example.org/METHODOLOGY.md".to_string(),
+        );
+        report.notes.reference_urls.insert(
+            "transparency".to_string(),
+            "https://example.org/transparency".to_string(),
+        );
+        let method = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            method.contains("methodology example.org/METHODOLOGY.md"),
+            "{method}"
+        );
+    }
+
+    #[test]
     fn page_five_fills_the_verify_command_with_the_expected_identity() {
         let (report, _) = baked_report();
         let mut context = PageContext::for_report(&report);
@@ -400,7 +720,7 @@ mod layout_and_pages {
             Some("https://github.com/acme/ci/.github/workflows/disclose.yml@refs/heads/main");
         context.expected_issuer = Some("https://token.actions.githubusercontent.com");
         let pages = layout_pages(&context);
-        let last = page_text(pages.last().expect("pages"));
+        let last = page_text(&verify_section(&pages));
         assert!(last.contains("--expected-identity"), "{last}");
         assert!(
             last.contains("token.actions.githubusercontent.com"),
@@ -439,7 +759,7 @@ mod layout_and_pages {
     fn page_five_prints_the_full_document_code() {
         let (report, _) = baked_report();
         let pages = layout_pages(&PageContext::for_report(&report));
-        let last = page_text(pages.last().expect("pages"));
+        let last = page_text(&verify_section(&pages));
         let hex = report.integrity.content_hash.trim_start_matches("sha256:");
         for group in hex.as_bytes().chunks(4) {
             assert!(last.contains(std::str::from_utf8(group).unwrap()), "{last}");
@@ -450,7 +770,7 @@ mod layout_and_pages {
     fn an_unsigned_report_does_not_claim_a_signature_stops_forgers() {
         let (report, _) = baked_report();
         let pages = layout_pages(&PageContext::for_report(&report));
-        let last = page_text(pages.last().expect("pages"));
+        let last = page_text(&verify_section(&pages));
         assert!(
             !last.contains("signed attestation names the original code"),
             "{last}"
@@ -528,9 +848,7 @@ mod layout_and_pages {
         context.expected_issuer = Some("https://token.actions.githubusercontent.com");
         let pages = layout_pages(&context);
         let quoted = format!("'{identity}'");
-        let line = pages
-            .last()
-            .expect("pages")
+        let line = verify_section(&pages)
             .iter()
             .find_map(|op| match op {
                 Op::Text {
