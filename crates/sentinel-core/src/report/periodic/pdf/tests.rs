@@ -522,6 +522,23 @@ mod layout_and_pages {
     }
 
     #[test]
+    fn energy_models_print_a_readable_name_beside_their_tag() {
+        let (mut report, _) = baked_report();
+        report.methodology.calibration_inputs.energy_source_models =
+            ["io_proxy_v3", "kepler_ebpf", "vendor_meter"]
+                .into_iter()
+                .map(String::from)
+                .collect();
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            all.contains(
+                "energy models I/O proxy, monthly x hourly grid intensity (io_proxy_v3), Kepler, RAPL split by CPU time (kepler_ebpf), vendor_meter"
+            ),
+            "{all}"
+        );
+    }
+
+    #[test]
     fn the_archive_row_names_unchained_dropped_and_outside_windows() {
         let (mut report, _) = baked_report();
         report.integrity.trace_integrity_chain = serde_json::json!({

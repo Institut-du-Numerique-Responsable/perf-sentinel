@@ -18,6 +18,9 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
   terms with the database and broker figures kept outside it, the caveats of the ESRS
   crosswalk, the excluded environments, the measuring binary's hash and SLSA provenance, the
   unchained, dropped and outside-period windows of the archive chain, and the reference links.
+- The measuring binary row names each energy model beside its tag, as in
+  `Kepler, RAPL split by CPU time (kepler_ebpf)`, and prints an unknown tag as it is. The tags
+  in the report and in the annex do not change.
 - The G2 example of `docs/schemas/examples` moves to schema v1.7 and perf-sentinel 0.31.0,
   with its `content_hash` baked in and its reference links on the Institut du Numérique
   Responsable repository, so `disclose-pdf` and `verify-hash` take it as it is.

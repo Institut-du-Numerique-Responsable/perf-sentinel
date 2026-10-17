@@ -1654,10 +1654,13 @@ fn measuring_binary(report: &PeriodicReport) -> String {
         ),
     ];
     if !calibration.energy_source_models.is_empty() {
-        let models: Vec<&str> = calibration
+        let models: Vec<String> = calibration
             .energy_source_models
             .iter()
-            .map(String::as_str)
+            .map(|tag| match crate::score::carbon::co2_model_label(tag) {
+                Some(label) => format!("{label} ({tag})"),
+                None => tag.clone(),
+            })
             .collect();
         parts.push(format!("energy models {}", models.join(", ")));
     }

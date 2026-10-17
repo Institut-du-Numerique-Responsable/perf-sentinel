@@ -108,6 +108,23 @@ pub const CO2_MODEL_CLOUD_SPECPOWER: &str = "cloud_specpower";
 /// energy model tag which tracks Scaphandre/cloud/proxy).
 pub const CO2_MODEL_EMAPS: &str = "electricity_maps_api";
 
+/// Readable name of a model tag, for documents a person reads.
+#[must_use]
+pub fn co2_model_label(tag: &str) -> Option<&'static str> {
+    Some(match tag {
+        CO2_MODEL => "I/O proxy, annual grid intensity",
+        CO2_MODEL_V2 => "I/O proxy, hourly grid intensity",
+        CO2_MODEL_V3 => "I/O proxy, monthly x hourly grid intensity",
+        CO2_MODEL_ALUMET => "Alumet, RAPL",
+        CO2_MODEL_SCAPHANDRE => "Scaphandre, RAPL",
+        CO2_MODEL_KEPLER => "Kepler, RAPL split by CPU time",
+        CO2_MODEL_REDFISH => "Redfish, BMC power",
+        CO2_MODEL_CLOUD_SPECPOWER => "Cloud SPECpower table",
+        CO2_MODEL_EMAPS => "Electricity Maps, live grid intensity",
+        _ => return None,
+    })
+}
+
 /// Suffix appended to the proxy model tag when calibration factors are active.
 pub const CO2_MODEL_CAL_SUFFIX: &str = "+cal";
 
