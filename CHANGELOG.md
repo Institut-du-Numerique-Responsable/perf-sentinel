@@ -4,6 +4,13 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- The HTML dashboard's Total CO2 cards, on the Overview and Carbon tabs, name the window's
+  carbon model after the bracket (`model io_proxy_v3`, `model scaphandre_rapl+cal`,
+  `model electricity_maps_api`), the tag the JSON report and the terminal's `Est. CO2` line
+  already carry.
+
 ### Changed
 
 - `disclose-pdf` ends on an annex that prints every field the schema defines, in schema order
