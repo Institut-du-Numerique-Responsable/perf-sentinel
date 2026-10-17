@@ -60,6 +60,14 @@ spec:
           annotations:
             summary: "perf-sentinel dropped a disclosure archive window"
             description: "The archive hash chain stays contiguous across a drop, so verify-hash recomputes clean over a record that is short and this counter is the only witness. No floor here, unlike the rules above: the unit is a whole scoring window."
+        - alert: PerfSentinelHubExportDropping
+          expr: (rate(perf_sentinel_hub_export_dropped_total[15m]) + rate(perf_sentinel_hub_export_incidents_dropped_total[15m]) + rate(perf_sentinel_hub_export_correlations_dropped_total[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "perf-sentinel dropped findings, incidents or correlations bound for PerfSentinelHub"
+            description: "What the daemon could not deliver to the Hub leaves a gap in the Hub's long history that the daemon cannot refill, its ring buffer having moved on. Silent while the Hub export is off. Raise the hub_export max_pending or request_timeout_secs, and look for rejected batches in the daemon log. No floor: the unit is a whole finding, incident or episode."
         {{- if .Values.prometheusRule.energyScrapers }}
         {{- $stale := .Values.prometheusRule.scraperStaleSeconds }}
         {{- range $backend := list "alumet" "scaphandre" "kepler" "redfish" "cloud_energy" }}

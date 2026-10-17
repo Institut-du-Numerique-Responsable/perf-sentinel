@@ -492,7 +492,7 @@ de détection.
 
 Les entrées `tuning` sont des conseils de configuration : chaque
 message nomme le réglage, sa valeur actuelle et l'ajustement suggéré.
-Dix règles tournent à chaque appel `/api/export/report` :
+Onze règles tournent à chaque appel `/api/export/report` :
 
 | Déclencheur                                                                                                                                                                   | Réglage suggéré                                                                                                                                      |
 |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -505,6 +505,7 @@ Dix règles tournent à chaque appel `/api/export/report` :
 | `perf_sentinel_analysis_service_overflow_total > 0` ou `perf_sentinel_slow_duration_service_overflow_total > 0`                                                               | Agréger ou réduire les noms de services (les plafonds de 128 et 64 séries sont fixes)                                                                |
 | `perf_sentinel_analysis_grouping_overflow_total > 0`, `perf_sentinel_slow_duration_grouping_overflow_total > 0` ou `perf_sentinel_service_io_ops_grouping_overflow_total > 0` | Agréger ou réduire les valeurs de regroupement, ou raccourcir `[detection] grouping_attributes` (les plafonds de 512, 256 et 4096 paires sont fixes) |
 | `perf_sentinel_correlator_pairs_evicted_total > 0` avec corrélation activée                                                                                                   | `[daemon.correlation] max_tracked_pairs`                                                                                                             |
+| Un `perf_sentinel_hub_export*_dropped_total > 0` avec l'export Hub activé                                                                                                     | `[daemon.hub_export] max_pending` ou `request_timeout_secs`, et le log pour les lots rejetés                                                         |
 | Tous les spans OTLP reçus filtrés comme non analysables (après 1000 spans)                                                                                                    | Corriger les attributs de spans ou pointer les services instrumentés vers cet endpoint                                                               |
 
 Les règles à compteurs sont collantes (les compteurs cumulatifs ne se
@@ -577,6 +578,10 @@ groups:
         labels: { severity: warning }
       - alert: PerfSentinelArchiveDropping
         expr: rate(perf_sentinel_archive_windows_dropped_total[15m]) > 0
+        for: 15m
+        labels: { severity: warning }
+      - alert: PerfSentinelHubExportDropping
+        expr: (rate(perf_sentinel_hub_export_dropped_total[15m]) + rate(perf_sentinel_hub_export_incidents_dropped_total[15m]) + rate(perf_sentinel_hub_export_correlations_dropped_total[15m])) > 0
         for: 15m
         labels: { severity: warning }
 ```

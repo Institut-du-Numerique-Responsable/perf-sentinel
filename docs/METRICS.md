@@ -468,7 +468,7 @@ detection output.
 ### The `tuning` advisor (since 0.8.7)
 
 `tuning` entries are configuration advice: each message names the
-config knob, its current value, and the suggested adjustment. Ten
+config knob, its current value, and the suggested adjustment. Eleven
 rules run on every `/api/export/report` call:
 
 | Trigger                                                                                                                                                                       | Suggested knob                                                                                                                  |
@@ -482,6 +482,7 @@ rules run on every `/api/export/report` call:
 | `perf_sentinel_analysis_service_overflow_total > 0` or `perf_sentinel_slow_duration_service_overflow_total > 0`                                                               | Aggregate or reduce service names (the 128- and 64-series caps are fixed)                                                       |
 | `perf_sentinel_analysis_grouping_overflow_total > 0`, `perf_sentinel_slow_duration_grouping_overflow_total > 0` or `perf_sentinel_service_io_ops_grouping_overflow_total > 0` | Aggregate or reduce grouping values, or shorten `[detection] grouping_attributes` (the 512-, 256- and 4096-pair caps are fixed) |
 | `perf_sentinel_correlator_pairs_evicted_total > 0` with correlation enabled                                                                                                   | `[daemon.correlation] max_tracked_pairs`                                                                                        |
+| Any `perf_sentinel_hub_export*_dropped_total > 0` with the Hub export enabled                                                                                                 | `[daemon.hub_export] max_pending` or `request_timeout_secs`, and the log for rejected batches                                   |
 | Every received OTLP span filtered as non-analyzable (after 1000 spans)                                                                                                        | Fix span attributes or point instrumented services at this endpoint                                                             |
 
 Counter-driven rules are sticky (lifetime counters only reset on
@@ -547,6 +548,10 @@ groups:
         labels: { severity: warning }
       - alert: PerfSentinelArchiveDropping
         expr: rate(perf_sentinel_archive_windows_dropped_total[15m]) > 0
+        for: 15m
+        labels: { severity: warning }
+      - alert: PerfSentinelHubExportDropping
+        expr: (rate(perf_sentinel_hub_export_dropped_total[15m]) + rate(perf_sentinel_hub_export_incidents_dropped_total[15m]) + rate(perf_sentinel_hub_export_correlations_dropped_total[15m])) > 0
         for: 15m
         labels: { severity: warning }
 ```
