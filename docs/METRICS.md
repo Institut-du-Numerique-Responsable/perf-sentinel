@@ -547,11 +547,11 @@ groups:
         for: 15m
         labels: { severity: warning }
       - alert: PerfSentinelArchiveDropping
-        expr: rate(perf_sentinel_archive_windows_dropped_total[15m]) > 0
+        expr: rate(perf_sentinel_archive_windows_dropped_total[30m]) > 0
         for: 15m
         labels: { severity: warning }
       - alert: PerfSentinelHubExportDropping
-        expr: (rate(perf_sentinel_hub_export_dropped_total[15m]) + rate(perf_sentinel_hub_export_incidents_dropped_total[15m]) + rate(perf_sentinel_hub_export_correlations_dropped_total[15m])) > 0
+        expr: (rate(perf_sentinel_hub_export_dropped_total[30m]) + rate(perf_sentinel_hub_export_incidents_dropped_total[30m]) + rate(perf_sentinel_hub_export_correlations_dropped_total[30m])) > 0
         for: 15m
         labels: { severity: warning }
 ```
