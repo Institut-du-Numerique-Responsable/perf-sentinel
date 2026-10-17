@@ -2,7 +2,8 @@ import { test, expect, Page } from "@playwright/test";
 
 // Carbon tab: the Energy card names where the energy figure comes from,
 // never the window energy_model (an intensity tag on Electricity Maps
-// daemons). The rules mirror GreenSummary::energy_source_label.
+// daemons). The rules mirror GreenSummary::energy_source_label. Total CO2
+// carries co2.total.model, as the CLI's Est. CO2 line does.
 
 type Row = [service: string, tag: string, ratio: number];
 
@@ -12,6 +13,7 @@ async function loadCarbon(
   windowTag: string,
   rows: Row[],
   calibrated = false,
+  co2Model?: string,
 ) {
   await page.route("**/dashboard.html", async (route) => {
     const response = await route.fetch();
@@ -26,6 +28,7 @@ async function loadCarbon(
         gs.energy_calibrated = calibrated;
         gs.per_service_energy_model = Object.fromEntries(rows.map(([s, t]) => [s, t]));
         gs.per_service_measured_ratio = Object.fromEntries(rows.map(([s, , r]) => [s, r]));
+        if (co2Model !== undefined) gs.co2.total.model = co2Model;
         return open + JSON.stringify(payload) + close;
       },
     );
@@ -117,7 +120,7 @@ test("6. an Electricity Maps window tag is never shown as the energy source", as
     ["b", "electricity_maps_api", 0],
   ]);
   await expectEnergySub(page, "modeled from I/O counts");
-  await expect(page.locator("#green-metrics")).not.toContainText("electricity_maps_api");
+  await expect(energyCard(page)).not.toContainText("electricity_maps_api");
 });
 
 test("7. no computed energy greys the card out", async ({ page }) => {
@@ -157,4 +160,41 @@ test("9. at 900px the ninth card spans both columns", async ({ page }) => {
   // The last card runs from the left column to the right edge.
   expect(last!.x).toBeCloseTo(first!.x, 0);
   expect(last!.x + last!.width).toBeCloseTo(second!.x + second!.width, 0);
+});
+
+function totalSub(page: Page) {
+  return page.locator("#green-metrics > .ps-metric").nth(0).locator(".ps-metric-sub");
+}
+
+test("10. Total CO2 names the window carbon model after the bracket", async ({ page }) => {
+  await loadCarbon(page, 0.5, "io_proxy_v3", [["a", "io_proxy_v3", 0]], false, "io_proxy_v3");
+  await expect(totalSub(page)).toHaveText(/^low .+ · high .+ · model\sio_proxy_v3$/);
+});
+
+test("11. the carbon model keeps +cal and names a measured backend", async ({ page }) => {
+  await loadCarbon(page, 0.5, "kepler_ebpf", [["a", "kepler_ebpf", 1]], true, "kepler_ebpf+cal");
+  await expect(totalSub(page)).toContainText("· model kepler_ebpf+cal");
+  await expectEnergySub(page, "source kepler_ebpf");
+});
+
+test("12. an Electricity Maps tag shows as the carbon model, not the energy source", async ({ page }) => {
+  await loadCarbon(page, 0.5, "electricity_maps_api", [["a", "electricity_maps_api", 0]], false, "electricity_maps_api");
+  await expect(totalSub(page)).toContainText("· model electricity_maps_api");
+  await expectEnergySub(page, "modeled from I/O counts");
+});
+
+test("13. a hostile or missing carbon model leaves the bracket alone", async ({ page }) => {
+  await loadCarbon(page, 0.5, "io_proxy_v3", [["a", "io_proxy_v3", 0]], false, "io\u202E_proxy");
+  await expect(totalSub(page)).toHaveText(/^low .+ · high [^·]+$/);
+  expect(await page.locator("#green-metrics").innerText()).not.toContain("\u202E");
+  await page.unrouteAll();
+  await loadCarbon(page, 0.5, "io_proxy_v3", [["a", "io_proxy_v3", 0]], false, "");
+  await expect(totalSub(page)).not.toContainText("model");
+});
+
+test("14. the Overview Total CO2 card carries the same model tag", async ({ page }) => {
+  await loadCarbon(page, 0.5, "io_proxy_v3", [["a", "io_proxy_v3", 0]], false, "io_proxy_v2+cal");
+  await page.goto("/dashboard.html#overview");
+  const card = page.locator("#findings-metrics > .ps-metric", { hasText: "Total CO2" });
+  await expect(card.locator(".ps-metric-sub")).toContainText("· model io_proxy_v2+cal");
 });
