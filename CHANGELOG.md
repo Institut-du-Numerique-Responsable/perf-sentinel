@@ -8,17 +8,25 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 - The daemon's `tuning` advisor flags what the Hub export dropped. With `[daemon.hub_export]`
   on, a finding, incident or correlation episode evicted from a full pending table, too large
-  for a payload or rejected by the Hub never reaches its long history, and the daemon cannot
-  send it again. `/api/export/report` now names the three counts, `max_pending` and
-  `request_timeout_secs` with their values, and the daemon log to read for rejected batches.
-  The rule stays silent while the export is off.
+  for a payload, rejected by the Hub or held for a Hub without the route never reaches its
+  long history, and the daemon cannot send it again. `/api/export/report` now names the three
+  counts, `max_pending` and `request_timeout_secs` with their values, the Hub upgrade a
+  missing route calls for, and the daemon log to read for rejected batches. The rule stays
+  silent while the export is off.
 - The chart's `PrometheusRule` gains `PerfSentinelHubExportDropping`, on the three
   `perf_sentinel_hub_export*_dropped_total` counters, among the rules that fire on data the
-  daemon lost and cannot recover.
+  daemon lost and cannot recover. Its 30-minute window outlasts its 15-minute `for`, so a
+  single drop fires.
 - `/api/config` reports `hub_export_enabled`. `query monitor` shows it on the Config tab, and
-  with the export on says the Hub already holds what the findings ring evicts, on the
-  `max_retained_findings` row and on the `findings_store` line of the headroom chart: a full
-  ring then loses no history.
+  with the export on says that an eviction from the findings ring loses nothing the export
+  delivered, on the `max_retained_findings` row and on the `findings_store` line of the
+  headroom chart. What the export drops shows on the Advisor tab.
+
+### Fixed
+
+- The chart's `PerfSentinelArchiveDropping` rule never fired on a single dropped window, the
+  case its description names. Its 15-minute rate went back to zero before its 15-minute `for`
+  elapsed. The rate now spans 30 minutes.
 
 ## [0.31.1] - 2026-10-17
 
