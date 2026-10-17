@@ -1432,7 +1432,7 @@ fn build_config_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
         &c.max_retained_findings.to_string(),
         &d.max_retained_findings.to_string(),
         if c.hub_export_enabled == Some(true) {
-            "Findings kept in the query ring buffer; oldest evicted past it, the Hub already holds them, so a full ring loses no history. /api/findings folds them by signature for display."
+            "Findings kept in the query ring buffer; oldest evicted past it. The Hub export carries them on its own queue, so an eviction here loses nothing the export delivered, and its drops show on the Advisor tab. /api/findings folds them by signature for display."
         } else {
             "Findings kept in the query ring buffer; oldest evicted past it. /api/findings folds them by signature for display."
         },
@@ -1920,19 +1920,13 @@ fn draw_trends(f: &mut Frame, state: &MonitorState, area: Rect) {
         x_bounds,
         &span_label,
     );
-    let hub_keeps_history = state
-        .latest
-        .as_ref()
-        .and_then(|s| s.config.as_ref())
-        .and_then(|c| c.hub_export_enabled)
-        .unwrap_or(false);
     draw_headroom_chart(
         f,
         rows[1],
         &series,
         x_bounds,
         &span_label,
-        hub_keeps_history,
+        hub_export_on(state.latest.as_ref()),
     );
 
     // Light up the border under the cursor (or being dragged): a terminal
@@ -2103,7 +2097,7 @@ fn draw_headroom_chart(
     series: &TrendSeries,
     x_bounds: [f64; 2],
     span_label: &str,
-    hub_keeps_history: bool,
+    hub_export: bool,
 ) {
     let dim = crate::tui::dim_style();
     if series.traces_pct.is_empty() && series.queue_pct.is_empty() && series.findings_pct.is_empty()
@@ -2201,19 +2195,31 @@ fn draw_headroom_chart(
             ),
             (
                 Color::Cyan,
-                format!(
-                    "findings_store {:.0}%{}",
-                    last_pct(&series.findings_pct),
-                    if hub_keeps_history {
-                        ", Hub keeps history"
-                    } else {
-                        ""
-                    }
-                ),
+                findings_store_legend(last_pct(&series.findings_pct), hub_export),
             ),
             (Color::Red, "advisor threshold 90%".to_string()),
         ],
     );
+}
+
+/// Whether the daemon pushes to the Hub, false on a daemon that predates
+/// the `/api/config` field.
+fn hub_export_on(latest: Option<&Snapshot>) -> bool {
+    latest
+        .and_then(|s| s.config.as_ref())
+        .and_then(|c| c.hub_export_enabled)
+        .unwrap_or(false)
+}
+
+/// The ring's headroom legend. With the Hub export on, its evictions lose
+/// nothing the export delivered, so the line says where they went.
+fn findings_store_legend(pct: f64, hub_export: bool) -> String {
+    let suffix = if hub_export {
+        ", evictions exported to the Hub"
+    } else {
+        ""
+    };
+    format!("findings_store {pct:.0}%{suffix}")
 }
 
 /// Compact duration label for the chart X axis: seconds under two

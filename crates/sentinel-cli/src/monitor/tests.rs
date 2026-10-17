@@ -613,13 +613,19 @@ fn config_says_the_hub_keeps_what_the_ring_evicts_when_the_export_is_on() {
         "{export}"
     );
     let ring = row_with_help(&text, "max_retained_findings =");
-    assert!(ring.contains("the Hub already holds"), "{ring}");
+    assert!(
+        ring.contains("loses nothing the export delivered"),
+        "{ring}"
+    );
 
     let mut snapshot = snapshot_with_warnings(Vec::new());
     snapshot.config = Some(full_config());
     let text = line_text(&build_config_lines(Some(&snapshot)));
     assert!(row_with_help(&text, "hub_export =").contains("= disabled"));
-    assert!(!text.contains("the Hub already holds"), "{text}");
+    assert!(
+        !text.contains("loses nothing the export delivered"),
+        "{text}"
+    );
 
     // A daemon before the field omits it: no row, no claim about the Hub.
     let old: ConfigSlim = serde_json::from_str(r#"{"listen_port":4318}"#).unwrap();
@@ -628,7 +634,26 @@ fn config_says_the_hub_keeps_what_the_ring_evicts_when_the_export_is_on() {
     snapshot.config = Some(old);
     let text = line_text(&build_config_lines(Some(&snapshot)));
     assert!(!text.contains("hub_export ="), "{text}");
-    assert!(!text.contains("the Hub already holds"), "{text}");
+    assert!(
+        !text.contains("loses nothing the export delivered"),
+        "{text}"
+    );
+}
+
+#[test]
+fn headroom_legend_says_where_the_ring_evictions_go_with_the_export_on() {
+    let mut snapshot = snapshot_with_warnings(Vec::new());
+    assert!(!hub_export_on(Some(&snapshot)), "no /api/config yet");
+    let mut cfg = full_config();
+    cfg.hub_export_enabled = Some(true);
+    snapshot.config = Some(cfg);
+    assert!(hub_export_on(Some(&snapshot)));
+    assert!(!hub_export_on(None));
+    assert_eq!(
+        "findings_store 92%, evictions exported to the Hub",
+        findings_store_legend(92.4, true)
+    );
+    assert_eq!("findings_store 92%", findings_store_legend(92.4, false));
 }
 
 #[test]
