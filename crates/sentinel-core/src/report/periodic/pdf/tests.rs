@@ -532,7 +532,7 @@ mod layout_and_pages {
         let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
         assert!(
             all.contains(
-                "energy models I/O proxy, monthly x hourly grid intensity (io_proxy_v3), Kepler, RAPL split by CPU time (kepler_ebpf), vendor_meter"
+                "energy models I/O proxy, monthly x hourly grid intensity (io_proxy_v3), Kepler, RAPL, active power only (kepler_ebpf), vendor_meter"
             ),
             "{all}"
         );
