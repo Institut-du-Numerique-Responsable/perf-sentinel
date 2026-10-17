@@ -135,6 +135,37 @@ fn grouping_fold_warning(metrics: &MetricsState) -> Option<crate::report::Warnin
     ))
 }
 
+/// Hub export loss rule. Past a drop the Hub's long history has a gap
+/// the daemon cannot refill, so the ring buffer is no longer the only
+/// place history is lost. Silent with the export off: the counters
+/// cannot move.
+fn hub_export_drop_warning(
+    metrics: &MetricsState,
+    daemon: &crate::config::DaemonConfig,
+) -> Option<crate::report::Warning> {
+    use crate::report::warnings::TUNING;
+    let export = &daemon.hub_export;
+    let findings = metrics.hub_export_dropped_total.get();
+    let incidents = metrics.hub_export_incidents_dropped_total.get();
+    let correlations = metrics.hub_export_correlations_dropped_total.get();
+    if !export.enabled || findings + incidents + correlations == 0 {
+        return None;
+    }
+    Some(crate::report::Warning::new(
+        TUNING,
+        format!(
+            "{findings} findings, {incidents} incidents and {correlations} \
+             correlation episodes never reached PerfSentinelHub since daemon \
+             start (evicted from a full pending table, oversized or \
+             rejected), so the Hub's history has gaps for them: raise \
+             `[daemon.hub_export] max_pending` (currently {}) or \
+             `request_timeout_secs` (currently {}), and check the daemon log \
+             for rejected batches",
+            export.max_pending, export.request_timeout_secs
+        ),
+    ))
+}
+
 /// Surface aggregated soft conditions in `Report.warning_details`, on
 /// top of the /metrics counters. Operators reading `/api/export/report`
 /// do not always scrape Prometheus, so a count of dropped requests
@@ -299,6 +330,8 @@ pub(super) fn collect_warning_details(
             ),
         ));
     }
+
+    details.extend(hub_export_drop_warning(metrics, daemon));
 
     // A high not_io share is healthy on a well-instrumented fleet
     // exporting all its spans. The actionable signal is ZERO retention:

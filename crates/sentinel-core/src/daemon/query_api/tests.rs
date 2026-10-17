@@ -2071,6 +2071,32 @@ fn tuning_advisor_flags_pair_evictions_only_when_correlation_enabled() {
 }
 
 #[test]
+fn tuning_advisor_flags_hub_export_drops_only_when_the_export_is_on() {
+    let metrics = MetricsState::new();
+    metrics.hub_export_dropped_total.inc_by(40);
+    metrics.hub_export_incidents_dropped_total.inc_by(3);
+    metrics.hub_export_correlations_dropped_total.inc_by(2);
+
+    let off = crate::config::DaemonConfig::default();
+    assert!(!off.hub_export.enabled, "default is opt-in");
+    assert!(tuning_messages(&metrics, &off).is_empty());
+
+    let mut on = crate::config::DaemonConfig::default();
+    on.hub_export.enabled = true;
+    on.hub_export.max_pending = 500;
+    on.hub_export.request_timeout_secs = 10;
+    let msgs = tuning_messages(&metrics, &on);
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    for part in [
+        "40 findings, 3 incidents and 2 correlation episodes",
+        "max_pending` (currently 500)",
+        "request_timeout_secs` (currently 10)",
+    ] {
+        assert!(msgs[0].contains(part), "{part}: {}", msgs[0]);
+    }
+}
+
+#[test]
 fn tuning_advisor_flags_zero_span_retention() {
     let metrics = MetricsState::new();
     metrics.otlp_spans_received_total.inc_by(10_000);
