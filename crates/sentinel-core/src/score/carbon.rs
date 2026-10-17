@@ -88,8 +88,8 @@ pub const CO2_MODEL_ALUMET: &str = "alumet_rapl";
 /// RAPL-dependent).
 pub const CO2_MODEL_SCAPHANDRE: &str = "scaphandre_rapl";
 
-/// Carbon estimation model: Kepler measurement, RAPL split by CPU time.
-/// Sits between Scaphandre (RAPL) and the cloud `SPECpower` interpolation.
+/// Carbon estimation model: Kepler measurement, RAPL, active power only.
+/// Sits between Scaphandre (RAPL) and Redfish (BMC chassis power).
 /// The name is historical: since Kepler 0.10, the only version read, the
 /// source is RAPL (sysfs/powercap, hwmon experimental), not eBPF.
 pub const CO2_MODEL_KEPLER: &str = "kepler_ebpf";
@@ -107,6 +107,23 @@ pub const CO2_MODEL_CLOUD_SPECPOWER: &str = "cloud_specpower";
 /// Highest precedence for the intensity dimension (independent of the
 /// energy model tag which tracks Scaphandre/cloud/proxy).
 pub const CO2_MODEL_EMAPS: &str = "electricity_maps_api";
+
+/// Readable name of a model tag, for documents a person reads.
+#[must_use]
+pub fn co2_model_label(tag: &str) -> Option<&'static str> {
+    Some(match tag {
+        CO2_MODEL => "I/O proxy, annual grid intensity",
+        CO2_MODEL_V2 => "I/O proxy, hourly grid intensity",
+        CO2_MODEL_V3 => "I/O proxy, monthly x hourly grid intensity",
+        CO2_MODEL_ALUMET => "Alumet, RAPL",
+        CO2_MODEL_SCAPHANDRE => "Scaphandre, RAPL per process",
+        CO2_MODEL_KEPLER => "Kepler, RAPL, active power only",
+        CO2_MODEL_REDFISH => "Redfish, BMC chassis power",
+        CO2_MODEL_CLOUD_SPECPOWER => "Cloud SPECpower table",
+        CO2_MODEL_EMAPS => "Electricity Maps, live grid intensity",
+        _ => return None,
+    })
+}
 
 /// Suffix appended to the proxy model tag when calibration factors are active.
 pub const CO2_MODEL_CAL_SUFFIX: &str = "+cal";

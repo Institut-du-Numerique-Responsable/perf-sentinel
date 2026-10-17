@@ -50,7 +50,7 @@ fn example_internal_g1_parses_and_validates() {
 #[test]
 fn example_official_public_g2_parses_and_validates() {
     let r = load_example("docs/schemas/examples/example-official-public-G2.json");
-    assert_eq!(r.schema_version, "perf-sentinel-report/v1.2");
+    assert_eq!(r.schema_version, "perf-sentinel-report/v1.7");
     assert_matches!(r.report_metadata.intent, ReportIntent::Official);
     assert_matches!(
         r.report_metadata.confidentiality_level,
@@ -63,7 +63,8 @@ fn example_official_public_g2_parses_and_validates() {
     );
     validate_official(&r).expect("official public example must pass validator");
     let hash = compute_content_hash(&r).expect("hash succeeds");
-    assert!(hash.starts_with("sha256:"));
+    // Baked, so disclose-pdf and verify-hash take the example as it is.
+    assert_eq!(hash, r.integrity.content_hash);
 }
 
 #[test]

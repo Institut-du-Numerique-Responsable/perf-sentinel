@@ -2309,15 +2309,20 @@ fn removing_the_periods_last_rollup_day_is_an_in_period_break() {
     assert_eq!((agg.chain_breaks, agg.chain_breaks_outside), (1, 0));
 }
 
-#[test]
-fn a_rollup_file_with_a_crash_fragment_first_is_still_a_rollup_file() {
+/// One window on each of two days, in one chained archive file.
+fn two_chained_rollups(dir: &Path) -> Vec<PathBuf> {
     let pool = window_pool();
-    let dir = TempDir::new().unwrap();
-    let paths = write_rollups(
-        dir.path(),
+    write_rollups(
+        dir,
         "archive",
         &[(day(10, 9), pool[0].clone()), (day(11, 9), pool[0].clone())],
-    );
+    )
+}
+
+#[test]
+fn a_rollup_file_with_a_crash_fragment_first_is_still_a_rollup_file() {
+    let dir = TempDir::new().unwrap();
+    let paths = two_chained_rollups(dir.path());
     let text = std::fs::read_to_string(&paths[0]).unwrap();
     std::fs::write(&paths[0], format!("{{\"format\":\"perf-sent\n{text}")).unwrap();
     let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
@@ -2327,13 +2332,8 @@ fn a_rollup_file_with_a_crash_fragment_first_is_still_a_rollup_file() {
 
 #[test]
 fn a_rollup_line_stripped_of_its_hash_is_a_break_even_first() {
-    let pool = window_pool();
     let dir = TempDir::new().unwrap();
-    let paths = write_rollups(
-        dir.path(),
-        "archive",
-        &[(day(10, 9), pool[0].clone()), (day(11, 9), pool[0].clone())],
-    );
+    let paths = two_chained_rollups(dir.path());
     let text = std::fs::read_to_string(&paths[0]).unwrap();
     let mut lines: Vec<serde_json::Value> = text
         .lines()

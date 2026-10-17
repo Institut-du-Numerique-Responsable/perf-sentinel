@@ -1651,7 +1651,7 @@
     ]},
     total_co2: { t: "Total CO2", u: METHO_URL + "#uncertainty-bracket", s: [
       ["What it measures", "Everything the analyzed traffic emitted, by the SCI v1.0 numerator: operational `(E x I)` plus embodied `M` plus network transport `T`, summed over traces and scored per region when spans carry `cloud.region`."],
-      ["How the bracket works", "low is half the mid value, high is double: a log-symmetric bracket that says the estimate is trusted to a factor of two, not to a percent. The Energy card says how the energy figure was obtained, by an energy backend or from I/O counts."],
+      ["How the bracket works", "low is half the mid value, high is double: a log-symmetric bracket that says the estimate is trusted to a factor of two, not to a percent. The model tag after it is the window's carbon model: an energy backend (`kepler_ebpf` is Kepler, RAPL, active power only, the name is historical), the I/O proxy with its grid intensity (`io_proxy_v3` monthly x hourly, `v2` hourly, `v1` annual) or `electricity_maps_api` for live grid intensity, `+cal` when calibration rescaled the I/O model. The Energy card says how the energy figure was obtained, by an energy backend or from I/O counts."],
       ["Limits", "A directional estimate for comparing runs and finding waste, not a wattmeter reading, and the project says so in its methodology."]
     ]},
     energy: { t: "Energy", u: METHO_URL + "#energy-per-operation", s: [
@@ -1696,7 +1696,7 @@
     ]},
     green_tab: { t: "GreenOps methodology", u: METHO_URL + "#pipeline-at-a-glance", s: [
       ["The pipeline in one breath", "Count the I/O operations each endpoint performs, turn them into energy (measured by a backend when configured, a per-operation model otherwise), multiply by the grid carbon intensity of each region, then assemble the SCI v1.0 terms: operational plus embodied plus transport."],
-      ["Measured vs modeled", "The Energy card names the energy source: a backend (RAPL, BMC, SPECpower) for the services it covered, the I/O model with its factor-of-two bracket for the rest, and on how many services each applies when they mix. The database and broker waste cards name their own model, the regions table its intensity source."],
+      ["Measured vs modeled", "The Energy card names the energy source: a backend (RAPL, BMC, SPECpower) for the services it covered, the I/O model with its factor-of-two bracket for the rest, and on how many services each applies when they mix. The Total CO2 card carries the window's carbon model tag, the database and broker waste cards their own model, the regions table its intensity source."],
       ["What it is for", "A directional waste counter to compare runs and target fixes, published with its uncertainty, not a wattmeter and not a regulatory instrument. The methodology page details every constant and its academic source."]
     ]}
   };
@@ -2165,8 +2165,7 @@
     if (hasGreen) {
       var co2 = greenSummary.co2;
       root.appendChild(wireKpiCard(tonedValue(
-        metricCard("Total CO2", formatGco2(co2.total.mid),
-          "low " + formatGco2(co2.total.low) + " · high " + formatGco2(co2.total.high)),
+        metricCard("Total CO2", formatGco2(co2.total.mid), co2TotalSub(co2.total)),
         "brand"
       ), "green"));
     } else {
@@ -3709,6 +3708,15 @@
     var t = tag.endsWith("+cal") ? tag.slice(0, -4) : tag;
     return ENERGY_TAG_RE.test(t) ? t : null;
   }
+  // The bracket plus co2.total.model, as the CLI's Est. CO2 line prints
+  // it: an energy backend, the I/O proxy's intensity tier or
+  // electricity_maps_api, +cal kept. A tag failing the gate is dropped.
+  function co2TotalSub(total) {
+    var sub = "low " + formatGco2(total.low) + " · high " + formatGco2(total.high);
+    var m = total.model;
+    // No-break space: a wrap never strands "model" away from its tag.
+    return typeof m === "string" && ENERGY_TAG_RE.test(m) ? sub + " · model\u00a0" + m : sub;
+  }
   function energySourceLabel(gs) {
     var ratios = gs.per_service_measured_ratio || {};
     var models = gs.per_service_energy_model || {};
@@ -3758,7 +3766,7 @@
     metrics.appendChild(greenCard(
       "Total CO2",
       formatGco2(co2.total.mid),
-      "low " + formatGco2(co2.total.low) + " · high " + formatGco2(co2.total.high),
+      co2TotalSub(co2.total),
       null,
       "The SCI v1.0 numerator summed over analyzed traces: operational `(E x I)` + embodied `M` + network transport `T`. The low/high bracket is log-symmetric (half, double): a directional estimate, not a wattmeter reading.",
       "total_co2"

@@ -4,8 +4,45 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-10-17
+
+A patch that adds API surface to `perf-sentinel-core`: `sentinel_core::score::carbon::co2_model_label`, the readable name of a carbon model tag. Nothing is removed and no public type changes shape. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The disclosure PDF now prints every field of the report it attaches, absent ones marked `not reported`, `verify-hash --url` reads a PDF, and the HTML dashboard names the carbon model on its Total CO2 cards.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. No scoring computation changes in 0.31.1, `co2_model_label` only names the tags.
+
+### Added
+
+- The HTML dashboard's Total CO2 cards, on the Overview and Carbon tabs, name the window's
+  carbon model after the bracket (`model io_proxy_v3`, `model scaphandre_rapl+cal`,
+  `model electricity_maps_api`), the tag the JSON report and the terminal's `Est. CO2` line
+  already carry.
+
+### Changed
+
+- `disclose-pdf` ends on an annex that prints every field the schema defines, in schema order
+  and as the attached report.json carries it, with `not reported` in the warning colour for
+  each field the report does not carry or carries empty, so what a report leaves out shows. A test derives the field list
+  from `schema.rs`, so a field added to the schema without the annex fails the build. Since
+  every field is now printed, a character outside the bundled fonts anywhere in the report
+  makes it unrenderable (exit 5, `unsupported_characters`).
+- The pages print fields they used to leave in the attachment: the report UUID and its
+  generation time on the cover, the VAT number and the OpenCorporates page in the header, the
+  avoidable energy beside the avoidable carbon, the split of the carbon total into its SCI
+  terms with the database and broker figures kept outside it, the caveats of the ESRS
+  crosswalk, the excluded environments, the measuring binary's hash and SLSA provenance, the
+  unchained, dropped and outside-period windows of the archive chain, and the reference links.
+- The measuring binary row names each energy model beside its tag, as in
+  `Kepler, RAPL, active power only (kepler_ebpf)`, and prints an unknown tag as it is. The tags
+  in the report and in the annex do not change.
+- The G2 example of `docs/schemas/examples` moves to schema v1.7 and perf-sentinel 0.31.0,
+  with its `content_hash` baked in and its reference links on the Institut du Numérique
+  Responsable repository, so `disclose-pdf` and `verify-hash` take it as it is.
+
 ### Fixed
 
+- The runtime coverage bar of the PDF no longer draws full when the report carries no runtime
+  window: `period_coverage` reads 1.0 when absent, and the card beside it already said
+  `Not reported`.
 - `verify-hash --url` reads a disclosure PDF. It took the PDF for JSON and stopped on
   `expected value at line 1 column 1`. It now checks the report, attestation and bundle the PDF
   attaches, as `--report` does, and fetches no sidecar next to it.

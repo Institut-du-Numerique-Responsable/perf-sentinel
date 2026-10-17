@@ -601,3 +601,18 @@ v0.30.0	7593c1e	2026-10-16	PASS
 # (disclose-pdf, verify-hash, report, pg-stat, mysql-stat) and the daemon's Hub
 # export timeout, not the detectors, the ingest paths or the energy backends.
 v0.31.0	bf31096	2026-10-16	PASS
+# v0.31.1, 2026-10-17. Targeted pass on the final release tree. Daemon image
+# perf-sentinel:0.31.1-024f0af3 built from release/0.31.1 (#206 and #208 over
+# #207, the bump, the dashboard recapture and the Qodana cleanups):
+# validate-findings 12/12, disclose 10/10, verify-hash-roundtrip,
+# verify-hash-fail-closed, hybrid-daemon-batch (HTML from a daemon report),
+# ci-shift-left, output-formats-coverage, daemon-sigterm-drain, all green.
+# validate-findings and hybrid-daemon-batch first failed on the lab's host
+# port-forwards, down since a Docker restart, and passed once restarted. The
+# lab ran at 39c13c8 with a local, uncommitted image pin in the daemon
+# manifest, the three Java services recovered first. Not run: the hub-*,
+# limit-*, failure-mode-*, template-*, ci-e2e-* and energy families. The
+# release touches the disclosure PDF, verify-hash --url and the HTML
+# dashboard's Total CO2 cards, not the detectors, the ingest paths, the Hub
+# export or the energy backends.
+v0.31.1	39c13c8	2026-10-17	PASS

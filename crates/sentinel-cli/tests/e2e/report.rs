@@ -870,7 +870,7 @@ fn cli_report_hub_relay_embeds_source() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let html = std::fs::read_to_string(&out_path).unwrap();
+    let html = fs::read_to_string(&out_path).unwrap();
     assert!(html.contains(r#""hub_relay":{"source":"prod-eu"}"#));
 }
 

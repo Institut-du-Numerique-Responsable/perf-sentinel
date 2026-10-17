@@ -10,6 +10,17 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.31.1]
+
+### Added
+
+- **`appVersion` moves to `0.31.1`.** The HTML report the daemon serves at
+  `/api/export/report` names the window's carbon model on its Total CO2
+  cards (`model io_proxy_v3`, `model scaphandre_rapl+cal`), the tag the JSON
+  report and the terminal's `Est. CO2` line already carry.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.31.0]
 
 ### Added

@@ -225,7 +225,7 @@ mod tests {
         let mut value: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert!(is_rollup_value(&value));
         let stated = value.as_object_mut().unwrap().remove("hash").unwrap();
-        let recomputed = crate::report::periodic::hasher::archive_chain_hash(&value).unwrap();
+        let recomputed = archive_chain_hash(&value).unwrap();
         assert_eq!(stated.as_str(), Some(recomputed.as_str()));
         let parsed: RollupLine = serde_json::from_value(value).unwrap();
         assert_eq!(parsed.day, day.day);

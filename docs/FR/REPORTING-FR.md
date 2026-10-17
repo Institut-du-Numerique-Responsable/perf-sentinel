@@ -597,7 +597,7 @@ confidentialité sur Rekor public.
 
 ## Rendre un PDF pour les lecteurs (`disclose-pdf`)
 
-`perf-sentinel disclose-pdf` rend un rapport en PDF/A-3b qu'un lecteur sans terminal peut suivre : des pages A4 en anglais, cinq sauf quand une section déborde sur la suivante, avec les chiffres, la bande d'incertitude, les applications, la méthode et ses avertissements, et la façon de vérifier le document. Le rapport, son attestation et son bundle voyagent dans le PDF en pièces jointes, octet pour octet.
+`perf-sentinel disclose-pdf` rend un rapport en PDF/A-3b qu'un lecteur sans terminal peut suivre : des pages A4 en anglais, cinq sauf quand une section déborde sur la suivante, avec les chiffres, la bande d'incertitude, les applications, la méthode et ses avertissements, et la façon de vérifier le document. Suit une annexe qui imprime chaque champ que le schéma actuel définit, dans son ordre et tel que le report.json joint le porte, avec `not reported` pour chaque champ que le rapport ne porte pas ou porte vide : ce qu'un rapport laisse de côté se voit au lieu de disparaître. Le rapport, son attestation et son bundle voyagent dans le PDF en pièces jointes, octet pour octet.
 
 ```bash
 perf-sentinel disclose-pdf \
@@ -609,7 +609,7 @@ perf-sentinel disclose-pdf \
     --output report.pdf
 ```
 
-Il ne rend que si le `content_hash` se recalcule et, avec `--attestation`, si l'attestation nomme ce hash : un PDF rendu vaut donc ces deux contrôles. Il ne vérifie jamais la signature : la dernière page imprime la commande `verify-hash`, avec l'identité et l'émetteur passés ici, que le lecteur lance lui-même. Le code du document est le `content_hash` du rapport, imprimé en entier et groupé par quatre caractères sur la couverture et la page de vérification, et abrégé dans le pied de chaque page. Ajoutez `transparency` à `[notes.reference_urls]` dans l'org config et la couverture dessine un QR code vers la page où vous publiez vos rapports. Sans cette clé, aucun QR code n'est dessiné.
+Il ne rend que si le `content_hash` se recalcule et, avec `--attestation`, si l'attestation nomme ce hash : un PDF rendu vaut donc ces deux contrôles. Il ne vérifie jamais la signature : la page de vérification imprime la commande `verify-hash`, avec l'identité et l'émetteur passés ici, que le lecteur lance lui-même. Le code du document est le `content_hash` du rapport, imprimé en entier et groupé par quatre caractères sur la couverture et la page de vérification, et abrégé dans le pied de chaque page. Ajoutez `transparency` à `[notes.reference_urls]` dans l'org config et la couverture dessine un QR code vers la page où vous publiez vos rapports. Sans cette clé, aucun QR code n'est dessiné. Comme l'annexe imprime chaque champ, un caractère absent des polices embarquées, où qu'il soit dans le rapport, empêche son rendu, et plus seulement sur les cinq premières pages.
 
 La commande imprime une ligne JSON sur stdout et sort avec un code fixe, un contrat sur lequel s'appuie PerfSentinelHub :
 

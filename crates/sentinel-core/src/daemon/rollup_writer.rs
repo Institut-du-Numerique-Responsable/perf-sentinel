@@ -370,7 +370,7 @@ mod tests {
         .unwrap()
     }
 
-    fn lines(dir: &Path) -> Vec<serde_json::Value> {
+    fn lines(dir: &Path) -> Vec<Value> {
         let mut names: Vec<_> = std::fs::read_dir(dir)
             .unwrap()
             .filter_map(|e| e.ok().map(|e| e.path()))
@@ -498,11 +498,11 @@ mod tests {
         assert_eq!(lines(dir.path()).len(), 0);
     }
 
-    fn rollup_lines_in(path: &Path) -> Vec<serde_json::Value> {
+    fn rollup_lines_in(path: &Path) -> Vec<Value> {
         std::fs::read_to_string(path)
             .unwrap()
             .lines()
-            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
             .filter(rollup::is_rollup_value)
             .collect()
     }

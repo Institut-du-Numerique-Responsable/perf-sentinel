@@ -338,7 +338,7 @@ async fn fetch_from_url(url: &str) -> Result<LoadedReport, i32> {
 async fn load_remote<F, Fut>(url: &str, get: F) -> Result<LoadedReport, i32>
 where
     F: Fn(String) -> Fut,
-    Fut: std::future::Future<Output = Result<Vec<u8>, String>>,
+    Fut: Future<Output = Result<Vec<u8>, String>>,
 {
     let bytes = get(url.to_string()).await.map_err(|e| {
         eprintln!("Error: fetch {url}: {e}");
@@ -1036,10 +1036,9 @@ mod tests {
 
     #[test]
     fn content_hash_check_fails_on_mismatch() {
-        let report: PeriodicReport =
+        let mut report: PeriodicReport =
             serde_json::from_slice(&std::fs::read(example_g2()).unwrap()).unwrap();
-        // Example file ships with a zeroed placeholder hash that does not
-        // match the recomputed canonical value.
+        report.integrity.content_hash = format!("sha256:{}", "0".repeat(64));
         let s = verify_content_hash(&report);
         assert_matches!(s, Status::Fail(_));
     }
