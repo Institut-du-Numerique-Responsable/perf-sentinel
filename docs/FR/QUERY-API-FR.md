@@ -316,6 +316,7 @@ ou comme moyen le moins coûteux de vérifier que le daemon tourne.
 | `stored_findings`         | number | Findings actuellement retenus dans le ring buffer de requêtage                                 |
 | `max_retained_findings`   | number | Plafond configuré de ce ring buffer (depuis 0.8.8)                                             |
 | `oldest_finding_ms`       | number | Instant de détection du plus ancien finding retenu, absent si le ring est vide (depuis 0.20.0) |
+| `findings_stored_total`   | number | Findings entrés dans le ring depuis le démarrage du daemon, évincés compris (depuis 0.31.2)    |
 | `disclosure_archive`      | object | Jours détenus en cumuls quotidiens, `{ oldest_day, days, last_closed_day }` (depuis 0.28.0)    |
 
 Les trois paires gauge/plafond alimentent le graphe Headroom de
@@ -355,6 +356,7 @@ curl -sS http://127.0.0.1:4318/api/status
   "stored_findings": 5,
   "max_retained_findings": 10000,
   "oldest_finding_ms": 1757000400000,
+  "findings_stored_total": 5,
   "disclosure_archive": {
     "oldest_day": "2025-07-01",
     "days": 65,

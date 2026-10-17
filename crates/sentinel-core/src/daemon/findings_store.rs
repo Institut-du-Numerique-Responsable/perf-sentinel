@@ -10,6 +10,7 @@
 //! history intact.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -333,6 +334,9 @@ pub struct FindingsFilter {
 pub struct FindingsStore {
     inner: RwLock<VecDeque<StoredFinding>>,
     max_size: usize,
+    /// Findings pushed since start, evicted ones included. Written under
+    /// the write lock so a read under the read lock matches the ring.
+    stored_total: AtomicU64,
 }
 
 impl FindingsStore {
@@ -351,6 +355,7 @@ impl FindingsStore {
         Self {
             inner: RwLock::new(VecDeque::with_capacity(capacity)),
             max_size,
+            stored_total: AtomicU64::new(0),
         }
     }
 
@@ -381,6 +386,8 @@ impl FindingsStore {
 
         let mut buf = self.inner.write().await;
         buf.extend(new_entries);
+        self.stored_total
+            .fetch_add(findings.len() as u64, Ordering::Relaxed);
         // Drop oldest entries if we exceeded capacity. `drain(..n)` on a
         // VecDeque is O(n), which is acceptable since n is typically small
         // (one batch's worth of excess, not the whole buffer).
@@ -484,6 +491,14 @@ impl FindingsStore {
     /// Current count of stored findings.
     pub async fn len(&self) -> usize {
         self.inner.read().await.len()
+    }
+
+    /// The ring's length and the findings pushed since start, from one
+    /// read. Between two reads of one process, the pushes beyond the
+    /// current length left the ring before anyone could read them.
+    pub async fn len_and_stored_total(&self) -> (usize, u64) {
+        let buf = self.inner.read().await;
+        (buf.len(), self.stored_total.load(Ordering::Relaxed))
     }
 
     /// Whether the store is empty.
@@ -1058,6 +1073,30 @@ mod tests {
         assert_eq!(b_row.seen_count, 3, "the larger count, not the sum");
         assert_eq!(b_row.stored_at_ms, 5000);
         assert_eq!(b_row.first_seen_ms, 2000);
+    }
+
+    #[tokio::test]
+    async fn the_stored_total_counts_every_push_the_evicted_ones_included() {
+        let store = FindingsStore::new(2);
+        assert_eq!(store.len_and_stored_total().await, (0, 0));
+        for i in 0..3 {
+            let mut f = make_finding_with_template(
+                "svc",
+                FindingType::RedundantSql,
+                &format!("SELECT {i}"),
+            );
+            enrich_with_signatures(std::slice::from_mut(&mut f));
+            store.push_batch(&[f], 1000).await;
+        }
+        assert_eq!(store.len_and_stored_total().await, (2, 3));
+        let disabled = FindingsStore::new(0);
+        let f = make_finding_with_template("svc", FindingType::RedundantSql, "SELECT 1");
+        disabled.push_batch(&[f], 1000).await;
+        assert_eq!(
+            disabled.len_and_stored_total().await,
+            (0, 0),
+            "nothing stored"
+        );
     }
 
     #[tokio::test]

@@ -383,6 +383,10 @@ struct StatusResponse {
     /// route. Additive since 0.20.0.
     #[serde(skip_serializing_if = "Option::is_none")]
     oldest_finding_ms: Option<u64>,
+    /// Findings pushed into the ring since the daemon started, evicted ones
+    /// included. Between two reads of one process, the ones beyond
+    /// `stored_findings` left the ring unread. Additive since 0.31.2.
+    findings_stored_total: u64,
     /// Days the disclosure archive's daily rollups hold, absent until one
     /// has closed. A period starting before `oldest_day` cannot be
     /// disclosed officially from this archive. Additive since 0.28.0.
@@ -605,7 +609,8 @@ async fn handle_correlations(
 async fn handle_status(State(state): State<Arc<QueryApiState>>) -> Json<StatusResponse> {
     let uptime = state.start_time.elapsed().as_secs();
     let active_traces = state.window.lock().await.active_traces();
-    let stored_findings = state.findings_store.len().await;
+    let (stored_findings, findings_stored_total) =
+        state.findings_store.len_and_stored_total().await;
     let oldest_finding_ms = state.findings_store.oldest_ms().await;
     Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION"),
@@ -617,6 +622,7 @@ async fn handle_status(State(state): State<Arc<QueryApiState>>) -> Json<StatusRe
         stored_findings,
         max_retained_findings: state.daemon_config.max_retained_findings,
         oldest_finding_ms,
+        findings_stored_total,
         disclosure_archive: disclosure_archive_status(&state.metrics),
     })
 }

@@ -6,7 +6,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [0.31.2] - 2026-10-17
 
-A patch with no public API change. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. It is about what a daemon tells its operator once PerfSentinelHub keeps its history: the daemon's own findings ring is no longer where history is lost, the Hub export is. The tuning advisor and a new chart alert name what the export dropped, and `query monitor` says a ring eviction loses nothing the export delivered. `/api/config` gains one field.
+A patch with no public API change. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. It is about what a daemon tells its operator once PerfSentinelHub keeps its history: the daemon's own findings ring is no longer where history is lost, the Hub export is. The tuning advisor and a new chart alert name what the export dropped, and `query monitor` says a ring eviction loses nothing the export delivered. `/api/status` and `/api/config` gain one field each.
 
 The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.31.2 touches the scoring code.
 
@@ -23,6 +23,10 @@ The embedded reference data keeps its vintages for this release: the SPECpower i
   `perf_sentinel_hub_export*_dropped_total` counters, among the rules that fire on data the
   daemon lost and cannot recover. Its 30-minute window outlasts its 15-minute `for`, so a
   single drop fires.
+- `/api/status` reports `findings_stored_total`, the findings pushed into the ring since the
+  daemon started, evicted ones included. Between two reads of one process, the pushes beyond
+  `stored_findings` left the ring unread: a Hub that polls the daemon can count what it
+  missed.
 - `/api/config` reports `hub_export_enabled`. `query monitor` shows it on the Config tab, and
   with the export on says that an eviction from the findings ring loses nothing the export
   delivered, on the `max_retained_findings` row and on the `findings_store` line of the

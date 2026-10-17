@@ -471,6 +471,7 @@ async fn status_reports_the_oldest_retained_finding() {
         .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value["oldest_finding_ms"], 4242);
+    assert_eq!(value["findings_stored_total"], 1);
 }
 
 /// One Alertmanager delivery as the handler receives it.

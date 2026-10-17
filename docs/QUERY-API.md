@@ -304,6 +304,7 @@ cheapest way to verify the daemon is up.
 | `stored_findings`         | number | Findings currently retained in the query ring buffer                                        |
 | `max_retained_findings`   | number | Configured cap of that ring buffer (since 0.8.8)                                            |
 | `oldest_finding_ms`       | number | Detection time of the oldest retained finding, absent when the ring is empty (since 0.20.0) |
+| `findings_stored_total`   | number | Findings pushed into the ring since the daemon started, evicted ones included (since 0.31.2) |
 | `disclosure_archive`      | object | Days held by the daily rollups, `{ oldest_day, days, last_closed_day }` (since 0.28.0)      |
 
 The three gauge/capacity pairs back the Headroom chart of
@@ -341,6 +342,7 @@ curl -sS http://127.0.0.1:4318/api/status
   "stored_findings": 5,
   "max_retained_findings": 10000,
   "oldest_finding_ms": 1757000400000,
+  "findings_stored_total": 5,
   "disclosure_archive": {
     "oldest_day": "2025-07-01",
     "days": 65,
