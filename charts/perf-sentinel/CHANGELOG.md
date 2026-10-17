@@ -10,6 +10,26 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.31.2]
+
+### Added
+
+- **`appVersion` moves to `0.31.2`.** With `[daemon.hub_export]` on, the
+  daemon's `tuning` advisor names the findings, incidents and correlation
+  episodes the export dropped, which the Hub's long history then lacks,
+  and `/api/config` reports `hub_export_enabled` for `query monitor`.
+- The `PrometheusRule` gains `PerfSentinelHubExportDropping`, on the
+  three `perf_sentinel_hub_export*_dropped_total` counters. It fires on a
+  single drop and stays silent while the export is off.
+
+### Fixed
+
+- `PerfSentinelArchiveDropping` never fired on a single dropped window:
+  its 15-minute rate fell back to zero before its 15-minute `for`
+  elapsed. The rate now spans 30 minutes.
+
+No `values.yaml` key is added or removed.
+
 ## [0.31.1]
 
 ### Added

@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.31.2] - 2026-10-17
+
+A patch with no public API change. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. It is about what a daemon tells its operator once PerfSentinelHub keeps its history: the daemon's own findings ring is no longer where history is lost, the Hub export is. The tuning advisor and a new chart alert name what the export dropped, and `query monitor` says a ring eviction loses nothing the export delivered. `/api/config` gains one field.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.31.2 touches the scoring code.
+
 ### Added
 
 - The daemon's `tuning` advisor flags what the Hub export dropped. With `[daemon.hub_export]`
