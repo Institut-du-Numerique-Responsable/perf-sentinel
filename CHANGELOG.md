@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-10-17
+
+A patch that adds API surface to `perf-sentinel-core`: `sentinel_core::score::carbon::co2_model_label`, the readable name of a carbon model tag. Nothing is removed and no public type changes shape. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. The disclosure PDF now prints every field of the report it attaches, absent ones marked `not reported`, `verify-hash --url` reads a PDF, and the HTML dashboard names the carbon model on its Total CO2 cards.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. No scoring computation changes in 0.31.1, `co2_model_label` only names the tags.
+
 ### Added
 
 - The HTML dashboard's Total CO2 cards, on the Overview and Carbon tabs, name the window's
