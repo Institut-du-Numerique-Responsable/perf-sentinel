@@ -150,8 +150,8 @@
         <div data-dc-tpl="270" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 16px;">
           <div data-dc-tpl="271" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: var(--accent); letter-spacing: 0.04em;"><span class="sc-interp">Read this first</span></div>
           <div data-dc-tpl="272" style="display: flex; flex-wrap: wrap; gap: 8px;">
-            <a data-dc-tpl="273" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.31.2" target="_blank" rel="noopener" class="scp5" style="display: inline-flex; align-items: center; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--rust); background: color-mix(in srgb,var(--rust) 12%,transparent); border: 1px solid color-mix(in srgb,var(--rust) 38%,transparent); border-radius: 999px; padding: 6px 12px;"><span class="sc-interp">Perf Sentinel v0.31.2</span></a>
-            <a data-dc-tpl="274" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v0.7.1" target="_blank" rel="noopener" class="scp6" style="display: inline-flex; align-items: center; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--dotnet); background: color-mix(in srgb,var(--dotnet) 12%,transparent); border: 1px solid color-mix(in srgb,var(--dotnet) 38%,transparent); border-radius: 999px; padding: 6px 12px;"><span class="sc-interp">Perf Sentinel Hub v0.7.1</span></a>
+            <a data-dc-tpl="273" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.31.3" target="_blank" rel="noopener" class="scp5" style="display: inline-flex; align-items: center; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--rust); background: color-mix(in srgb,var(--rust) 12%,transparent); border: 1px solid color-mix(in srgb,var(--rust) 38%,transparent); border-radius: 999px; padding: 6px 12px;"><span class="sc-interp">Perf Sentinel v0.31.3</span></a>
+            <a data-dc-tpl="274" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v0.7.2" target="_blank" rel="noopener" class="scp6" style="display: inline-flex; align-items: center; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--dotnet); background: color-mix(in srgb,var(--dotnet) 12%,transparent); border: 1px solid color-mix(in srgb,var(--dotnet) 38%,transparent); border-radius: 999px; padding: 6px 12px;"><span class="sc-interp">Perf Sentinel Hub v0.7.2</span></a>
           </div>
         </div>
         <div data-dc-tpl="275" style="display: flex; flex-direction: column; gap: 12px;">
@@ -466,7 +466,7 @@
       <div data-dc-tpl="761" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: var(--rust); letter-spacing: 0.04em;"><span class="sc-interp">// built in rust</span></div>
       <div data-dc-tpl="762" style="display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; margin-top: 12px;">
         <h2 data-dc-tpl="763" style="margin: 0px; font-size: clamp(28px, 3.4vw, 38px); font-weight: 700; letter-spacing: -0.018em; color: var(--text);"><span class="sc-interp">A single </span><span data-dc-tpl="764" style="color: var(--rust);"><span class="sc-interp">Rust</span></span><span class="sc-interp"> binary, measured</span></h2><div data-dc-tpl="765" style="display: inline-flex; align-items: center; gap: 9px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--rust); background: color-mix(in srgb,var(--rust) 12%,transparent); border: 1px solid color-mix(in srgb,var(--rust) 38%,transparent); border-radius: 999px; padding: 8px 14px;">
-          <span data-dc-tpl="766" data-ico="rust" role="img" aria-label="Rust" style="width: 15px; height: 15px;"></span><span class="sc-interp">Rust ≥ 1.99.0 (MSRV)</span>
+          <span data-dc-tpl="766" data-ico="rust" role="img" aria-label="Rust" style="width: 15px; height: 15px;"></span><span class="sc-interp">Rust ≥ 1.99.1 (MSRV)</span>
         </div>
       </div>
       <p data-dc-tpl="767" data-intro=""><span class="sc-interp">The figures below time the analysis pipeline alone (single-threaded, on synthetic datasets), so they isolate pipeline cost, not end-to-end throughput.</span></p>
@@ -3182,7 +3182,7 @@ class Component extends DCLogic {
       carbonTdEyebrow: t.carbonTdEyebrow, carbonTdTitle: t.carbonTdTitle, carbonTdPoints: t.carbonTdPoints, carbonTdResultA: t.carbonTdResultA, carbonTdResultB: t.carbonTdResultB, carbonTdResultC: t.carbonTdResultC, carbonTdResultD: t.carbonTdResultD,
       carbonBuEyebrow: t.carbonBuEyebrow, carbonBuTitle: t.carbonBuTitle, carbonBuPoints: t.carbonBuPoints, carbonBuResultA: t.carbonBuResultA, carbonBuResultB: t.carbonBuResultB, carbonBuResultC: t.carbonBuResultC, carbonBuResultD: t.carbonBuResultD,
       modEyebrow: t.modEyebrow, modTitle: t.modTitle, modCols: t.modCols, modSrc: t.modSrc, modSrcList: t.modSrcList, modFlow: t.modFlow,
-      navPerf: t.navPerf, perfEyebrow: t.perfEyebrow, perfT1: t.perfT1, perfWRust: t.perfWRust, perfT2: t.perfT2, perfIntro: t.perfIntro, perfBadge: t.perfBadgeTpl.replace('{v}', this.state.rustVersion || '1.99.0'), perfStats: t.perfStats,
+      navPerf: t.navPerf, perfEyebrow: t.perfEyebrow, perfT1: t.perfT1, perfWRust: t.perfWRust, perfT2: t.perfT2, perfIntro: t.perfIntro, perfBadge: t.perfBadgeTpl.replace('{v}', this.state.rustVersion || '1.99.1'), perfStats: t.perfStats,
       perfMore: t.perfMore, modesMore: t.modesMore, modesCi: t.modesCi,
       goEqAria: t.goEqAria, goEqTotal: t.goEqTotal, goEqET: t.goEqET, goEqES: t.goEqES, goEqIT: t.goEqIT, goEqIS: t.goEqIS, goEqMT: t.goEqMT, goEqMS: t.goEqMS, goEqLo: t.goEqLo, goEqBounds: t.goEqBounds, goEqAvLabel: t.goEqAvLabel, goEqAvText: t.goEqAvText,
       lgcAria: t.lgcAria || '', lgcSteps: t.lgcSteps || [], lgcScope: t.lgcScope || '',
@@ -3205,10 +3205,10 @@ class Component extends DCLogic {
         'perf-sentinel analyze --input traces.json --format sarif > findings.sarif',
       ].map((c, k) => [`ciCmd${k + 1}View`, c.split(' ').flatMap((w, i) => [i ? ' ' : '', React.createElement('span', { key: i, style: { whiteSpace: 'nowrap' } }, w)])])),
       ctaGuide: t.ctaGuide, ctaGuideHref: lang === 'fr' ? '/fr/guide#install' : '/guide#install',
-      psRelLabel: 'Perf Sentinel v' + (this.state.psVersion || '0.31.2'),
-      psRelHref: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v' + (this.state.psVersion || '0.31.2'),
-      hubRelLabel: 'Perf Sentinel Hub v' + (this.state.hubVersion || '0.7.1'),
-      hubRelHref: 'https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v' + (this.state.hubVersion || '0.7.1'),
+      psRelLabel: 'Perf Sentinel v' + (this.state.psVersion || '0.31.3'),
+      psRelHref: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v' + (this.state.psVersion || '0.31.3'),
+      hubRelLabel: 'Perf Sentinel Hub v' + (this.state.hubVersion || '0.7.2'),
+      hubRelHref: 'https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v' + (this.state.hubVersion || '0.7.2'),
       ftTagline: t.ftTagline, ftColProduct: t.ftColProduct, ftColDocs: t.ftColDocs, ftColProject: t.ftColProject,
       ftDocQuickstart: t.ftDocQuickstart, ftDocCli: t.ftDocCli, ftDocConfig: t.ftDocConfig, ftDocMethod: t.ftDocMethod,
       ftProjLicense: t.ftProjLicense, ftBadgeNote: t.ftBadgeNote, ftBottomLeft: t.ftBottomLeft, ftBottomRight: t.ftBottomRight, inrBy: t.inrBy, inrArt: t.inrArt, inrName: t.inrName, govEyebrow: t.govEyebrow, govTitleA: t.govTitleA, govTitleB: t.govTitleB, govBodyA: t.govBodyA, govBodyB: t.govBodyB, govGh: t.govGh,
