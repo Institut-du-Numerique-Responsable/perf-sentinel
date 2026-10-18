@@ -8,6 +8,8 @@
 //! fire. Collapses `IN (?, ?, ?)` into `IN (?)`. Quoted identifiers are
 //! preserved verbatim: ANSI `"id"` and `MySQL` `` `id` ``. For `MySQL` and
 //! `MariaDB` (see [`normalize_sql_for`]), `"..."` is a string literal instead.
+//! A backslash escapes the next byte inside a string literal, except on
+//! engines that follow the standard, where only `E'...'` strings honour it.
 
 use regex::Regex;
 use std::borrow::Cow;
@@ -21,6 +23,19 @@ static IN_LIST_RE: LazyLock<Regex> =
 pub struct SqlNormalized {
     pub template: String,
     pub params: Vec<String>,
+}
+
+/// Quoting rules that differ between engines.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Dialect {
+    /// `MySQL` and `MariaDB`: `"..."` is a string, `\` escapes in every string.
+    MySql,
+    /// Standard strings (`standard_conforming_strings` on `PostgreSQL`): `\`
+    /// escapes only inside `E'...'`.
+    Standard,
+    /// Any other engine, unknown included: `\` escapes, the privacy-safe
+    /// reading, since a missed escape leaks the rest of the string.
+    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,9 +69,29 @@ struct Tokenizer<'a> {
     dollar_tag: Vec<u8>,
     /// Delimiter that closes the current string literal: `'`, or `"` in `MySQL` mode.
     quote: u8,
-    /// `MySQL` mode: `"..."` is a string literal, not an identifier.
-    double_quote_is_string: bool,
+    /// Quoting rules of the engine that emitted the query.
+    dialect: Dialect,
+    /// The current string literal treats `\` as an escape.
+    backslash_escapes: bool,
 }
+
+/// Canonical `db.system` values whose strings follow the standard: `''` is
+/// the only escape, plus `E'...'` on `PostgreSQL`, `CockroachDB` and Vertica.
+const STANDARD_STRING_SYSTEMS: &[&str] = &[
+    "postgresql",
+    "cockroachdb",
+    "vertica",
+    "mssql",
+    "oracle",
+    "db2",
+    "sqlite",
+    "h2",
+    "hsqldb",
+    "derby",
+    "trino",
+    "presto",
+    "teradata",
+];
 
 /// Maximum query length accepted for normalization (64 KB).
 /// Queries exceeding this are truncated to prevent unbounded memory usage.
@@ -66,23 +101,35 @@ const MAX_QUERY_LEN: usize = 65_536;
 ///
 /// `MySQL` and `MariaDB` read `"..."` as a string literal in their default
 /// mode, so it is masked like `'...'`. Every other value, unknown ones
-/// included, keeps the ANSI reading of [`normalize_sql`]. A `MySQL` server in
+/// included, keeps `"..."` as an identifier. A `MySQL` server in
 /// `ANSI_QUOTES` mode loses its double-quoted identifiers to `?`, the
-/// privacy-safe side of the error.
+/// privacy-safe side of the error. The engines of `STANDARD_STRING_SYSTEMS`
+/// read `\` as an ordinary character outside `E'...'`, every other value,
+/// unknown ones included, as an escape, like [`normalize_sql`].
 #[must_use]
 pub fn normalize_sql_for(query: &str, db_system: &str) -> SqlNormalized {
-    let mysql =
-        db_system.eq_ignore_ascii_case("mysql") || db_system.eq_ignore_ascii_case("mariadb");
-    tokenize(query, mysql)
+    let dialect =
+        if db_system.eq_ignore_ascii_case("mysql") || db_system.eq_ignore_ascii_case("mariadb") {
+            Dialect::MySql
+        } else if STANDARD_STRING_SYSTEMS
+            .iter()
+            .any(|s| db_system.eq_ignore_ascii_case(s))
+        {
+            Dialect::Standard
+        } else {
+            Dialect::Other
+        };
+    tokenize(query, dialect)
 }
 
-/// Normalize a SQL query by replacing literal values with `?` placeholders.
+/// Normalize a SQL query of unknown dialect by replacing literal values with
+/// `?` placeholders.
 #[must_use]
 pub fn normalize_sql(query: &str) -> SqlNormalized {
-    tokenize(query, false)
+    tokenize(query, Dialect::Other)
 }
 
-fn tokenize(query: &str, double_quote_is_string: bool) -> SqlNormalized {
+fn tokenize(query: &str, dialect: Dialect) -> SqlNormalized {
     // Truncate at a char boundary to prevent unbounded allocation from adversarial input
     let query = if query.len() > MAX_QUERY_LEN {
         &query[..query.floor_char_boundary(MAX_QUERY_LEN)]
@@ -103,7 +150,8 @@ fn tokenize(query: &str, double_quote_is_string: bool) -> SqlNormalized {
         value_start: 0,
         dollar_tag: Vec::new(),
         quote: b'\'',
-        double_quote_is_string,
+        dialect,
+        backslash_escapes: false,
     };
 
     while t.i < t.bytes.len() {
@@ -216,7 +264,12 @@ fn checked_query_slice(query: &str, start: usize, end: usize) -> &str {
 
 /// `'` always opens a string literal, `"` only in `MySQL` mode.
 fn opens_string(t: &Tokenizer<'_>, b: u8) -> bool {
-    b == b'\'' || (b == b'"' && t.double_quote_is_string)
+    b == b'\'' || (b == b'"' && t.dialect == Dialect::MySql)
+}
+
+/// The quote at `i` opens an escape string (`E'...'`): it follows a lone `E`.
+fn is_escape_string_prefix(i: usize, bytes: &[u8]) -> bool {
+    i > 0 && bytes[i - 1].eq_ignore_ascii_case(&b'e') && !is_identifier_byte_before(i - 1, bytes)
 }
 
 fn step_normal(t: &mut Tokenizer<'_>) {
@@ -224,6 +277,8 @@ fn step_normal(t: &mut Tokenizer<'_>) {
     if opens_string(t, b) {
         flush_normal_run(t);
         t.quote = b;
+        t.backslash_escapes =
+            t.dialect != Dialect::Standard || is_escape_string_prefix(t.i, t.bytes);
         t.state = State::InString;
         t.current_value.clear();
         t.value_start = t.i + 1; // points after the opening quote
@@ -278,7 +333,11 @@ fn step_normal(t: &mut Tokenizer<'_>) {
 
 fn step_in_string(t: &mut Tokenizer<'_>) {
     let b = t.bytes[t.i];
-    if b == t.quote {
+    if b == b'\\' && t.backslash_escapes {
+        // Skip the escaped byte, a quote included. The param keeps the
+        // escape as written. Past the end, the loop stops and flushes.
+        t.i += 2;
+    } else if b == t.quote {
         if t.i + 1 < t.bytes.len() && t.bytes[t.i + 1] == t.quote {
             // Escaped quote ('' or ""): flush accumulated slice, push one quote, reset start
             t.current_value
@@ -311,10 +370,33 @@ fn step_in_number(t: &mut Tokenizer<'_>) {
         t.current_value.push('.');
         t.i += 1;
     } else {
+        if let Some(end) = number_tail_end(t) {
+            t.current_value
+                .push_str(checked_query_slice(t.query, t.i, end));
+            t.i = end;
+        }
         t.params.push(std::mem::take(&mut t.current_value));
         t.template.push('?');
         t.state = State::Normal;
         t.normal_start = t.i;
+    }
+}
+
+/// End of the hex digits after `0x` or of an exponent (`e10`, `E-3`) that
+/// continues the number at `t.i`, `None` when the byte there ends it.
+fn number_tail_end(t: &Tokenizer<'_>) -> Option<usize> {
+    let bytes = t.bytes;
+    let run_end = |start: usize, keep: fn(&u8) -> bool| {
+        let n = bytes[start..].iter().take_while(|b| keep(b)).count();
+        (n > 0).then_some(start + n)
+    };
+    match bytes[t.i] {
+        b'x' | b'X' if t.current_value == "0" => run_end(t.i + 1, u8::is_ascii_hexdigit),
+        b'e' | b'E' => {
+            let sign = usize::from(matches!(bytes.get(t.i + 1), Some(b'+' | b'-')));
+            run_end(t.i + 1 + sign, u8::is_ascii_digit)
+        }
+        _ => None,
     }
 }
 
@@ -629,6 +711,105 @@ mod tests {
         let r = normalize_sql("SELECT * FROM t WHERE x = -5");
         assert_eq!(r.template, "SELECT * FROM t WHERE x = -?");
         assert_eq!(r.params, vec!["5"]);
+    }
+
+    // -- Hex and exponent literals --
+
+    #[test]
+    fn hex_literal_is_one_param() {
+        let r = normalize_sql("SELECT * FROM t WHERE h = 0x1F2A");
+        assert_eq!(r.template, "SELECT * FROM t WHERE h = ?");
+        assert_eq!(r.params, vec!["0x1F2A"]);
+    }
+
+    #[test]
+    fn hex_prefix_without_digits_stays_a_number_then_text() {
+        let r = normalize_sql("SELECT 0xg");
+        assert_eq!(r.template, "SELECT ?xg");
+        assert_eq!(r.params, vec!["0"]);
+    }
+
+    #[test]
+    fn exponent_literal_is_one_param() {
+        let r = normalize_sql("SELECT * FROM t WHERE v = 1e10");
+        assert_eq!(r.template, "SELECT * FROM t WHERE v = ?");
+        assert_eq!(r.params, vec!["1e10"]);
+    }
+
+    #[test]
+    fn signed_exponent_after_fraction_is_one_param() {
+        let r = normalize_sql("SELECT * FROM t WHERE v = 2.5e-3 AND w = 4E+2");
+        assert_eq!(r.template, "SELECT * FROM t WHERE v = ? AND w = ?");
+        assert_eq!(r.params, vec!["2.5e-3", "4E+2"]);
+    }
+
+    #[test]
+    fn exponent_marker_without_digits_is_not_consumed() {
+        // `e` with no digit after it is text, and `col1e` is an identifier.
+        let r = normalize_sql("SELECT col1e, 1e FROM t");
+        assert_eq!(r.template, "SELECT col1e, ?e FROM t");
+        assert_eq!(r.params, vec!["1"]);
+    }
+
+    // -- Backslash escapes --
+
+    #[test]
+    fn backslash_escaped_quote_does_not_leak_by_default() {
+        let r = normalize_sql(r"SELECT * FROM t WHERE name = 'it\'s secret data'");
+        assert_eq!(r.template, "SELECT * FROM t WHERE name = ?");
+        assert_eq!(r.params, vec![r"it\'s secret data"]);
+    }
+
+    #[test]
+    fn mysql_backslash_escapes_in_both_quote_styles() {
+        let r = normalize_sql_for(
+            r#"SELECT 1 FROM t WHERE a = 'x\'y' AND b = "p\"q\\""#,
+            "mysql",
+        );
+        assert_eq!(r.template, "SELECT ? FROM t WHERE a = ? AND b = ?");
+        assert_eq!(r.params, vec!["1", r"x\'y", r#"p\"q\\"#]);
+    }
+
+    #[test]
+    fn postgres_standard_string_ends_on_a_trailing_backslash() {
+        // standard_conforming_strings: `\` is an ordinary character.
+        let r = normalize_sql_for(r"SELECT * FROM t WHERE p = 'C:\' AND n = 1", "postgresql");
+        assert_eq!(r.template, "SELECT * FROM t WHERE p = ? AND n = ?");
+        assert_eq!(r.params, vec![r"C:\", "1"]);
+    }
+
+    #[test]
+    fn postgres_escape_string_honours_backslash() {
+        let r = normalize_sql_for(
+            r"SELECT * FROM t WHERE a = E'it\'s' AND b = e'x\\'",
+            "postgresql",
+        );
+        assert_eq!(r.template, "SELECT * FROM t WHERE a = E? AND b = e?");
+        assert_eq!(r.params, vec![r"it\'s", r"x\\"]);
+    }
+
+    #[test]
+    fn standard_engine_string_ending_on_backslash_does_not_leak_the_next_one() {
+        let q = r"SELECT * FROM t WHERE path = 'C:\Temp\' AND owner = 'alice@corp.com'";
+        for db_system in ["mssql", "oracle", "sqlite", "cockroachdb"] {
+            let r = normalize_sql_for(q, db_system);
+            assert_eq!(r.template, "SELECT * FROM t WHERE path = ? AND owner = ?");
+            assert_eq!(r.params, vec![r"C:\Temp\", "alice@corp.com"]);
+        }
+    }
+
+    #[test]
+    fn identifier_ending_in_e_is_not_an_escape_string_prefix() {
+        let r = normalize_sql_for(r"SELECT * FROM t WHERE type='a\' AND n = 1", "postgresql");
+        assert_eq!(r.template, "SELECT * FROM t WHERE type=? AND n = ?");
+        assert_eq!(r.params, vec![r"a\", "1"]);
+    }
+
+    #[test]
+    fn trailing_backslash_in_unterminated_string_is_flushed() {
+        let r = normalize_sql(r"SELECT 'abc\");
+        assert_eq!(r.template, "SELECT ?");
+        assert_eq!(r.params, vec![r"abc\"]);
     }
 
     // -- CTE support --

@@ -7,7 +7,7 @@
 - [Les datastores non-SQL ne sont pas analysés](#les-datastores-non-sql-ne-sont-pas-analysés) : pourquoi les spans Redis, MongoDB et similaires sont écartés à l'ingestion.
 - [Messaging : côté producteur seulement, pas d'analyse des consommateurs](#messaging--côté-producteur-seulement-pas-danalyse-des-consommateurs) : pourquoi les spans consommateur sont écartés et les boucles de publication signalées largement.
 - [Messaging : traces producteur et consommateur reliées, pas fusionnées](#messaging--traces-producteur-et-consommateur-reliées-pas-fusionnées) : pourquoi le saut par le broker est navigable mais les deux traces restent distinctes.
-- [Tokenizer SQL](#tokenizer-sql) : compromis du normaliseur à base de regex.
+- [Tokenizer SQL](#tokenizer-sql) : compromis du normaliseur à machine à états.
 - [Paramètres bindés des ORM et classification N+1 vs redundant](#paramètres-bindés-des-orm-et-classification-n1-vs-redundant) : impact des placeholders nommés sur la classification.
 - [Redaction de la query string HTTP et visibilité des N+1](#redaction-de-la-query-string-http-et-visibilité-des-n1) : pourquoi les boucles N+1 sur paramètre de query sont invisibles avec les instrumentations qui masquent la query string.
 - [Findings lents et ratio de gaspillage](#findings-lents-et-ratio-de-gaspillage) : pourquoi les findings lents ne contribuent pas au ratio de gaspillage I/O.
@@ -112,13 +112,15 @@ Seul le chemin OTLP transporte les liens. Jaeger les modélise en références e
 
 ## Tokenizer SQL
 
-Le normaliseur SQL utilise un tokenizer maison basé sur les regex plutôt qu'un parseur SQL complet. Ce compromis garde le binaire petit, évite les dépendances lourdes et permet au tokenizer de fonctionner d'un dialecte SQL à l'autre.
+Le normaliseur SQL utilise un tokenizer maison, une machine à états en une seule passe, plutôt qu'un parseur SQL complet. Une regex ne sert qu'à réduire les listes `IN (...)` une fois le parcours terminé. Ce compromis garde le binaire petit, évite les dépendances lourdes et permet au tokenizer de fonctionner d'un dialecte SQL à l'autre.
 
 - Pas d'analyse sémantique : les littéraux et UUIDs sont remplacés de manière positionnelle, pas d'AST.
 - Longueur de requête : plafond de 64 Ko, troncature à une frontière de caractère avant la normalisation pour borner la mémoire consommée par une entrée adverse.
 - CTEs (`WITH ... AS (...)`) prises en charge, y compris imbriquées.
 - Les identifiants entre quotes sont préservés tels quels et les chiffres à l'intérieur ne sont pas confondus avec des littéraux : ANSI `"MyTable"` et MySQL `` `table` ``. Le scan ferme sur le premier délimiteur, donc un délimiteur doublé d'échappement (`""`, `` ` `` `` ` ``) n'est pas décodé.
 - Les chaînes dollar-quoted (`$$body$$`, `$tag$body$tag$`) se réduisent à `?`, y compris dans les corps de fonctions.
+- Les nombres couvrent les entiers, les décimaux, les exposants (`1e10`, `2.5e-3`) et l'hexadécimal (`0x1F2A`). Un signe reste dans le template (`-5` devient `-?`), et un littéral binaire comme `0b101` garde les chiffres qui suivent son `b`.
+- Une barre oblique inverse dans une chaîne suit le moteur. Les moteurs dont les chaînes suivent la norme la lisent comme un caractère ordinaire : PostgreSQL, CockroachDB et Vertica hors des chaînes `E'...'`, SQL Server, Oracle, DB2, SQLite, H2, HSQLDB, Derby, Trino, Presto et Teradata partout. Tout autre moteur, MySQL et MariaDB compris, s'en sert pour échapper, de même qu'un événement qui ne nomme aucun moteur, la lecture qui protège les données. Trois configurations sont mal lues : un serveur MySQL en mode `NO_BACKSLASH_ESCAPES`, un serveur PostgreSQL avec `standard_conforming_strings` désactivé, et une chaîne qui se termine par une barre oblique inverse (`'C:\'`) dans un événement qui ne nomme aucun moteur. La chaîne se prolonge alors et masque le reste de l'instruction, ou le contenu d'une chaîne suivante arrive dans le template.
 - Les instructions `CALL` normalisent leurs paramètres littéraux, et les expressions SQL comme `NOW()` et `INTERVAL '...'` sont gérées.
 - Les identifiants SQL Server `[...]` ne sont pas traités spécialement (`[` est un caractère normal). Les courants comme `[Order Details]` ou `[Col1]` restent intacts, tandis qu'un identifiant entre crochets purement numérique comme `[123]` voit ses chiffres remplacés par `?`. Traiter `[` comme un caractère normal garde les littéraux et sous-scripts de tableau PostgreSQL (`ARRAY['a', 'b']`, `arr[1]`) correctement masqués.
 

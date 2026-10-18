@@ -7,7 +7,7 @@
 - [Non-SQL datastores are not analyzed](#non-sql-datastores-are-not-analyzed): why Redis, MongoDB and similar spans are dropped at ingestion.
 - [Messaging: producer side only, no consumer analysis](#messaging-producer-side-only-no-consumer-analysis): why consumer spans are dropped and publish loops are flagged eagerly.
 - [Messaging: producer and consumer traces are linked, not merged](#messaging-producer-and-consumer-traces-are-linked-not-merged): why the broker hop is navigable but the two traces stay apart.
-- [SQL tokenizer](#sql-tokenizer): regex-based normalizer trade-offs.
+- [SQL tokenizer](#sql-tokenizer): state-machine normalizer trade-offs.
 - [ORM bind parameters and N+1 vs redundant classification](#orm-bind-parameters-and-n1-vs-redundant-classification): how named bind placeholders affect classification.
 - [HTTP query-string redaction and N+1 visibility](#http-query-string-redaction-and-n1-visibility): why query-parameter N+1 loops are invisible under instrumentations that redact the query string.
 - [Slow findings and waste ratio](#slow-findings-and-waste-ratio): why slow findings do not contribute to the I/O waste ratio.
@@ -111,13 +111,15 @@ Only the OTLP path carries links. Jaeger models them as references and Zipkin v2
 
 ## SQL tokenizer
 
-The SQL normalizer uses a homemade regex-based tokenizer rather than a full SQL parser. This trade-off keeps the binary small, avoids heavy deps and lets the tokenizer work across dialects.
+The SQL normalizer uses a homemade tokenizer, a single-pass state machine, rather than a full SQL parser. A regex only collapses `IN (...)` lists once the scan is done. This trade-off keeps the binary small, avoids heavy deps and lets the tokenizer work across dialects.
 
 - No semantic parsing: literals and UUIDs are replaced positionally, no AST.
 - Query length: 64 KB cap, truncated at a character boundary before normalization to bound adversarial input memory.
 - CTEs (`WITH ... AS (...)`) supported including nested.
 - Quoted identifiers are preserved verbatim and digits inside them are not mistaken for literals: ANSI `"MyTable"` and MySQL `` `table` ``. The scan closes on the first delimiter, so a doubled-delimiter escape (`""`, `` ` `` `` ` ``) is not decoded.
 - Dollar-quoted strings (`$$body$$`, `$tag$body$tag$`) collapse to `?`, including in function bodies.
+- Numbers cover integers, decimals, exponents (`1e10`, `2.5e-3`) and hexadecimal (`0x1F2A`). A sign stays in the template (`-5` becomes `-?`), and a binary literal such as `0b101` keeps the digits after its `b`.
+- A backslash inside a string follows the engine. Engines whose strings follow the standard read it as an ordinary character: PostgreSQL, CockroachDB and Vertica outside `E'...'` strings, SQL Server, Oracle, DB2, SQLite, H2, HSQLDB, Derby, Trino, Presto and Teradata everywhere. Every other engine, MySQL and MariaDB included, escapes with it, and so does an event that names no engine, the privacy-safe side. Three setups are read wrong: a MySQL server in `NO_BACKSLASH_ESCAPES` mode, a PostgreSQL server with `standard_conforming_strings` off, and a string ending on a backslash (`'C:\'`) in an event that names no engine. The string then runs on and masks the rest of the statement, or the content of a later string reaches the template.
 - `CALL` statements normalize literal params, SQL expressions like `NOW()` and `INTERVAL '...'` are handled.
 - SQL Server `[...]` identifiers are not special-cased (`[` is a normal character). Common ones like `[Order Details]` or `[Col1]` stay intact, while an all-numeric bracketed identifier such as `[123]` has its digits replaced with `?`. Treating `[` as a normal character keeps PostgreSQL array literals and subscripts (`ARRAY['a', 'b']`, `arr[1]`) correctly redacted.
 

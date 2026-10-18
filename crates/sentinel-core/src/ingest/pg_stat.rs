@@ -7,7 +7,7 @@
 //! a complementary view of SQL hotspots at the database level.
 
 use crate::detect::Finding;
-use crate::normalize::sql::normalize_sql;
+use crate::normalize::sql::normalize_sql_for;
 use serde::{Deserialize, Serialize};
 
 /// A single entry from `pg_stat_statements`.
@@ -478,7 +478,7 @@ fn parse_csv(text: &str) -> Result<Vec<PgStatEntry>, PgStatError> {
             parse_u64(&fields, i, line_num, "shared_blks_read")
         })?;
 
-        let normalized = normalize_sql(&query);
+        let normalized = normalize_sql_for(&query, "postgresql");
 
         entries.push(PgStatEntry {
             query,
@@ -583,7 +583,7 @@ fn parse_json(text: &str) -> Result<Vec<PgStatEntry>, PgStatError> {
     let entries = raw_entries
         .into_iter()
         .map(|raw| {
-            let normalized = normalize_sql(&raw.query);
+            let normalized = normalize_sql_for(&raw.query, "postgresql");
             PgStatEntry {
                 query: raw.query,
                 normalized_template: normalized.template,
@@ -880,7 +880,7 @@ fn parse_prometheus_response(
             total_exec_time_ms
         };
 
-        let normalized = normalize_sql(&query_text);
+        let normalized = normalize_sql_for(&query_text, "postgresql");
 
         entries.push(PgStatEntry {
             query: query_text,

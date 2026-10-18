@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.31.2
-appVersion: "0.31.2"
+version: 0.31.3
+appVersion: "0.31.3"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -36,15 +36,11 @@ annotations:
     - name: Helm deployment guide
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
-    - kind: added
-      description: "appVersion 0.31.2. The daemon's tuning advisor and query monitor name what the Hub export dropped, and /api/config reports whether the export is on."
-    - kind: added
-      description: "PrometheusRule gains PerfSentinelHubExportDropping, on the findings, incidents and correlations the export dropped, which the Hub's long history then lacks."
     - kind: fixed
-      description: "PerfSentinelArchiveDropping now fires on a single dropped window: its rate spans 30 minutes, past its 15-minute for. No values.yaml key is added or removed."
+      description: "appVersion 0.31.3. The daemon masks a backslash-escaped quote, a hexadecimal number and a number with an exponent in its SQL templates, so findings on such queries change signature and their acknowledgments stop matching. No values.yaml key is added or removed, and no template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.31.2
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.31.3
       platforms:
         - linux/amd64
         - linux/arm64
