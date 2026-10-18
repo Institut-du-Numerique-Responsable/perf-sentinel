@@ -357,7 +357,7 @@ The exemplar format follows the OpenMetrics specification: `metric{labels} value
 
 **Auto-format detection:** follows the same byte-level heuristic pattern as `json.rs`. If the first non-whitespace byte is `[` or `{`, parse as JSON, otherwise as CSV. No external csv crate, the CSV parser handles RFC 4180 quoting manually (double-quoted fields, escaped `""`).
 
-**SQL normalization reuse:** each query goes through `normalize::sql::normalize_sql()` to produce a template comparable with trace-based findings. PostgreSQL normalizes queries at the server level (e.g., `$1` placeholders), but Perf Sentinel re-normalizes for consistency with its own template format.
+**SQL normalization reuse:** each query goes through `normalize::sql::normalize_sql_for(query, "postgresql")` to produce a template comparable with trace-based findings. PostgreSQL normalizes queries at the server level (e.g., `$1` placeholders), but Perf Sentinel re-normalizes for consistency with its own template format.
 
 ### Four-ranking output
 
@@ -395,7 +395,7 @@ The function builds a PromQL `topk(N, sum by (queryid, instance, job, query) (pg
 }
 ```
 
-`parse_prometheus_response` extracts the `query` (or `queryid`) label as the raw SQL text and the value as total execution time, converted to milliseconds by `PgStatTimeUnit::to_ms` (the default series counts seconds). Rows are identified by `queryid`, `instance` and `job`. `datname` is left out so that one statement is one ranked row whichever database it ran against. Each result is converted to a `PgStatEntry` with its SQL normalized through `normalize::sql::normalize_sql()` for consistency with trace-based findings.
+`parse_prometheus_response` extracts the `query` (or `queryid`) label as the raw SQL text and the value as total execution time, converted to milliseconds by `PgStatTimeUnit::to_ms` (the default series counts seconds). Rows are identified by `queryid`, `instance` and `job`. `datname` is left out so that one statement is one ranked row whichever database it ran against. Each result is converted to a `PgStatEntry` with its SQL normalized through `normalize::sql::normalize_sql_for(query, "postgresql")` for consistency with trace-based findings.
 
 ### CLI integration
 

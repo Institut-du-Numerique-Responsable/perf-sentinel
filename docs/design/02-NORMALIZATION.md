@@ -11,13 +11,13 @@ Normalization is the second pipeline stage. It transforms raw `SpanEvent`s into 
 
 The [sqlparser](https://docs.rs/sqlparser/) crate is a full SQL parser that builds an AST. We chose a homemade tokenizer instead:
 
-- **Binary size:** sqlparser adds ~300KB to the release binary. Perf Sentinel targets < 15 MB total.
+- **Binary size:** a full parser and its dialect grammars add code to the release binary. Perf Sentinel targets < 15 MB total.
 - **Dependency weight:** sqlparser pulls in additional crates and increases compile time.
-- **Dialect-agnostic:** sqlparser requires specifying a SQL dialect (PostgreSQL, MySQL, etc.). Our tokenizer works across all dialects because it only replaces literals and never needs to understand query structure.
+- **No dialect required:** sqlparser requires specifying a SQL dialect (PostgreSQL, MySQL, etc.). Our tokenizer produces a template for any dialect because it only replaces literals and never needs to understand query structure. The engine named in `db.system` only adjusts quoting rules (MySQL double-quoted strings, backslash escapes), and an unknown engine gets the privacy-safe reading.
 - **Performance:** a full parser builds an AST we would immediately discard. Our single-pass tokenizer processes input in O(n) with no intermediate data structure.
-- **Simplicity:** a few hundred lines of code vs a 50,000+ line dependency.
+- **Simplicity:** a few hundred lines of code vs a full parser and its dialect grammars.
 
-The trade-off is documented in [LIMITATIONS.md](../LIMITATIONS.md): the tokenizer handles ASCII SQL only and does not perform semantic analysis. It supports CTEs, double-quoted identifiers, PostgreSQL dollar-quoted strings and `CALL` statements.
+The trade-off is documented in [LIMITATIONS.md](../LIMITATIONS.md): the delimiters and keywords the tokenizer acts on (quotes, `$`, digits, `IN`) must be ASCII, while literal content can be any UTF-8, and it does not perform semantic analysis. It supports CTEs, double-quoted identifiers, PostgreSQL dollar-quoted strings and `CALL` statements.
 
 This "never understands query structure" property is sufficient for every stage of the pipeline. Every detector (`n_plus_one`, `redundant`, `fanout`, …) and the `sanitizer_aware` classifier reason over *trace shape* (occurrence counts, timing variance, span ordering, ORM instrumentation scope) and the query *fingerprint*, never the SQL's internal grammar. Structural SQL analysis would only pay off if Perf Sentinel pivoted into single-query static analysis (a different product category), and even then an `EXPLAIN` plan beats re-parsing the logged text.
 
@@ -25,16 +25,18 @@ The tokenizer is also *total*. It always emits a best-effort template, even on t
 
 ## SQL tokenizer: single-pass state machine
 
-`normalize_sql()` processes the query byte-by-byte through six states. `normalize_sql_for(query, db_system)` runs the same machine, reading `"` as a string quote when `db_system` is `mysql` or `mariadb`. The pipeline passes the span's `db.system`, and `mysql-stat` passes `mysql`:
+`normalize_sql()` processes the query byte-by-byte through six states. `normalize_sql_for(query, db_system)` runs the same machine, reading `"` as a string quote when `db_system` is `mysql` or `mariadb`. The pipeline passes the span's `db.system`, `mysql-stat` passes `mysql` and `pg-stat` passes `postgresql`:
 
 | State             | Trigger (enter)          | Action                                             | Trigger (exit)                              |
 |-------------------|--------------------------|----------------------------------------------------|---------------------------------------------|
 | **Normal**        | Default / end of literal | Accumulate into template                           | `'`, `"`, `` ` ``, `$$`/`$tag$`, or standalone digit |
-| **InString**      | Opening `'`, or `"` on MySQL/MariaDB | Accumulate into `current_value`         | Same quote, not doubled                     |
-| **InNumber**      | Standalone digit         | Accumulate digits/dot                              | Non-digit or second dot                     |
+| **InString**      | Opening `'`, or `"` on MySQL/MariaDB | Accumulate into `current_value`, skip the byte after an escaping `\` | Same quote, not doubled or escaped |
+| **InNumber**      | Standalone digit         | Accumulate digits/dot, then a `0x` hex run or an exponent (`e`, optional sign, digits) | Non-digit, second dot, or end of the hex run or exponent |
 | **InDoubleQuote** | Opening `"`, other engines | Pass through into template (identifier preserved) | Closing `"`                              |
 | **InBacktick** | Opening `` ` `` (MySQL identifier) | Pass through into template (identifier preserved) | Closing `` ` `` |
 | **InDollarQuote** | `$$` or `$tag$`          | Accumulate body into `current_value`, emit one `?` | Matching `$$` / `$tag$`                     |
+
+Whether a backslash escapes inside **InString** is decided when the string opens. The engines of `STANDARD_STRING_SYSTEMS` (PostgreSQL, CockroachDB, Vertica, SQL Server, Oracle, DB2, SQLite, H2, HSQLDB, Derby, Trino, Presto, Teradata) follow the standard and escape only in an `E'...'` string, an `E` or `e` right before the quote with no identifier byte before it. Every other engine, MySQL, MariaDB and an unnamed one included, escapes in every string. For an unknown engine this is the privacy-safe side: a missed escape closes the string early and leaks the rest of it into the template, while a wrong one only masks more than needed. The param keeps the escape as written.
 
 ### Batch `push_str` optimization
 
@@ -71,7 +73,7 @@ if !has_in_list
 }
 ```
 
-If `has_in_list` is false after the main loop, the regex post-pass (`IN_LIST_RE.replace_all`) is skipped entirely. This avoids ~2us of regex overhead on the ~80% of queries that have no IN clause.
+If `has_in_list` is false after the main loop, the regex post-pass (`IN_LIST_RE.replace_all`) is skipped entirely. Queries with no IN clause never run the regex.
 
 ### `Cow::Borrowed` optimization
 
@@ -125,9 +127,7 @@ fn is_uuid(s: &str) -> bool {
 }
 ```
 
-**Why hand-coded?** This function is called on every path segment of every HTTP URL in the pipeline. A compiled regex (`Regex::is_match`) takes ~150ns per call due to the regex engine overhead. The hand-coded check takes ~3ns: a length check (fast rejection for >99% of segments), four byte comparisons for dash positions and a single pass for hex digits.
-
-At 100,000 events/sec with an average of 4 path segments per URL, this saves ~60ms/sec of regex overhead.
+**Why hand-coded?** This function is called on every path segment of every HTTP URL in the pipeline. A compiled regex (`Regex::is_match`) runs the regex engine on every call. The hand-coded check is a length check (fast rejection for >99% of segments), four byte comparisons for dash positions and a single pass for hex digits.
 
 ### `split_origin` and host-aware grouping
 

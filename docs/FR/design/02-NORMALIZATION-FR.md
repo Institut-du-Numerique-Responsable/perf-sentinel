@@ -11,13 +11,13 @@ La normalisation est la deuxième étape du pipeline. Elle transforme les `SpanE
 
 Le crate [sqlparser](https://docs.rs/sqlparser/) est un parseur SQL complet qui construit un AST. Nous avons choisi un tokenizer maison à la place :
 
-- **Taille du binaire :** sqlparser ajoute ~300 Ko au binaire release. Perf Sentinel cible < 15 Mo au total.
+- **Taille du binaire :** un parseur complet et ses grammaires de dialectes ajoutent du code au binaire release. Perf Sentinel cible < 15 Mo au total.
 - **Poids des dépendances :** sqlparser amène des crates supplémentaires et augmente le temps de compilation.
-- **Agnostique du dialecte :** sqlparser nécessite de spécifier un dialecte SQL (PostgreSQL, MySQL, etc.). Notre tokenizer fonctionne avec tous les dialectes car il ne remplace que les littéraux : il n'a jamais besoin de comprendre la structure de la requête.
+- **Pas de dialecte requis :** sqlparser nécessite de spécifier un dialecte SQL (PostgreSQL, MySQL, etc.). Notre tokenizer produit un template pour tous les dialectes car il ne remplace que les littéraux : il n'a jamais besoin de comprendre la structure de la requête. Le moteur nommé par `db.system` n'ajuste que les règles de guillemets (chaînes MySQL entre guillemets doubles, échappements par barre oblique inverse), et un moteur inconnu reçoit la lecture qui protège les données.
 - **Performance :** un parseur complet construit un AST que nous jetterions immédiatement. Notre tokenizer en une seule passe traite l'entrée en O(n) sans structure de données intermédiaire.
-- **Simplicité :** quelques centaines de lignes de code vs une dépendance de 50 000+ lignes.
+- **Simplicité :** quelques centaines de lignes de code vs un parseur complet et ses grammaires de dialectes.
 
-Le compromis est documenté dans [LIMITATIONS-FR.md](../LIMITATIONS-FR.md) : le tokenizer ne gère que le SQL ASCII et ne réalise pas d'analyse sémantique. Il prend en charge les CTEs, les identifiants entre guillemets doubles, les chaînes dollar-quoted PostgreSQL et les instructions `CALL`.
+Le compromis est documenté dans [LIMITATIONS-FR.md](../LIMITATIONS-FR.md) : les délimiteurs et mots-clés sur lesquels le tokenizer agit (guillemets, `$`, chiffres, `IN`) doivent être en ASCII, le contenu des littéraux peut être en UTF-8 quelconque, et il ne réalise pas d'analyse sémantique. Il prend en charge les CTEs, les identifiants entre guillemets doubles, les chaînes dollar-quoted PostgreSQL et les instructions `CALL`.
 
 Cette propriété (ne jamais comprendre la structure de la requête) suffit pour toutes les étapes du pipeline. Chaque détecteur (`n_plus_one`, `redundant`, `fanout`, …) et le classifieur `sanitizer_aware` raisonnent sur la *forme de la trace* (nombre d'occurrences, variance temporelle, ordonnancement des spans, scope d'instrumentation ORM) et sur l'*empreinte* de la requête, jamais sur sa grammaire interne. Une analyse SQL structurelle ne serait rentable que si Perf Sentinel pivotait vers de l'analyse statique de requête isolée (une autre catégorie de produit), et même là un plan `EXPLAIN` vaut mieux que re-parser le texte journalisé.
 
@@ -25,16 +25,18 @@ Le tokenizer est aussi *total*. Il produit toujours un template, construit au mi
 
 ## Tokenizer SQL : machine à états en une seule passe
 
-`normalize_sql()` traite la requête octet par octet à travers six états. `normalize_sql_for(query, db_system)` fait tourner la même machine, en lisant `"` comme un guillemet de chaîne quand `db_system` vaut `mysql` ou `mariadb`. Le pipeline passe le `db.system` du span, et `mysql-stat` passe `mysql` :
+`normalize_sql()` traite la requête octet par octet à travers six états. `normalize_sql_for(query, db_system)` fait tourner la même machine, en lisant `"` comme un guillemet de chaîne quand `db_system` vaut `mysql` ou `mariadb`. Le pipeline passe le `db.system` du span, `mysql-stat` passe `mysql` et `pg-stat` passe `postgresql` :
 
 | État              | Déclencheur (entrée)         | Action                                                | Déclencheur (sortie)                     |
 |-------------------|------------------------------|-------------------------------------------------------|------------------------------------------|
 | **Normal**        | Défaut / fin de littéral     | Accumule dans le template                             | `'`, `"`, `` ` ``, `$$`/`$tag$`, ou chiffre isolé |
-| **InString**      | Guillemet ouvrant `'`, ou `"` sur MySQL/MariaDB | Accumule dans `current_value`     | Même guillemet, non doublé               |
-| **InNumber**      | Chiffre isolé                | Accumule chiffres/point                               | Non-chiffre ou deuxième point            |
+| **InString**      | Guillemet ouvrant `'`, ou `"` sur MySQL/MariaDB | Accumule dans `current_value`, saute l'octet qui suit un `\` qui échappe | Même guillemet, ni doublé ni échappé |
+| **InNumber**      | Chiffre isolé                | Accumule chiffres/point, puis une suite hexadécimale après `0x` ou un exposant (`e`, signe facultatif, chiffres) | Non-chiffre, deuxième point, ou fin de la suite hexadécimale ou de l'exposant |
 | **InDoubleQuote** | Guillemet double ouvrant `"`, autres moteurs | Laisse passer dans le template (identifiant préservé) | Guillemet double fermant `"` |
 | **InBacktick** | Accent grave ouvrant `` ` `` (identifiant MySQL) | Laisse passer dans le template (identifiant préservé) | Accent grave fermant `` ` `` |
 | **InDollarQuote** | `$$` ou `$tag$`              | Accumule le corps dans `current_value`, émet un `?`   | `$$` / `$tag$` correspondant             |
+
+Le rôle d'échappement de la barre oblique inverse dans **InString** est fixé à l'ouverture de la chaîne. Les moteurs de `STANDARD_STRING_SYSTEMS` (PostgreSQL, CockroachDB, Vertica, SQL Server, Oracle, DB2, SQLite, H2, HSQLDB, Derby, Trino, Presto, Teradata) suivent la norme et n'échappent que dans une chaîne `E'...'`, un `E` ou `e` juste avant le guillemet sans octet d'identifiant devant lui. Tout autre moteur, y compris MySQL, MariaDB et un moteur non nommé, échappe dans toutes les chaînes. Pour un moteur inconnu, c'est le côté qui protège les données : un échappement manqué ferme la chaîne trop tôt et fait fuiter la suite dans le template, alors qu'un échappement en trop ne fait que masquer plus que nécessaire. Le paramètre garde l'échappement tel qu'écrit.
 
 ### Optimisation batch `push_str`
 
@@ -71,7 +73,7 @@ if !has_in_list
 }
 ```
 
-Si `has_in_list` est faux après la boucle principale, la passe regex post-traitement (`IN_LIST_RE.replace_all`) est entièrement sautée. Cela évite ~2us de surcoût regex sur les ~80% de requêtes qui n'ont pas de clause IN.
+Si `has_in_list` est faux après la boucle principale, la passe regex post-traitement (`IN_LIST_RE.replace_all`) est entièrement sautée. Les requêtes sans clause IN ne passent jamais par la regex.
 
 ### Optimisation `Cow::Borrowed`
 
@@ -125,9 +127,7 @@ fn is_uuid(s: &str) -> bool {
 }
 ```
 
-**Pourquoi codé à la main ?** Cette fonction est appelée sur chaque segment de chemin de chaque URL HTTP dans le pipeline. Une regex compilée (`Regex::is_match`) prend ~150ns par appel à cause du surcoût du moteur regex. La vérification codée à la main prend ~3ns : une vérification de longueur (rejet rapide pour >99% des segments), quatre comparaisons d'octets pour les positions des tirets et une seule passe pour les chiffres hexadécimaux.
-
-À 100 000 événements/sec avec une moyenne de 4 segments de chemin par URL, cela économise ~60ms/sec de surcoût regex.
+**Pourquoi codé à la main ?** Cette fonction est appelée sur chaque segment de chemin de chaque URL HTTP dans le pipeline. Une regex compilée (`Regex::is_match`) fait tourner le moteur regex à chaque appel. La vérification codée à la main consiste en une vérification de longueur (rejet rapide pour >99% des segments), quatre comparaisons d'octets pour les positions des tirets et une seule passe pour les chiffres hexadécimaux.
 
 ### `split_origin` et regroupement conscient du host
 

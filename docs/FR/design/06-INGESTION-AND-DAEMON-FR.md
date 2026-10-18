@@ -362,7 +362,7 @@ Le format suit la spécification OpenMetrics : `metric{labels} value # {trace_id
 
 **Auto-détection du format :** suit le même principe d'heuristique au niveau des octets que `json.rs`. Si le premier octet non-espace est `[` ou `{`, parse en JSON, sinon en CSV. Pas de crate csv externe, le parseur CSV gère manuellement les guillemets RFC 4180 (champs entre guillemets doubles, `""` échappé).
 
-**Réutilisation de la normalisation SQL :** chaque requête passe par `normalize::sql::normalize_sql()` pour produire un template comparable avec les findings basés sur les traces. PostgreSQL normalise les requêtes côté serveur (par ex. les paramètres positionnels `$1`), mais Perf Sentinel les renormalise pour rester cohérent avec son propre format de template.
+**Réutilisation de la normalisation SQL :** chaque requête passe par `normalize::sql::normalize_sql_for(query, "postgresql")` pour produire un template comparable avec les findings basés sur les traces. PostgreSQL normalise les requêtes côté serveur (par ex. les paramètres positionnels `$1`), mais Perf Sentinel les renormalise pour rester cohérent avec son propre format de template.
 
 ### Sortie à quatre classements
 
@@ -400,7 +400,7 @@ La fonction construit une requête instantanée PromQL `topk(N, sum by (queryid,
 }
 ```
 
-`parse_prometheus_response` extrait le label `query` (ou `queryid`) comme texte SQL brut et la valeur comme temps d'exécution total, convertie en millisecondes par `PgStatTimeUnit::to_ms` (la série par défaut compte en secondes). Les lignes sont identifiées par `queryid`, `instance` et `job`. `datname` est écarté pour qu'une requête donne une seule ligne classée, quelle que soit la base sur laquelle elle a tourné. Chaque résultat est converti en `PgStatEntry`, avec son SQL normalisé via `normalize::sql::normalize_sql()` pour rester cohérent avec les findings basés sur les traces.
+`parse_prometheus_response` extrait le label `query` (ou `queryid`) comme texte SQL brut et la valeur comme temps d'exécution total, convertie en millisecondes par `PgStatTimeUnit::to_ms` (la série par défaut compte en secondes). Les lignes sont identifiées par `queryid`, `instance` et `job`. `datname` est écarté pour qu'une requête donne une seule ligne classée, quelle que soit la base sur laquelle elle a tourné. Chaque résultat est converti en `PgStatEntry`, avec son SQL normalisé via `normalize::sql::normalize_sql_for(query, "postgresql")` pour rester cohérent avec les findings basés sur les traces.
 
 ### Intégration CLI
 
