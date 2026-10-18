@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.31.3] - 2026-10-18
+
+A patch with no public API change: no type or function of `perf-sentinel-core` changes signature. The SQL normalizer masks three literal forms it used to keep in the template, a backslash-escaped quote, which leaked the rest of its string, a hexadecimal number and a number with an exponent. `normalize_sql`, the entry point for an engine left unnamed, now reads a backslash as an escape, and `pg-stat` normalizes as PostgreSQL. A finding whose template held one of these forms changes template and signature, so its acknowledgment stops matching, and findings on such queries can appear or disappear. The daemon's API, its metrics and its configuration do not change. The toolchain moves to Rust 1.99.1.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.31.3 touches the scoring code.
+
 ### Changed
 
 - The pinned toolchain moves from Rust 1.99.0 to 1.99.1 (`rust-toolchain.toml`, `rust-version`, the CI comments that name it and CONTRIBUTING.md). Clippy and rustfmt are clean on the new release with no code change.

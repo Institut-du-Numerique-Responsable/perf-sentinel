@@ -10,6 +10,18 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.31.3]
+
+### Fixed
+
+- **`appVersion` moves to `0.31.3`.** The daemon masks three literal forms
+  its SQL templates used to keep: a backslash-escaped quote, which leaked
+  the rest of its string into the template, a hexadecimal number and a
+  number with an exponent. Findings on such queries change signature, so
+  their acknowledgments stop matching. The image is built with Rust 1.99.1.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.31.2]
 
 ### Added
