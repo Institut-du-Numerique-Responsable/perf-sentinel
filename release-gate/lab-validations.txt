@@ -631,3 +631,18 @@ v0.31.1	39c13c8	2026-10-17	PASS
 # and the chart's rules, not the detectors, the ingest paths or the energy
 # backends.
 v0.31.2	04d5a54	2026-10-17	PASS
+# v0.31.3, 2026-10-18. Targeted pass on the final release tree. Daemon image
+# perf-sentinel:0.31.3-24b6c075 built from release/0.31.3 with Rust 1.99.1
+# (the SQL normalizer's backslash escapes per engine, hex and exponent
+# literals, pg-stat normalized as PostgreSQL, the toolchain move):
+# validate-findings 12/12, sql-backtick-redaction with its new 0.31.3 leg
+# (four OTLP traces, one per literal form, which fails six checks on the
+# published 0.31.2 binary), pg-stat on both paths (the Prometheus path
+# unlocked by verify-grafana-dashboard, green too), mysql-stat,
+# hybrid-daemon-batch, ci-shift-left and output-formats-coverage, all green.
+# The lab ran at 2ce2f95 on a cluster rebuilt from scratch, with a local,
+# uncommitted image pin in the daemon manifest. Not run: the hub-*, limit-*,
+# failure-mode-*, template-*, ci-e2e-* and energy families. The release
+# touches the SQL normalizer and pg-stat, not the daemon's API, the Hub
+# export or the energy backends.
+v0.31.3	2ce2f95	2026-10-18	PASS
