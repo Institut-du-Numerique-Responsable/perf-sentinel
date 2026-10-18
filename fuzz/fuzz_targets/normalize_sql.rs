@@ -18,4 +18,9 @@ fuzz_target!(|data: &str| {
     let first = normalize_sql_for(data, "mysql");
     let second = normalize_sql_for(&first.template, "mysql");
     assert_eq!(second.template, first.template);
+
+    // PostgreSQL mode reads `\` as an escape only inside `E'...'`.
+    let first = normalize_sql_for(data, "postgresql");
+    let second = normalize_sql_for(&first.template, "postgresql");
+    assert_eq!(second.template, first.template);
 });

@@ -49,8 +49,42 @@ fn float_lit() -> impl Strategy<Value = Lit> {
 
 /// Quoted string literal. Content mixes letters, digits, spaces,
 /// backslashes, and single quotes. Quotes are escaped as `''` in the
-/// SQL text and must come back unescaped in the param.
+/// SQL text and must come back unescaped in the param. Backslashes are
+/// doubled, read as one escape or as two plain characters depending on
+/// the dialect, and kept as written in the param either way.
 fn str_lit() -> impl Strategy<Value = Lit> {
+    raw_str().prop_map(|raw| {
+        let written = raw.replace('\\', "\\\\");
+        Lit {
+            sql: format!("'{}'", written.replace('\'', "''")),
+            param: written,
+        }
+    })
+}
+
+/// `PostgreSQL` standard string: a backslash is an ordinary character, so
+/// a lone one (even right before the closing quote) is carried as is.
+fn pg_str_lit() -> impl Strategy<Value = Lit> {
+    raw_str().prop_map(|raw| Lit {
+        sql: format!("'{}'", raw.replace('\'', "''")),
+        param: raw,
+    })
+}
+
+/// String whose quotes are backslash-escaped (`\'`), the `MySQL` and
+/// unknown-dialect spelling. Only an escaping reading closes it in the
+/// right place.
+fn bs_str_lit() -> impl Strategy<Value = Lit> {
+    raw_str().prop_map(|raw| {
+        let written = raw.replace('\\', "\\\\").replace('\'', "\\'");
+        Lit {
+            sql: format!("'{written}'"),
+            param: written,
+        }
+    })
+}
+
+fn raw_str() -> impl Strategy<Value = String> {
     proptest::collection::vec(
         prop_oneof![
             Just('a'),
@@ -63,13 +97,7 @@ fn str_lit() -> impl Strategy<Value = Lit> {
         ],
         0..8,
     )
-    .prop_map(|chars| {
-        let raw = format!("{MARKER}{}", chars.into_iter().collect::<String>());
-        Lit {
-            sql: format!("'{}'", raw.replace('\'', "''")),
-            param: raw,
-        }
-    })
+    .prop_map(|chars| format!("{MARKER}{}", chars.into_iter().collect::<String>()))
 }
 
 /// `MySQL` double-quoted string literal. A `"` is escaped as `""` in the SQL
@@ -88,8 +116,25 @@ fn dq_str_lit() -> impl Strategy<Value = Lit> {
     })
 }
 
+/// Hex (`0x1F`) or exponent (`2.5e-3`) literal: one param, never split.
+fn prefixed_num_lit() -> impl Strategy<Value = Lit> {
+    prop_oneof![
+        any::<u32>().prop_map(|n| format!("0x{n:X}")),
+        (
+            0u32..=99,
+            prop_oneof![Just("e"), Just("E-"), Just("e+")],
+            0u32..=99
+        )
+            .prop_map(|(m, e, x)| format!("{m}.5{e}{x}")),
+    ]
+    .prop_map(|s| Lit {
+        sql: s.clone(),
+        param: s,
+    })
+}
+
 fn any_lit() -> impl Strategy<Value = Lit> {
-    prop_oneof![int_lit(), float_lit(), str_lit()]
+    prop_oneof![int_lit(), float_lit(), prefixed_num_lit(), str_lit()]
 }
 
 /// Cosmetic dimensions of a statement (keyword casing, whitespace,
@@ -222,6 +267,52 @@ proptest! {
         prop_assert!(!first.template.contains('"'), "{}", first.template);
 
         let second = normalize_sql_for(&first.template, "mysql");
+        prop_assert_eq!(&second.template, &first.template);
+        prop_assert!(second.params.is_empty(), "{:?}", second.params);
+    }
+
+    /// Unknown dialect and `MySQL` mode: a backslash-escaped quote stays
+    /// inside its string, so nothing after it reaches the template.
+    #[test]
+    fn backslash_escaped_quotes_never_leak(
+        (shape, eq, list, _) in statement(),
+        note in bs_str_lit(),
+        db_system in prop_oneof![Just(""), Just("mysql")],
+    ) {
+        let first = normalize_sql_for(&render(&shape, &eq, &list, &note), db_system);
+
+        let expected: Vec<&str> = std::iter::once(&eq)
+            .chain(&list)
+            .chain(std::iter::once(&note))
+            .map(|l| l.param.as_str())
+            .collect();
+        prop_assert_eq!(&first.params, &expected);
+        prop_assert!(!first.template.contains(MARKER), "{}", first.template);
+        prop_assert!(!first.template.contains('\''), "{}", first.template);
+
+        let second = normalize_sql_for(&first.template, db_system);
+        prop_assert_eq!(&second.template, &first.template);
+        prop_assert!(second.params.is_empty(), "{:?}", second.params);
+    }
+
+    /// `PostgreSQL` mode: a lone backslash does not escape the closing
+    /// quote, so the string ends where the server ends it.
+    #[test]
+    fn postgres_backslash_is_an_ordinary_character(
+        (shape, eq, list, _) in statement(),
+        note in pg_str_lit(),
+    ) {
+        let first = normalize_sql_for(&render(&shape, &eq, &list, &note), "postgresql");
+
+        let expected: Vec<&str> = std::iter::once(&eq)
+            .chain(&list)
+            .chain(std::iter::once(&note))
+            .map(|l| l.param.as_str())
+            .collect();
+        prop_assert_eq!(&first.params, &expected);
+        prop_assert!(!first.template.contains(MARKER), "{}", first.template);
+
+        let second = normalize_sql_for(&first.template, "postgresql");
         prop_assert_eq!(&second.template, &first.template);
         prop_assert!(second.params.is_empty(), "{:?}", second.params);
     }

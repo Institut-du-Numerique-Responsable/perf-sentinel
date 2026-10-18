@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Fixed
+
+- A backslash-escaped quote no longer leaks the rest of a string into the SQL template. `WHERE name = 'it\'s secret data'` closed the string at `\'`, so `s secret data` reached the template, the reports, the query API, the archive and PerfSentinelHub in clear. A backslash now escapes the next character inside a string literal on MySQL and MariaDB, in both quote styles, on the other engines that escape with it, such as ClickHouse, Snowflake or BigQuery, and on any engine the event does not name, the privacy-safe reading when the dialect is unknown. Engines whose strings follow the standard keep reading a backslash as an ordinary character: PostgreSQL, CockroachDB and Vertica outside `E'...'`, SQL Server, Oracle, DB2, SQLite, H2, HSQLDB, Derby, Trino, Presto and Teradata everywhere, so `'C:\'` still ends at its second quote. `pg-stat` now normalizes as PostgreSQL.
+- A hexadecimal literal (`0x1F2A`) and a number with an exponent (`1e10`, `2.5e-3`) are now one `?`. The tokenizer stopped at the `x` or the `e`, so the rest of the value stayed in the template and each value got a template of its own.
+- A finding whose template held such a string or number gets a new template and a new signature, so its acknowledgment no longer matches. Detection groups by template, so queries that split into one template per value now group, and an N+1 that only varied by such a value now shows up. On an engine the event does not name, a string that ends on a backslash, such as `'C:\'`, now masks the rest of the statement.
+
 ## [0.31.2] - 2026-10-17
 
 A patch with no public API change. No detector, normalizer or finding signature changes, so no finding appears, disappears or changes signature and acknowledgments keep matching. It is about what a daemon tells its operator once PerfSentinelHub keeps its history: the daemon's own findings ring is no longer where history is lost, the Hub export is. The tuning advisor and a new chart alert name what the export dropped, and `query monitor` says a ring eviction loses nothing the export delivered. `/api/status` and `/api/config` gain one field each.
