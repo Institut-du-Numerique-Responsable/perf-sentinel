@@ -825,7 +825,8 @@ a.shell-identity[aria-current="page"] {
     font-family: var(--font-mono);
 }
 
-/* A sortable column head reads as the header it replaces, plus its arrow. */
+/* A sortable column head reads as the header it replaces, plus its arrow: one
+   for the sorted column, both, muted, for the others. */
 .sort-head {
     display: inline-flex;
     align-items: center;
@@ -843,9 +844,17 @@ a.shell-identity[aria-current="page"] {
     color: var(--text);
 }
 
-/* An incident's findings: fewer columns than the fleet table, the endpoint
-   wraps and the template is cut to one line, so it needs less than the
-   fleet table's minimum. */
+.sort-head svg {
+    opacity: .5;
+}
+
+.sort-head:hover svg, th[aria-sort] .sort-head svg {
+    opacity: 1;
+}
+
+/* An incident's findings: fewer columns than the fleet table, and the
+   endpoint and the template wrap, so it needs less than the fleet table's
+   minimum. */
 .table-findings {
     min-width: 820px;
 }
@@ -853,9 +862,13 @@ a.shell-identity[aria-current="page"] {
 .findings-template {
     display: block;
     max-width: 300px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+}
+
+/* Underlined, unlike the rest of the product's links: a lone word in a table
+   cell does not read as a link by its colour alone. */
+.ack-link {
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
 
 .findings-filter {

@@ -513,7 +513,7 @@
       <div data-dc-tpl="779" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: var(--dotnet); letter-spacing: 0.04em;"><span class="sc-interp">// one for the fleet</span></div>
       <div data-dc-tpl="780" style="display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; margin-top: 12px;">
         <h2 data-dc-tpl="781" style="margin: 0px; font-size: clamp(28px, 3.4vw, 38px); font-weight: 700; letter-spacing: -0.018em; color: var(--text);"><span class="sc-interp">A </span><span data-dc-tpl="782" style="color: var(--dotnet);"><span class="sc-interp">C#</span></span><span class="sc-interp"> Hub, for finding history</span></h2><div data-dc-tpl="783" style="display: inline-flex; align-items: center; gap: 9px; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--dotnet); background: color-mix(in srgb,var(--dotnet) 12%,transparent); border: 1px solid color-mix(in srgb,var(--dotnet) 38%,transparent); border-radius: 999px; padding: 8px 14px;">
-          <img data-dc-tpl="784" src="assets/dotnet.svg" alt=".NET" width="15" height="15" style="display: block; flex: 0 0 auto;"><span class="sc-interp">.NET SDK 10.0.401</span>
+          <img data-dc-tpl="784" src="assets/dotnet.svg" alt=".NET" width="15" height="15" style="display: block; flex: 0 0 auto;"><span class="sc-interp">.NET SDK 10.0.402</span>
         </div>
       </div>
       <p data-dc-tpl="785" data-intro=""><span class="sc-interp">In daemon mode, Perf Sentinel holds findings in memory, oldest evicted first, and </span><code data-dc-tpl="786" class="dc-cmd">/api/findings</code><span class="sc-interp"> answers at most 1,000 rows: current state, not history. The Hub, a separate service, collects from every daemon and keeps what an eviction or restart would erase, such as when a finding first appeared. It also receives the periodic reports a scheduled job publishes, checks them, renders their PDF and shares them under an expiring link.</span></p>
@@ -3162,7 +3162,7 @@ class Component extends DCLogic {
         this.setState({ copied: true });
         clearTimeout(this._t); this._t = setTimeout(() => this.setState({ copied: false }), 1600);
       },
-      hubEyebrow: t.hubEyebrow, hubStats: t.hubStats, hubBench: t.hubBench, hubBenchHref: t.hubBenchHref, hubTitleB1: t.hubTitleB1, hubWCs: t.hubWCs, hubTitleB2: t.hubTitleB2, hubBadge: t.hubBadgeTpl.replace('{v}', this.state.dotnetVersion || '10.0.401'),
+      hubEyebrow: t.hubEyebrow, hubStats: t.hubStats, hubBench: t.hubBench, hubBenchHref: t.hubBenchHref, hubTitleB1: t.hubTitleB1, hubWCs: t.hubWCs, hubTitleB2: t.hubTitleB2, hubBadge: t.hubBadgeTpl.replace('{v}', this.state.dotnetVersion || '10.0.402'),
       hubLeadA: t.hubLeadA, hubLeadB: t.hubLeadB, pubEyebrow: t.pubEyebrow, pubT1: t.pubT1, pubTWord: t.pubTWord, pubT2: t.pubT2, pubIntroA: t.pubIntroA, pubIntroB: t.pubIntroB, pubIntroC: t.pubIntroC, pubVerT: t.pubVerT, pubVerText: t.pubVerText, pubCopyTitle: t.pubCopyTitle,
       hubMore: t.hubMore, hubDmnNote: t.hubDmnNote, hubPush: t.hubPush, hubPull: t.hubPull, hubKeepA: t.hubKeepA, hubKeepB: t.hubKeepB, hubKeepC: t.hubKeepC,
       hubSurvives: t.hubSurvives, hubBrowser: t.hubBrowser, hubLauncher: t.hubLauncher, hubPick: t.hubPick, hubRun: t.hubRun,
@@ -3207,8 +3207,8 @@ class Component extends DCLogic {
       ctaGuide: t.ctaGuide, ctaGuideHref: lang === 'fr' ? '/fr/guide#install' : '/guide#install',
       psRelLabel: 'Perf Sentinel v' + (this.state.psVersion || '0.31.3'),
       psRelHref: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v' + (this.state.psVersion || '0.31.3'),
-      hubRelLabel: 'Perf Sentinel Hub v' + (this.state.hubVersion || '0.7.2'),
-      hubRelHref: 'https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v' + (this.state.hubVersion || '0.7.2'),
+      hubRelLabel: 'Perf Sentinel Hub v' + (this.state.hubVersion || '0.7.3'),
+      hubRelHref: 'https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v' + (this.state.hubVersion || '0.7.3'),
       ftTagline: t.ftTagline, ftColProduct: t.ftColProduct, ftColDocs: t.ftColDocs, ftColProject: t.ftColProject,
       ftDocQuickstart: t.ftDocQuickstart, ftDocCli: t.ftDocCli, ftDocConfig: t.ftDocConfig, ftDocMethod: t.ftDocMethod,
       ftProjLicense: t.ftProjLicense, ftBadgeNote: t.ftBadgeNote, ftBottomLeft: t.ftBottomLeft, ftBottomRight: t.ftBottomRight, inrBy: t.inrBy, inrArt: t.inrArt, inrName: t.inrName, govEyebrow: t.govEyebrow, govTitleA: t.govTitleA, govTitleB: t.govTitleB, govBodyA: t.govBodyA, govBodyB: t.govBodyB, govGh: t.govGh,

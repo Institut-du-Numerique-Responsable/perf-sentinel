@@ -757,7 +757,7 @@
 
     function showTip(anchor, text) {
         closeTip();
-        const box = el('div', {class: 'tipbox', id: 'tipbox', role: 'tooltip', text: text});
+        const box = proseInto(el('div', {class: 'tipbox', id: 'tipbox', role: 'tooltip'}), text);
         anchor.setAttribute('aria-describedby', 'tipbox');
         document.body.appendChild(box);
         const at = anchor.getBoundingClientRect();
@@ -1719,9 +1719,8 @@
                     el('p', {}, [
                         el('span', {text: 'Reading this daemon\'s settings returned '}),
                         el('span', {class: 'code-inline', text: code}),
-                        el('span', {
-                            text: ': ' + (PSL.READ_ERRORS[code] || PSL.ERRORS[code] || 'the Hub could not reach it.')
-                        })
+                        proseInto(el('span'),
+                            ': ' + (PSL.READ_ERRORS[code] || PSL.ERRORS[code] || 'the Hub could not reach it.'))
                     ]),
                     el('p', {
                         class: 'notice-sub',
@@ -3580,10 +3579,8 @@
             text.appendChild(el('p', {class: 'notice-block-body'}, [
                 el('span', {text: 'The last attempt returned '}),
                 el('span', {class: 'code-inline', text: source.last_error_code}),
-                el('span', {
-                    text: ': ' + (PSL.READ_ERRORS[source.last_error_code] || PSL.ERRORS[source.last_error_code]
-                        || 'the Hub could not reach it.')
-                })
+                proseInto(el('span'), ': ' + (PSL.READ_ERRORS[source.last_error_code]
+                    || PSL.ERRORS[source.last_error_code] || 'the Hub could not reach it.'))
             ]));
         }
         text.appendChild(el('p', {
@@ -4684,12 +4681,10 @@
         if (state.incidents.length === 0) {
             section.appendChild(el('div', {class: 'empty-state'}, [
                 el('p', {class: 'empty-title', text: 'No incident recorded.'}),
-                el('p', {
-                    text: 'An incident exists only when a daemon with [daemon.incidents] enabled receives one from '
-                        + 'the operator\'s alerting. Nothing here means none was posted'
-                        + (Object.values(state.incidentFilter).some(Boolean) ? ' for this filter' : '')
-                        + ', or that no daemon read just now publishes them yet.'
-                })
+                proseInto(el('p'), 'An incident exists only when a daemon with `[daemon.incidents]` enabled '
+                    + 'receives one from the operator\'s alerting. Nothing here means none was posted'
+                    + (Object.values(state.incidentFilter).some(Boolean) ? ' for this filter' : '')
+                    + ', or that no daemon read just now publishes them yet.')
             ]));
             appendCopyNote(section);
             return section;
@@ -5090,7 +5085,7 @@
         const canAck = (state.sources || []).some(function (source) {
             return source.ack_relay;
         });
-        const columns = ['Type', 'Severity', 'Endpoint', 'Template', 'Seen', 'First seen'].concat(canAck ? ['Ack'] : []);
+        const columns = ['Type', 'Severity', IMPACT_HEAD, 'Endpoint', 'Template', 'Seen', 'First seen'].concat(canAck ? ['Ack'] : []);
         const head = el('tr', {}, columns.map(function (name) {
             return findingHead(name, incident);
         }));
@@ -5098,6 +5093,7 @@
             const finding = row.finding || {};
             const phase = PSL.findingPhase(row, incident);
             const template = PSL.findingTemplate(row);
+            const impact = PSL.findingImpact(row);
             const tr = el('tr', {}, [
                 // Not table-mono: this reads as a label now, not as the
                 // identifier the API filters on, which is untouched.
@@ -5107,13 +5103,10 @@
                     'data-sev': finding.severity || null,
                     text: finding.severity || '?'
                 })]),
+                el('td', {'data-align': 'right', text: impact == null ? '—' : impact.toLocaleString('en')}),
                 el('td', {class: 'table-mono', text: finding.source_endpoint || '?'}),
-                // Truncated to one line, whole in the tooltip: the template is what tells two rows apart.
-                el('td', {class: 'table-mono'}, [el('span', {
-                    class: 'findings-template',
-                    title: template,
-                    text: template || '—'
-                })]),
+                // Whole, wrapped: the template is what tells two rows apart.
+                el('td', {class: 'table-mono'}, [el('span', {class: 'findings-template', text: template || '—'})]),
                 el('td', {'data-align': 'right', text: String(row.seen_count == null ? '?' : row.seen_count)}),
                 el('td', {
                     title: PSL.dtHuman(row.first_seen_ms),
@@ -5134,9 +5127,13 @@
         })]);
     }
 
+    // The findings dashboard's own name for it, so the two read the same number the same way.
+    const IMPACT_HEAD = 'Est. impact (ops)';
+
     const FINDING_SORT_KEY = {
         Type: 'type',
         Severity: 'severity',
+        [IMPACT_HEAD]: 'impact',
         Endpoint: 'endpoint',
         Template: 'template',
         Seen: 'seen',
@@ -5146,7 +5143,7 @@
     /** A column head that sorts on click. Counts and severity read worst first, the rest A to Z. */
     function findingHead(name, incident) {
         const key = FINDING_SORT_KEY[name];
-        const th = el('th', {scope: 'col', 'data-align': name === 'Seen' ? 'right' : null});
+        const th = el('th', {scope: 'col', 'data-align': name === 'Seen' || name === IMPACT_HEAD ? 'right' : null});
         if (!key) {
             th.textContent = name;
             return th;
@@ -5157,12 +5154,13 @@
         const id = incidentKey(incident) + ':' + key;
         const button = el('button', {type: 'button', class: 'sort-head', 'data-sort': id}, [
             el('span', {text: name}),
-            active ? svg([['path', {d: sort.dir === 'asc' ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'}]], 11) : null
+            // Idle heads carry both arrows, or only the sorted column would read as sortable.
+            svg([['path', {d: active ? (sort.dir === 'asc' ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6') : 'M8 9l4-4 4 4M8 15l4 4 4-4'}]], 11)
         ]);
         button.addEventListener('click', function () {
             state.findingSort = active
                 ? {key: key, dir: sort.dir === 'asc' ? 'desc' : 'asc'}
-                : {key: key, dir: key === 'severity' || key === 'seen' ? 'desc' : 'asc'};
+                : {key: key, dir: key === 'severity' || key === 'impact' || key === 'seen' ? 'desc' : 'asc'};
             // The ids come from the daemon: escaped, so a quote in one cannot break the selector.
             renderFocus('[data-sort="' + CSS.escape(id) + '"]');
         });
@@ -5174,6 +5172,7 @@
         const label = PSL.FINDING_TYPE_LABEL[finding.type] || finding.type || 'finding';
         const link = el('a', {
             href: PSL.ackRouteHash(finding.signature, incident.source_id),
+            class: 'ack-link',
             'aria-label': 'Ack ' + label + ' on ' + (finding.source_endpoint || 'an unknown endpoint'),
             text: 'Ack'
         });
@@ -5246,7 +5245,7 @@
             el('p', {class: 'page-sub'}, [
                 document.createTextNode('Each pair is a finding that, again and again, fires within seconds after '
                     + 'another one. Its periods of activity stay here after the daemon forgets them. '),
-                helpDot('A daemon with [daemon.correlation] on and [daemon.hub_export] set pushes each period a '
+                helpDot('A daemon with `[daemon.correlation]` on and `[daemon.hub_export]` set pushes each period a '
                     + 'pair stays active as an episode, and closes it once the pair has not co-occurred for its '
                     + 'gap, ten minutes by default. The Hub keeps what it is pushed and re-derives nothing. An '
                     + 'episode whose daemon went silent past its gap and a quarter of an hour reads as ended '
@@ -5269,10 +5268,8 @@
         if (pairs.length === 0) {
             section.appendChild(el('div', {class: 'empty-state'}, [
                 el('p', {class: 'empty-title', text: 'No correlation in this range.'}),
-                el('p', {
-                    text: 'A pair shows here once a daemon with [daemon.correlation] and [daemon.hub_export] on '
-                        + 'pushes an episode of it.'
-                })
+                proseInto(el('p'), 'A pair shows here once a daemon with `[daemon.correlation]` and '
+                    + '`[daemon.hub_export]` on pushes an episode of it.')
             ]));
             return section;
         }
