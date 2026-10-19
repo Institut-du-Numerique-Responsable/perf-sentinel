@@ -12,6 +12,9 @@
 //!   values (including IN-list arity) share one template
 //! - **containment**: params are extracted exactly, in encounter order,
 //!   and no literal content survives in the template
+//! - **round trip**: putting each literal back in place of its `?`
+//!   rebuilds the original statement byte for byte, so the tokenizer
+//!   never drops or alters the text between literals
 
 use proptest::prelude::*;
 
@@ -183,6 +186,43 @@ fn render(shape: &Shape, eq_lit: &Lit, in_list: &[Lit], note: &Lit) -> String {
     )
 }
 
+/// Render a flat statement with one column per literal and no `IN`
+/// list: `SELECT * FROM t WHERE ca = <lit> AND cb = <lit> ...`. The
+/// `IN (?)` collapse rewrites whitespace and list arity, so the round
+/// trip only holds on statements it leaves alone.
+fn render_flat(shape: &Shape, lits: &[Lit]) -> String {
+    let w = shape.ws;
+    let predicates = lits
+        .iter()
+        .zip(b'a'..)
+        .map(|(lit, col)| format!("c{col}{w}={w}{sql}", col = char::from(col), sql = lit.sql))
+        .collect::<Vec<_>>()
+        .join(&format!("{w}AND{w}"));
+    format!(
+        "{sel}{w}*{w}FROM{w}{table}{w}WHERE{w}{predicates}",
+        sel = shape.select,
+        table = shape.table,
+    )
+}
+
+/// Literals paired with the `db.system` that reads each of them as one
+/// literal: backslash-escaped strings on an unnamed engine and on
+/// `MySQL`, double-quoted strings on `MySQL` only, standard strings with a
+/// lone backslash on `PostgreSQL` only.
+fn dialect_lits() -> impl Strategy<Value = (&'static str, Vec<Lit>)> {
+    prop_oneof![
+        prop::collection::vec(prop_oneof![any_lit(), bs_str_lit()], 1..6)
+            .prop_map(|lits| ("", lits)),
+        prop::collection::vec(prop_oneof![any_lit(), bs_str_lit(), dq_str_lit()], 1..6)
+            .prop_map(|lits| ("mysql", lits)),
+        prop::collection::vec(
+            prop_oneof![int_lit(), float_lit(), prefixed_num_lit(), pg_str_lit()],
+            1..6
+        )
+        .prop_map(|lits| ("postgresql", lits)),
+    ]
+}
+
 type Statement = (Shape, Lit, Vec<Lit>, Lit);
 
 fn statement() -> impl Strategy<Value = Statement> {
@@ -315,5 +355,29 @@ proptest! {
         let second = normalize_sql_for(&first.template, "postgresql");
         prop_assert_eq!(&second.template, &first.template);
         prop_assert!(second.params.is_empty(), "{:?}", second.params);
+    }
+
+    /// Round trip: the template plus the literals rebuild the original
+    /// statement exactly. Containment checks what comes out as params;
+    /// this checks that everything else is copied through unchanged.
+    #[test]
+    fn template_and_literals_rebuild_the_statement(
+        shape in shape(),
+        (db_system, lits) in dialect_lits(),
+    ) {
+        let original = render_flat(&shape, &lits);
+        let normalized = normalize_sql_for(&original, db_system);
+
+        let expected: Vec<&str> = lits.iter().map(|l| l.param.as_str()).collect();
+        prop_assert_eq!(&normalized.params, &expected);
+
+        let parts: Vec<&str> = normalized.template.split('?').collect();
+        prop_assert_eq!(parts.len(), lits.len() + 1, "{}", normalized.template);
+        let mut rebuilt = String::from(parts[0]);
+        for (lit, part) in lits.iter().zip(&parts[1..]) {
+            rebuilt.push_str(&lit.sql);
+            rebuilt.push_str(part);
+        }
+        prop_assert_eq!(rebuilt, original);
     }
 }
