@@ -187,15 +187,16 @@ fn render(shape: &Shape, eq_lit: &Lit, in_list: &[Lit], note: &Lit) -> String {
 }
 
 /// Render a flat statement with one column per literal and no `IN`
-/// list: `SELECT * FROM t WHERE ca = <lit> AND cb = <lit> ...`. The
+/// list: `SELECT * FROM t WHERE (ca = <lit>) AND (cb = <lit>) ...`. The
 /// `IN (?)` collapse rewrites whitespace and list arity, so the round
-/// trip only holds on statements it leaves alone.
+/// trip only holds on statements it leaves alone. The `)` puts a
+/// non-space byte right after each literal, the last one included.
 fn render_flat(shape: &Shape, lits: &[Lit]) -> String {
     let w = shape.ws;
     let predicates = lits
         .iter()
         .zip(b'a'..)
-        .map(|(lit, col)| format!("c{col}{w}={w}{sql}", col = char::from(col), sql = lit.sql))
+        .map(|(lit, col)| format!("(c{col}{w}={w}{sql})", col = char::from(col), sql = lit.sql))
         .collect::<Vec<_>>()
         .join(&format!("{w}AND{w}"));
     format!(
@@ -208,18 +209,15 @@ fn render_flat(shape: &Shape, lits: &[Lit]) -> String {
 /// Literals paired with the `db.system` that reads each of them as one
 /// literal: backslash-escaped strings on an unnamed engine and on
 /// `MySQL`, double-quoted strings on `MySQL` only, standard strings with a
-/// lone backslash on `PostgreSQL` only.
+/// lone backslash on `PostgreSQL` only. Doubled backslashes read on all three.
 fn dialect_lits() -> impl Strategy<Value = (&'static str, Vec<Lit>)> {
     prop_oneof![
         prop::collection::vec(prop_oneof![any_lit(), bs_str_lit()], 1..6)
             .prop_map(|lits| ("", lits)),
         prop::collection::vec(prop_oneof![any_lit(), bs_str_lit(), dq_str_lit()], 1..6)
             .prop_map(|lits| ("mysql", lits)),
-        prop::collection::vec(
-            prop_oneof![int_lit(), float_lit(), prefixed_num_lit(), pg_str_lit()],
-            1..6
-        )
-        .prop_map(|lits| ("postgresql", lits)),
+        prop::collection::vec(prop_oneof![any_lit(), pg_str_lit()], 1..6)
+            .prop_map(|lits| ("postgresql", lits)),
     ]
 }
 
