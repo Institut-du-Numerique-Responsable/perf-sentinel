@@ -646,3 +646,15 @@ v0.31.2	04d5a54	2026-10-17	PASS
 # touches the SQL normalizer and pg-stat, not the daemon's API, the Hub
 # export or the energy backends.
 v0.31.3	2ce2f95	2026-10-18	PASS
+# v0.31.4, 2026-10-19. Targeted pass on the final release tree. Daemon image
+# perf-sentinel:0.31.4-6dfdcb5f built from test/sql-round-trip-property (a
+# round-trip property in the SQL tokenizer's tests, inout 0.2.4, no product
+# code change): validate-findings 12/12, sql-backtick-redaction, pg-stat
+# (the pg_stat_statements path, the Prometheus path skipped without the
+# exporter), mysql-stat, hybrid-daemon-batch, ci-shift-left and
+# output-formats-coverage, all green. The lab ran at 164bf0f on a cluster
+# rebuilt from scratch, with a local, uncommitted image pin in the daemon
+# manifest. Not run: the hub-*, limit-*, failure-mode-*, template-*,
+# ci-e2e-* and energy families. The release changes no code outside the
+# tests.
+v0.31.4	164bf0f	2026-10-19	PASS
