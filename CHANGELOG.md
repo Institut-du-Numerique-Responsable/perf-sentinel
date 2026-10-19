@@ -4,6 +4,20 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.31.4] - 2026-10-19
+
+This release is a patch: it adds no API surface, removes nothing, and no public type of `perf-sentinel-core` changes shape. No code outside the tests changes, so no finding appears, disappears or changes signature, acknowledgments keep matching, and the daemon's API, its metrics and the findings it exports do not change. The SQL tokenizer gains a round-trip property test, and the lockfiles move off a yanked `inout` release.
+
+The embedded reference data keeps its vintages for this release: the SPECpower instance table stays on `2026-04-24 (CCF aligned)`, the carbon table on `ember-2025`, the hourly grid profiles on `2022-2024 shapes, ember-2025 levels` and the per-provider PUE constants on their 2026 refresh, audited under step 2.5 of the release procedure on the day of 0.27.0 and found inside their window. Nothing in 0.31.4 touches the scoring code.
+
+### Changed
+
+- `inout` moves from 0.2.3, which is yanked, to 0.2.4 in `Cargo.lock` and `fuzz/Cargo.lock`.
+
+### Internal
+
+- The SQL tokenizer's metamorphic suite gains a round-trip property: putting each extracted literal back in place of its `?` must rebuild the original statement byte for byte. The idempotence and containment properties check the template and the params, but not the text between literals, so a tokenizer that dropped or altered a character there went unnoticed. The property runs on an unnamed engine, MySQL and PostgreSQL, each with the literal forms it reads as one literal, and fails on a tokenizer that drops the character after a number.
+
 ## [0.31.3] - 2026-10-18
 
 A patch with no public API change: no type or function of `perf-sentinel-core` changes signature. The SQL normalizer masks three literal forms it used to keep in the template, a backslash-escaped quote, which leaked the rest of its string, a hexadecimal number and a number with an exponent. `normalize_sql`, the entry point for an engine left unnamed, now reads a backslash as an escape, and `pg-stat` normalizes as PostgreSQL. A finding whose template held one of these forms changes template and signature, so its acknowledgment stops matching, and findings on such queries can appear or disappear. The daemon's API, its metrics and its configuration do not change. The toolchain moves to Rust 1.99.1.

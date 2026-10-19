@@ -10,6 +10,15 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.31.4]
+
+### Changed
+
+- **`appVersion` moves to `0.31.4`.** The release adds a test and moves
+  a yanked dependency, no daemon behavior changes.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.31.3]
 
 ### Fixed
