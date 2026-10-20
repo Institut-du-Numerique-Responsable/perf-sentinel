@@ -891,8 +891,8 @@ pub(super) struct GridFeedSetup {
 }
 
 /// Spawn one scraper per configured grid operator feed
-/// (`[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`,
-/// `[green.energinet]`). Same staleness convention as Electricity Maps.
+/// (`[green.rte_eco2mix]`, `[green.em6]`...). Same staleness convention as
+/// Electricity Maps.
 pub(super) fn setup_grid_feed_scrapers(config: &Config) -> Vec<GridFeedSetup> {
     config
         .green

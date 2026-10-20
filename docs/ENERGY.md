@@ -31,7 +31,7 @@ Each row of this table replaces or refines the row above it. You can stop at any
 | `[green.scaphandre]`                  | CPU energy from Intel RAPL counters, attributed per process by Scaphandre.                                                                                                                                     | `scaphandre_rapl`            |
 | `[green.alumet]`                      | CPU energy from RAPL, attributed per cgroup by Alumet. The recommended measured backend: same counters as Scaphandre, sampling characterized as less error-prone by its authors, container-shaped attribution. | `alumet_rapl`                |
 | `[green.electricity_maps]`            | Does not change E. Replaces the annual grid intensity with the live value for your region, which is the largest lever on the gCO2 figures in regions with variable electricity mixes.                          | intensity source `real_time` |
-| `[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`, `[green.energinet]` | Does not change E. The free counterparts for France, Great Britain, Finland and Denmark: live direct emissions published by the grid operator, lower than a lifecycle figure. Electricity Maps wins where both apply. | intensity source `real_time`, provider named on the region row |
+| `[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`, `[green.energinet]`, `[green.ree_esios]`, `[green.open_electricity]`, `[green.mavir]`, `[green.em6]` | Does not change E. The free counterparts for France, Great Britain, Finland, Denmark, Spain, Australia, Hungary and New Zealand: live direct emissions published by the grid operator, lower than a lifecycle figure. Electricity Maps wins where both apply. | intensity source `real_time`, provider named on the region row |
 
 When several backends cover the same service, the daemon keeps the highest-fidelity reading: `alumet_rapl` beats `scaphandre_rapl`, which beats `kepler_ebpf`, then `redfish_bmc`, then `cloud_specpower`, then the proxy. All measured backends are daemon-only (`watch`). Batch `analyze` always uses the proxy path.
 
@@ -84,5 +84,6 @@ What each external source contributes to the numbers above:
 - **Electricity Maps**: the live grid intensity API behind the `real_time` intensity source.
 - **RTE éCO2mix** (open data on ODRÉ, Licence Ouverte v2.0): the free live intensity of the French grid, direct emissions of French production, behind `real_time` rows tagged `rte_eco2mix`.
 - **NESO, Fingrid, Energinet** (CC BY 4.0): the free live intensity of the British, Finnish and Danish grids, behind `real_time` rows tagged `neso`, `fingrid` and `energinet`.
+- **REE e·sios, Open Electricity, MAVIR, em6**: the free live intensity of the Spanish, Australian, Hungarian and New Zealand grids, under non-commercial or reserved terms quoted in `docs/CONFIGURATION.md`, behind `real_time` rows tagged `ree_esios`, `open_electricity`, `mavir` and `em6`.
 
 The deeper design rationale, including how each backend's reading shape is normalized, lives in `docs/design/05-GREENOPS-AND-CARBON.md`.

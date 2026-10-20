@@ -43,6 +43,10 @@ The engine makes no outbound call unless the configuration or the command line n
 | NESO Carbon Intensity API (`api.carbonintensity.org.uk`)                                  | A `[green.neso]` section                                                     |
 | Fingrid open data (`data.fingrid.fi`), with the `x-api-key` header                        | A `[green.fingrid]` section with a key                                       |
 | Energinet Energi Data Service (`api.energidataservice.dk`)                                | A `[green.energinet]` section                                                |
+| REE e·sios (`api.esios.ree.es`), with the `x-api-key` header                              | A `[green.ree_esios]` section with a token                                   |
+| Open Electricity (`api.openelectricity.org.au`), with a bearer key when set               | A `[green.open_electricity]` section                                         |
+| MAVIR real-time data export (`rtdwweb.mavir.hu`)                                          | A `[green.mavir]` section                                                    |
+| em6 (`api.em6.co.nz`)                                                                     | A `[green.em6]` section                                                      |
 | Tempo, Jaeger, Victoria Traces                                                           | The `tempo` and `jaeger-query` commands                                      |
 | Prometheus                                                                               | `pg-stat` and `mysql-stat` with `--prometheus`                               |
 | PerfSentinelHub                                                                          | `[daemon.hub_export] enabled = true`                                         |

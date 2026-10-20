@@ -3933,7 +3933,7 @@
   }
 
   // Grid operator feeds, keyed by `intensity_provider`. The tooltips carry
-  // the licence credits that CC BY 4.0 and Licence Ouverte ask for.
+  // the credits each operator's terms ask for.
   var GRID_FEEDS = {
     rte_eco2mix: {
       name: "RTE \u00e9CO2mix",
@@ -3958,6 +3958,32 @@
       url: "https://www.energidataservice.dk/",
       tip: "Denmark DK1 and DK2, Energinet Energi Data Service (CC BY 4.0): direct CO2 per kWh " +
         "consumed, lifecycle excluded."
+    },
+    ree_esios: {
+      name: "REE e\u00b7sios",
+      url: "https://www.esios.ree.es/",
+      tip: "Mainland Spain. Source: Red El\u00e9ctrica (REE), e\u00b7sios indicator 10355, read live over " +
+        "the report's window; REE does not sponsor or endorse this use. Direct CO2 of peninsular " +
+        "generation, imports and lifecycle excluded."
+    },
+    open_electricity: {
+      name: "Open Electricity",
+      url: "https://openelectricity.org.au/",
+      tip: "Australia, NEM regions and WEM. Data sourced from Open Electricity (The Superpower " +
+        "Institute), licensed under CC BY-NC 4.0. Direct emissions over regional generation " +
+        "including rooftop solar, imports and lifecycle excluded."
+    },
+    mavir: {
+      name: "MAVIR",
+      url: "https://www.mavir.hu/web/mavir/co2-kibocsatas-reszaranya-a-brutto-hazai-termelesben",
+      tip: "Hungary, MAVIR ZRt. real-time data: direct CO2 of domestic power plants per gross " +
+        "domestic generation, imports and lifecycle excluded."
+    },
+    em6: {
+      name: "em6",
+      url: "https://www.em6.co.nz/",
+      tip: "New Zealand, em6 by Energy Market Services (Transpower New Zealand Limited): direct " +
+        "CO2 of grid-connected generation, lifecycle excluded."
     }
   };
 

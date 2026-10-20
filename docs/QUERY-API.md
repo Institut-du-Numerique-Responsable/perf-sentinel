@@ -409,11 +409,11 @@ set listed under **Response shape**.)
 
 ### GET /api/energy
 
-Live health of the ten energy/intensity backends (since 0.8.8): the
-five scraped measured-energy sources (Alumet, Scaphandre, Kepler,
-Redfish, cloud SPECpower) and the five real-time intensity APIs,
+Live health of the fourteen energy/intensity backends (since 0.8.8):
+the five scraped measured-energy sources (Alumet, Scaphandre, Kepler,
+Redfish, cloud SPECpower) and the nine real-time intensity APIs,
 Electricity Maps and the grid operator feeds (RTE éCO2mix, NESO,
-Fingrid, Energinet).
+Fingrid, Energinet, REE e·sios, Open Electricity, MAVIR, em6).
 Backs the Scrapers tab of `perf-sentinel query monitor`. The effective
 mix itself (which source won the precedence chain per service, grid
 intensity per region) lives on `/api/export/report` under
@@ -422,10 +422,11 @@ configured, fresh, and succeeding".
 
 **Query parameters:** none.
 
-**Response shape:** an object with a `backends` array of ten entries in
+**Response shape:** an object with a `backends` array of fourteen entries in
 a fixed order following the measured-energy precedence chain (`alumet`,
 `scaphandre`, `kepler`, `redfish`, `cloud_energy`, `electricity_maps`,
-`rte_eco2mix`, `neso`, `fingrid`, `energinet`), each:
+`rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
+`open_electricity`, `mavir`, `em6`), each:
 
 | Field                     | Type    | Description                                                                                                                                                                                            |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -474,7 +475,11 @@ curl -sS http://127.0.0.1:4318/api/energy
     { "backend": "rte_eco2mix", "configured": false },
     { "backend": "neso", "configured": false },
     { "backend": "fingrid", "configured": false },
-    { "backend": "energinet", "configured": false }
+    { "backend": "energinet", "configured": false },
+    { "backend": "ree_esios", "configured": false },
+    { "backend": "open_electricity", "configured": false },
+    { "backend": "mavir", "configured": false },
+    { "backend": "em6", "configured": false }
   ]
 }
 ```

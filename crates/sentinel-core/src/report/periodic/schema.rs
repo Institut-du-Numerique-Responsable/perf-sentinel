@@ -54,7 +54,8 @@
 //! its `content_hash` when re-hashed here.
 //!
 //! v1.8 adds the grid operator feeds to `CarbonIntensitySource`:
-//! `rte_eco2mix`, `neso`, `fingrid` and `energinet`.
+//! `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
+//! `open_electricity`, `mavir` and `em6`.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};

@@ -109,7 +109,7 @@
     },
     "CarbonIntensitySource": {
       "type": "string",
-      "enum": ["electricity_maps", "rte_eco2mix", "neso", "fingrid", "energinet", "static_tables", "mixed"]
+      "enum": ["electricity_maps", "rte_eco2mix", "neso", "fingrid", "energinet", "ree_esios", "open_electricity", "mavir", "em6", "static_tables", "mixed"]
     },
     "ReportMetadata": {
       "type": "object",

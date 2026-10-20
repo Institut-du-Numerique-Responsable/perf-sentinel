@@ -34,6 +34,10 @@ pub enum GridFeedKind {
     Neso,
     Fingrid(FingridDataset),
     Energinet,
+    ReeEsios,
+    OpenElectricity,
+    Mavir,
+    Em6,
 }
 
 impl GridFeedKind {
@@ -44,6 +48,10 @@ impl GridFeedKind {
             Self::Neso => RealTimeProvider::Neso,
             Self::Fingrid(_) => RealTimeProvider::Fingrid,
             Self::Energinet => RealTimeProvider::Energinet,
+            Self::ReeEsios => RealTimeProvider::ReeEsios,
+            Self::OpenElectricity => RealTimeProvider::OpenElectricity,
+            Self::Mavir => RealTimeProvider::Mavir,
+            Self::Em6 => RealTimeProvider::Em6,
         }
     }
 
@@ -55,6 +63,10 @@ impl GridFeedKind {
             Self::Neso => "[green.neso]",
             Self::Fingrid(_) => "[green.fingrid]",
             Self::Energinet => "[green.energinet]",
+            Self::ReeEsios => "[green.ree_esios]",
+            Self::OpenElectricity => "[green.open_electricity]",
+            Self::Mavir => "[green.mavir]",
+            Self::Em6 => "[green.em6]",
         }
     }
 
@@ -66,6 +78,10 @@ impl GridFeedKind {
             Self::Neso => "https://api.carbonintensity.org.uk",
             Self::Fingrid(_) => "https://data.fingrid.fi/api",
             Self::Energinet => "https://api.energidataservice.dk",
+            Self::ReeEsios => "https://api.esios.ree.es",
+            Self::OpenElectricity => "https://api.openelectricity.org.au/v4",
+            Self::Mavir => "https://rtdwweb.mavir.hu/rtdwweb/webuser",
+            Self::Em6 => "https://api.em6.co.nz/ords/em6/data_api",
         }
     }
 
@@ -76,7 +92,10 @@ impl GridFeedKind {
         match self {
             Self::RteEco2mix => 900,
             Self::Fingrid(_) => 180,
-            Self::Neso | Self::Energinet => 300,
+            Self::Neso | Self::Energinet | Self::ReeEsios | Self::Mavir | Self::Em6 => 300,
+            // Two calls per poll when both networks are mapped: 288 a day,
+            // within the 500 of the free plan.
+            Self::OpenElectricity => 600,
         }
     }
 
@@ -88,6 +107,10 @@ impl GridFeedKind {
             Self::Neso => &["GB"],
             Self::Fingrid(_) => &["FI"],
             Self::Energinet => &["DK1", "DK2"],
+            Self::ReeEsios => &["ES"],
+            Self::OpenElectricity => &["AU-NSW", "AU-QLD", "AU-SA", "AU-TAS", "AU-VIC", "AU-WA"],
+            Self::Mavir => &["HU"],
+            Self::Em6 => &["NZ"],
         }
     }
 }
@@ -99,9 +122,10 @@ pub struct GridFeedConfig {
     /// API base URL, trailing slashes trimmed.
     pub endpoint: String,
     pub poll_interval: Duration,
-    /// Lowercased cloud region -> operator zone (`FR`, `GB`, `FI`, `DK1`, `DK2`).
+    /// Lowercased cloud region -> operator zone (`FR`, `DK1`, `AU-NSW`...).
     pub regions: BTreeMap<String, String>,
-    /// Only Fingrid needs one, sent as `x-api-key`.
+    /// Fingrid and REE e·sios need one, sent as `x-api-key`; Open
+    /// Electricity takes an optional one as a bearer token.
     pub api_key: Option<String>,
 }
 

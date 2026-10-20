@@ -646,9 +646,9 @@ poll_interval_secs = 300
 
 Les chips et la ligne du terminal d'Electricity Maps sont masqués quand `[green.electricity_maps]` n'est pas configuré.
 
-#### Flux des gestionnaires de réseau : `[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`, `[green.energinet]` (optionnel, opt-in)
+#### Flux des gestionnaires de réseau : `[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`, `[green.energinet]`, `[green.ree_esios]`, `[green.open_electricity]`, `[green.mavir]`, `[green.em6]` (optionnel, opt-in)
 
-Intensité carbone en temps réel publiée gratuitement par les gestionnaires de réseau eux-mêmes, pour les régions cloud de leur réseau. Mode daemon uniquement. La présence d'une section active son flux. Les quatre comptent les émissions directes, cycle de vie exclu, ils sont donc plus bas qu'un chiffre Electricity Maps `lifecycle` pour la même heure, et ils ne mesurent pas exactement la même chose :
+Intensité carbone en temps réel publiée gratuitement par les gestionnaires de réseau eux-mêmes, pour les régions cloud de leur réseau. Mode daemon uniquement. La présence d'une section active son flux. Tous comptent les émissions directes, cycle de vie exclu, ils sont donc plus bas qu'un chiffre Electricity Maps `lifecycle` pour la même heure, et ils ne mesurent pas exactement la même chose :
 
 | Section | Gestionnaire, zone | Ce que mesure le chiffre | Pas | Clé | Licence |
 |---|---|---|---|---|---|
@@ -656,17 +656,21 @@ Intensité carbone en temps réel publiée gratuitement par les gestionnaires de
 | `[green.neso]` | NESO Carbon Intensity API, Grande-Bretagne (hors Irlande du Nord) | CO2 direct de la production plus les imports, par kWh consommé | 30 min | aucune | CC BY 4.0 et conditions d'utilisation de l'API |
 | `[green.fingrid]` | Fingrid, Finlande | Émissions directes de la production (jeu 266, la base de RTE) ou de la consommation (265, imports à facteurs annuels fixes) | 3 min | gratuite | CC BY 4.0 |
 | `[green.energinet]` | Energinet Energi Data Service, Danemark `DK1` et `DK2` | CO2 direct par kWh consommé, imports compris | 5 min | aucune | CC BY 4.0 |
+| `[green.ree_esios]` | REE e·sios, Espagne péninsulaire (hors Baléares et Canaries) | CO2 direct de la production péninsulaire, imports exclus | 5 min | jeton gratuit | avis légal e·sios : pas d'usage commercial, crédit à Red Eléctrica |
+| `[green.open_electricity]` | Open Electricity (The Superpower Institute), Australie : régions du NEM `AU-NSW`, `AU-QLD`, `AU-SA`, `AU-TAS`, `AU-VIC` et WEM `AU-WA` | Émissions directes rapportées à la production régionale, solaire en toiture compris, imports exclus | 5 min | facultative, gratuite | CC BY-NC 4.0 |
+| `[green.mavir]` | MAVIR, Hongrie | CO2 direct des centrales nationales par production nationale brute, imports exclus | 15 min | aucune | pas de licence ouverte |
+| `[green.em6]` | em6 (Energy Market Services, Transpower), Nouvelle-Zélande | CO2 direct de la production raccordée au réseau | 30 min | aucune | tous droits réservés |
 
 Champs communs :
 
 | Champ                | Type    | Défaut | Description                                                                                            |
 |----------------------|---------|--------|--------------------------------------------------------------------------------------------------------|
-| `regions`            | liste   | aucun  | Régions cloud desservies par le réseau (`rte_eco2mix`, `neso`, `fingrid`). Chacune reçoit la valeur nationale |
-| `region_map`         | table   | aucun  | `[green.energinet]` seulement : région cloud vers zone d'enchères, `DK1` (ouest) ou `DK2` (est)        |
+| `regions`            | liste   | aucun  | Régions cloud desservies par le réseau, pour tous les flux sauf `energinet` et `open_electricity`. Chacune reçoit la valeur nationale |
+| `region_map`         | table   | aucun  | Région cloud vers zone. `[green.energinet]` : `DK1` (ouest) ou `DK2` (est). `[green.open_electricity]` : `AU-NSW`, `AU-QLD`, `AU-SA`, `AU-TAS`, `AU-VIC` ou `AU-WA` |
 | `endpoint`           | chaîne  | par flux | URL de base de l'API, `http://` ou `https://`                                                        |
-| `poll_interval_secs` | entier  | 900 (RTE), 300 (NESO, Energinet), 180 (Fingrid) | Intervalle de sondage (plage : 60-86400), proche du pas de chaque gestionnaire |
+| `poll_interval_secs` | entier  | 900 (RTE), 600 (Open Electricity), 300 (NESO, Energinet, e·sios, MAVIR, em6), 180 (Fingrid) | Intervalle de sondage (plage : 60-86400), proche du pas de chaque gestionnaire |
 | `dataset`            | chaîne  | `"production"` | `[green.fingrid]` seulement : `"production"` (266) ou `"consumption"` (265)                     |
-| `api_key`            | chaîne  | aucun  | `[green.fingrid]` seulement. Préférez la variable d'environnement `PERF_SENTINEL_FINGRID_API_KEY`      |
+| `api_key`            | chaîne  | aucun  | Requise par `[green.fingrid]` et `[green.ree_esios]`, facultative pour `[green.open_electricity]`. Préférez les variables d'environnement `PERF_SENTINEL_FINGRID_API_KEY`, `PERF_SENTINEL_REE_ESIOS_API_KEY` et `PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY` |
 
 ```toml
 [green.rte_eco2mix]
@@ -680,19 +684,44 @@ regions = ["europe-north1"]
 
 [green.energinet]
 region_map = { "dk-west" = "DK1", "dk-east" = "DK2" }
+
+[green.ree_esios]                # jeton dans PERF_SENTINEL_REE_ESIOS_API_KEY
+regions = ["eu-south-2"]
+
+[green.open_electricity]
+region_map = { "ap-southeast-2" = "AU-NSW", "ap-southeast-4" = "AU-VIC" }
+
+[green.mavir]
+regions = ["hu-central"]
+
+[green.em6]
+regions = ["ap-southeast-6"]
 ```
 
-**Précédence.** Electricity Maps l'emporte pour toute région qu'il couvre aussi. Une région cloud ne peut figurer que dans un seul flux de gestionnaire, sinon le chargement échoue. Une ligne temps réel venant d'un flux de gestionnaire porte `intensity_provider` (`rte_eco2mix`, `neso`, `fingrid`, `energinet`) dans `green_summary.regions[]`, absent pour Electricity Maps afin que les rapports antérieurs gardent leur forme. Le tag de modèle vaut `grid_operator_api` quand aucune région n'a utilisé Electricity Maps. Le dashboard HTML ajoute un chip par flux au bandeau du scoring carbone, et le terminal une ligne `Carbon scoring: grid operator open data (...)`, dès qu'une région l'a utilisé : une section configurée ne prouve rien à elle seule, puisque le mode batch ne lance aucun scraper.
+**Précédence.** Electricity Maps l'emporte pour toute région qu'il couvre aussi. Une région cloud ne peut figurer que dans un seul flux de gestionnaire, sinon le chargement échoue. Une ligne temps réel venant d'un flux de gestionnaire porte `intensity_provider` (`rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`, `open_electricity`, `mavir`, `em6`) dans `green_summary.regions[]`, absent pour Electricity Maps afin que les rapports antérieurs gardent leur forme. Le tag de modèle vaut `grid_operator_api` quand aucune région n'a utilisé Electricity Maps. Le dashboard HTML ajoute un chip par flux au bandeau du scoring carbone, et le terminal une ligne `Carbon scoring: grid operator open data (...)`, dès qu'une région l'a utilisé : une section configurée ne prouve rien à elle seule, puisque le mode batch ne lance aucun scraper.
 
-**Fraîcheur.** Chaque gestionnaire a son propre retard. Le scraper rejette un dernier enregistrement de plus de 3 heures (RTE), 2 heures (NESO) ou 1 heure (Fingrid, Energinet) comme flux arrêté, et un enregistrement daté de plus de 15 minutes dans le futur comme pas encore mesuré. Après 3x `poll_interval_secs` sans valeur fraîche, le scoring retombe sur les profils embarqués, comme avec Electricity Maps. Les échecs sont comptés par zone, donc un `DK2` muet est signalé même quand `DK1` répond : un avertissement nomme le flux et la zone après 3 échecs consécutifs.
+**Fraîcheur.** Chaque gestionnaire a son propre retard. Le scraper rejette un dernier enregistrement de plus de 3 heures (RTE, Open Electricity), 2 heures (NESO, em6) ou 1 heure (Fingrid, Energinet, e·sios, MAVIR) comme flux arrêté, et un enregistrement daté de plus de 15 minutes dans le futur comme pas encore mesuré. Après 3x `poll_interval_secs` sans valeur fraîche, le scoring retombe sur les profils embarqués, comme avec Electricity Maps. Les échecs sont comptés par zone, donc un `DK2` muet est signalé même quand `DK1` répond : un avertissement nomme le flux et la zone après 3 échecs consécutifs.
 
-**Divulgations.** Déclarez le flux dans l'org-config, `carbon_intensity_source = "rte_eco2mix"`, `"neso"`, `"fingrid"` ou `"energinet"` (ou `"mixed"` pour plusieurs), pour qu'un lecteur ne confonde pas leur base avec un chiffre Electricity Maps en cycle de vie. CC BY 4.0 et la Licence Ouverte demandent une attribution là où les chiffres sont publiés : le rapport HTML nomme le gestionnaire et pointe vers lui sur chaque ligne, une divulgation publiée devrait le créditer aussi.
+**Divulgations.** Déclarez le flux dans l'org-config, `carbon_intensity_source = "rte_eco2mix"`, `"neso"`, `"fingrid"`, `"energinet"`, `"ree_esios"`, `"open_electricity"`, `"mavir"` ou `"em6"` (ou `"mixed"` pour plusieurs), pour qu'un lecteur ne confonde pas leur base avec un chiffre Electricity Maps en cycle de vie. CC BY 4.0, CC BY-NC 4.0, la Licence Ouverte et l'avis e·sios demandent une attribution là où les chiffres sont publiés : le rapport HTML nomme le gestionnaire et pointe vers lui sur chaque ligne avec le crédit que ses conditions demandent, une divulgation publiée devrait le créditer aussi.
+
+**Conditions restrictives.** e·sios, Open Electricity, MAVIR et em6 publient gratuitement mais n'accordent pas de licence ouverte pour tout usage, leurs sections restent donc opt-in comme les autres et sont documentées avec leurs conditions :
+
+- **REE e·sios :** l'avis légal d'e·sios, qui couvre `api.esios.ree.es`, indique "Se prohíbe expresamente la utilización de estos datos y servicios con fines comerciales". La réutilisation suit la licence type de l'article 4.2 b de la loi espagnole 37/2007 : citer Red Eléctrica comme source, ne pas dénaturer le sens, donner la date de dernière mise à jour, ne jamais laisser entendre que REE soutient la réutilisation, et n'utiliser aucun logo REE ou e·sios.
+- **Open Electricity :** les données des offres Community, Academic et Pro sont sous CC BY-NC 4.0, à créditer par "Data sourced from Open Electricity (The Superpower Institute), licensed under CC BY-NC 4.0.". L'usage commercial demande l'offre Enterprise, et la page de licence range l'usage interne par un organisme à but lucratif dans le cadre de son activité parmi les usages que la licence standard ne couvre pas. Les clés doivent rester secrètes.
+- **MAVIR :** pas de licence ouverte. L'avis légal ("Jogi nyilatkozat") autorise l'utilisation des actualités et informations du site dans le cadre légal applicable, et réserve à l'accord de MAVIR l'usage public ou commercial des autres contenus.
+- **em6 :** l'endpoint gratuit d'intensité courante n'est accompagné d'aucune licence : Transpower New Zealand Limited se réserve tous les droits, et ses conditions n'accordent ni n'interdisent la réutilisation.
+
+Perf Sentinel est un logiciel AGPL-3.0, et les divulgations qu'il produit sont publiques, déclaratives et non monnayées, publiées pour réduire l'empreinte carbone des applications web : le projet considère cet usage comme non commercial. Chaque gestionnaire applique néanmoins ses propres conditions et sa propre définition de l'usage commercial : confrontez-les à votre déploiement avant d'activer un flux.
 
 **Par flux :**
 - **RTE `éCO2mix` :** 50 000 appels par utilisateur et par mois sur ODRÉ, les 900 s par défaut en consomment environ 2 900. `taux_co2` est une estimation que RTE remplace ensuite par des chiffres consolidés.
 - **NESO :** les conditions interdisent de vendre, louer ou réhéberger l'accès à l'API, et le logo NESO demande un accord préalable : chaque daemon l'appelle pour son propre usage. Chaque sondage lit les 3 dernières heures de créneaux d'une demi-heure et retient l'estimation la plus récente (`actual`), datée par son propre créneau. NESO cesse parfois de mettre `actual` à jour et le recopie sur chaque nouveau créneau : quand il reste identique sur 4 créneaux consécutifs alors que la prévision bouge, ou quand aucun créneau n'en porte, la prévision du créneau le plus récent est utilisée à la place.
-- **Fingrid :** une clé gratuite sur data.fingrid.fi (portail développeur, « Open Data starter »), envoyée dans l'en-tête `x-api-key`, jamais dans l'URL, et débarrassée des espaces autour. Sans clé la section est désactivée avec un avertissement, comme Electricity Maps sans jeton ; une clé qui n'est pas en ASCII imprimable fait échouer le chargement, et un endpoint `http://` avec une clé journalise un avertissement de transmission en clair. Le jeu utilisé est enregistré dans `scoring_config.fingrid_dataset` (266 ou 265) et nommé sur le chip HTML et la ligne du terminal, puisque les deux bases diffèrent. Limites : 10 000 appels par jour et un toutes les 2 secondes par clé.
+- **Fingrid :** une clé gratuite sur data.fingrid.fi (portail développeur, "Open Data starter"), envoyée dans l'en-tête `x-api-key`, jamais dans l'URL, et débarrassée des espaces autour. Sans clé la section est désactivée avec un avertissement, comme Electricity Maps sans jeton. Une clé qui n'est pas en ASCII imprimable fait échouer le chargement, et un endpoint `http://` avec une clé journalise un avertissement de transmission en clair. Le jeu utilisé est enregistré dans `scoring_config.fingrid_dataset` (266 ou 265) et nommé sur le chip HTML et la ligne du terminal, puisque les deux bases diffèrent. Limites : 10 000 appels par jour et un toutes les 2 secondes par clé.
 - **Energinet :** les valeurs sont des estimations initiales qu'Energinet dit ne pas corriger en général. Son guide d'API demande aux éditeurs de ne pas interroger depuis chaque unité d'une application : gardez un daemon par site plutôt qu'un par hôte.
+- **REE e·sios :** un jeton personnel gratuit, demandé depuis l'icône "Solicitud de Token" du site e·sios, envoyé dans l'en-tête `x-api-key` avec l'en-tête `Accept` qu'envoient les clients d'e·sios. Sans jeton la section est désactivée avec un avertissement. Seul l'indicateur 10355, la péninsule, est lu : les îles publient sur un autre indicateur, ne rattachez donc que des régions continentales. La valeur arrive en tCO2 par MWh et est multipliée par 1000, et un 0 compte comme un point manquant. Chaque sondage demande les 3 dernières heures, ce qui évite aussi le cache du CDN qui répond aux URL connues sans vérifier le jeton. Aucune limite de débit n'est publiée : les 300 s par défaut font un appel par point de 5 minutes.
+- **Open Electricity :** l'API publie les émissions (tCO2e) et l'énergie (MWh) par région et par technologie, pas d'intensité : Perf Sentinel divise les émissions par la production, sans la série nette des batteries, la charge des batteries ni le pompage, qui compteraient deux fois la même énergie. Le solaire en toiture arrive 30 à 100 minutes après le reste, chaque région est donc lue au dernier intervalle que le solaire en toiture couvre, jusqu'à une heure et demie d'âge sur le WEM. Un horodatage marque la fin de son intervalle de 5 minutes, la convention de l'AEMO. Un appel par réseau rattaché (NEM, WEM) : les 600 s par défaut font 288 appels par jour avec les deux, sous les 500 de l'offre gratuite, et la clé, si elle est définie, part dans un en-tête `Authorization: Bearer`.
+- **MAVIR :** les données n'existent que sous forme d'export XLSX du graphique 1000687, lu par un lecteur ZIP minimal. La colonne est trouvée par son en-tête hongrois (ratio mesuré, sans le solaire domestique ni l'autoconsommation, que MAVIR remplit 25 à 40 minutes plus tard), donc un en-tête renommé fait échouer le flux au lieu de lire une autre colonne. L'unité n'est imprimée nulle part : les tCO2 par MWh se déduisent des propres séries d'émissions et de production de MAVIR, et un ratio au-delà de 1,5 est rejeté comme changement d'unité. Le quart d'heure en cours est lu, daté par son début, et MAVIR le révise de quelques g/kWh une fois clos. `www.mavir.hu` interdit les robots, et l'hôte des données `rtdwweb.mavir.hu` ne publie pas de fichier robots.
+- **em6 :** un endpoint gratuit renvoie les trois dernières périodes d'échange. La plus récente est lue, datée par le début de sa demi-heure et publiée quelques minutes après sa fin. Le chiffre ne couvre que la production raccordée au réseau, sans la production intégrée ni les batteries.
 
 #### `[green] calibration_file` (optionnel)
 
@@ -1201,6 +1230,8 @@ Les fichiers de configuration ne doivent jamais contenir de secrets. Pour les va
 |-----------------------------------|-----------------------------------------------------------------|-----------------------------------------|
 | `PERF_SENTINEL_EMAPS_TOKEN`       | l'`api_key` Electricity Maps                                    | daemon et batch                         |
 | `PERF_SENTINEL_FINGRID_API_KEY`   | `[green.fingrid] api_key`                                       | daemon et batch                         |
+| `PERF_SENTINEL_REE_ESIOS_API_KEY` | `[green.ree_esios] api_key`                                     | daemon et batch                         |
+| `PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY` | `[green.open_electricity] api_key`                       | daemon et batch                         |
 | `PERF_SENTINEL_ACK_API_KEY`       | `[daemon.ack] api_key`                                          | daemon et batch                         |
 | `PERF_SENTINEL_INCIDENTS_API_KEY` | `[daemon.incidents] api_key`                                    | daemon et batch                         |
 | `PERF_SENTINEL_READ_API_KEY`      | `[daemon] read_api_key`                                         | daemon et batch                         |
@@ -1209,7 +1240,7 @@ Les fichiers de configuration ne doivent jamais contenir de secrets. Pour les va
 | `PERF_SENTINEL_HUB_TOKEN`         | le jeton enregistré par `login`, pour `hub`                     | CLI, envoyée en `Authorization: Bearer` |
 | `PERF_SENTINEL_HUB_URL`           | l'URL `--hub` de `login` et `hub`                               | CLI                                     |
 
-Les surcharges s'appliquent à chaque exécution, commandes batch et exécution sans aucun fichier de config comprises, donc un job qui hérite du Secret du daemon doit lui aussi porter des valeurs valides (la clé d'incidents ne compte qu'une fois `[daemon.incidents] enabled` posé). Une variable définie à la chaîne vide compte comme définie : une clé vide est rejetée au chargement de la config plutôt qu'ignorée en silence, donc un Secret monté vide fait échouer toute commande qui la charge, daemon compris, au lieu d'ouvrir la route. Les deux clés de sources de données font exception : un `PERF_SENTINEL_EMAPS_TOKEN` ou un `PERF_SENTINEL_FINGRID_API_KEY` vide ou blanc compte comme absent, puisqu'une clé manquante ne fait que désactiver sa source (avec un avertissement pour Fingrid) et n'ouvre rien.
+Les surcharges s'appliquent à chaque exécution, commandes batch et exécution sans aucun fichier de config comprises, donc un job qui hérite du Secret du daemon doit lui aussi porter des valeurs valides (la clé d'incidents ne compte qu'une fois `[daemon.incidents] enabled` posé). Une variable définie à la chaîne vide compte comme définie : une clé vide est rejetée au chargement de la config plutôt qu'ignorée en silence, donc un Secret monté vide fait échouer toute commande qui la charge, daemon compris, au lieu d'ouvrir la route. Les clés de sources de données font exception : un `PERF_SENTINEL_EMAPS_TOKEN`, `PERF_SENTINEL_FINGRID_API_KEY`, `PERF_SENTINEL_REE_ESIOS_API_KEY` ou `PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY` vide ou blanc compte comme absent, puisqu'une clé manquante ne fait que désactiver sa source (avec un avertissement pour Fingrid et e·sios, Open Electricity appelant alors en anonyme) et n'ouvre rien.
 
 ### Proxy sortant et CA privée
 

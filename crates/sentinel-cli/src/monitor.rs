@@ -2262,6 +2262,12 @@ fn intensity_source_label(
         (IntensitySource::RealTime, Some(RealTimeProvider::Neso)) => "RealTime (neso)",
         (IntensitySource::RealTime, Some(RealTimeProvider::Fingrid)) => "RealTime (fingrid)",
         (IntensitySource::RealTime, Some(RealTimeProvider::Energinet)) => "RealTime (energinet)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::ReeEsios)) => "RealTime (ree_esios)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::OpenElectricity)) => {
+            "RealTime (open_electricity)"
+        }
+        (IntensitySource::RealTime, Some(RealTimeProvider::Mavir)) => "RealTime (mavir)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::Em6)) => "RealTime (em6)",
         (IntensitySource::RealTime, _) => "RealTime (hot)",
         (IntensitySource::MonthlyHourly, _) => "MonthlyHourly (cold)",
         (IntensitySource::Hourly, _) => "Hourly (cold)",

@@ -109,7 +109,8 @@ pub const CO2_MODEL_CLOUD_SPECPOWER: &str = "cloud_specpower";
 pub const CO2_MODEL_EMAPS: &str = "electricity_maps_api";
 
 /// Carbon intensity source: a grid operator's free real-time feed (RTE
-/// `éCO2mix`, NESO, Fingrid, Energinet). Ranks right below
+/// `éCO2mix`, NESO, Fingrid, Energinet, REE e·sios, Open Electricity,
+/// MAVIR, em6). Ranks right below
 /// [`CO2_MODEL_EMAPS`]; which operator served a region is on its
 /// `intensity_provider`.
 pub const CO2_MODEL_GRID_OPERATOR: &str = "grid_operator_api";
@@ -369,13 +370,31 @@ pub enum RealTimeProvider {
     Fingrid,
     /// Energinet (Denmark DK1, DK2): emissions of consumption.
     Energinet,
+    /// REE e·sios (mainland Spain): direct emissions of peninsular generation.
+    ReeEsios,
+    /// Open Electricity (Australia, NEM regions and WEM): direct emissions
+    /// of regional generation, from per-technology emissions and energy.
+    OpenElectricity,
+    /// MAVIR (Hungary): direct emissions of domestic power plants per
+    /// gross domestic generation.
+    Mavir,
+    /// em6 (New Zealand): direct emissions of grid-connected generation.
+    Em6,
 }
 
 impl RealTimeProvider {
     /// The grid operator feeds, in a fixed order (`/api/energy` rows,
     /// display lists).
-    pub const GRID_OPERATORS: [Self; 4] =
-        [Self::RteEco2mix, Self::Neso, Self::Fingrid, Self::Energinet];
+    pub const GRID_OPERATORS: [Self; 8] = [
+        Self::RteEco2mix,
+        Self::Neso,
+        Self::Fingrid,
+        Self::Energinet,
+        Self::ReeEsios,
+        Self::OpenElectricity,
+        Self::Mavir,
+        Self::Em6,
+    ];
 
     /// Wire name, as serialized.
     #[must_use]
@@ -386,6 +405,10 @@ impl RealTimeProvider {
             Self::Neso => "neso",
             Self::Fingrid => "fingrid",
             Self::Energinet => "energinet",
+            Self::ReeEsios => "ree_esios",
+            Self::OpenElectricity => "open_electricity",
+            Self::Mavir => "mavir",
+            Self::Em6 => "em6",
         }
     }
 
@@ -398,6 +421,10 @@ impl RealTimeProvider {
             Self::Neso => "NESO Carbon Intensity",
             Self::Fingrid => "Fingrid",
             Self::Energinet => "Energinet",
+            Self::ReeEsios => "REE e·sios",
+            Self::OpenElectricity => "Open Electricity",
+            Self::Mavir => "MAVIR",
+            Self::Em6 => "em6",
         }
     }
 }
@@ -540,8 +567,8 @@ pub struct ScoringConfig {
     /// present `scoring_config` did mean the API was configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub electricity_maps: Option<bool>,
-    /// Grid operator feeds configured (`[green.rte_eco2mix]`, `[green.neso]`,
-    /// `[green.fingrid]`, `[green.energinet]`). Absent when none is.
+    /// Grid operator feeds configured (`[green.rte_eco2mix]`, `[green.em6]`...).
+    /// Absent when none is.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub grid_feeds: Vec<RealTimeProvider>,
     /// Fingrid dataset scored when `[green.fingrid]` is configured: 266

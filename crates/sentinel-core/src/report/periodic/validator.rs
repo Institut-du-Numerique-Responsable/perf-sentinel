@@ -38,6 +38,10 @@ pub(crate) const CARBON_SOURCE_VALUES: &[&str] = &[
     "neso",
     "fingrid",
     "energinet",
+    "ree_esios",
+    "open_electricity",
+    "mavir",
+    "em6",
     "static_tables",
     "mixed",
 ];

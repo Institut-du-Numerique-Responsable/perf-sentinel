@@ -793,7 +793,7 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
     type CounterPair<'a> = (&'a prometheus::IntCounter, &'a prometheus::IntCounter);
     let m = &state.metrics;
     let b = state.energy_backends;
-    let rows: [(&str, bool, Option<&prometheus::Gauge>, Option<CounterPair>); 10] = [
+    let rows: [(&str, bool, Option<&prometheus::Gauge>, Option<CounterPair>); 6] = [
         (
             "alumet",
             b.alumet,
@@ -836,13 +836,12 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
             None,
             None,
         ),
-        grid_feed_row(&state, crate::score::carbon::RealTimeProvider::RteEco2mix),
-        grid_feed_row(&state, crate::score::carbon::RealTimeProvider::Neso),
-        grid_feed_row(&state, crate::score::carbon::RealTimeProvider::Fingrid),
-        grid_feed_row(&state, crate::score::carbon::RealTimeProvider::Energinet),
     ];
+    let grid_feeds = crate::score::carbon::RealTimeProvider::GRID_OPERATORS
+        .map(|provider| grid_feed_row(&state, provider));
     let backends = rows
         .into_iter()
+        .chain(grid_feeds)
         .map(|(name, configured, age, counters)| EnergyBackendStatus {
             backend: name.to_string(),
             configured,

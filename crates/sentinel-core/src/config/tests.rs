@@ -4662,7 +4662,8 @@ fn an_inert_electricity_maps_region_map_is_not_checked() {
     assert_eq!(validate_region_keys_raw_with_env(&raw, || None), Ok(()));
 }
 
-// --- grid operator feeds: [green.rte_eco2mix], [green.neso], [green.fingrid], [green.energinet] ---
+// --- grid operator feeds: [green.rte_eco2mix], [green.neso], [green.fingrid], [green.energinet],
+// [green.ree_esios], [green.open_electricity], [green.em6] ---
 
 #[test]
 fn grid_feeds_absent_by_default() {
@@ -4761,7 +4762,7 @@ fn fingrid_key_from_env_wins_over_the_file() {
     let raw: RawConfig =
         toml::from_str("[green.fingrid]\nregions = [\"europe-north1\"]\napi_key = \"from-file\"\n")
             .unwrap();
-    let feeds = raw::convert_grid_feed_sections(&raw.green, || Some("from-env".to_string()));
+    let feeds = raw::convert_grid_feed_sections(&raw.green, |_| Some("from-env".to_string()));
     assert_eq!(feeds[0].api_key.as_deref(), Some("from-env"));
     assert_eq!(
         feeds[0].kind,
@@ -4790,7 +4791,7 @@ fn grid_feeds_without_env(
     toml: &str,
 ) -> Result<Vec<crate::score::grid_feed::GridFeedConfig>, String> {
     let raw: RawConfig = toml::from_str(toml).map_err(|e| e.to_string())?;
-    let feeds = raw::convert_grid_feed_sections(&raw.green, || None);
+    let feeds = raw::convert_grid_feed_sections(&raw.green, |_| None);
     Config::validate_grid_feeds(&feeds).map(|()| feeds)
 }
 
@@ -4839,12 +4840,85 @@ fn fingrid_rejects_a_key_the_header_would_refuse() {
 }
 
 #[test]
+fn the_optional_feeds_load_after_the_others() {
+    use crate::score::grid_feed::GridFeedKind;
+    let toml = "[green.em6]\nregions = [\"nz-north\"]\n\
+                [green.mavir]\nregions = [\"hungarycentral\"]\n\
+                [green.open_electricity]\nregion_map = { \"ap-southeast-2\" = \"au-nsw\", \"ap-southeast-4\" = \"AU-VIC\" }\n\
+                [green.ree_esios]\nregions = [\"eu-south-2\"]\napi_key = \"t0k\"\n";
+    let feeds = grid_feeds_without_env(toml).unwrap();
+    let kinds: Vec<GridFeedKind> = feeds.iter().map(|f| f.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            GridFeedKind::ReeEsios,
+            GridFeedKind::OpenElectricity,
+            GridFeedKind::Mavir,
+            GridFeedKind::Em6
+        ]
+    );
+    assert_eq!(feeds[0].regions["eu-south-2"], "ES");
+    assert_eq!(feeds[0].api_key.as_deref(), Some("t0k"));
+    assert_eq!(feeds[1].regions["ap-southeast-2"], "AU-NSW");
+    // Optional for Open Electricity: anonymous calls get the free plan.
+    assert_eq!(feeds[1].api_key, None);
+    assert_eq!(feeds[1].poll_interval, Duration::from_mins(10));
+    assert_eq!(feeds[2].regions["hungarycentral"], "HU");
+    assert_eq!(feeds[3].regions["nz-north"], "NZ");
+}
+
+#[test]
+fn each_feed_reads_its_own_key_variable() {
+    let raw: RawConfig = toml::from_str(
+        "[green.ree_esios]\nregions = [\"eu-south-2\"]\n\
+         [green.open_electricity]\nregion_map = { \"ap-southeast-2\" = \"AU-NSW\" }\n",
+    )
+    .unwrap();
+    let env = |name: &str| match name {
+        "PERF_SENTINEL_REE_ESIOS_API_KEY" => Some("esios".to_string()),
+        "PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY" => Some(" oe\n".to_string()),
+        _ => None,
+    };
+    let feeds = raw::convert_grid_feed_sections(&raw.green, env);
+    assert_eq!(feeds[0].api_key.as_deref(), Some("esios"));
+    assert_eq!(feeds[1].api_key.as_deref(), Some("oe"));
+}
+
+#[test]
+fn ree_esios_without_a_key_is_disabled_not_fatal() {
+    let feeds = grid_feeds_without_env("[green.ree_esios]\nregions = [\"eu-south-2\"]\n").unwrap();
+    assert!(feeds.is_empty());
+}
+
+#[test]
+fn open_electricity_rejects_a_zone_it_does_not_serve() {
+    let err = grid_feeds_without_env(
+        "[green.open_electricity]\nregion_map = { \"ap-southeast-2\" = \"AU-NT\" }\n",
+    )
+    .unwrap_err();
+    assert!(err.contains("AU-NT"), "got {err}");
+}
+
+#[test]
+fn open_electricity_region_keys_colliding_by_case_are_rejected() {
+    let err = load_from_str(
+        "[green.open_electricity]\nregion_map = { \"Sydney\" = \"AU-NSW\", \"sydney\" = \"AU-VIC\" }\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("sydney") && err.contains("Sydney"),
+        "got {err}"
+    );
+}
+
+#[test]
 fn fingrid_dataset_is_recorded_in_the_scoring_config() {
     let raw: RawConfig = toml::from_str(
         "[green.fingrid]\nregions = [\"europe-north1\"]\ndataset = \"consumption\"\napi_key = \"k\"\n",
     )
     .unwrap();
-    let feeds = raw::convert_grid_feed_sections(&raw.green, || None);
+    let feeds = raw::convert_grid_feed_sections(&raw.green, |_| None);
     let mut config = Config::from(raw);
     config.green.grid_feeds = feeds;
     assert_eq!(config.scoring_config().fingrid_dataset, Some(265));

@@ -423,11 +423,11 @@ l'ensemble complet listé sous **Forme de réponse**.)
 
 ### GET /api/energy
 
-Santé live des dix backends énergie/intensité (depuis 0.8.8) : les
+Santé live des quatorze backends énergie/intensité (depuis 0.8.8) : les
 cinq sources d'énergie mesurée scrappées (Alumet, Scaphandre, Kepler,
-Redfish, SPECpower cloud) et les cinq API d'intensité temps réel,
+Redfish, SPECpower cloud) et les neuf API d'intensité temps réel,
 Electricity Maps et les flux des gestionnaires de réseau (RTE éCO2mix,
-NESO, Fingrid, Energinet). Alimente l'onglet Scrapers de `perf-sentinel query monitor`. Le
+NESO, Fingrid, Energinet, REE e·sios, Open Electricity, MAVIR, em6). Alimente l'onglet Scrapers de `perf-sentinel query monitor`. Le
 mix effectif lui-même (quelle source a gagné la chaîne de précédence
 par service, intensité de grille par région) vit sur
 `/api/export/report` sous `green_summary`. Cet endpoint répond
@@ -435,10 +435,11 @@ seulement "chaque backend est-il configuré, frais, et en succès".
 
 **Paramètres de requête :** aucun.
 
-**Forme de réponse :** un objet avec un tableau `backends` de dix
+**Forme de réponse :** un objet avec un tableau `backends` de quatorze
 entrées dans un ordre fixe suivant la chaîne de précédence de l'énergie
 mesurée (`alumet`, `scaphandre`, `kepler`, `redfish`, `cloud_energy`,
-`electricity_maps`, `rte_eco2mix`, `neso`, `fingrid`, `energinet`), chacune :
+`electricity_maps`, `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
+`open_electricity`, `mavir`, `em6`), chacune :
 
 | Champ                     | Type    | Description                                                                                                                                                                                      |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -487,7 +488,11 @@ curl -sS http://127.0.0.1:4318/api/energy
     { "backend": "rte_eco2mix", "configured": false },
     { "backend": "neso", "configured": false },
     { "backend": "fingrid", "configured": false },
-    { "backend": "energinet", "configured": false }
+    { "backend": "energinet", "configured": false },
+    { "backend": "ree_esios", "configured": false },
+    { "backend": "open_electricity", "configured": false },
+    { "backend": "mavir", "configured": false },
+    { "backend": "em6", "configured": false }
   ]
 }
 ```

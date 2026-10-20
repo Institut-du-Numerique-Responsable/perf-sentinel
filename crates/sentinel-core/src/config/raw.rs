@@ -114,6 +114,10 @@ pub(super) struct GreenSection {
     neso: Option<NationalGridFeedSection>,
     fingrid: Option<FingridSection>,
     energinet: Option<EnerginetSection>,
+    ree_esios: Option<KeyedGridFeedSection>,
+    open_electricity: Option<OpenElectricitySection>,
+    mavir: Option<NationalGridFeedSection>,
+    em6: Option<NationalGridFeedSection>,
 }
 
 /// Raw deserialization target for `[green.scaphandre]`.
@@ -236,8 +240,8 @@ pub(super) struct CloudServiceRaw {
     cpu_query: Option<String>,
 }
 
-/// Raw deserialization target for `[green.rte_eco2mix]` and `[green.neso]`,
-/// the national grid operator feeds: every listed region gets the national
+/// Raw deserialization target for `[green.rte_eco2mix]`, `[green.neso]`,
+/// `[green.mavir]` and `[green.em6]`, the national feeds without key: every listed region gets the national
 /// value. The section being present is what enables the source.
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -274,6 +278,28 @@ pub(super) struct EnerginetSection {
     pub(super) endpoint: Option<String>,
     pub(super) poll_interval_secs: Option<u64>,
     pub(super) region_map: BTreeMap<String, String>,
+}
+
+/// Raw deserialization target for `[green.ree_esios]`: a national feed
+/// behind a key.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct KeyedGridFeedSection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) regions: Vec<String>,
+    pub(super) api_key: Option<String>,
+}
+
+/// Raw deserialization target for `[green.open_electricity]`: each region
+/// names its Australian zone, and the key is optional.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct OpenElectricitySection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) region_map: BTreeMap<String, String>,
+    pub(super) api_key: Option<String>,
 }
 
 /// Raw deserialization target for `[green.electricity_maps]`.
@@ -393,9 +419,7 @@ impl From<RawConfig> for Config {
         let green_defaults = GreenConfig::default();
         let daemon_defaults = DaemonConfig::default();
         // Read before the field moves below take `raw.green` apart.
-        let grid_feeds = convert_grid_feed_sections(&raw.green, || {
-            std::env::var("PERF_SENTINEL_FINGRID_API_KEY").ok()
-        });
+        let grid_feeds = convert_grid_feed_sections(&raw.green, |name| std::env::var(name).ok());
         let correlation_defaults = crate::detect::correlate_cross::CorrelationConfig::default();
         let ack_defaults = DaemonAckConfig::default();
 
@@ -1084,14 +1108,24 @@ pub(super) fn validate_region_keys_raw_with_env(
     env_lookup: impl FnOnce() -> Option<String>,
 ) -> Result<(), String> {
     reject_case_colliding_keys("[green.service_regions]", &raw.green.service_regions)?;
-    if let Some(energinet) = &raw.green.energinet {
+    let zone_maps = [
+        (
+            "[green.energinet] region_map",
+            raw.green.energinet.as_ref().map(|s| &s.region_map),
+        ),
+        (
+            "[green.open_electricity] region_map",
+            raw.green.open_electricity.as_ref().map(|s| &s.region_map),
+        ),
+    ];
+    for (name, map) in zone_maps {
+        let Some(map) = map else { continue };
         // Zones compare normalized: `dk1` and `DK1` name the same zone.
-        let zones: HashMap<String, String> = energinet
-            .region_map
+        let zones: HashMap<String, String> = map
             .iter()
             .map(|(region, zone)| (region.trim().to_string(), zone.trim().to_ascii_uppercase()))
             .collect();
-        reject_case_colliding_keys("[green.energinet] region_map", &zones)?;
+        reject_case_colliding_keys(name, &zones)?;
     }
     let maps = &raw.green.electricity_maps;
     if electricity_maps_token(maps, env_lookup()).is_none() {
@@ -1397,12 +1431,13 @@ pub(super) fn convert_electricity_maps_section_with_env(
 
 /// Convert the grid operator feed sections, in a fixed order: defaults
 /// filled, endpoint trailing slashes trimmed, regions trimmed and lowercased
-/// so they match span regions. A Fingrid section without a key is dropped
-/// with a warning, like Electricity Maps without a token: the API refuses
-/// keyless calls. The env lookup is a closure so tests avoid the process env.
+/// so they match span regions. A Fingrid or e·sios section without a key is
+/// dropped with a warning, like Electricity Maps without a token: the API
+/// refuses keyless calls. The env lookup is a closure so tests avoid the
+/// process env.
 pub(super) fn convert_grid_feed_sections(
     green: &GreenSection,
-    fingrid_key_env: impl FnOnce() -> Option<String>,
+    env: impl Fn(&str) -> Option<String>,
 ) -> Vec<crate::score::grid_feed::GridFeedConfig> {
     use crate::score::grid_feed::{FingridDataset, GridFeedConfig, GridFeedKind};
     let national = |kind: GridFeedKind, zone: &str, raw: &NationalGridFeedSection| {
@@ -1421,58 +1456,70 @@ pub(super) fn convert_grid_feed_sections(
     if let Some(raw) = &green.neso {
         feeds.push(national(GridFeedKind::Neso, "GB", raw));
     }
-    if let Some(raw) = &green.fingrid {
-        // Trimmed like the daemon API keys, so a Secret with a final newline works.
-        let clean = |key: String| {
-            let key = key.trim().to_string();
-            (!key.is_empty()).then_some(key)
+    if let Some(raw) = &green.fingrid
+        && let Some(key) = required_key(
+            "[green.fingrid]",
+            "PERF_SENTINEL_FINGRID_API_KEY",
+            &env,
+            raw.api_key.as_deref(),
+        )
+    {
+        let dataset = match raw.dataset {
+            Some(FingridDatasetRaw::Consumption) => FingridDataset::Consumption,
+            _ => FingridDataset::Production,
         };
-        let from_env = fingrid_key_env().and_then(clean);
-        let from_file = raw.api_key.clone().and_then(clean);
-        if from_env.is_none() && from_file.is_some() {
-            tracing::warn!(
-                "[green.fingrid] api_key is set in the config file. Prefer the \
-                 PERF_SENTINEL_FINGRID_API_KEY environment variable to avoid \
-                 committing secrets to version control."
-            );
-        }
-        if let Some(key) = from_env.or(from_file) {
-            let dataset = match raw.dataset {
-                Some(FingridDatasetRaw::Consumption) => FingridDataset::Consumption,
-                _ => FingridDataset::Production,
-            };
-            feeds.push((
-                GridFeedKind::Fingrid(dataset),
-                raw.endpoint.clone(),
-                raw.poll_interval_secs,
-                region_map(&raw.regions, "FI"),
-                Some(key),
-            ));
-        } else {
-            tracing::warn!(
-                "[green.fingrid] has no API key (PERF_SENTINEL_FINGRID_API_KEY or \
-                 api_key), the feed is disabled"
-            );
-        }
+        feeds.push((
+            GridFeedKind::Fingrid(dataset),
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            region_map(&raw.regions, "FI"),
+            Some(key),
+        ));
     }
     if let Some(raw) = &green.energinet {
-        let regions = raw
-            .region_map
-            .iter()
-            .map(|(region, zone)| {
-                (
-                    region.trim().to_ascii_lowercase(),
-                    zone.trim().to_ascii_uppercase(),
-                )
-            })
-            .collect();
         feeds.push((
             GridFeedKind::Energinet,
             raw.endpoint.clone(),
             raw.poll_interval_secs,
-            regions,
+            zone_map(&raw.region_map),
             None,
         ));
+    }
+    if let Some(raw) = &green.ree_esios
+        && let Some(key) = required_key(
+            "[green.ree_esios]",
+            "PERF_SENTINEL_REE_ESIOS_API_KEY",
+            &env,
+            raw.api_key.as_deref(),
+        )
+    {
+        feeds.push((
+            GridFeedKind::ReeEsios,
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            region_map(&raw.regions, "ES"),
+            Some(key),
+        ));
+    }
+    if let Some(raw) = &green.open_electricity {
+        feeds.push((
+            GridFeedKind::OpenElectricity,
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            zone_map(&raw.region_map),
+            feed_key(
+                "[green.open_electricity]",
+                "PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY",
+                &env,
+                raw.api_key.as_deref(),
+            ),
+        ));
+    }
+    if let Some(raw) = &green.mavir {
+        feeds.push(national(GridFeedKind::Mavir, "HU", raw));
+    }
+    if let Some(raw) = &green.em6 {
+        feeds.push(national(GridFeedKind::Em6, "NZ", raw));
     }
     feeds
         .into_iter()
@@ -1489,6 +1536,57 @@ pub(super) fn convert_grid_feed_sections(
                 api_key,
             },
         )
+        .collect()
+}
+
+/// A feed key from its env var or the file, the env var winning. Trimmed
+/// like the daemon API keys, so a Secret with a final newline works, and
+/// blank counts as unset.
+fn feed_key(
+    section: &str,
+    env_var: &str,
+    env: &impl Fn(&str) -> Option<String>,
+    file: Option<&str>,
+) -> Option<String> {
+    let clean = |key: &str| {
+        let key = key.trim();
+        (!key.is_empty()).then(|| key.to_string())
+    };
+    let from_env = env(env_var).as_deref().and_then(clean);
+    let from_file = file.and_then(clean);
+    if from_env.is_none() && from_file.is_some() {
+        tracing::warn!(
+            "{section} api_key is set in the config file. Prefer the {env_var} \
+             environment variable to avoid committing secrets to version control."
+        );
+    }
+    from_env.or(from_file)
+}
+
+/// [`feed_key`] for an API that refuses keyless calls: without one the feed
+/// is dropped with a warning.
+fn required_key(
+    section: &str,
+    env_var: &str,
+    env: &impl Fn(&str) -> Option<String>,
+    file: Option<&str>,
+) -> Option<String> {
+    let key = feed_key(section, env_var, env, file);
+    if key.is_none() {
+        tracing::warn!("{section} has no API key ({env_var} or api_key), the feed is disabled");
+    }
+    key
+}
+
+/// Regions trimmed and lowercased, zones trimmed and uppercased.
+fn zone_map(map: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    map.iter()
+        .map(|(region, zone)| {
+            (
+                region.trim().to_ascii_lowercase(),
+                zone.trim().to_ascii_uppercase(),
+            )
+        })
         .collect()
 }
 

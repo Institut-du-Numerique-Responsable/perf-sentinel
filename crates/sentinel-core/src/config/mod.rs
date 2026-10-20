@@ -257,7 +257,8 @@ pub struct GreenConfig {
     /// Electricity Maps real-time carbon intensity config (daemon only).
     pub electricity_maps: Option<crate::score::electricity_maps::ElectricityMapsConfig>,
     /// Grid operator real-time intensity feeds (daemon only), in a fixed
-    /// order: RTE `éCO2mix`, NESO, Fingrid, Energinet.
+    /// order: RTE `éCO2mix`, NESO, Fingrid, Energinet, REE e·sios, Open
+    /// Electricity, MAVIR, em6.
     pub grid_feeds: Vec<crate::score::grid_feed::GridFeedConfig>,
 }
 

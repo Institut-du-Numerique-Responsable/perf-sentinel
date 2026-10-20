@@ -1017,6 +1017,10 @@ fn template_carries_scoring_config_bandeau_and_helpers() {
         "neso:",
         "fingrid:",
         "energinet:",
+        "ree_esios:",
+        "open_electricity:",
+        "mavir:",
+        "em6:",
     ] {
         assert!(
             TEMPLATE.contains(needle),

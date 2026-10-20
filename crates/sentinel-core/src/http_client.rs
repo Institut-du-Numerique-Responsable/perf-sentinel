@@ -363,14 +363,31 @@ pub async fn fetch_get_limited(
     auth: Option<&crate::ingest::auth_header::AuthHeader>,
     max_bytes: usize,
 ) -> Result<bytes::Bytes, FetchError> {
+    let headers = auth.map_or(&[][..], std::slice::from_ref);
+    fetch_get_with_headers(client, uri, user_agent, timeout, headers, max_bytes).await
+}
+
+/// [`fetch_get_limited`] with any number of headers.
+///
+/// # Errors
+///
+/// Same as [`fetch_get_limited`].
+pub async fn fetch_get_with_headers(
+    client: &HttpClient,
+    uri: &Uri,
+    user_agent: &str,
+    timeout: std::time::Duration,
+    headers: &[crate::ingest::auth_header::AuthHeader],
+    max_bytes: usize,
+) -> Result<bytes::Bytes, FetchError> {
     use http_body_util::{BodyExt, Empty, Limited};
 
     let mut builder = hyper::Request::builder()
         .method(hyper::Method::GET)
         .uri(uri.clone())
         .header(hyper::header::USER_AGENT, user_agent);
-    if let Some(auth) = auth {
-        builder = builder.header(&auth.name, &auth.value);
+    for header in headers {
+        builder = builder.header(&header.name, &header.value);
     }
     let req = builder
         .body(Empty::<bytes::Bytes>::new())

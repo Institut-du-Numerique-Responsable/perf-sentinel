@@ -609,7 +609,7 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 
 # --- Carbon: grid operator open data (opt-in, free, daemon only) ------------
 # Real-time intensity published by grid operators themselves, for the regions
-# on their grid. All four count direct emissions, lifecycle excluded, so they
+# on their grid. All of them count direct emissions, lifecycle excluded, so they
 # read lower than an Electricity Maps lifecycle figure. Electricity Maps wins
 # for any region both cover, and a region belongs to one feed only. Model tag
 # `grid_operator_api` when no region uses Electricity Maps; each region row
@@ -648,6 +648,52 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # endpoint = "https://api.energidataservice.dk"    # default https://api.energidataservice.dk
 # poll_interval_secs = 300                         # default 300 (5-minute values), bounds 60..86400
 # region_map = { "dk-west" = "DK1", "dk-east" = "DK2" }   # no default, DK1 west of the Great Belt, DK2 east
+#
+# The next four operators publish free of charge but restrict reuse: a
+# non-commercial clause (REE e·sios, Open Electricity) or no open licence at
+# all (MAVIR, em6). Perf Sentinel is AGPL-3.0 software and its disclosures are
+# public, declarative and unpaid, made to cut the footprint of web
+# applications, a use the project reads as non-commercial. Each operator
+# applies its own definition: read its terms against your use before enabling
+# its feed (docs/CONFIGURATION.md quotes them).
+#
+# REE e·sios, mainland Spain: indicator 10355, CO2 of peninsular generation
+# every 5 minutes. Needs a free personal token requested on the e·sios site,
+# set through PERF_SENTINEL_REE_ESIOS_API_KEY: without one the feed is
+# disabled with a warning. The legal notice forbids commercial use and asks to
+# credit Red Eléctrica without suggesting it endorses the reuse.
+# [green.ree_esios]
+# endpoint = "https://api.esios.ree.es"            # default https://api.esios.ree.es
+# poll_interval_secs = 300                         # default 300 (5-minute values), bounds 60..86400
+# regions = ["eu-south-2", "spaincentral", "europe-southwest1"]   # no default, mainland Spain only, not the islands
+# api_key = "your-esios-token"                     # no default, prefer PERF_SENTINEL_REE_ESIOS_API_KEY
+#
+# Open Electricity, Australia (The Superpower Institute, data under CC BY-NC
+# 4.0). Emissions over generation, rooftop solar included, per NEM region and
+# for the WEM, every 5 minutes. The key is optional: anonymous calls get the
+# free plan's 500 calls a day.
+# [green.open_electricity]
+# endpoint = "https://api.openelectricity.org.au/v4"   # default https://api.openelectricity.org.au/v4
+# poll_interval_secs = 600                         # default 600 (two networks make 288 calls a day), bounds 60..86400
+# region_map = { "ap-southeast-2" = "AU-NSW", "ap-southeast-4" = "AU-VIC" }   # no default, AU-NSW, AU-QLD, AU-SA, AU-TAS, AU-VIC or AU-WA
+# api_key = "your-open-electricity-key"            # no default, optional, prefer PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY
+#
+# MAVIR, Hungary: CO2 of domestic power plants per gross domestic generation,
+# every quarter hour, from the export of its public real-time data (no key).
+# The legal notice lets its information be used within the law and reserves
+# other uses.
+# [green.mavir]
+# endpoint = "https://rtdwweb.mavir.hu/rtdwweb/webuser"   # default https://rtdwweb.mavir.hu/rtdwweb/webuser
+# poll_interval_secs = 300                         # default 300 (15-minute values), bounds 60..86400
+# regions = ["hu-central"]                         # no default, the region names your spans carry on the Hungarian grid
+#
+# em6, New Zealand (Energy Market Services, a Transpower business): CO2 of
+# grid-connected generation per half hour, free and without key, all rights
+# reserved.
+# [green.em6]
+# endpoint = "https://api.em6.co.nz/ords/em6/data_api"   # default https://api.em6.co.nz/ords/em6/data_api
+# poll_interval_secs = 300                         # default 300 (half-hourly values), bounds 60..86400
+# regions = ["ap-southeast-6", "newzealandnorth"]  # no default, at least one cloud region on the New Zealand grid
 
 # --- Per-window NDJSON archive (input for `disclose`) ----------------------
 # Written only when `path` is set. Requires `[green] enabled = true`, the
