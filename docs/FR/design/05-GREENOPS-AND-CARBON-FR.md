@@ -447,23 +447,23 @@ Pour les VMs cloud (AWS, GCP, Azure) qui n'exposent pas Intel RAPL aux guests, P
 
 **Architecture.** Le répertoire `cloud_energy/` contient :
 
-- `config/mod.rs` : `CloudEnergyConfig` et `ServiceCloudConfig` par service (provider, région, instance_type, surcharges optionnelles des watts idle/max).
+- `config.rs` : `CloudEnergyConfig` et `ServiceCloudConfig` par service (provider, instance_type ou surcharges des watts idle/max, `cpu_query` optionnelle). `cpu_query_groups` regroupe les services par requête CPU résolue, espaces de bord retirés.
 - `table.rs` : table de correspondance embarquée avec les valeurs idle et max watts pour chaque type listé dans [`INSTANCE-TYPES-FR.md`](../INSTANCE-TYPES-FR.md), après la mise à jour CCF du 2026-04-24. Toutes les entrées suivent une méthodologie unique homogène : `idle_watts = vCPU * idle_per_vCPU` et `max_watts = vCPU * max_per_vCPU`, avec les coefficients tirés par fournisseur de `ccf-coefficients` 2026-04-24 (`coefficients-{aws,gcp,azure}-use.csv`). Aucun surcoût de carte mère n'est reconstruit : la colonne baseboard AWS a été abandonnée par CCF en 2026-04-24 et n'est pas réajoutée. La règle des 5 pour cent répartit les entrées modernes en deux groupes. Les entrées sont ré-alignées sur CCF quand le calcul SPECpower direct divergeait (Sapphire Rapids sur AWS `m7i`/`c7i`/`r7i` et GCP `c3`, EPYC Genoa sur AWS `m7a`/`c7a` et GCP `c3d`/`n2d`, Graviton 3 `m7g`/`c7g` et Graviton 4 `m8g`/`c8g` mappés sur le proxy CCF EPYC 2nd Gen, EPYC Turin sur AWS `m8a`/`c8a`, Emerald Rapids sur GCP `c4`). Elles restent sur le calcul `SPECpower_ssj 2008` direct 2024 Q1 - 2026 Q2 quand elles sont dans les 5 pour cent ou absentes du CSV du fournisseur (AWS Milan `m6a`/`c6a`, Turin GCP `c4d`, Ampere Altra GCP `t2a`, Sapphire Rapids Azure, Emerald Rapids Azure, Genoa Azure, Cobalt 100 Azure, Sierra Forest). Nouvelles familles AWS ajoutées par cette mise à jour : `m8a` / `c8a` (Turin), `m8i` / `c8i` (Emerald Rapids), `r7a` (Genoa memory-optimized). Nouvelle famille GCP : `c4a` (Axion ARM Neoverse V2, proxié sur AWS Graviton 4). `resolve_instance_class` ramène les noms de classes managées de base de données, de cache, de broker et de recherche et les noms AWS ou Azure à modificateur sur la ligne de leur famille de base, ou sur une raison `Unsupported`, et `lookup_instance_power` garde le défaut du fournisseur pour tout le reste. Voir `docs/FR/LIMITATIONS-FR.md`.
-- `scraper.rs` : scraper API JSON Prometheus. Interroge `avg(rate(cpu_metric[interval]))` par service, récupère le JSON depuis l'endpoint Prometheus.
+- `scraper.rs` : scraper API JSON Prometheus. Envoie chaque requête CPU résolue distincte telle qu'écrite, sans gabarit, une fois par tick, et lit la valeur de la première série et le nombre de séries.
 - `state.rs` : `CloudEnergyState` adossé à `ArcSwap` pour des lectures sans verrou depuis le chemin de scoring.
 - `mod.rs` : ré-exports et documentation du module.
 
-**La formule.** Pour chaque service avec une config cloud :
+**La formule.** Pour chaque requête CPU distincte dont la réponse contient une seule série, lue par des services qui se résolvent sur une même enveloppe `(idle_watts, max_watts)` :
 
 ```
-cpu_percent       = prometheus_query(cpu_metric, service_label)
+cpu_percent       = prometheus_query(cpu_query)
 watts             = idle_watts + (max_watts - idle_watts) * (cpu_percent / 100)
 joules            = watts * scrape_interval_secs
 kwh               = joules / 3_600_000
-energy_per_op_kwh = kwh / ops_in_window
+energy_per_op_kwh = kwh / sum(ops_in_window des services qui lisent la requête)
 ```
 
-`idle_watts` et `max_watts` viennent de la recherche dans la table SPECpower par type d'instance ou des surcharges fournies par l'utilisateur dans la configuration. Le nombre d'ops vient du même compteur `MetricsState::service_io_ops_total` que celui utilisé par Scaphandre.
+Chaque service du groupe qui a des ops dans la fenêtre reçoit cet `energy_per_op_kwh`, donc le nœud n'est compté qu'une fois. Une réponse à plusieurs séries, ou un groupe dont les services se résolvent sur des enveloppes différentes, garde le calcul par service : chaque service applique sa propre enveloppe à la première série et divise par ses propres ops. Le cas à plusieurs séries avertit une fois par requête, les enveloppes différentes avertissent au chargement de la configuration. `idle_watts` et `max_watts` viennent de la recherche dans la table SPECpower par type d'instance ou des surcharges fournies par l'utilisateur dans la configuration. Le nombre d'ops vient du même compteur `MetricsState::service_io_ops_total` que celui utilisé par Scaphandre.
 
 **Exemple de configuration.**
 
@@ -473,24 +473,23 @@ prometheus_endpoint = "http://prometheus:9090"
 scrape_interval_secs = 15
 default_provider = "aws"
 default_instance_type = "c5.xlarge"
-cpu_metric = "node_cpu_seconds_total"
 
 [green.cloud.services.api-us]
 provider = "aws"
-region = "us-east-1"
 instance_type = "m7i.4xlarge"  # Sapphire Rapids, entrée moderne
+cpu_query = 'aws_ec2_cpuutilization_average{instance_id="i-0123456789abcdef0"}'
 
 [green.cloud.services.api-eu]
 provider = "gcp"
-region = "europe-west1"
 instance_type = "c4d-standard-8"  # AMD Turin (Zen 5), entrée moderne
+cpu_query = '100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="api-eu:9100"}[5m])) * 100)'
 ```
 
 **Tag de modèle et précédence.** Le coefficient porte le tag `"cloud_specpower"`. Dans `build_tick_ctx`, les sources de plus haute fidélité priment : Alumet écrase Scaphandre, qui écrase Kepler, qui écrase Redfish, qui écrase cloud SPECpower pour un même service. Le tag de modèle de niveau supérieur reflète la source la plus précise : `electricity_maps_api` > `grid_operator_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`.
 
 **Daemon uniquement.** Comme Scaphandre, l'estimation d'énergie cloud est une fonctionnalité daemon uniquement. La commande `analyze` batch utilise toujours le modèle proxy.
 
-**Ce que cloud SPECpower ne fait PAS.** Voir `docs/FR/LIMITATIONS-FR.md` "Limites de précision du cloud SPECpower" pour la discussion complète. Le modèle SPECpower capture la puissance proportionnelle au CPU mais pas la mémoire, les I/O ou le réseau. La multi-tenance n'est pas corrigée. La précision est d'environ +/-30%.
+**Ce que cloud SPECpower ne fait PAS.** Voir `docs/FR/LIMITATIONS-FR.md` "Limites de précision du cloud SPECpower" pour la discussion complète. Le modèle SPECpower capture la puissance proportionnelle au CPU mais pas la mémoire, les I/O ou le réseau. Des services d'un même nœud ne se partagent ses watts que s'ils lisent une même requête à une seule série, et les locataires non tracés sont attribués aux services tracés. La précision est d'environ +/-30%.
 
 ## Attribution de l'énergie par intervalle d'Alumet
 

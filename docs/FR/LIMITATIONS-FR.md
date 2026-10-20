@@ -719,7 +719,7 @@ Cela capture la variation de puissance proportionnelle à la charge, ce que la c
 
 1. **Attribution par finding :** comme Scaphandre, c'est un coefficient par service. Il couvre le nœud du service émetteur, jamais la base de données ou le broker qu'il appelle.
 2. **Puissance mémoire ou I/O :** les données SPECpower couvrent le CPU et la carte mère, pas le stockage ni le réseau.
-3. **Correction de la mutualisation :** le modèle suppose que toute la puissance de l'instance est attribuée à la charge tracée par Perf Sentinel.
+3. **Un nœud par requête CPU :** les services qui lisent une même requête CPU se partagent les watts de son nœud selon leur nombre d'opérations quand la réponse contient une seule série. Une requête qui renvoie plusieurs séries garde un chiffre par service, chacun lisant la première série, avec un avertissement. Des services d'un même nœud lus par des requêtes différentes ne sont pas reconnus comme voisins, donc chacun est chiffré comme s'il possédait le nœud. Les locataires non tracés du nœud ne sont pas vus non plus : toute la puissance du nœud est attribuée aux services tracés.
 
 #### Méthodologie unique après la mise à jour du 2026-04-24.
 

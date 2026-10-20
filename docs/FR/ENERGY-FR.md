@@ -35,6 +35,8 @@ Chaque ligne de ce tableau remplace ou affine la ligne au-dessus, sur le même p
 
 Quand plusieurs backends couvrent le même service, le daemon garde la lecture la plus fidèle : `alumet_rapl` bat `scaphandre_rapl`, qui bat `kepler_ebpf`, puis `redfish_bmc`, puis `cloud_specpower`, puis le proxy. Tous les backends mesurés sont réservés au daemon (`watch`). Le mode batch `analyze` utilise toujours le chemin proxy.
 
+**Chaque nœud est compté une fois.** Les services qui lisent une même requête CPU cloud renvoyant une seule série, ou un même châssis Redfish, se partagent l'énergie de ce nœud selon les opérations que chacun a émises dans l'intervalle, au lieu de recevoir chacun le nœud entier. Un service du nœud qu'un backend plus fidèle chiffre garde ses opérations dans ce décompte, donc sa part est abandonnée plutôt que donnée à ses voisins. Les sources au niveau du nœud doivent donc lister chaque service tracé du nœud : un service tracé laissé de côté laisse sa part aux services listés. Les règles cloud, watts différents et requêtes à plusieurs séries compris, sont dans [CONFIGURATION-FR.md](CONFIGURATION-FR.md#greencloud-optionnel-opt-in).
+
 Une contrainte s'applique à tous les barreaux RAPL : les compteurs matériels ne voient que le CPU et la DRAM, soit environ la moitié aux deux tiers de ce que le serveur tire à la prise. Seul Redfish couvre aussi les ventilateurs, les disques et les cartes réseau, et les pertes de l'alimentation seulement quand le BMC mesure à son entrée.
 
 ## Le chiffre de la base de données
@@ -65,7 +67,7 @@ L'étiquette `model` dit quel chemin l'a produit (`alumet_rapl`, `broker_specpow
 
 ## Ce que les chiffres ne sont pas
 
-L'outil est un compteur directionnel de gaspillage avec un ancrage énergétique de plus en plus solide, pas un wattmètre et pas un inventaire carbone certifié. Le chemin proxy porte un encadrement multiplicatif de 2x. La puissance au repos dépend du barreau : le proxy, Kepler et la formule d'attribution habituelle d'Alumet la laissent non attribuée, alors que cloud SPECpower et Redfish incluent la puissance au repos du nœud dans les services qu'ils chiffrent. Les ratios par comptage derrière `co2.avoidable`, les deux paliers de gaspillage de la divulgation et les chiffres base de données et broker traitent pareil un SELECT indexé bon marché et une écriture lourde, alors que les mesures académiques montrent des écarts de puissance de plusieurs dizaines de pour cent, et une requête lente pèse une opération comme une rapide. Tout cela est quantifié, avec le raisonnement, dans [LIMITATIONS-FR.md](LIMITATIONS-FR.md).
+L'outil est un compteur directionnel de gaspillage avec un ancrage énergétique de plus en plus solide, pas un wattmètre et pas un inventaire carbone certifié. Le chemin proxy porte un encadrement multiplicatif de 2x. La puissance au repos dépend du barreau : le proxy, Kepler et la formule d'attribution habituelle d'Alumet la laissent non attribuée, alors que cloud SPECpower et Redfish incluent la puissance au repos du nœud, répartie entre les services qui lisent ce nœud. Les ratios par comptage derrière `co2.avoidable`, les deux paliers de gaspillage de la divulgation et les chiffres base de données et broker traitent pareil un SELECT indexé bon marché et une écriture lourde, alors que les mesures académiques montrent des écarts de puissance de plusieurs dizaines de pour cent, et une requête lente pèse une opération comme une rapide. Tout cela est quantifié, avec le raisonnement, dans [LIMITATIONS-FR.md](LIMITATIONS-FR.md).
 
 ## Sources
 

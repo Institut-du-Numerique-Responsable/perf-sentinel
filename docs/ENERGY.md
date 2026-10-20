@@ -35,6 +35,8 @@ Each row of this table replaces or refines the row above it, on the same perimet
 
 When several backends cover the same service, the daemon keeps the highest-fidelity reading: `alumet_rapl` beats `scaphandre_rapl`, which beats `kepler_ebpf`, then `redfish_bmc`, then `cloud_specpower`, then the proxy. All measured backends are daemon-only (`watch`). Batch `analyze` always uses the proxy path.
 
+**Each node is counted once.** The services that read one cloud CPU query returning a single series, or one Redfish chassis, split that node's energy by the operations each emitted in the interval, instead of each receiving the whole node. A service on the node that a higher-fidelity backend prices keeps its operations in that count, so its share is dropped rather than handed to its neighbours. Node-level sources must therefore list every traced service on the node: a traced service left out leaves its share to the listed ones. The cloud rules, mixed power figures and multi-series queries included, are in [CONFIGURATION.md](CONFIGURATION.md#greencloud-optional-opt-in).
+
 One constraint applies to every RAPL-based rung: the hardware counters only see CPU and DRAM, which is roughly half to two thirds of what the server draws at the wall. Only Redfish also covers fans, disks and network cards, and power supply losses only when the BMC measures at the supply input.
 
 ## The database figure
@@ -65,7 +67,7 @@ The `model` tag says which path produced it (`alumet_rapl`, `broker_specpower`, 
 
 ## What the numbers are not
 
-The tool is a directional waste counter with increasingly good energy anchoring, not a wattmeter and not a certified carbon inventory. The proxy path carries a 2x multiplicative bracket. Idle power depends on the rung: the proxy, Kepler and Alumet's usual attribution formula leave it unattributed, while cloud SPECpower and Redfish include the node's idle power in the services they price. The count-based ratios behind `co2.avoidable`, both disclosure waste tiers and the database and broker figures treat a cheap indexed SELECT and a heavy write the same, which academic measurements show can differ by tens of percent in power terms, and a slow query weighs one operation like a fast one. All of this is quantified, with the reasoning, in [LIMITATIONS.md](LIMITATIONS.md).
+The tool is a directional waste counter with increasingly good energy anchoring, not a wattmeter and not a certified carbon inventory. The proxy path carries a 2x multiplicative bracket. Idle power depends on the rung: the proxy, Kepler and Alumet's usual attribution formula leave it unattributed, while cloud SPECpower and Redfish include the node's idle power, split between the services reading that node. The count-based ratios behind `co2.avoidable`, both disclosure waste tiers and the database and broker figures treat a cheap indexed SELECT and a heavy write the same, which academic measurements show can differ by tens of percent in power terms, and a slow query weighs one operation like a fast one. All of this is quantified, with the reasoning, in [LIMITATIONS.md](LIMITATIONS.md).
 
 ## Sources
 

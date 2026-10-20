@@ -447,23 +447,23 @@ For cloud VMs (AWS, GCP, Azure) that do not expose Intel RAPL to guests, Perf Se
 
 **Architecture.** The `cloud_energy/` directory contains:
 
-- `config/mod.rs`: `CloudEnergyConfig` and per-service `ServiceCloudConfig` (provider, region, instance_type, optional idle/max watts overrides).
+- `config.rs`: `CloudEnergyConfig` and per-service `ServiceCloudConfig` (provider, instance_type or idle/max watts overrides, optional `cpu_query`). `cpu_query_groups` groups the services by their trimmed resolved CPU query.
 - `table.rs`: embedded lookup table with idle and max watt values for every type listed in [`INSTANCE-TYPES.md`](../INSTANCE-TYPES.md), after the 2026-04-24 CCF refresh. All entries follow a single homogeneous methodology: `idle_watts = vCPU * idle_per_vCPU` and `max_watts = vCPU * max_per_vCPU`, with coefficients sourced per provider from `ccf-coefficients` 2026-04-24 (`coefficients-{aws,gcp,azure}-use.csv`). No baseboard overhead is reconstructed: the AWS-specific baseboard column was dropped by CCF in 2026-04-24 and is not added back. The 5 percent rule splits modern entries into two groups. Entries are re-aligned to CCF when the SPECpower direct compute diverged (Sapphire Rapids on AWS `m7i`/`c7i`/`r7i` and GCP `c3`, EPYC Genoa on AWS `m7a`/`c7a` and GCP `c3d`/`n2d`, Graviton 3 `m7g`/`c7g` and Graviton 4 `m8g`/`c8g` mapped to the CCF EPYC 2nd Gen proxy, EPYC Turin on AWS `m8a`/`c8a`, Emerald Rapids on GCP `c4`). They stay on `SPECpower_ssj 2008` direct compute 2024 Q1 - 2026 Q2 when within 5 percent or absent from the provider CSV (AWS Milan `m6a`/`c6a`, GCP Turin `c4d`, GCP Ampere Altra `t2a`, Azure Sapphire Rapids, Azure Emerald Rapids, Azure Genoa, Azure Cobalt 100, Sierra Forest). New AWS families added by this refresh: `m8a` / `c8a` (Turin), `m8i` / `c8i` (Emerald Rapids), `r7a` (Genoa memory-optimized). New GCP family: `c4a` (Axion ARM Neoverse V2, proxied to AWS Graviton 4). `resolve_instance_class` maps managed database, cache, broker and search class names and AWS or Azure modifier names to the row of their base family, or to an `Unsupported` reason, and `lookup_instance_power` keeps the provider default for anything else. See `docs/LIMITATIONS.md`.
-- `scraper.rs`: Prometheus JSON API scraper. Queries `avg(rate(cpu_metric[interval]))` per service, fetches JSON from the Prometheus endpoint.
+- `scraper.rs`: Prometheus JSON API scraper. Sends each distinct resolved CPU query as written, with no templating, once per tick, and reads the value of the first series and the series count.
 - `state.rs`: `CloudEnergyState` backed by `ArcSwap` for lock-free reads from the scoring path.
 - `mod.rs`: re-exports and module documentation.
 
-**The formula.** For each service with a cloud config:
+**The formula.** For each distinct CPU query whose response holds one series, read by services that resolve one `(idle_watts, max_watts)` envelope:
 
 ```
-cpu_percent       = prometheus_query(cpu_metric, service_label)
+cpu_percent       = prometheus_query(cpu_query)
 watts             = idle_watts + (max_watts - idle_watts) * (cpu_percent / 100)
 joules            = watts * scrape_interval_secs
 kwh               = joules / 3_600_000
-energy_per_op_kwh = kwh / ops_in_window
+energy_per_op_kwh = kwh / sum(ops_in_window of the services reading the query)
 ```
 
-`idle_watts` and `max_watts` come from the SPECpower table lookup by instance type or from user-provided overrides in the config. The op count comes from the same `MetricsState::service_io_ops_total` counter used by Scaphandre.
+Every service of the group with ops in the window gets that `energy_per_op_kwh`, so the node is counted once. A response with several series, or a group whose services resolve different envelopes, keeps the per-service computation: each service applies its own envelope to the first series and divides by its own ops. The multi-series case warns once per query, the mixed envelopes warn at config load. `idle_watts` and `max_watts` come from the SPECpower table lookup by instance type or from user-provided overrides in the config. The op count comes from the same `MetricsState::service_io_ops_total` counter used by Scaphandre.
 
 **Config example.**
 
@@ -473,24 +473,23 @@ prometheus_endpoint = "http://prometheus:9090"
 scrape_interval_secs = 15
 default_provider = "aws"
 default_instance_type = "c5.xlarge"
-cpu_metric = "node_cpu_seconds_total"
 
 [green.cloud.services.api-us]
 provider = "aws"
-region = "us-east-1"
 instance_type = "m7i.4xlarge"  # Sapphire Rapids, modern entry
+cpu_query = 'aws_ec2_cpuutilization_average{instance_id="i-0123456789abcdef0"}'
 
 [green.cloud.services.api-eu]
 provider = "gcp"
-region = "europe-west1"
 instance_type = "c4d-standard-8"  # AMD Turin (Zen 5), modern entry
+cpu_query = '100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="api-eu:9100"}[5m])) * 100)'
 ```
 
 **Model tag and precedence.** The coefficient carries model tag `"cloud_specpower"`. In `build_tick_ctx`, higher-fidelity sources take precedence: Alumet overrides Scaphandre overrides Kepler overrides Redfish overrides cloud SPECpower for the same service. The top-level model tag reflects the most precise source: `electricity_maps_api` > `grid_operator_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`.
 
 **Daemon only.** Like Scaphandre, cloud energy estimation is a daemon-only feature. The `analyze` batch command always uses the proxy model.
 
-**What cloud SPECpower does NOT do.** See `docs/LIMITATIONS.md` "Cloud SPECpower precision bounds" for the full discussion. The SPECpower model captures CPU-proportional power but not memory, I/O or network power. Shared tenancy is not corrected. Accuracy is approximately +/-30%.
+**What cloud SPECpower does NOT do.** See `docs/LIMITATIONS.md` "Cloud SPECpower precision bounds" for the full discussion. The SPECpower model captures CPU-proportional power but not memory, I/O or network power. Services on one node share its watts only when they read one single-series query, and untraced tenants are attributed to the traced services. Accuracy is approximately +/-30%.
 
 ## Alumet interval-energy attribution
 

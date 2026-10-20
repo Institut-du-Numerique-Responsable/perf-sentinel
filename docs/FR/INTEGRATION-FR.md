@@ -507,17 +507,16 @@ prometheus_endpoint = "http://prometheus:9090"
 scrape_interval_secs = 15
 default_provider = "aws"
 default_instance_type = "m7i.xlarge"
-cpu_metric = "node_cpu_seconds_total"
 
 [green.cloud.services.api-us]
 provider = "aws"
-region = "us-east-1"
 instance_type = "m7i.4xlarge"  # Sapphire Rapids
+cpu_query = 'aws_ec2_cpuutilization_average{instance_id="i-0123456789abcdef0"}'
 
 [green.cloud.services.analytics]
 provider = "azure"
-region = "westeurope"
 instance_type = "Standard_D8s_v6"  # Emerald Rapids
+cpu_query = '100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="analytics:9100"}[5m])) * 100)'
 ```
 
 Le daemon interpole la consommation avec `watts = idle_watts + (max_watts - idle_watts) * (cpu% / 100)` en utilisant les coefficients CCF 2026-04-24 par vCPU embarqués dans le binaire (chaque type listé dans [`INSTANCE-TYPES-FR.md`](./INSTANCE-TYPES-FR.md), couvrant AWS, GCP, Azure et Scaleway, y compris les architectures modernes Sapphire Rapids, Emerald Rapids, Genoa, Turin, Graviton 3/4 et Cobalt 100). Le tag de modèle est `"cloud_specpower"`. Comme Scaphandre, c'est une fonctionnalité réservée au daemon.

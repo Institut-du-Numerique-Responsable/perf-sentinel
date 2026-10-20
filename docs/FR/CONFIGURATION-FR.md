@@ -571,7 +571,7 @@ Estimation d'énergie cloud-native via utilisation CPU% + interpolation SPECpowe
 | `scrape_interval_secs`  | entier | `15`      | Intervalle de sondage en secondes (plage : 1-3600).                                                                                                                                             |
 | `default_provider`      | chaîne | *(aucun)* | Fournisseur cloud par défaut : `"aws"`, `"gcp"`, `"azure"`, `"scaleway"`. Les types d'instance Scaleway sont dérivés de son Product Catalog, voir [INSTANCE-TYPES-FR.md](INSTANCE-TYPES-FR.md). |
 | `default_instance_type` | chaîne | *(aucun)* | Type d'instance de repli pour les services non mappés.                                                                                                                                          |
-| `cpu_metric`            | chaîne | *(aucun)* | Métrique/requête PromQL par défaut pour l'utilisation CPU.                                                                                                                                      |
+| `cpu_metric`            | chaîne | *(aucun)* | Requête PromQL par défaut pour l'utilisation CPU, partagée par chaque service sans `cpu_query` propre. Ces services lisent un seul nœud quand elle renvoie une série.                           |
 
 Les entrées par service dans `[green.cloud.services]` acceptent deux formes :
 
@@ -584,15 +584,17 @@ scrape_interval_secs = 15
 default_provider = "aws"
 
 [green.cloud.services]
-"account-svc" = { provider = "aws", instance_type = "m7i.4xlarge" }       # Sapphire Rapids
+"account-svc" = { provider = "aws", instance_type = "m7i.4xlarge", cpu_query = "aws_ec2_cpuutilization_average{instance_id=\"i-0123456789abcdef0\"}" }   # Sapphire Rapids
 "api-asia" = { provider = "gcp", instance_type = "c4d-standard-8" }       # AMD Turin
 "analytics" = { provider = "azure", instance_type = "Standard_D8s_v6" }   # Emerald Rapids
-"ml-bench" = { provider = "aws", instance_type = "m8g.4xlarge" }          # Graviton 4
+"ml-bench" = { provider = "aws", instance_type = "m8g.4xlarge", cpu_query = "aws_ec2_cpuutilization_average{instance_id=\"i-0fedcba9876543210\"}" }      # Graviton 4
 ```
 
 La liste complète des types couverts, avec leurs watts au repos et maximum, est dans [`INSTANCE-TYPES-FR.md`](./INSTANCE-TYPES-FR.md). Familles d'instances modernes couvertes : AWS m7i/c7i/r7i, m7a/c7a, m6a/c6a, Graviton 3 m7g/c7g et Graviton 4 m8g/c8g (la table ne porte aucune ligne Graviton 2), GCP c3, c3d, c4, c4d, n2d et t2a, et Azure Standard_Dv6, Standard_Dadsv6, Standard_Dpsv6 (Cobalt 100) et Standard_Ev6. Une entrée bare-metal nommée d'après son CPU couvre Sierra Forest (`xeon-6780e`, watts au niveau système, suppose pleine possession de la puce).
 
 **Classes managées.** `instance_type` accepte aussi les noms de classes managées de base de données, de cache, de broker et de recherche (`db.r6i.large`, `cache.r5.large`, `kafka.m5.large`, `mq.t3.micro`, `r5.large.search`) et les noms AWS ou Azure portant un modificateur de stockage ou de réseau (`db.m5d.large`, `c7gn.large`, `Standard_D4ds_v5`). Chacun se résout sur la ligne de la famille de VM qui l'héberge, ici comme dans `[green.broker_static]`. Les règles, et les classes laissées de côté avec leur raison, sont dans [Classes de services managés](./INSTANCE-TYPES-FR.md#classes-de-services-managés).
+
+**Services sur un même nœud.** Les services qui se résolvent sur une même requête CPU (leur `cpu_query`, sinon `cpu_metric`, sinon le défaut de leur fournisseur, comparés après suppression des espaces de bord) sont lus comme un seul nœud. Quand la réponse contient une seule série et que tous ces services se résolvent sur les mêmes watts au repos et maximum, les watts du nœud sont répartis entre eux selon les opérations que chacun a émises dans l'intervalle, et le nœud n'est compté qu'une fois. Des services qui lisent une même requête avec des watts différents se chargent avec un avertissement qui les nomme et gardent un chiffre par service, chacun chiffré comme s'il possédait le nœud. Une requête qui renvoie plusieurs séries garde aussi un chiffre par service, chacun lisant la première série, et le daemon avertit une fois avec le nombre de séries et les services. Une requête agrégée sur une flotte (`avg` ou `sum` sans `by`) renvoie une seule série et se lit comme un seul nœud. Chiffrer chaque nœud demande donc une requête filtrée sur lui, par exemple une requête node_exporter filtrée par `instance` (`100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="node-a:9100"}[5m])) * 100)`) ou une métrique de supervision cloud filtrée sur le label où l'exporteur place l'identifiant d'instance (`aws_ec2_cpuutilization_average{instance_id="i-0123456789abcdef0"}` avec cloudwatch_exporter). Dans l'exemple ci-dessus, `account-svc` et `ml-bench` liraient sinon tous deux la requête AWS par défaut. Deux chaînes de requête différentes font deux nœuds, même quand elles lisent la même machine.
 
 **Watts manuels (on-premise ou matériel personnalisé) :**
 

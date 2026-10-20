@@ -556,7 +556,7 @@ Cloud-native energy estimation via CPU utilization + SPECpower interpolation. Wh
 | `scrape_interval_secs`  | integer | `15`     | Polling interval in seconds (range: 1-3600).                                                                                                                                 |
 | `default_provider`      | string  | *(none)* | Default cloud provider: `"aws"`, `"gcp"`, `"azure"`, `"scaleway"`. Scaleway instance types are derived from its Product Catalog, see [INSTANCE-TYPES.md](INSTANCE-TYPES.md). |
 | `default_instance_type` | string  | *(none)* | Fallback instance type for unmapped services.                                                                                                                                |
-| `cpu_metric`            | string  | *(none)* | Default PromQL metric/query for CPU utilization.                                                                                                                             |
+| `cpu_metric`            | string  | *(none)* | Default PromQL query for CPU utilization, shared by every service without its own `cpu_query`. Those services read one node when it returns one series.                      |
 
 Per-service entries in `[green.cloud.services]` support two forms:
 
@@ -569,15 +569,17 @@ scrape_interval_secs = 15
 default_provider = "aws"
 
 [green.cloud.services]
-"account-svc" = { provider = "aws", instance_type = "m7i.4xlarge" }       # Sapphire Rapids
+"account-svc" = { provider = "aws", instance_type = "m7i.4xlarge", cpu_query = "aws_ec2_cpuutilization_average{instance_id=\"i-0123456789abcdef0\"}" }   # Sapphire Rapids
 "api-asia" = { provider = "gcp", instance_type = "c4d-standard-8" }       # AMD Turin
 "analytics" = { provider = "azure", instance_type = "Standard_D8s_v6" }   # Emerald Rapids
-"ml-bench" = { provider = "aws", instance_type = "m8g.4xlarge" }          # Graviton 4
+"ml-bench" = { provider = "aws", instance_type = "m8g.4xlarge", cpu_query = "aws_ec2_cpuutilization_average{instance_id=\"i-0fedcba9876543210\"}" }      # Graviton 4
 ```
 
 The full list of covered types, with their idle and max wattage, is [`INSTANCE-TYPES.md`](./INSTANCE-TYPES.md). Modern instance families covered include AWS m7i/c7i/r7i, m7a/c7a, m6a/c6a, Graviton 3 m7g/c7g and Graviton 4 m8g/c8g (the table holds no Graviton 2 row), GCP c3, c3d, c4, c4d, n2d and t2a, and Azure Standard_Dv6, Standard_Dadsv6, Standard_Dpsv6 (Cobalt 100) and Standard_Ev6. One CPU-named bare-metal entry covers Sierra Forest (`xeon-6780e`, system-level watts assuming full chip ownership).
 
 **Managed classes.** `instance_type` also accepts the names of managed database, cache, broker and search classes (`db.r6i.large`, `cache.r5.large`, `kafka.m5.large`, `mq.t3.micro`, `r5.large.search`) and AWS or Azure names carrying a storage or network modifier (`db.m5d.large`, `c7gn.large`, `Standard_D4ds_v5`). Each resolves to the row of the VM family it runs on, here and in `[green.broker_static]`. The rules, and the classes left out with their reason, are in [Managed service classes](./INSTANCE-TYPES.md#managed-service-classes).
+
+**Services on one node.** The services that resolve to one CPU query (their `cpu_query`, else `cpu_metric`, else their provider default, compared after trimming) are read as one node. When the response holds a single series and every one of those services resolves to the same idle and max watts, the node's watts are split between them by the operations each emitted in the interval, so the node is counted once. Services that read one query with different watt figures load with a warning naming both and keep a figure per service, each priced as if it owned the node. A query that returns several series also keeps a figure per service, each reading the first series, and the daemon warns once with the series count and the services. An aggregate query over a fleet (`avg` or `sum` without `by`) returns one series and is read as one node. Pricing each node therefore takes a query filtered to it, such as a node_exporter query filtered by `instance` (`100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="node-a:9100"}[5m])) * 100)`) or a cloud monitoring metric filtered on the label the exporter puts the instance id in (`aws_ec2_cpuutilization_average{instance_id="i-0123456789abcdef0"}` with cloudwatch_exporter). In the example above, `account-svc` and `ml-bench` would otherwise both read the AWS default query. Two different query strings are two nodes, even when they read the same machine.
 
 **Manual watts (on-premise or custom hardware):**
 

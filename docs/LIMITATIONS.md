@@ -710,7 +710,7 @@ This captures workload-proportional power scaling, which the fixed proxy constan
 
 1. **Per-finding attribution:** like Scaphandre, this is a per-service coefficient. It covers the emitting service's node, never the database or broker it calls.
 2. **Memory or I/O power:** the SPECpower data captures CPU and baseboard, not storage or network.
-3. **Shared tenancy correction:** the model assumes the instance's full power is attributed to Perf Sentinel's traced workload.
+3. **One node per CPU query:** the services that read one CPU query split its node's watts by operation count when the response holds one series. A query returning several series keeps a figure per service, each reading the first series, with a warning. Services on one node read through different queries are not recognised as neighbours, so each is priced as if it owned the node. Untraced tenants of the node are not seen either: the node's full power is attributed to the traced services.
 
 #### Single methodology after the 2026-04-24 refresh.
 
