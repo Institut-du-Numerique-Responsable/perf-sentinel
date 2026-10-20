@@ -160,7 +160,7 @@ The outbound-HTTP template keeps the callee host (`GET user-svc/api/x`), so two 
 
 Slow findings (`slow_sql`, `slow_http`) represent operations that are **necessary but slow**, not avoidable I/O. Therefore, slow findings do **not** contribute to the I/O waste ratio or the `avoidable_io_ops` count in the GreenOps summary. They still appear in the findings list with `green_impact.estimated_extra_io_ops: 0`.
 
-The waste ratio measures how much I/O could be eliminated (N+1, redundant), while slow findings highlight operations that need optimization (indexing, caching) rather than elimination.
+The waste ratio measures how much I/O could be eliminated (N+1, redundant), while slow findings highlight operations that need optimization (indexing, caching) rather than elimination. Energy does not read `duration_us` either: a slow query weighs one operation in every energy figure, so a long query's host cost is not modelled.
 
 ## Session commands and waste ratio
 
@@ -431,7 +431,7 @@ Caveats shared by both flags:
 
 Perf Sentinel uses an **I/O → energy → CO₂ proxy model** to estimate the carbon footprint of analyzed workloads. The chain has three steps and an inherent margin of error at each:
 
-1. **I/O operations → energy**: each detected I/O op (SQL query, HTTP call) is multiplied by a fixed `ENERGY_PER_IO_OP_KWH` constant of `0.0000001 kWh` (~0.1 mWh). This is **not measured**: it is an order-of-magnitude approximation.
+1. **I/O operations → energy**: each I/O op the emitting service issues (SQL query, HTTP call) is multiplied by a fixed `ENERGY_PER_IO_OP_KWH` constant of `0.0000001 kWh` (~0.1 mWh). This is **not measured**: it is an order-of-magnitude approximation. Every rung of the ladder, the I/O proxy included, prices the emitting service's own host for each operation it issues: CPU, memory and network stack on that host. The callee (database server, broker, downstream service) is never in it. Database and broker host energy enters a report only through a declared or measured source: `[green.alumet.database]`, `[green.alumet.broker]` or `[green.broker_static]`. SQL verb weights and HTTP tiers are relative weights that rank operation classes. Their ratios come from database-server benchmarks, but they bill no database host.
 2. **Energy → CO₂**: energy is multiplied by a per-region grid carbon intensity (gCO₂eq/kWh) sourced from Electricity Maps and Cloud Carbon Footprint annual averages (2023-2024), with a per-provider PUE applied (AWS 1.15, GCP 1.09, Azure 1.17, Generic 1.2). The three provider PUEs are not strictly comparable in scope. AWS publishes a global fleet average for calendar year 2024, GCP a global fleet trailing-twelve-month average for 2024, and Azure an FY25 (July 2024 to June 2025) figure for its owned-and-controlled facilities only (leased and colocation are excluded). The cross-window gap is around 12 months and the scope difference is around a few percent of the fleet.
 3. **Embodied carbon (`M` in SCI v1.0)**: hardware manufacturing emissions amortized at a configurable default of `0.001 gCO₂/request`. Region-independent.
 
@@ -697,7 +697,7 @@ Perf Sentinel ships an opt-in integration with the [Redfish](https://www.dmtf.or
 
 #### What cloud SPECpower improves.
 
-The proxy model uses a fixed energy constant for all I/O operations. Cloud SPECpower replaces this with a CPU-utilization-aware estimate per service:
+The proxy model uses a fixed energy constant for all I/O operations. Cloud SPECpower replaces this, on the same perimeter, with a CPU-utilization-aware estimate of the node that runs each service:
 
 ```
 watts = idle_watts + (max_watts - idle_watts) * (cpu_percent / 100)
@@ -708,7 +708,7 @@ This captures workload-proportional power scaling, which the fixed proxy constan
 
 #### What cloud SPECpower does NOT do.
 
-1. **Per-finding attribution:** like Scaphandre, this is a per-service coefficient.
+1. **Per-finding attribution:** like Scaphandre, this is a per-service coefficient. It covers the emitting service's node, never the database or broker it calls.
 2. **Memory or I/O power:** the SPECpower data captures CPU and baseboard, not storage or network.
 3. **Shared tenancy correction:** the model assumes the instance's full power is attributed to Perf Sentinel's traced workload.
 
@@ -738,13 +738,13 @@ Cloud SPECpower is a daemon-only feature (`watch` mode). The `analyze` batch com
 
 ### Per-operation energy coefficients
 
-The per-operation energy multipliers (SQL verb weighting, HTTP payload size tiers) are heuristic estimates derived from academic DBMS energy benchmarks (Xu et al. ICDE 2010, Tsirogiannis et al. SIGMOD 2010) and the Cloud Carbon Footprint methodology. The relative ratios between operations (SELECT < DELETE < INSERT/UPDATE) are more robust than the absolute values, which vary across hardware generations and database engines.
+The per-operation energy multipliers (SQL verb weighting, HTTP payload size tiers) are heuristic estimates derived from academic DBMS energy benchmarks (Xu et al. ICDE 2010, Tsirogiannis et al. SIGMOD 2010) and the Cloud Carbon Footprint methodology. They are relative weights that rank operation classes on the emitting service: the benchmarks measured database servers, but the weights bill no database host. The relative ratios between operations (SELECT < DELETE < INSERT/UPDATE) are more robust than the absolute values, which vary across hardware generations and database engines.
 
 Key limitations:
 
-- **No query complexity analysis.** A full table scan SELECT costs more energy than an indexed point lookup, but both get the same 0.5x coefficient. The coefficients capture the average operation class, not the specific query plan.
+- **No query complexity analysis.** A full table scan SELECT costs more energy than an indexed point lookup, but both get the same 0.5x coefficient. The coefficients capture the average operation class, not the specific query plan. A long-running query also weighs one operation: `duration_us` is never read, so its host cost is not modelled.
 - **HTTP payload size requires OTel attributes.** The `http.response.body.size` (or legacy `http.response_content_length`) attribute must be present on HTTP spans. When absent, the coefficient falls back to 1.0x (the base constant). Most HTTP instrumentation libraries do not emit this attribute by default.
-- **Not used with measured energy.** When a measured backend provides per-service energy, the per-operation coefficients are ignored, because measured data is always more accurate than heuristic multipliers.
+- **Not used with measured energy.** When a measured backend provides per-service energy, the per-operation coefficients are ignored: the measured reading replaces the proxy on the same perimeter, the emitting service's host.
 
 Set `per_operation_coefficients = false` to disable this feature and use the flat energy constant for all operations.
 

@@ -22,13 +22,21 @@ pub(crate) use super::carbon_profiles::HourlyProfileRef;
 /// Estimated energy consumed per I/O operation in kWh.
 ///
 /// This is a rough order-of-magnitude approximation (~0.1 mWh per I/O op).
-/// It accounts for a typical database query or HTTP round-trip on cloud
-/// infrastructure, including CPU, memory, and network overhead.
+/// Every rung of the ladder, the I/O proxy included, prices the emitting
+/// service's own host for each operation it issues: CPU, memory and
+/// network stack on that host. The callee (database server, broker,
+/// downstream service) is never in it. Database and broker host energy
+/// enters a report only through a declared or measured source:
+/// `[green.alumet.database]`, `[green.alumet.broker]` or
+/// `[green.broker_static]`.
 ///
 /// Not a measured value. See `docs/design/05-GREENOPS-AND-CARBON.md`.
 pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1;
 
 // Per-operation energy multipliers (proxy model only).
+// SQL verb weights and HTTP tiers are relative weights that rank operation
+// classes on the emitting service. Their ratios come from database-server
+// benchmarks, but they bill no database host and carry no host share.
 // See docs/design/05-GREENOPS-AND-CARBON.md for sources and rationale.
 
 const SQL_SELECT_COEFF: f64 = 0.5; // read-only index lookup
@@ -501,7 +509,8 @@ pub struct CarbonContext {
     /// daemon can clone the context per tick without deep-copying profiles.
     pub custom_hourly_profiles: Option<Arc<HashMap<String, HourlyProfile>>>,
     /// Per-service calibration factors from `[green] calibration_file`.
-    /// Multiplied with the proxy model `ENERGY_PER_IO_OP_KWH` per service.
+    /// Multiplies the emitting service's proxy energy
+    /// (`ENERGY_PER_IO_OP_KWH`, with its weights) per service.
     pub calibration: Option<crate::calibrate::CalibrationData>,
     /// Real-time grid intensity from Electricity Maps (daemon only).
     /// Keys are lowercased cloud region names, values carry gCO2/kWh

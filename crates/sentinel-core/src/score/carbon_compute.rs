@@ -508,10 +508,10 @@ fn resolve_span_intensity<'a>(
 
 /// Pick the best-available energy (kWh) for a single span and report
 /// whether it came from a measured snapshot and whether a calibration
-/// factor was applied. Measured energy overrides the proxy model
-/// (calibrated or not). If no snapshot entry exists, the proxy model
-/// is used with optional per-operation weighting and optional per-service
-/// calibration factor.
+/// factor was applied. A measured entry replaces the proxy model
+/// (calibrated or not) on the same perimeter, the emitting service's host.
+/// If no snapshot entry exists, the proxy model is used with optional
+/// per-operation weighting and optional per-service calibration factor.
 fn resolve_span_energy(
     span: &crate::normalize::NormalizedEvent,
     ctx: &CarbonContext,

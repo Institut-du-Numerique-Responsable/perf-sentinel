@@ -172,7 +172,7 @@ Dans Perf Sentinel :
 pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1; // 0,1 mWh par opération I/O
 ```
 
-C'est une approximation grossière d'ordre de grandeur, pas une valeur mesurée. Elle tient compte d'une requête de base de données ou d'un aller-retour HTTP typique sur une infrastructure cloud. Le [projet Cloud Carbon Footprint](https://www.cloudcarbonfootprint.org/docs/methodology/) utilise une approche similaire d'estimation de l'énergie à partir de l'utilisation des ressources plutôt que d'une mesure directe.
+C'est une approximation grossière d'ordre de grandeur, pas une valeur mesurée. Chaque barreau de l'échelle, le proxy I/O compris, chiffre l'hôte propre du service émetteur pour chaque opération qu'il émet : CPU, mémoire et pile réseau de cet hôte. L'appelé (serveur de base de données, broker, service en aval) n'y figure jamais. L'énergie des hôtes de base de données et de broker n'entre dans un rapport que par une source déclarée ou mesurée : `[green.alumet.database]`, `[green.alumet.broker]` ou `[green.broker_static]`. Les poids par verbe SQL et les paliers HTTP sont des poids relatifs qui classent les familles d'opérations. Leurs ratios viennent de benchmarks de serveurs de base de données, mais ils ne facturent aucun hôte de base de données. Le [projet Cloud Carbon Footprint](https://www.cloudcarbonfootprint.org/docs/methodology/) utilise une approche similaire d'estimation de l'énergie à partir de l'utilisation des ressources plutôt que d'une mesure directe.
 
 La valeur doit être divulguée comme méthodologie selon les exigences SCI. Elle est documentée dans le code, dans [LIMITATIONS-FR.md](../LIMITATIONS-FR.md) et ici.
 
@@ -268,6 +268,8 @@ avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops)
 ```
 
 Cela préserve l'**échelle relative** (une réduction de 50% du gaspillage donne une chute de 50% du CO₂ évitable) sans nécessiter d'attribution de région par finding. En contrepartie, quand les ops évitables sont concentrées dans une région à haute intensité, ce ratio sous-attribue légèrement les économies. La simplification est documentée comme limitation connue et étiquetée au niveau des données via `methodology: "sci_v1_operational_ratio"`.
+
+**Le ratio compte des opérations, pas leur énergie.** Le même ratio par comptage met à l'échelle `co2.avoidable` et les deux paliers de gaspillage de la divulgation (opérationnel et canonique). Un SELECT évitable pèse une opération bien que son poids de verbe proxy soit 0,5x, toutes les opérations d'un service partagent une même énergie par op sur un backend mesuré, et une requête lente pèse une opération puisque `duration_us` n'est jamais lu. Le carbone évitable est donc surestimé quand les opérations évitables coûtent moins que le mélange comptabilisé, et sous-estimé quand elles coûtent plus.
 
 **Le carbone embarqué est exclu de l'évitable.** Vous ne pouvez pas faire disparaître le silicium fabriqué en corrigeant des requêtes N+1 : les émissions embarquées sont fixes par requête peu importe l'efficacité de l'application. L'estimation évitable ne considère que le terme opérationnel.
 
@@ -646,7 +648,7 @@ L'objet `green_summary.scoring_config` expose la configuration runtime de l'int�
 
 ## Coefficients énergétiques par opération
 
-Le modèle proxy utilise une seule constante `ENERGY_PER_IO_OP_KWH` (0,1 mWh) pour chaque opération I/O. Cela traite un `SELECT` en lecture seule sur un index de la même manière qu'un `INSERT` gourmand en disque écrivant dans le WAL et les pages de données. Les coefficients par opération affinent cela en appliquant un multiplicateur selon le type d'opération.
+Le modèle proxy utilise une seule constante `ENERGY_PER_IO_OP_KWH` (0,1 mWh) pour chaque opération I/O émise par le service émetteur. Cela traite un `SELECT` en lecture seule sur un index de la même manière qu'un `INSERT` gourmand en disque écrivant dans le WAL et les pages de données. Les coefficients par opération affinent cela en appliquant un multiplicateur selon le type d'opération. Ces multiplicateurs sont des poids relatifs sur le coût propre du service émetteur : ils classent les familles d'opérations et ne facturent aucun hôte de base de données.
 
 **Multiplicateurs SQL.** Le verbe est extrait du premier mot du champ `target` (la requête SQL brute), pas du champ `operation`. C'est nécessaire car les spans ingérés via OTLP stockent `db.system` (ex. "postgresql") dans `operation`, pas le verbe SQL. Le premier token délimité par des espaces donne le verbe SQL de façon fiable dans tous les formats d'ingestion (JSON natif, OTLP, Jaeger, Zipkin).
 
@@ -675,7 +677,7 @@ Deux défauts de Kafka cassent aussi la lecture naïve "une publication égale u
 
 **Assise normative.** La spécification SCI de la Green Software Foundation (texte v1.1.0, et non la publication payante ISO/IEC 21031:2024, qui n'a pas été consultée) autorise une valeur modélisée : "In situations where there is a lack of access, capability, or rights to the necessary real-world data, the SCI allows for data generated through modeling, using best estimates instead." C'est un repli conditionné à l'inaccessibilité de la donnée, pas un choix libre, et aucune sous-spécification GSF ne couvre les charges de type broker ou messaging.
 
-**Sources.** Les ratios relatifs proviennent de benchmarks académiques d'énergie SGBD (Z. Xu, Y.-C. Tu, X. Wang, "Exploring Power-Performance Tradeoffs in Database Systems", IEEE ICDE 2010, p. 485-496, Tsirogiannis, Harizopoulos, Shah, "Analyzing the Energy Efficiency of a Database Server", SIGMOD 2010, p. 231-242, Lella et al., "DBJoules: An Energy Measurement Tool for Database Management Systems", arXiv:2311.08961, 2023) et de la méthodologie Cloud Carbon Footprint. Les valeurs absolues sont des estimations d'ordre de grandeur. L'ordre relatif (SELECT < DELETE < INSERT/UPDATE) est plus robuste d'une génération de matériel à l'autre.
+**Sources.** Les ratios relatifs proviennent de benchmarks académiques d'énergie SGBD (Z. Xu, Y.-C. Tu, X. Wang, "Exploring Power-Performance Tradeoffs in Database Systems", IEEE ICDE 2010, p. 485-496, Tsirogiannis, Harizopoulos, Shah, "Analyzing the Energy Efficiency of a Database Server", SIGMOD 2010, p. 231-242, Lella et al., "DBJoules: An Energy Measurement Tool for Database Management Systems", arXiv:2311.08961, 2023) et de la méthodologie Cloud Carbon Footprint, empruntés comme poids relatifs seulement : ces benchmarks ont mesuré des serveurs de base de données, alors que les poids mettent à l'échelle le coût par op propre au service émetteur et ne facturent aucun hôte de base de données. Les valeurs absolues sont des estimations d'ordre de grandeur. L'ordre relatif (SELECT < DELETE < INSERT/UPDATE) est plus robuste d'une génération de matériel à l'autre.
 
 **Où cela s'intègre.** Dans la boucle de spans de `compute_carbon_report`, le chemin proxy de repli applique le coefficient :
 
@@ -687,7 +689,7 @@ let proxy_energy_kwh = if ctx.per_operation_coefficients {
 };
 ```
 
-Quand de l'énergie mesurée est disponible (Scaphandre ou cloud SPECpower), le coefficient n'est PAS appliqué. Les données mesurées sont toujours plus précises que des multiplicateurs heuristiques.
+Quand de l'énergie mesurée est disponible (n'importe quel backend mesuré), le coefficient n'est PAS appliqué : le backend mesuré remplace le proxy sur le même périmètre, l'hôte du service émetteur.
 
 **Détail hot path.** La fonction `energy_coefficient()` est `#[inline]` et n'alloue pas : elle utilise `split_ascii_whitespace().next()` (lazy, s'arrête au premier espace) pour l'extraction du verbe et `eq_ignore_ascii_case` pour la comparaison au lieu d'une conversion en minuscules. Le verbe le plus courant (SELECT) correspond dès la première comparaison.
 
@@ -768,6 +770,8 @@ Le consommateur planifié est perf-lint, une intégration IDE compagnon (pas enc
 `calibrate.rs` sert la sous-commande `calibrate`, qui transforme un CSV de puissance mesurée en multiplicateurs par service pour le proxy I/O. Elle comble l'écart entre "un coefficient directionnel" et "un coefficient directionnel ancré sur votre matériel", sans exiger d'agent de mesure au runtime.
 
 L'arithmétique est simple : pour chaque service présent **à la fois** dans les traces et dans les relevés, `energy_per_op = total_energy / total_ops`, et le facteur émis est ce rapport divisé par le coefficient proxy par défaut. Un service à zéro op sur la fenêtre d'observation est ignoré plutôt que doté d'un facteur, puisque diviser par lui fabriquerait un nombre à partir d'aucune preuve.
+
+Les relevés ne doivent couvrir que la part de l'hôte propre du service. La puissance d'une base de données ou d'un broker relève de `[green.alumet.database]`, `[green.alumet.broker]` ou `[green.broker_static]`, et l'intégrer au relevé d'un service la compte deux fois dès qu'une source d'hôte est déclarée.
 
 Deux formes d'entrée sont acceptées et détectées automatiquement depuis l'en-tête CSV. `timestamp,service,power_watts` est intégré en énergie via l'intervalle entre relevés consécutifs **par service**, pour que des services entrelacés ne corrompent pas mutuellement leurs intervalles. `timestamp,service,energy_kwh` est pris tel quel. Les lignes de commentaire commençant par `#` sont ignorées, car les exports de wattmètre portent couramment un préambule.
 

@@ -161,7 +161,7 @@ Le template HTTP sortant garde le host de l'appelé (`GET user-svc/api/x`), donc
 
 Les findings lents (`slow_sql`, `slow_http`) représentent des opérations qui sont **nécessaires mais lentes** : ce ne sont pas des I/O évitables. Par conséquent, les findings lents ne contribuent **pas** au ratio de gaspillage I/O ni au compteur `avoidable_io_ops` dans le résumé GreenOps. Ils apparaissent tout de même dans la liste des findings avec `green_impact.estimated_extra_io_ops: 0`.
 
-Le ratio de gaspillage mesure combien d'I/O pourraient être éliminées (N+1, redondant), tandis que les findings lents mettent en évidence des opérations nécessitant une optimisation (indexation, cache) plutôt qu'une élimination.
+Le ratio de gaspillage mesure combien d'I/O pourraient être éliminées (N+1, redondant), tandis que les findings lents mettent en évidence des opérations nécessitant une optimisation (indexation, cache) plutôt qu'une élimination. L'énergie ne lit pas non plus `duration_us` : une requête lente pèse une opération dans chaque chiffre d'énergie, donc le coût d'hôte d'une requête longue n'est pas modélisé.
 
 ## Commandes de session et ratio de gaspillage
 
@@ -440,7 +440,7 @@ Réserves communes aux deux flags :
 
 Perf Sentinel utilise un **modèle proxy I/O → énergie → CO₂** pour estimer l'empreinte carbone des charges de travail analysées. La chaîne comporte trois étapes, chacune introduisant une marge d'erreur :
 
-1. **Opérations I/O → énergie** : chaque opération I/O détectée (requête SQL, appel HTTP) est multipliée par une constante fixe `ENERGY_PER_IO_OP_KWH` de `0.0000001 kWh` (~0,1 mWh). Cette valeur n'est **pas mesurée** : c'est une approximation d'ordre de grandeur.
+1. **Opérations I/O → énergie** : chaque opération I/O émise par le service émetteur (requête SQL, appel HTTP) est multipliée par une constante fixe `ENERGY_PER_IO_OP_KWH` de `0.0000001 kWh` (~0,1 mWh). Cette valeur n'est **pas mesurée** : c'est une approximation d'ordre de grandeur. Chaque barreau de l'échelle, le proxy I/O compris, chiffre l'hôte propre du service émetteur pour chaque opération qu'il émet : CPU, mémoire et pile réseau de cet hôte. L'appelé (serveur de base de données, broker, service en aval) n'y figure jamais. L'énergie des hôtes de base de données et de broker n'entre dans un rapport que par une source déclarée ou mesurée : `[green.alumet.database]`, `[green.alumet.broker]` ou `[green.broker_static]`. Les poids par verbe SQL et les paliers HTTP sont des poids relatifs qui classent les familles d'opérations. Leurs ratios viennent de benchmarks de serveurs de base de données, mais ils ne facturent aucun hôte de base de données.
 2. **Énergie → CO₂** : l'énergie est multipliée par une intensité carbone réseau par région (gCO₂eq/kWh) issue d'Electricity Maps et Cloud Carbon Footprint (moyennes annuelles 2023-2024), avec un PUE par fournisseur (AWS 1,15, GCP 1,09, Azure 1,17, Generic 1,2). Les trois PUE fournisseurs ne sont pas strictement comparables en périmètre. AWS publie une moyenne flotte mondiale pour l'année calendaire 2024, GCP une moyenne TTM (trailing-twelve-month) sur la flotte mondiale en 2024, et Azure une valeur FY25 (juillet 2024 à juin 2025) pour ses seuls centres de données détenus et exploités en propre (les sites loués et en colocation sont exclus). L'écart de fenêtre est d'environ 12 mois et l'écart de périmètre est de l'ordre de quelques pourcents de la flotte.
 3. **Carbone embarqué (`M` dans SCI v1.0)** : émissions de fabrication matérielle amorties à un défaut configurable de `0.001 gCO₂/request`. Indépendant de la région.
 
@@ -706,7 +706,7 @@ Perf Sentinel embarque une intégration opt-in avec le standard BMC [Redfish](ht
 
 #### Ce que le cloud SPECpower améliore.
 
-Le modèle proxy utilise une constante d'énergie fixe pour toutes les opérations I/O. Le cloud SPECpower la remplace par une estimation par service qui tient compte de l'utilisation CPU :
+Le modèle proxy utilise une constante d'énergie fixe pour toutes les opérations I/O. Le cloud SPECpower la remplace, sur le même périmètre, par une estimation du nœud qui exécute chaque service, qui tient compte de l'utilisation CPU :
 
 ```
 watts = idle_watts + (max_watts - idle_watts) * (cpu_percent / 100)
@@ -717,7 +717,7 @@ Cela capture la variation de puissance proportionnelle à la charge, ce que la c
 
 #### Ce que le cloud SPECpower ne fait PAS.
 
-1. **Attribution par finding :** comme Scaphandre, c'est un coefficient par service.
+1. **Attribution par finding :** comme Scaphandre, c'est un coefficient par service. Il couvre le nœud du service émetteur, jamais la base de données ou le broker qu'il appelle.
 2. **Puissance mémoire ou I/O :** les données SPECpower couvrent le CPU et la carte mère, pas le stockage ni le réseau.
 3. **Correction de la mutualisation :** le modèle suppose que toute la puissance de l'instance est attribuée à la charge tracée par Perf Sentinel.
 
@@ -747,13 +747,13 @@ Le cloud SPECpower est une fonctionnalité réservée au daemon (mode `watch`). 
 
 ### Coefficients énergétiques par opération
 
-Les multiplicateurs d'énergie par opération (pondération par verbe SQL, paliers de taille de payload HTTP) sont des estimations heuristiques dérivées de benchmarks académiques d'énergie SGBD (Xu et al. ICDE 2010, Tsirogiannis et al. SIGMOD 2010) et de la méthodologie Cloud Carbon Footprint. Les ratios relatifs entre opérations (SELECT < DELETE < INSERT/UPDATE) sont plus fiables que les valeurs absolues, qui varient selon les générations de matériel et les moteurs de bases de données.
+Les multiplicateurs d'énergie par opération (pondération par verbe SQL, paliers de taille de payload HTTP) sont des estimations heuristiques dérivées de benchmarks académiques d'énergie SGBD (Xu et al. ICDE 2010, Tsirogiannis et al. SIGMOD 2010) et de la méthodologie Cloud Carbon Footprint. Ce sont des poids relatifs qui classent les familles d'opérations du service émetteur : les benchmarks ont mesuré des serveurs de base de données, mais les poids ne facturent aucun hôte de base de données. Les ratios relatifs entre opérations (SELECT < DELETE < INSERT/UPDATE) sont plus fiables que les valeurs absolues, qui varient selon les générations de matériel et les moteurs de bases de données.
 
 Limitations principales :
 
-- **Pas d'analyse de complexité de requête.** Un SELECT avec full table scan coûte plus d'énergie qu'un point lookup indexé, mais les deux reçoivent le même coefficient 0.5x. Les coefficients capturent la classe d'opération moyenne, pas le plan d'exécution propre à la requête.
+- **Pas d'analyse de complexité de requête.** Un SELECT avec full table scan coûte plus d'énergie qu'un point lookup indexé, mais les deux reçoivent le même coefficient 0.5x. Les coefficients capturent la classe d'opération moyenne, pas le plan d'exécution propre à la requête. Une requête longue pèse aussi une opération : `duration_us` n'est jamais lu, donc son coût d'hôte n'est pas modélisé.
 - **La taille du payload HTTP nécessite des attributs OTel.** L'attribut `http.response.body.size` (ou l'ancien `http.response_content_length`) doit être présent sur les spans HTTP. Quand il est absent, le coefficient retombe à 1.0x (la constante de base). La plupart des bibliothèques d'instrumentation HTTP n'émettent pas cet attribut par défaut.
-- **Non utilisé avec l'énergie mesurée.** Quand un backend mesuré fournit de l'énergie par service, les coefficients par opération sont ignorés, car les données mesurées sont toujours plus précises que des multiplicateurs heuristiques.
+- **Non utilisé avec l'énergie mesurée.** Quand un backend mesuré fournit de l'énergie par service, les coefficients par opération sont ignorés : la lecture mesurée remplace le proxy sur le même périmètre, l'hôte du service émetteur.
 
 Mettre `per_operation_coefficients = false` pour désactiver cette fonctionnalité et utiliser la constante d'énergie fixe pour toutes les opérations.
 

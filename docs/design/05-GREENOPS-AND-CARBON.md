@@ -172,7 +172,7 @@ In Perf Sentinel:
 pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1; // 0.1 mWh per I/O op
 ```
 
-This is a rough order-of-magnitude approximation, not a measured value. It accounts for a typical database query or HTTP round-trip on cloud infrastructure. The [Cloud Carbon Footprint project](https://www.cloudcarbonfootprint.org/docs/methodology/) uses a similar approach of estimating energy from resource usage rather than direct measurement.
+This is a rough order-of-magnitude approximation, not a measured value. Every rung of the ladder, the I/O proxy included, prices the emitting service's own host for each operation it issues: CPU, memory and network stack on that host. The callee (database server, broker, downstream service) is never in it. Database and broker host energy enters a report only through a declared or measured source: `[green.alumet.database]`, `[green.alumet.broker]` or `[green.broker_static]`. SQL verb weights and HTTP tiers are relative weights that rank operation classes. Their ratios come from database-server benchmarks, but they bill no database host. The [Cloud Carbon Footprint project](https://www.cloudcarbonfootprint.org/docs/methodology/) uses a similar approach of estimating energy from resource usage rather than direct measurement.
 
 The value must be disclosed as methodology per SCI requirements. It is documented in the code, in [LIMITATIONS.md](../LIMITATIONS.md) and here.
 
@@ -268,6 +268,8 @@ avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops)
 ```
 
 This preserves the **relative scale** (a 50% waste reduction yields a 50% drop in avoidable CO₂) without requiring per-finding region attribution. The trade-off is that when avoidable ops are concentrated in a high-intensity region, this ratio slightly under-attributes the savings. The simplification is documented as a known limitation and tagged at the data layer via `methodology: "sci_v1_operational_ratio"`.
+
+**The ratio counts operations, not their energy.** The same op-count ratio scales `co2.avoidable` and both disclosure waste tiers (operational and canonical). An avoidable SELECT weighs one operation although its proxy verb weight is 0.5x, every operation of a service shares one energy per op on a measured backend, and a slow query weighs one operation because `duration_us` is never read. Avoidable carbon is therefore overstated when the avoidable operations are cheaper than the accounted mix, and understated when they are heavier.
 
 **Embodied carbon is excluded from avoidable.** You can't optimize away manufactured silicon by fixing N+1 queries: embodied emissions are fixed per request regardless of how efficient the application is. The avoidable estimate only considers the operational term.
 
@@ -646,7 +648,7 @@ The `green_summary.scoring_config` object exposes the runtime configuration of t
 
 ## Per-operation energy coefficients
 
-The proxy model uses a single `ENERGY_PER_IO_OP_KWH` constant (0.1 mWh) for every I/O operation. This treats a read-only `SELECT` hitting an index the same as a disk-heavy `INSERT` writing to WAL and data pages. The per-operation coefficient feature refines this by applying a multiplier based on the operation type.
+The proxy model uses a single `ENERGY_PER_IO_OP_KWH` constant (0.1 mWh) for every I/O operation the emitting service issues. This treats a read-only `SELECT` hitting an index the same as a disk-heavy `INSERT` writing to WAL and data pages. The per-operation coefficient feature refines this by applying a multiplier based on the operation type. The multipliers are relative weights on the emitting service's own cost: they rank operation classes and bill no database host.
 
 **SQL verb multipliers.** The verb is extracted from the first word of the `target` field (the raw SQL statement), not from the `operation` field. This is necessary because OTLP-ingested spans store `db.system` (e.g., "postgresql") in `operation`, not the SQL verb. The first whitespace-delimited token reliably gives the SQL verb across all ingestion formats (native JSON, OTLP, Jaeger, Zipkin).
 
@@ -675,7 +677,7 @@ Two Kafka defaults also break the naive "one publish equals one durable write" r
 
 **Standards footing.** The Green Software Foundation SCI specification (text v1.1.0, not the paid ISO/IEC 21031:2024 publication, which was not consulted) permits a modelled value: "In situations where there is a lack of access, capability, or rights to the necessary real-world data, the SCI allows for data generated through modeling, using best estimates instead." That is a conditional fallback tied to the data being inaccessible, not a free choice, and no GSF sub-specification covers broker or messaging workloads.
 
-**Sources.** The relative ratios are derived from academic DBMS energy benchmarks (Z. Xu, Y.-C. Tu, X. Wang, "Exploring Power-Performance Tradeoffs in Database Systems", IEEE ICDE 2010, pp. 485-496; Tsirogiannis, Harizopoulos, Shah, "Analyzing the Energy Efficiency of a Database Server", SIGMOD 2010, pp. 231-242; Lella et al., "DBJoules: An Energy Measurement Tool for Database Management Systems", arXiv:2311.08961, 2023) and the Cloud Carbon Footprint methodology. The absolute values are order-of-magnitude estimates. The relative ordering (SELECT < DELETE < INSERT/UPDATE) is more robust across hardware generations.
+**Sources.** The relative ratios are derived from academic DBMS energy benchmarks (Z. Xu, Y.-C. Tu, X. Wang, "Exploring Power-Performance Tradeoffs in Database Systems", IEEE ICDE 2010, pp. 485-496; Tsirogiannis, Harizopoulos, Shah, "Analyzing the Energy Efficiency of a Database Server", SIGMOD 2010, pp. 231-242; Lella et al., "DBJoules: An Energy Measurement Tool for Database Management Systems", arXiv:2311.08961, 2023) and the Cloud Carbon Footprint methodology, borrowed as relative weights only: those benchmarks measured database servers, while the weights scale the emitting service's own per-op cost and bill no database host. The absolute values are order-of-magnitude estimates. The relative ordering (SELECT < DELETE < INSERT/UPDATE) is more robust across hardware generations.
 
 **Where it plugs in.** In `compute_carbon_report`'s span loop, the proxy fallback path applies the coefficient:
 
@@ -687,7 +689,7 @@ let proxy_energy_kwh = if ctx.per_operation_coefficients {
 };
 ```
 
-When measured energy is available (Scaphandre or cloud SPECpower), the coefficient is NOT applied. Measured data is always more accurate than heuristic multipliers.
+When measured energy is available (any measured backend), the coefficient is NOT applied: the measured backend replaces the proxy on the same perimeter, the emitting service's host.
 
 **Hot path detail.** The `energy_coefficient()` function is `#[inline]` and avoids allocation: it uses `split_ascii_whitespace().next()` (lazy, stops at the first space) for verb extraction and `eq_ignore_ascii_case` for matching instead of lowercasing. The most common verb (SELECT) matches on the first comparison.
 
@@ -768,6 +770,8 @@ The planned consumer is perf-lint, a companion IDE integration (not yet publishe
 `calibrate.rs` backs the `calibrate` subcommand, which turns a measured power CSV into per-service multipliers for the I/O proxy. It closes the gap between "a directional coefficient" and "a directional coefficient anchored on your hardware" without requiring an agent at runtime.
 
 The arithmetic is plain: for each service present in **both** the traces and the readings, `energy_per_op = total_energy / total_ops`, and the emitted factor is that divided by the default proxy coefficient. A service with zero ops in the observation window is skipped rather than assigned a factor, since dividing by it would manufacture a number out of no evidence.
+
+Readings must cover the service's own host share only. Database or broker power belongs to `[green.alumet.database]`, `[green.alumet.broker]` or `[green.broker_static]`, and folding it into a service's reading counts it twice once a host source is declared.
 
 Two input shapes are accepted and auto-detected from the CSV header. `timestamp,service,power_watts` is integrated into energy using the interval between consecutive readings **per service**, so interleaved services do not corrupt each other's intervals. `timestamp,service,energy_kwh` is taken as-is. Comment lines starting with `#` are skipped, because wattmeter exports routinely carry a preamble.
 

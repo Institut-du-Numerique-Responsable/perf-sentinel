@@ -4,6 +4,10 @@
 //! energy readings (e.g. from Scaphandre RAPL exports or cloud monitoring) and
 //! produces adjusted energy-per-op coefficients. These are written to a TOML
 //! file that can be loaded via `[green] calibration_file`.
+//!
+//! Readings must cover the service's own host share only. Database or
+//! broker power belongs to their `[green]` sections, and folding it into a
+//! service's reading counts it twice once a host source is declared.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
