@@ -221,6 +221,10 @@ fn standardized_example_fragments_compose() {
     assert!(config.green.kepler.is_some());
     assert!(config.green.redfish.is_some());
     assert!(config.green.electricity_maps.is_some());
+    assert_eq!(
+        validate::green::overlapping_node_readings(&config.green),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -3617,6 +3621,121 @@ fn validate_redfish_rejects_scrape_interval_above_max() {
     cfg.scrape_interval = Duration::from_secs(4000);
     let err = Config::validate_redfish(&cfg).expect_err("scrape_interval above MAX must error");
     assert!(err.contains("4000"));
+}
+
+fn redfish_with_two_chassis(first: &str, second: &str) -> RedfishConfig {
+    let mut cfg = minimal_redfish_config();
+    cfg.endpoints.clear();
+    cfg.endpoints
+        .insert("rack-a".to_string(), redfish_endpoint(first));
+    cfg.endpoints
+        .insert("rack-b".to_string(), redfish_endpoint(second));
+    cfg
+}
+
+#[test]
+fn validate_redfish_rejects_one_chassis_declared_twice() {
+    let cases = [
+        (
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+        ),
+        (
+            "https://BMC.Local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+        ),
+        (
+            "https://bmc.local:443/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/1/Power/",
+        ),
+        (
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/1/EnvironmentMetrics",
+        ),
+        (
+            "http://[::1]/redfish/v1/Chassis/1/Sensors/PowerMeter",
+            "http://[::1]:80/redfish/v1/Chassis/1/Power",
+        ),
+    ];
+    for (first, second) in cases {
+        let err = Config::validate_redfish(&redfish_with_two_chassis(first, second))
+            .expect_err("one chassis under two ids must error");
+        assert!(
+            err.contains("'rack-a' and 'rack-b' read the same chassis"),
+            "{first} vs {second}: {err}"
+        );
+    }
+}
+
+#[test]
+fn validate_redfish_accepts_two_chassis_on_one_host_and_distinct_hosts() {
+    let cases = [
+        (
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/2/Power",
+        ),
+        (
+            "https://bmc-1.local/redfish/v1/Chassis/1/Power",
+            "https://bmc-2.local/redfish/v1/Chassis/1/Power",
+        ),
+        (
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local:8443/redfish/v1/Chassis/1/Power",
+        ),
+    ];
+    for (first, second) in cases {
+        assert!(
+            Config::validate_redfish(&redfish_with_two_chassis(first, second)).is_ok(),
+            "{first} vs {second}"
+        );
+    }
+}
+
+fn cloud_and_redfish_toml(chassis_services: &[&str]) -> String {
+    let toml = String::from(
+        r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+cpu_metric = "node_cpu"
+
+[green.cloud.services]
+"a" = { idle_watts = 10.0, max_watts = 50.0 }
+"b" = { idle_watts = 10.0, max_watts = 50.0 }
+
+[green.redfish.endpoints.rack1]
+url = "https://bmc.local/redfish/v1/Chassis/1/Power"
+schema = "legacy_power"
+
+[green.redfish.service_mappings]
+"#,
+    );
+    let mappings: Vec<String> = chassis_services
+        .iter()
+        .map(|service| format!("\"{service}\" = \"rack1\""))
+        .collect();
+    toml + &mappings.join("\n")
+}
+
+fn node_overlaps(chassis_services: &[&str]) -> Vec<String> {
+    let config = load_from_str(&cloud_and_redfish_toml(chassis_services))
+        .expect("overlapping node readings warn, they do not reject");
+    validate::green::overlapping_node_readings(&config.green)
+}
+
+#[test]
+fn overlapping_node_readings_warn_without_containment() {
+    let warnings = node_overlaps(&["b", "c"]);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    let message = &warnings[0];
+    assert!(message.contains("CPU query 'node_cpu' (a, b)"), "{message}");
+    assert!(message.contains("chassis 'rack1' (b, c)"), "{message}");
+    assert!(message.contains("share b: a keep a share"), "{message}");
+}
+
+#[test]
+fn overlapping_node_readings_accept_containment_and_disjoint_groups() {
+    assert_eq!(node_overlaps(&["a", "b", "c"]), Vec::<String>::new());
+    assert_eq!(node_overlaps(&["c"]), Vec::<String>::new());
 }
 
 #[test]

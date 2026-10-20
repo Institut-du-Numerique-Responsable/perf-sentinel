@@ -1,6 +1,6 @@
 //! Validation of the `[green]` section and its energy-backend subsections.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::score::alumet::AlumetConfig;
 use crate::score::cloud_energy::config::{CloudEnergyConfig, ServiceCloudConfig};
@@ -57,6 +57,127 @@ pub(crate) fn mixed_query_envelope_conflicts(cfg: &CloudEnergyConfig) -> Vec<Str
 fn warn_mixed_query_envelopes(cfg: &CloudEnergyConfig) {
     for message in mixed_query_envelope_conflicts(cfg) {
         tracing::warn!("{message}");
+    }
+}
+
+/// Scheme, host, port and chassis path of a Redfish endpoint URL.
+type RedfishChassisKey = (String, String, u16, String);
+
+const REDFISH_CHASSIS_PREFIX: &str = "/redfish/v1/Chassis/";
+
+/// Chassis identity of an endpoint URL (rule R1): scheme and host
+/// lowercased, the port or the scheme default, and the path cut to
+/// `/redfish/v1/Chassis/<id>` so `/Power`, `/EnvironmentMetrics` and
+/// `/Sensors/<x>` of one chassis collide. Other paths keep their full
+/// form without a trailing slash. Parsed by hand like
+/// `validate_http_authority`, which has already accepted the URL,
+/// because `hyper` is optional outside the daemon features.
+fn redfish_chassis_key(url: &str) -> RedfishChassisKey {
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
+    let scheme = scheme.to_ascii_lowercase();
+    let (authority, path) = rest.find('/').map_or((rest, ""), |i| rest.split_at(i));
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    // `]` closes a bracketed IPv6 host, so a colon after it starts the port.
+    let host_end = authority.rfind(']').map_or(0, |i| i + 1);
+    let (host, port) = match authority[host_end..].rfind(':') {
+        Some(i) => authority.split_at(host_end + i),
+        None => (authority, ""),
+    };
+    let port = port
+        .strip_prefix(':')
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(default_port);
+    let path = path
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/');
+    let path_key = match path.strip_prefix(REDFISH_CHASSIS_PREFIX) {
+        Some(rest) if !rest.is_empty() => {
+            let id = rest.split('/').next().unwrap_or(rest);
+            format!("{REDFISH_CHASSIS_PREFIX}{id}")
+        }
+        _ => path.to_string(),
+    };
+    (scheme, host.to_ascii_lowercase(), port, path_key)
+}
+
+/// A node-level reading and the services it is attributed to.
+type NodeGroup = (String, Vec<String>);
+
+/// `service -> key` inverted to `key -> sorted services`.
+fn groups_by_value(section: &str, map: &HashMap<String, String>) -> Vec<NodeGroup> {
+    let mut groups: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (service, key) in map {
+        groups.entry(key).or_default().push(service.clone());
+    }
+    groups
+        .into_iter()
+        .map(|(key, mut services)| {
+            services.sort();
+            (format!("{section} '{key}'"), services)
+        })
+        .collect()
+}
+
+/// Node-level groups ranked by precedence, lowest first: cloud CPU
+/// queries, Redfish chassis, then Alumet domains (only under
+/// `label_key = "domain"`, the one Alumet key that names a node).
+fn node_level_groups(green: &crate::config::GreenConfig) -> [Vec<NodeGroup>; 3] {
+    let cloud = green.cloud_energy.as_ref().map_or_else(Vec::new, |cfg| {
+        cfg.cpu_query_groups()
+            .into_iter()
+            .map(|(query, services)| (format!("[green.cloud] CPU query '{query}'"), services))
+            .collect()
+    });
+    let redfish = green.redfish.as_ref().map_or_else(Vec::new, |cfg| {
+        groups_by_value("[green.redfish] chassis", &cfg.service_mappings)
+    });
+    let alumet = green
+        .alumet
+        .as_ref()
+        .filter(|cfg| cfg.label_key == "domain")
+        .map_or_else(Vec::new, |cfg| {
+            groups_by_value("[green.alumet] domain", &cfg.service_mappings)
+        });
+    [cloud, redfish, alumet]
+}
+
+/// Messages for node-level readings that overlap without containment
+/// (rule O1). A lower group X sharing services with a higher group Y,
+/// with members outside Y, still splits its node among those members
+/// while Y bills the same node again.
+pub(crate) fn overlapping_node_readings(green: &crate::config::GreenConfig) -> Vec<String> {
+    let ranks = node_level_groups(green);
+    let mut out = Vec::new();
+    for (i, lower) in ranks.iter().enumerate() {
+        for higher in &ranks[i + 1..] {
+            push_overlaps(lower, higher, &mut out);
+        }
+    }
+    out
+}
+
+fn push_overlaps(lower: &[NodeGroup], higher: &[NodeGroup], out: &mut Vec<String>) {
+    for (x_label, x_services) in lower {
+        for (y_label, y_services) in higher {
+            let (shared, outside): (Vec<&str>, Vec<&str>) = x_services
+                .iter()
+                .map(String::as_str)
+                .partition(|s| y_services.iter().any(|y| y == s));
+            if shared.is_empty() || outside.is_empty() {
+                continue;
+            }
+            out.push(format!(
+                "{x_label} ({}) and {y_label} ({}) share {}: {} keep a share of the node \
+                 {x_label} reads while {y_label} bills it again. Map every service of that \
+                 node to {y_label}, or each service to the one node it runs on",
+                x_services.join(", "),
+                y_services.join(", "),
+                shared.join(", "),
+                outside.join(", "),
+            ));
+        }
     }
 }
 
@@ -143,7 +264,14 @@ impl Config {
             Self::validate_electricity_maps(cfg)?;
         }
         Self::validate_grid_feeds(&self.green.grid_feeds)?;
+        self.warn_overlapping_node_readings();
         Ok(())
+    }
+
+    fn warn_overlapping_node_readings(&self) {
+        for message in overlapping_node_readings(&self.green) {
+            tracing::warn!("{message}");
+        }
     }
 
     fn validate_embodied_carbon(value: f64) -> Result<(), String> {
@@ -712,35 +840,51 @@ impl Config {
     }
 
     /// Validate each `chassis_id -> RedfishEndpoint` pair in
-    /// `[green.redfish.endpoints]`. The `schema` field is type-checked
-    /// by serde at deserialization, so only the URL needs runtime
-    /// validation here.
+    /// `[green.redfish.endpoints]`, in sorted id order, and reject a
+    /// second id that resolves a chassis already declared (rule R1):
+    /// its power would be counted once per id. The `schema` field is
+    /// type-checked by serde at deserialization, so only the URL needs
+    /// runtime validation here.
     fn validate_redfish_endpoints(
         endpoints: &HashMap<String, RedfishEndpoint>,
     ) -> Result<(), String> {
-        for (chassis_id, endpoint) in endpoints {
-            if chassis_id.is_empty() || chassis_id.len() > 256 {
+        let mut ids: Vec<&String> = endpoints.keys().collect();
+        ids.sort();
+        let mut seen: HashMap<RedfishChassisKey, &str> = HashMap::new();
+        for chassis_id in ids {
+            let url = &endpoints[chassis_id].url;
+            Self::validate_redfish_endpoint(chassis_id, url)?;
+            if let Some(first) = seen.insert(redfish_chassis_key(url), chassis_id) {
                 return Err(format!(
-                    "[green.redfish] endpoints chassis id '{chassis_id}' must be 1-256 chars"
+                    "[green.redfish] endpoints '{first}' and '{chassis_id}' read the same \
+                     chassis ('{url}'), so its power would be counted once per id. Declare \
+                     the chassis once and map its services to that id"
                 ));
             }
-            if has_control_char(chassis_id) {
-                return Err(format!(
-                    "[green.redfish] endpoints chassis id '{chassis_id}' contains control characters"
-                ));
-            }
-            let url = &endpoint.url;
-            if !url.starts_with("http://") && !url.starts_with("https://") {
-                return Err(format!(
-                    "[green.redfish] endpoint URL for chassis '{chassis_id}' must start with 'http://' or 'https://', got '{url}'"
-                ));
-            }
-            validate_http_authority(
-                url,
-                &format!("[green.redfish] endpoint URL for chassis '{chassis_id}'"),
-            )?;
         }
         Ok(())
+    }
+
+    fn validate_redfish_endpoint(chassis_id: &str, url: &str) -> Result<(), String> {
+        if chassis_id.is_empty() || chassis_id.len() > 256 {
+            return Err(format!(
+                "[green.redfish] endpoints chassis id '{chassis_id}' must be 1-256 chars"
+            ));
+        }
+        if has_control_char(chassis_id) {
+            return Err(format!(
+                "[green.redfish] endpoints chassis id '{chassis_id}' contains control characters"
+            ));
+        }
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(format!(
+                "[green.redfish] endpoint URL for chassis '{chassis_id}' must start with 'http://' or 'https://', got '{url}'"
+            ));
+        }
+        validate_http_authority(
+            url,
+            &format!("[green.redfish] endpoint URL for chassis '{chassis_id}'"),
+        )
     }
 
     /// Validate each `service -> chassis_id` pair in `[green.redfish.service_mappings]`.

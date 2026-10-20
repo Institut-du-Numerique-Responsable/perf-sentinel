@@ -1513,7 +1513,10 @@ fn cmd_calibrate(
         }
     };
 
-    for warning in sentinel_core::calibrate::validate_results(&results) {
+    for warning in sentinel_core::calibrate::validate_results(&results)
+        .into_iter()
+        .chain(sentinel_core::calibrate::shared_series_warnings(&readings))
+    {
         eprintln!("Warning: {warning}");
     }
 
