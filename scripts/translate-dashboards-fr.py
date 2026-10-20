@@ -67,11 +67,21 @@ t("title", "OTLP span intake (received vs filtered)", "Admission des spans OTLP 
 t("title", "Report exports rate", "Débit d'exports de rapport")
 t("title", "Energy per scoring window (kWh)", "Énergie par fenêtre de scoring (kWh)")
 t("title", "Carbon per scoring window (gCO2e)", "Carbone par fenêtre de scoring (gCO2e)")
+t("title", "Energy over the selected range (kWh)", "Énergie sur la plage choisie (kWh)")
+t("title", "Carbon over the selected range (gCO2e)", "Carbone sur la plage choisie (gCO2e)")
 
 # --- template variable labels ---
 t("label", "Daemon namespace", "Namespace du daemon")
 
 # --- panel and variable descriptions ---
+
+t("description",
+  "Electricity attributed to the analysed workload. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window panel above would count a window once per scrape. No data on a range that predates the counter.",
+  "Électricité attribuée à la charge analysée. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner le panneau par fenêtre ci-dessus compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.")
+
+t("description",
+  "Operational carbon of the analysed workload, embodied and network transport excluded. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window panel above would count a window once per scrape. No data on a range that predates the counter.",
+  "Carbone opérationnel de la charge analysée, hors carbone incorporé et transport réseau. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner le panneau par fenêtre ci-dessus compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.")
 t("description",
   "The Prometheus instance scraping the perf-sentinel daemon /metrics endpoint.",
   "L'instance Prometheus qui scrape l'endpoint /metrics du daemon perf-sentinel.")

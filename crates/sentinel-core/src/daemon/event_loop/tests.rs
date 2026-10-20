@@ -1325,6 +1325,37 @@ async fn process_traces_green_disabled() {
 }
 
 #[tokio::test]
+async fn energy_and_carbon_counters_sum_every_window() {
+    let metrics = MetricsState::new();
+    let ctx = score::carbon::CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        ..empty_carbon_ctx()
+    };
+    let store = findings_store::FindingsStore::new(100);
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    let (mut kwh, mut gco2) = (0.0, 0.0);
+    for trace in ["t1", "t2"] {
+        let events: Vec<_> = (1..=6)
+            .map(|i| make_normalized(trace, &format!("SELECT * FROM item WHERE id = {i}")))
+            .collect();
+        process_traces(
+            vec![(trace.to_string(), events)],
+            test_ctx(&detect_config, &ctx, &metrics, &store, true, &cell),
+        )
+        .await;
+        kwh += metrics.energy_kwh.get();
+        gco2 += metrics.carbon_gco2.get();
+    }
+    assert!(kwh > 0.0 && gco2 > 0.0, "the windows scored nothing");
+    assert!((metrics.energy_kwh_total.get() - kwh).abs() < 1e-12);
+    assert!((metrics.carbon_gco2_total.get() - gco2).abs() < 1e-9);
+    let output = metrics.render();
+    assert!(output.contains("perf_sentinel_energy_kwh_total"));
+    assert!(output.contains("perf_sentinel_carbon_gco2_total"));
+}
+
+#[tokio::test]
 async fn process_traces_publishes_green_summary_to_cell() {
     // Asserts the contract behind /api/export/report: each batch
     // overwrites the shared cell so live snapshots pick up the

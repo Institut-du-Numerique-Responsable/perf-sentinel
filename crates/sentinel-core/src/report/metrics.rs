@@ -150,6 +150,12 @@ pub struct MetricsState {
     /// `CO2e`, summed across regions. Scalar, same rationale as
     /// `energy_kwh`.
     pub carbon_gco2: Gauge,
+    /// Running sum of `energy_kwh` over every scoring window since
+    /// start. `increase()` over it gives the energy of any time range,
+    /// which summing the per-window gauge cannot.
+    pub energy_kwh_total: Counter,
+    /// Running sum of `carbon_gco2`, same use as `energy_kwh_total`.
+    pub carbon_gco2_total: Counter,
     /// Configured cap of the correlation window (`[daemon]
     /// max_active_traces`), set once at startup. Pairs with
     /// `active_traces` for a headroom panel.
@@ -520,6 +526,18 @@ impl MetricsState {
         )
         .expect("metric creation should not fail");
 
+        let energy_kwh_total = Counter::new(
+            "perf_sentinel_energy_kwh_total",
+            "Workload energy summed over every scoring window since start, kWh",
+        )
+        .expect("metric creation should not fail");
+
+        let carbon_gco2_total = Counter::new(
+            "perf_sentinel_carbon_gco2_total",
+            "Operational carbon summed over every scoring window since start, grams CO2e (excludes embodied and network transport)",
+        )
+        .expect("metric creation should not fail");
+
         let max_active_traces = Gauge::new(
             "perf_sentinel_max_active_traces",
             "Configured cap of the correlation window ([daemon] max_active_traces)",
@@ -738,6 +756,12 @@ impl MetricsState {
             .expect("registration should not fail");
         registry
             .register(Box::new(carbon_gco2.clone()))
+            .expect("registration should not fail");
+        registry
+            .register(Box::new(energy_kwh_total.clone()))
+            .expect("registration should not fail");
+        registry
+            .register(Box::new(carbon_gco2_total.clone()))
             .expect("registration should not fail");
         registry
             .register(Box::new(max_active_traces.clone()))
@@ -1198,6 +1222,8 @@ impl MetricsState {
             io_waste_ratio,
             energy_kwh,
             carbon_gco2,
+            energy_kwh_total,
+            carbon_gco2_total,
             max_active_traces,
             analysis_queue_capacity,
             max_retained_findings,

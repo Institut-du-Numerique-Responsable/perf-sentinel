@@ -1806,6 +1806,62 @@
         },
         "overrides": []
       }
+    },
+    {
+      "title": "Energy over the selected range (kWh)",
+      "description": "Electricity attributed to the analysed workload. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window panel above would count a window once per scrape. No data on a range that predates the counter.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 110
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(perf_sentinel_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth"
+        }
+      }
+    },
+    {
+      "title": "Carbon over the selected range (gCO2e)",
+      "description": "Operational carbon of the analysed workload, embodied and network transport excluded. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window panel above would count a window once per scrape. No data on a range that predates the counter.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 110
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(perf_sentinel_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "massg"
+        }
+      }
     }
   ],
   "schemaVersion": 39,

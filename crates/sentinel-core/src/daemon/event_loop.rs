@@ -1447,10 +1447,18 @@ fn emit_findings_and_update_metrics(
     // Window-scoped energy/carbon scalars for the Grafana Trends panels.
     // Per-service/region breakdown stays off /metrics (cardinality). The
     // totals are bounded and safe to expose as gauges.
+    let window_gco2: f64 = green_summary.regions.iter().map(|r| r.co2_gco2).sum();
     metrics.energy_kwh.set(green_summary.energy_kwh);
-    metrics
-        .carbon_gco2
-        .set(green_summary.regions.iter().map(|r| r.co2_gco2).sum());
+    metrics.carbon_gco2.set(window_gco2);
+    // inc_by panics on a negative value, and a NaN would poison the sum.
+    for (counter, value) in [
+        (&metrics.energy_kwh_total, green_summary.energy_kwh),
+        (&metrics.carbon_gco2_total, window_gco2),
+    ] {
+        if value.is_finite() && value > 0.0 {
+            counter.inc_by(value);
+        }
+    }
 
     // Per-(service, grouping) avoidable and analysed I/O ops: the two
     // series a per-service waste ratio divides, from the same scoring
