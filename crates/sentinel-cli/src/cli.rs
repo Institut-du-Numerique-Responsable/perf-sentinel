@@ -988,6 +988,13 @@ pub(crate) enum Commands {
         /// with `cosign sign-blob` for signed disclosures.
         #[arg(long, value_name = "PATH")]
         emit_attestation: Option<PathBuf>,
+        /// Total requests across the in-scope applications over the
+        /// period, the denominator of `coverage_percentage`. Overrides
+        /// `scope_manifest.total_requests_in_period` from the org config,
+        /// so a figure known only once the period closes can be passed
+        /// per run.
+        #[arg(long, value_name = "N")]
+        total_requests_in_period: Option<u64>,
         /// Launch the read-only preview TUI: tune the period (month /
         /// quarter / year / custom), intent and confidentiality live, see
         /// the aggregated summary, and copy the equivalent command. Never

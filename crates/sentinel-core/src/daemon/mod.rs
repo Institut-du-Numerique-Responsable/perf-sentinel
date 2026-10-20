@@ -705,6 +705,52 @@ total_applications_declared = 1
     }
 
     #[tokio::test]
+    async fn daemon_run_refuses_official_when_specpower_version_drifts() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        // Publishable except for a table date the binary does not embed.
+        writeln!(
+            file,
+            r#"
+[organisation]
+name = "Example SAS"
+country = "FR"
+
+[methodology]
+sci_specification = "ISO/IEC 21031:2024"
+enabled_patterns = ["n_plus_one_sql", "n_plus_one_http", "redundant_sql", "redundant_http"]
+conformance = "core-required"
+
+[methodology.calibration]
+carbon_intensity_source = "static_tables"
+specpower_table_version = "2023-05-01"
+
+[scope_manifest]
+total_applications_declared = 1
+"#
+        )
+        .unwrap();
+
+        let config = Config {
+            reporting: crate::config::ReportingConfig {
+                intent: Some("official".to_string()),
+                org_config_path: Some(file.path().display().to_string()),
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        let err = run(config).await.expect_err("must refuse");
+        match err {
+            DaemonError::ReportingValidation { errors } => {
+                assert_eq!(errors.len(), 1, "got {errors:?}");
+                assert!(errors[0].contains("specpower_table_version"));
+                assert!(errors[0].contains("does not match"));
+            }
+            other => panic!("expected ReportingValidation, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn incident_store_is_seeded_from_the_archive_when_enabled() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("incidents.ndjson");

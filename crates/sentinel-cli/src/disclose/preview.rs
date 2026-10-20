@@ -330,6 +330,9 @@ pub(crate) struct DiscloseState {
     org: OrgConfig,
     org_config_path: PathBuf,
     strict_attribution: bool,
+    /// `--total-requests-in-period`, already applied to `org` and echoed in
+    /// the equivalent command.
+    total_requests_cli: Option<u64>,
     /// Earliest and latest window timestamp in the archive, for default
     /// anchoring and the range hint. `None` for an empty archive.
     archive_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
@@ -365,6 +368,7 @@ impl DiscloseState {
             org,
             org_config_path,
             strict_attribution,
+            total_requests_cli: None,
             archive_range,
             granularity: Granularity::Month,
             anchor,
@@ -378,6 +382,16 @@ impl DiscloseState {
         };
         state.recompute();
         state
+    }
+
+    /// Apply `--total-requests-in-period` the way `cmd_disclose` does, and
+    /// keep it so the equivalent command reproduces it.
+    #[must_use]
+    pub(crate) fn with_total_requests_override(mut self, total: Option<u64>) -> Self {
+        super::apply_total_requests_override(&mut self.org, total);
+        self.total_requests_cli = total;
+        self.recompute();
+        self
     }
 
     pub(crate) fn granularity(&self) -> Granularity {
@@ -530,7 +544,7 @@ impl DiscloseState {
     /// The `disclose` command equivalent to the current settings.
     pub(crate) fn equivalent_command(&self) -> String {
         let (from, to) = self.resolved_dates();
-        equivalent_command(
+        let mut cmd = equivalent_command(
             self.intent,
             self.confidentiality,
             self.granularity.period_type(),
@@ -538,7 +552,12 @@ impl DiscloseState {
             to,
             &self.input,
             &self.org_config_path,
-        )
+        );
+        if let Some(total) = self.total_requests_cli {
+            use std::fmt::Write as _;
+            let _ = write!(cmd, " --total-requests-in-period {total}");
+        }
+        cmd
     }
 
     /// The scrollable summary, as styled lines. Drives both the renderer and
@@ -890,6 +909,26 @@ mod tests {
         assert!(cmd.contains("--to 2026-03-31"));
         assert!(cmd.contains("--input archive.ndjson"));
         assert!(cmd.contains("--org-config org.toml"));
+    }
+
+    #[test]
+    fn total_requests_override_is_applied_and_echoed() {
+        let state = empty_state(d(2026, 5, 15));
+        assert!(
+            !state
+                .equivalent_command()
+                .contains("--total-requests-in-period")
+        );
+        let state = state.with_total_requests_override(Some(4_200_000));
+        assert_eq!(
+            state.org.scope_manifest.total_requests_in_period,
+            Some(4_200_000)
+        );
+        assert!(
+            state
+                .equivalent_command()
+                .ends_with(" --total-requests-in-period 4200000")
+        );
     }
 
     #[test]

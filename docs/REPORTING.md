@@ -20,7 +20,7 @@ For `official` intent, the validator also rejects reports below 75% runtime-cali
 
 `disclose` reports `aggregate.temporal_coverage`: the fraction of the declared period's calendar days that carried measurements (`observed_days / days_in_period`). When it falls below an informational threshold the CLI prints a stderr warning and appends a disclaimer to the report, but it never blocks an `official` report. Archiving is traffic-gated (a window with no traffic writes nothing), so a low figure can be a legitimately quiet period rather than a measurement gap. Treat it as a lower bound on activity, not a daemon-uptime guarantee. It exists so a reader can distinguish a continuously-measured quarter from one where the daemon ran only a handful of days, the in-binary signal closest to "the operator stopped measuring for part of the period". Total non-participation (never running the tool) leaves no report at all and is out of scope for any in-binary check, see [docs/design/08-PERIODIC-DISCLOSURE.md](design/08-PERIODIC-DISCLOSURE.md).
 
-Two further checks tighten consistency. The validator hard-rejects a `days_covered` that does not equal `(to_date - from_date) + 1` (a disclose-produced report always satisfies this, so only a hand-edited file trips it) and a `requests_measured` that exceeds an operator-declared `total_requests_in_period`. For `official` intent, omitting `total_requests_in_period` in the org config emits a warning, since `coverage_percentage` is then absent from the report.
+Two further checks tighten consistency. The validator hard-rejects a `days_covered` that does not equal `(to_date - from_date) + 1` (a disclose-produced report always satisfies this, so only a hand-edited file trips it) and a `requests_measured` that exceeds an operator-declared `total_requests_in_period`. For `official` intent, omitting `total_requests_in_period` from both the org config and `--total-requests-in-period` emits a warning, since `coverage_percentage` is then absent from the report.
 
 ### The archive must reach the period start (0.28.0)
 
@@ -67,6 +67,7 @@ Perf Sentinel publishes reports at two granularity levels, controlled by `--conf
 - `--org-config <PATH>` (required for `intent = "official"`). The static organisation / methodology / scope TOML described in the org-config TOML section below.
 - `--emit-attestation <PATH>` (optional). When set, also writes the in-toto v1 statement sidecar at this path. Needed for the signing workflow.
 - `--strict-attribution` (optional). By default, Perf Sentinel buckets spans without a `service.name` attribution into a synthetic `_unattributed` service. This bucket contributes to aggregate totals but is excluded from per-service breakdowns. With `--strict-attribution`, the disclose call refuses to produce a report if any window carries unattributed spans, listing the offending timestamps in the error message. Use for an official disclosure when you want to assert that 100% of measured operations were properly attributed.
+- `--total-requests-in-period <N>` (optional). Total requests across the in-scope applications over the period, the denominator of `coverage_percentage`. Takes precedence over `scope_manifest.total_requests_in_period` in the org config. The total is only known once the period closes, so passing it per run keeps the org config static. The `--tui` preview applies it too and repeats it in the command it prints.
 - `--tui` (optional, needs the `tui` build feature). Opens a read-only preview instead of writing a report, see below. It relaxes `--intent`, `--confidentiality`, `--period-type`, `--from`, `--to`, and `--output` to optional, since you dial them in the interface. Conflicts with `--emit-attestation`.
 
 ## Interactive preview (`--tui`)
@@ -146,6 +147,8 @@ Operators that already collect daemon stdout via a sidecar can pass the resultin
 ## org-config TOML
 
 The static organisation/methodology/scope fields live in a TOML file you check into your infrastructure repository alongside the rest of the Perf Sentinel config. A complete example sits in `docs/examples/perf-sentinel-org.toml`. The same file is referenced by `[reporting] org_config_path` when the daemon is asked to validate publishable disclosures at startup.
+
+`methodology.calibration.specpower_table_version` is optional. Left out, `disclose` fills it with the date of the SPECpower table the running binary embeds, the only table it can use, so an upgrade that changes the table needs no edit. Declared, it must equal that date: `disclose --intent official` rejects a mismatch, and so does the daemon startup gate below, so the drift surfaces at deploy time rather than when the report is produced.
 
 ## Example: internal draft (G1)
 

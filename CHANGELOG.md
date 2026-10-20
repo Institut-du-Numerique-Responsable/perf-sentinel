@@ -4,6 +4,15 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- `perf-sentinel disclose --total-requests-in-period <N>` sets the denominator of `coverage_percentage` for one run and takes precedence over `scope_manifest.total_requests_in_period` in the org config. The total is only known once the period closes, so the org config no longer needs a copy edited per report. The `--tui` preview applies the flag and repeats it in the command it prints.
+
+### Changed
+
+- `methodology.calibration.specpower_table_version` in the org config is optional. Left out, `disclose` fills it with the date of the SPECpower table the running binary embeds, so an upgrade that changes the table no longer breaks an official disclosure until someone edits the org config. A declared value keeps its meaning and must still equal that date. Existing org configs load unchanged.
+- The daemon startup gate for `[reporting] intent = "official"` now rejects a declared `specpower_table_version` that differs from the running binary's table date. Only `disclose` checked it before, so the drift surfaced when the report was produced rather than at deploy time. A daemon whose org config declares a stale date refuses to start after this upgrade: align the date or remove the line.
+
 ## [0.31.4] - 2026-10-19
 
 This release is a patch: it adds no API surface, removes nothing, and no public type of `perf-sentinel-core` changes shape. No code outside the tests changes, so no finding appears, disappears or changes signature, acknowledgments keep matching, and the daemon's API, its metrics and the findings it exports do not change. The SQL tokenizer gains a round-trip property test, and the lockfiles move off a yanked `inout` release.

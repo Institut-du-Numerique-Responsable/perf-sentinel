@@ -535,12 +535,18 @@ async fn dispatch_command(command: Commands) {
             org_config,
             strict_attribution,
             emit_attestation,
+            total_requests_in_period,
             #[cfg(feature = "tui")]
             tui,
         } => {
             #[cfg(feature = "tui")]
             if tui {
-                tui_launch::cmd_disclose_tui(input, &org_config, strict_attribution);
+                tui_launch::cmd_disclose_tui(
+                    input,
+                    &org_config,
+                    strict_attribution,
+                    total_requests_in_period,
+                );
                 std::process::exit(0);
             }
             // Canonical path: clap requires these whenever `--tui` is absent.
@@ -557,6 +563,7 @@ async fn dispatch_command(command: Commands) {
                 &org_config,
                 strict_attribution,
                 emit_attestation.as_deref(),
+                total_requests_in_period,
             );
             std::process::exit(code);
         }

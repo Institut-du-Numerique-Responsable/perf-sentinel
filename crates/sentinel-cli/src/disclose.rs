@@ -95,6 +95,15 @@ pub(crate) mod preview;
 #[cfg(feature = "tui")]
 pub(crate) use preview::{CustomField, DiscloseState, Granularity, Tone};
 
+/// `--total-requests-in-period` takes precedence over the org config's
+/// `scope_manifest.total_requests_in_period`: the total is only known once
+/// the period closes, so passing it per run keeps the org config static.
+pub(crate) fn apply_total_requests_override(org: &mut OrgConfig, cli_total: Option<u64>) {
+    if cli_total.is_some() {
+        org.scope_manifest.total_requests_in_period = cli_total;
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn cmd_disclose(
     intent: ReportIntentCli,
@@ -107,6 +116,7 @@ pub fn cmd_disclose(
     org_config_path: &Path,
     strict_attribution: bool,
     emit_attestation: Option<&Path>,
+    total_requests_in_period: Option<u64>,
 ) -> i32 {
     if matches!(intent, ReportIntentCli::Audited) {
         eprintln!(
@@ -115,13 +125,14 @@ pub fn cmd_disclose(
         return 2;
     }
 
-    let org = match org_config::load_from_path(org_config_path) {
+    let mut org = match org_config::load_from_path(org_config_path) {
         Ok(c) => c,
         Err(err) => {
             eprintln!("Error: {}", sanitize_for_terminal(&err.to_string()));
             return 1;
         }
     };
+    apply_total_requests_override(&mut org, total_requests_in_period);
 
     let days_covered = match (to - from).num_days() {
         n if n < 0 => {
@@ -315,8 +326,9 @@ fn non_fatal_warnings(
     }
     if matches!(intent, ReportIntent::Official) && !total_requests_declared {
         warnings.push(
-            "Warning: total_requests_in_period is not declared in the org config; \
-             coverage_percentage will be absent from this official report."
+            "Warning: total_requests_in_period is not declared in the org config \
+             nor passed with --total-requests-in-period; coverage_percentage will \
+             be absent from this official report."
                 .to_string(),
         );
     }
@@ -412,7 +424,10 @@ pub(crate) fn build_report(
         calibration_inputs: CalibrationInputs {
             cloud_regions: org.methodology.calibration.cloud_regions.clone(),
             carbon_intensity_source: org.methodology.calibration.carbon_intensity_source.clone(),
-            specpower_table_version: org.methodology.calibration.specpower_table_version.clone(),
+            specpower_table_version: org
+                .methodology
+                .calibration
+                .resolved_specpower_table_version(),
             binary_specpower_vintage: Some(
                 sentinel_core::score::cloud_energy::embedded_specpower_vintage().to_string(),
             ),
@@ -996,6 +1011,64 @@ mod tests {
             non_fatal_warnings(&healthy, ReportIntent::Internal, false, 0, 0),
             Vec::<String>::new()
         );
+    }
+
+    fn example_org() -> OrgConfig {
+        let org_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/examples/perf-sentinel-org.toml");
+        org_config::load_from_path(org_path).unwrap()
+    }
+
+    fn one_day_report(org: &OrgConfig, requests: u64) -> PeriodicReport {
+        let mut aggregate = AggregateInputs::default();
+        aggregate.aggregate.total_requests = requests;
+        let day = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let period = Period {
+            from_date: day,
+            to_date: day,
+            period_type: PeriodType::Custom,
+            days_covered: 1,
+        };
+        build_report(
+            org,
+            period,
+            ReportIntent::Internal,
+            Confidentiality::Internal,
+            "test".to_string(),
+            aggregate,
+        )
+    }
+
+    #[test]
+    fn omitted_specpower_version_is_filled_from_binary() {
+        let mut org = example_org();
+        org.methodology.calibration.specpower_table_version = None;
+        let report = one_day_report(&org, 1);
+        assert_eq!(
+            report
+                .methodology
+                .calibration_inputs
+                .specpower_table_version,
+            sentinel_core::score::cloud_energy::embedded_specpower_date()
+        );
+    }
+
+    #[test]
+    fn cli_total_requests_overrides_org_config() {
+        let mut org = example_org();
+        org.scope_manifest.total_requests_in_period = Some(10);
+        apply_total_requests_override(&mut org, Some(400));
+        let report = one_day_report(&org, 100);
+        assert_eq!(report.scope_manifest.total_requests_in_period, Some(400));
+        assert_eq!(report.scope_manifest.coverage_percentage, Some(25.0));
+    }
+
+    #[test]
+    fn absent_cli_total_keeps_org_config_value() {
+        let mut org = example_org();
+        org.scope_manifest.total_requests_in_period = Some(10);
+        apply_total_requests_override(&mut org, None);
+        assert_eq!(org.scope_manifest.total_requests_in_period, Some(10));
     }
 
     #[test]
