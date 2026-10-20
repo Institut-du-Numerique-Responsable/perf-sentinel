@@ -3,10 +3,14 @@
 Tous les `instance_type` acceptés par `[green.cloud.services]` et par
 `[green.broker_static]`, avec les puissances au repos et maximale entre
 lesquelles le modèle SPECpower interpole. 421 entrées, millésime
-de la table `2026-04-24 (CCF aligned)`.
+de la table `2026-04-24 (CCF aligned)`. Les noms de classes managées de base de données,
+de cache, de broker et de recherche sont acceptés aussi : chacun se résout
+sur la ligne de la famille de VM qui l'héberge, voir
+[Classes de services managés](#classes-de-services-managés).
 
 **Un type absent n'est pas une erreur.** Perf Sentinel avertit une seule
-fois au démarrage en nommant le type, puis se rabat sur une moyenne du
+fois au démarrage en nommant le type, et la raison quand il s'agit d'une
+classe managée que le modèle laisse de côté, puis se rabat sur une moyenne du
 fournisseur, ce qui rend la valeur plus grossière. Cet
 avertissement est aussi la façon de vérifier votre propre type sans lire
 cette page. Quand votre matériel est absent et que vous connaissez sa
@@ -65,6 +69,53 @@ coefficient plutôt qu'à une machine mesurée :
 Cette page est générée depuis la table embarquée par
 `scripts/generate-instance-types-doc.py`, et un test casse le build si les
 deux divergent. Ne la modifiez pas à la main.
+
+## Classes de services managés
+
+Une classe managée de base de données, de cache, de broker ou de
+recherche tourne sur une famille de VM que la table valorise, donc son
+nom se résout sur la ligne de cette famille. Les règles s'appliquent dans
+l'ordre et s'arrêtent à la première ligne trouvée. Une ligne exacte n'est
+jamais réécrite, et aucune règle ne calcule de puissance propre.
+
+| Forme du nom | Se résout sur |
+|---|---|
+| `db.<type>` (RDS, Aurora provisionné) | `<type>` |
+| `cache.<type>` (ElastiCache) | `<type>` |
+| `kafka.<type>`, `express.<type>` (MSK provisionné, brokers MSK Express) | `<type>` |
+| `mq.<type>` (Amazon MQ) | `<type>` |
+| `<type>.search`, `<type>.elasticsearch` (OpenSearch) | `<type>` |
+| AWS `<famille>.<taille>`, famille finissant par au plus deux lettres parmi `d`, `n`, `b` | la famille sans elles : `db.r6idn.large` vers `r6i.large`, `c7gn.large` vers `c7g.large` |
+| Azure `Standard_<série><taille><options>_v<k>`, options contenant `d` | le même nom sans le `d` : `Standard_D4ds_v5` vers `Standard_D4s_v5`, `Standard_D4ads_v5` vers `Standard_D4as_v5` |
+
+Les lettres AWS `d` (stockage d'instance local), `n` (réseau) et `b`
+(stockage bloc), et le `d` Azure (disque temporaire local), ne changent
+pas le processeur. Les lettres de processeur `a`, `g`, `i` et les
+modificateurs AWS `z` et `e` ne sont jamais retirés, donc `m5zn` et
+`x2iedn` restent inconnus. Le retrait est approximatif quand un
+modificateur change la génération de CPU : `c5n` est une puce Skylake
+alors que les lignes `c5` sont Cascade Lake, un écart qui reste dans la
+fourchette 2x. Une classe dont la famille de base n'a pas de ligne reste
+inconnue.
+
+Non modélisées. L'avertissement de démarrage donne la raison pour les
+trois premières lignes, les autres sont signalées comme types inconnus :
+
+| Classe | Raison |
+|---|---|
+| `db.serverless` (Aurora Serverless v2) | dimensionnée en ACU, chacune d'environ 2 Gio de mémoire avec le CPU et le réseau correspondants, sans équivalence vCPU publiée |
+| `db-f1-micro`, `db-g1-small` (Cloud SQL à cœur partagé) | un vCPU partagé, exclu comme toute offre à vCPU partagés |
+| `redis-*` (types de nœud Memorystore) | le nombre de vCPU est publié, la série de machine ne l'est pas |
+| Familles AWS `x`, `z`, `i` et `im`, OpenSearch `or1` | 16 à 32 Gio par vCPU, au-delà de la règle binaire de prime DRAM, ou une plateforme non publiée |
+| ElastiCache, MSK et OpenSearch Serverless, Azure Cache for Redis, Event Hubs, Service Bus | facturés en unités de capacité, aucune instance à déclarer |
+
+Sources des règles : les [conventions de nommage des types
+d'instance](https://docs.aws.amazon.com/ec2/latest/instancetypes/instance-type-names.html)
+AWS, les [conventions de nommage des
+VM](https://learn.microsoft.com/fr-fr/azure/virtual-machines/vm-naming-conventions)
+Azure, la définition de la [capacité Aurora Serverless
+v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.how-it-works.html),
+et l'exclusion des vCPU partagés de `scripts/refresh-instance-power.py`.
 
 ## AWS (184 entrées)
 

@@ -575,7 +575,9 @@ default_provider = "aws"
 "ml-bench" = { provider = "aws", instance_type = "m8g.4xlarge" }          # Graviton 4
 ```
 
-The full list of covered types, with their idle and max wattage, is [`INSTANCE-TYPES.md`](./INSTANCE-TYPES.md). Modern instance families covered include AWS m7i/c7i/r7i, m7a/c7a, m6a/c6a, m7g/c7g and m8g/c8g, GCP c3, c3d, c4, c4d, n2d and t2a, and Azure Standard_Dv6, Standard_Dadsv6, Standard_Dpsv6 (Cobalt 100) and Standard_Ev6. One CPU-named bare-metal entry covers Sierra Forest (`xeon-6780e`, system-level watts assuming full chip ownership).
+The full list of covered types, with their idle and max wattage, is [`INSTANCE-TYPES.md`](./INSTANCE-TYPES.md). Modern instance families covered include AWS m7i/c7i/r7i, m7a/c7a, m6a/c6a, Graviton 3 m7g/c7g and Graviton 4 m8g/c8g (the table holds no Graviton 2 row), GCP c3, c3d, c4, c4d, n2d and t2a, and Azure Standard_Dv6, Standard_Dadsv6, Standard_Dpsv6 (Cobalt 100) and Standard_Ev6. One CPU-named bare-metal entry covers Sierra Forest (`xeon-6780e`, system-level watts assuming full chip ownership).
+
+**Managed classes.** `instance_type` also accepts the names of managed database, cache, broker and search classes (`db.r6i.large`, `cache.r5.large`, `kafka.m5.large`, `mq.t3.micro`, `r5.large.search`) and AWS or Azure names carrying a storage or network modifier (`db.m5d.large`, `c7gn.large`, `Standard_D4ds_v5`). Each resolves to the row of the VM family it runs on, here and in `[green.broker_static]`. The rules, and the classes left out with their reason, are in [Managed service classes](./INSTANCE-TYPES.md#managed-service-classes).
 
 **Manual watts (on-premise or custom hardware):**
 

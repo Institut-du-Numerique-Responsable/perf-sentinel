@@ -3,10 +3,13 @@
 Every `instance_type` accepted by `[green.cloud.services]` and by
 `[green.broker_static]`, with the idle and maximum wattage the SPECpower
 model interpolates between. 421 entries, table vintage
-`2026-04-24 (CCF aligned)`.
+`2026-04-24 (CCF aligned)`. Managed database, cache, broker and search class names are
+accepted too: each resolves to the row of the VM family it runs on, see
+[Managed service classes](#managed-service-classes).
 
 **An unlisted type is not an error.** Perf Sentinel warns once at startup,
-naming the type, and falls back to a provider-level average, so the
+naming the type, and the reason when it is a managed class the model
+leaves out, then falls back to a provider-level average, so the
 figure gets coarser. That warning is also how you check your own
 type without reading this page. When your hardware is absent and you know
 its draw, declare it directly instead, which is exact rather than
@@ -61,6 +64,51 @@ and `docs/design/05-GREENOPS-AND-CARBON.md`. Configuring the scraper:
 This page is generated from the embedded table by
 `scripts/generate-instance-types-doc.py`, and a test fails the build if
 the two disagree. Do not edit it by hand.
+
+## Managed service classes
+
+A managed database, cache, broker or search class runs on a VM family
+the table prices, so its name resolves to that family's row. The rules
+apply in order and stop at the first row. An exact row is never
+rewritten, and no rule derives a wattage of its own.
+
+| Name shape | Resolves to |
+|---|---|
+| `db.<type>` (RDS, Aurora provisioned) | `<type>` |
+| `cache.<type>` (ElastiCache) | `<type>` |
+| `kafka.<type>`, `express.<type>` (MSK provisioned, MSK Express brokers) | `<type>` |
+| `mq.<type>` (Amazon MQ) | `<type>` |
+| `<type>.search`, `<type>.elasticsearch` (OpenSearch) | `<type>` |
+| AWS `<family>.<size>`, family ending in up to two of `d`, `n`, `b` | the family without them: `db.r6idn.large` to `r6i.large`, `c7gn.large` to `c7g.large` |
+| Azure `Standard_<series><size><features>_v<k>`, features holding `d` | the same name without the `d`: `Standard_D4ds_v5` to `Standard_D4s_v5`, `Standard_D4ads_v5` to `Standard_D4as_v5` |
+
+The AWS letters `d` (local instance store), `n` (network) and `b` (block
+storage), and the Azure `d` (local temp disk), leave the processor
+unchanged. The processor letters `a`, `g`, `i` and the AWS `z` and `e`
+modifiers are never dropped, so `m5zn` and `x2iedn` stay unknown. The
+strip is approximate where a modifier changes the CPU generation: `c5n`
+is a Skylake part while the `c5` rows are Cascade Lake, a gap inside the
+2x bracket. A class whose base family has no row stays unknown.
+
+Not modeled. The startup warning names the reason for the first three
+rows, the others warn as unknown types:
+
+| Class | Reason |
+|---|---|
+| `db.serverless` (Aurora Serverless v2) | sized in ACUs, each about 2 GiB of memory with corresponding CPU and networking, no published vCPU equivalence |
+| `db-f1-micro`, `db-g1-small` (Cloud SQL shared core) | a shared vCPU, excluded like every shared-vCPU offer |
+| `redis-*` (Memorystore node types) | the vCPU count is published, the machine series is not |
+| AWS `x`, `z`, `i` and `im` families, OpenSearch `or1` | 16 to 32 GiB per vCPU, beyond the binary DRAM premium rule, or an undisclosed platform |
+| ElastiCache, MSK and OpenSearch Serverless, Azure Cache for Redis, Event Hubs, Service Bus | billed in capacity units, no instance to declare |
+
+Rule sources: the AWS [instance type naming
+conventions](https://docs.aws.amazon.com/ec2/latest/instancetypes/instance-type-names.html),
+the Azure [VM naming
+conventions](https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions),
+the [Aurora Serverless v2
+capacity](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.how-it-works.html)
+definition, and the shared-vCPU exclusion of
+`scripts/refresh-instance-power.py`.
 
 ## AWS (184 entries)
 

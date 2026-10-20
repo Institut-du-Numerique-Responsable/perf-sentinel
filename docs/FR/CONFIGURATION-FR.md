@@ -590,7 +590,9 @@ default_provider = "aws"
 "ml-bench" = { provider = "aws", instance_type = "m8g.4xlarge" }          # Graviton 4
 ```
 
-La liste complète des types couverts, avec leurs watts au repos et maximum, est dans [`INSTANCE-TYPES-FR.md`](./INSTANCE-TYPES-FR.md). Familles d'instances modernes couvertes : AWS m7i/c7i/r7i, m7a/c7a, m6a/c6a, m7g/c7g et m8g/c8g, GCP c3, c3d, c4, c4d, n2d et t2a, et Azure Standard_Dv6, Standard_Dadsv6, Standard_Dpsv6 (Cobalt 100) et Standard_Ev6. Une entrée bare-metal nommée d'après son CPU couvre Sierra Forest (`xeon-6780e`, watts au niveau système, suppose pleine possession de la puce).
+La liste complète des types couverts, avec leurs watts au repos et maximum, est dans [`INSTANCE-TYPES-FR.md`](./INSTANCE-TYPES-FR.md). Familles d'instances modernes couvertes : AWS m7i/c7i/r7i, m7a/c7a, m6a/c6a, Graviton 3 m7g/c7g et Graviton 4 m8g/c8g (la table ne porte aucune ligne Graviton 2), GCP c3, c3d, c4, c4d, n2d et t2a, et Azure Standard_Dv6, Standard_Dadsv6, Standard_Dpsv6 (Cobalt 100) et Standard_Ev6. Une entrée bare-metal nommée d'après son CPU couvre Sierra Forest (`xeon-6780e`, watts au niveau système, suppose pleine possession de la puce).
+
+**Classes managées.** `instance_type` accepte aussi les noms de classes managées de base de données, de cache, de broker et de recherche (`db.r6i.large`, `cache.r5.large`, `kafka.m5.large`, `mq.t3.micro`, `r5.large.search`) et les noms AWS ou Azure portant un modificateur de stockage ou de réseau (`db.m5d.large`, `c7gn.large`, `Standard_D4ds_v5`). Chacun se résout sur la ligne de la famille de VM qui l'héberge, ici comme dans `[green.broker_static]`. Les règles, et les classes laissées de côté avec leur raison, sont dans [Classes de services managés](./INSTANCE-TYPES-FR.md#classes-de-services-managés).
 
 **Watts manuels (on-premise ou matériel personnalisé) :**
 

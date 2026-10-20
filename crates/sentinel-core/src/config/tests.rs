@@ -4943,3 +4943,27 @@ fn energinet_region_keys_colliding_by_case_are_rejected() {
         .is_ok()
     );
 }
+
+#[test]
+fn cloud_service_on_a_left_out_class_loads_with_its_reason() {
+    let toml = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+
+[green.cloud.services.orders-db]
+provider = "aws"
+instance_type = "db.serverless"
+"#;
+    load_from_str(toml).expect("a left-out class warns, it does not reject");
+    let suffix = validate::green::unpriced_instance_suffix("db.serverless")
+        .expect("db.serverless is not priced");
+    assert!(suffix.contains("ACU"), "{suffix}");
+    assert_eq!(
+        validate::green::unpriced_instance_suffix("db.r6i.large"),
+        None
+    );
+    assert_eq!(
+        validate::green::unpriced_instance_suffix("m5zn.large").as_deref(),
+        Some("")
+    );
+}

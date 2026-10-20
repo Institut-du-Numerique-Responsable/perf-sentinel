@@ -520,7 +520,7 @@ region = "westeurope"
 instance_type = "Standard_D8s_v6"  # Emerald Rapids
 ```
 
-Le daemon interpole la consommation avec `watts = idle_watts + (max_watts - idle_watts) * (cpu% / 100)` en utilisant les coefficients CCF 2026-04-24 par vCPU embarqués dans le binaire (~390 types d'instances couvrant AWS, GCP, Azure, y compris les architectures modernes Sapphire Rapids, Emerald Rapids, Genoa, Turin, Graviton 3/4 et Cobalt 100). Le tag de modèle est `"cloud_specpower"`. Comme Scaphandre, c'est une fonctionnalité réservée au daemon.
+Le daemon interpole la consommation avec `watts = idle_watts + (max_watts - idle_watts) * (cpu% / 100)` en utilisant les coefficients CCF 2026-04-24 par vCPU embarqués dans le binaire (chaque type listé dans [`INSTANCE-TYPES-FR.md`](./INSTANCE-TYPES-FR.md), couvrant AWS, GCP, Azure et Scaleway, y compris les architectures modernes Sapphire Rapids, Emerald Rapids, Genoa, Turin, Graviton 3/4 et Cobalt 100). Le tag de modèle est `"cloud_specpower"`. Comme Scaphandre, c'est une fonctionnalité réservée au daemon.
 
 **Précédence des sources d'énergie.** Quand plusieurs sources mesurées sont configurées pour le même service, la plus précise gagne. La chaîne complète : `electricity_maps_api` > `grid_operator_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`. Voir `docs/FR/LIMITATIONS-FR.md` pour la discussion sur les limites de précision de chaque source mesurée.
 

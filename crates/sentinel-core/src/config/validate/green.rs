@@ -13,6 +13,18 @@ use super::{
     warn_unknown_region,
 };
 
+/// The tail of a load-time warning for an instance type the embedded
+/// table cannot price: `None` when it resolves to a row, empty when it
+/// is unknown, `": <reason>"` when it names a class left out on purpose.
+pub(crate) fn unpriced_instance_suffix(instance_type: &str) -> Option<String> {
+    use crate::score::cloud_energy::table::{InstanceClass, resolve_instance_class};
+    match resolve_instance_class(instance_type) {
+        InstanceClass::Known { .. } => None,
+        InstanceClass::Unsupported(reason) => Some(format!(": {reason}")),
+        InstanceClass::Unknown => Some(String::new()),
+    }
+}
+
 /// Validate `[green.broker_static]`: a declared cluster must be
 /// countable and its instance type nameable.
 pub(super) fn validate_broker_static(
@@ -60,11 +72,11 @@ pub(super) fn validate_broker_static(
     warn_unknown_region("[green.broker_static]", cfg.region.as_deref());
     // An unknown type still yields a provider default, so warn rather
     // than reject: the figure stays sound, just coarser.
-    if !crate::score::cloud_energy::table::is_known_instance_type(&cfg.instance_type) {
+    if let Some(why) = unpriced_instance_suffix(&cfg.instance_type) {
         tracing::warn!(
             instance_type = %cfg.instance_type,
             "[green.broker_static] instance_type is absent from the embedded \
-             SPECpower table, falling back to the provider default watts"
+             SPECpower table, falling back to the provider default watts{why}"
         );
     }
     Ok(())
@@ -813,12 +825,12 @@ impl Config {
             ));
         }
         if let Some(ref it) = cfg.default_instance_type
-            && !crate::score::cloud_energy::table::is_known_instance_type(it)
+            && let Some(why) = unpriced_instance_suffix(it)
         {
             tracing::warn!(
                 instance_type = %it,
                 "[green.cloud] default_instance_type is not in the embedded \
-                 SPECpower table; the provider default watts will be used"
+                 SPECpower table; the provider default watts will be used{why}"
             );
         }
         if let Some(ref m) = cfg.cpu_metric
@@ -942,13 +954,13 @@ impl Config {
             ));
         }
         if !instance_type.is_empty()
-            && !crate::score::cloud_energy::table::is_known_instance_type(instance_type)
+            && let Some(why) = unpriced_instance_suffix(instance_type)
         {
             tracing::warn!(
                 service = %service,
                 instance_type = %instance_type,
                 "[green.cloud.services] instance_type is not in the embedded \
-                 SPECpower table; provider default watts will be used"
+                 SPECpower table; provider default watts will be used{why}"
             );
         }
         Ok(())
