@@ -683,6 +683,7 @@ fn build_applications(
                     &accum.anti_patterns,
                     first_seen,
                     last_seen,
+                    service_energy_per_op(accum),
                     service_carbon_ratio(accum),
                 ),
             })),
@@ -713,24 +714,32 @@ fn service_carbon_ratio(accum: &ServiceAccumulator) -> f64 {
     }
 }
 
+/// The service's own period-average energy per I/O operation, on the
+/// boundary of its `energy_kwh` (emitting side, no database or broker
+/// host). Zero without operations, never NaN.
+fn service_energy_per_op(accum: &ServiceAccumulator) -> f64 {
+    if accum.total_io_ops > 0 {
+        accum.energy_kwh / accum.total_io_ops as f64
+    } else {
+        0.0
+    }
+}
+
 fn build_anti_pattern_details(
     service: &str,
     anti_patterns: &BTreeMap<String, AntiPatternAccumulator>,
     first_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
     last_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
+    per_op_kwh: f64,
     service_carbon_kwh_ratio: f64,
 ) -> Vec<AntiPatternDetail> {
-    // Proxy coefficient lifted from the carbon module so the per-pattern
-    // waste lines up with the aggregate proxy energy. Region-blind, see
-    // design doc 08.
-    const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1;
     let now = Utc::now();
     let mut out = Vec::with_capacity(anti_patterns.len());
     for (pattern, accum) in anti_patterns {
         let key = (service.to_string(), pattern.clone());
         let first = first_seen.get(&key).copied().unwrap_or(now);
         let last = last_seen.get(&key).copied().unwrap_or(now);
-        let waste_kwh = (accum.avoidable_io_ops as f64) * ENERGY_PER_IO_OP_KWH;
+        let waste_kwh = (accum.avoidable_io_ops as f64) * per_op_kwh;
         let waste_kgco2eq = waste_kwh * service_carbon_kwh_ratio;
         let rgesn_criteria = FindingType::from_kind_str(pattern)
             .map(|t| {
@@ -862,6 +871,47 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!(out[1].contains("Calibration applied"));
         assert!(out[1].contains("calibration_inputs.calibration_applied"));
+    }
+
+    fn single_pattern_waste(energy_kwh: f64, carbon_kgco2eq: f64, total_io_ops: u64) -> (f64, f64) {
+        let mut accum = ServiceAccumulator {
+            total_io_ops,
+            energy_kwh,
+            carbon_kgco2eq,
+            ..ServiceAccumulator::default()
+        };
+        accum.anti_patterns.insert(
+            "n_plus_one_sql".to_string(),
+            AntiPatternAccumulator {
+                occurrences: 3,
+                avoidable_io_ops: 100,
+            },
+        );
+        let per_service = BTreeMap::from([("svc".to_string(), accum)]);
+        let apps = build_applications(
+            &per_service,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Confidentiality::Internal,
+        );
+        let Application::G1(app) = &apps[0] else {
+            panic!("internal confidentiality builds G1 rows");
+        };
+        let ap = &app.anti_patterns[0];
+        (ap.estimated_waste_kwh, ap.estimated_waste_kgco2eq)
+    }
+
+    #[test]
+    fn per_pattern_waste_prices_at_the_service_energy_per_op() {
+        let (kwh, kg) = single_pattern_waste(2.0, 0.5, 1000);
+        assert!((kwh - 0.2).abs() < 1e-12, "got {kwh}");
+        assert!((kg - 0.2 * (0.5 / 2.0)).abs() < 1e-12, "got {kg}");
+    }
+
+    #[test]
+    fn per_pattern_waste_is_zero_without_io_ops() {
+        let (kwh, kg) = single_pattern_waste(2.0, 0.5, 0);
+        assert!(kwh == 0.0 && kg == 0.0, "got {kwh} kWh, {kg} kg");
     }
 
     #[test]
