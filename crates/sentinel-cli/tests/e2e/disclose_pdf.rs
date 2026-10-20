@@ -170,7 +170,7 @@ fn disclose_pdf_newer_schema_is_exit_5() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = write_baked(dir.path(), example());
     let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    value["schema_version"] = "perf-sentinel-report/v1.8".into();
+    value["schema_version"] = "perf-sentinel-report/v1.9".into();
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
 
     let out = run(&[

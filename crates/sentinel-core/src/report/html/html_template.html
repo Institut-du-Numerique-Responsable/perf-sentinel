@@ -1651,7 +1651,7 @@
     ]},
     total_co2: { t: "Total CO2", u: METHO_URL + "#uncertainty-bracket", s: [
       ["What it measures", "Everything the analyzed traffic emitted, by the SCI v1.0 numerator: operational `(E x I)` plus embodied `M` plus network transport `T`, summed over traces and scored per region when spans carry `cloud.region`."],
-      ["How the bracket works", "low is half the mid value, high is double: a log-symmetric bracket that says the estimate is trusted to a factor of two, not to a percent. The model tag after it is the window's carbon model: an energy backend (`kepler_ebpf` is Kepler, RAPL, active power only, the name is historical), the I/O proxy with its grid intensity (`io_proxy_v3` monthly x hourly, `v2` hourly, `v1` annual) or `electricity_maps_api` for live grid intensity, `+cal` when calibration rescaled the I/O model. The Energy card says how the energy figure was obtained, by an energy backend or from I/O counts."],
+      ["How the bracket works", "low is half the mid value, high is double: a log-symmetric bracket that says the estimate is trusted to a factor of two, not to a percent. The model tag after it is the window's carbon model: an energy backend (`kepler_ebpf` is Kepler, RAPL, active power only, the name is historical), the I/O proxy with its grid intensity (`io_proxy_v3` monthly x hourly, `v2` hourly, `v1` annual) or `electricity_maps_api` (Electricity Maps) and `grid_operator_api` (a grid operator feed) for live grid intensity, `+cal` when calibration rescaled the I/O model. The Energy card says how the energy figure was obtained, by an energy backend or from I/O counts."],
       ["Limits", "A directional estimate for comparing runs and finding waste, not a wattmeter reading, and the project says so in its methodology."]
     ]},
     energy: { t: "Energy", u: METHO_URL + "#energy-per-operation", s: [
@@ -3910,11 +3910,17 @@
         buildTemporalGranularityChip(cfg.temporal_granularity)
       );
     }
-    // RTE has no knobs: one chip, shown when a region drew on it, as the
-    // CLI does (a configured section alone proves nothing in batch runs).
-    if ((regions || []).some(function (r) { return r && r.intensity_provider === "rte_eco2mix"; })) {
-      chips.push(buildRteChip());
-    }
+    // Grid operator feeds have no knobs: one chip per feed a region drew
+    // on, as the CLI does (a configured section proves nothing in batch runs).
+    Object.keys(GRID_FEEDS).forEach(function (key) {
+      if ((regions || []).some(function (r) { return r && r.intensity_provider === key; })) {
+        var label = GRID_FEEDS[key].name;
+        // Fingrid's two datasets differ in basis: name the one scored.
+        if (key === "fingrid" && cfg && cfg.fingrid_dataset === 265) label += " consumption";
+        else if (key === "fingrid" && cfg && cfg.fingrid_dataset === 266) label += " production";
+        chips.push(buildScoringChip(label, "neutral", GRID_FEEDS[key].tip));
+      }
+    });
     if (!chips.length) {
       bandeau.style.display = "none";
       return;
@@ -3926,14 +3932,40 @@
     bandeau.style.display = "";
   }
 
-  function buildRteChip() {
-    return buildScoringChip(
-      "RTE éCO2mix",
-      "neutral",
-      "Live intensity of the French grid from RTE open data: direct emissions of " +
-        "French production, imports and lifecycle excluded, so lower than an " +
-        "Electricity Maps lifecycle figure."
-    );
+  // Grid operator feeds, keyed by `intensity_provider`. The tooltips carry
+  // the licence credits that CC BY 4.0 and Licence Ouverte ask for.
+  var GRID_FEEDS = {
+    rte_eco2mix: {
+      name: "RTE \u00e9CO2mix",
+      url: "https://www.rte-france.com/eco2mix",
+      tip: "France, RTE \u00e9CO2mix on ODR\u00c9 (Licence Ouverte v2.0): direct emissions of " +
+        "French production, imports and lifecycle excluded, so lower than an Electricity Maps lifecycle figure."
+    },
+    neso: {
+      name: "NESO",
+      url: "https://carbonintensity.org.uk/",
+      tip: "Great Britain, NESO Carbon Intensity API (CC BY 4.0): direct CO2 of generation " +
+        "plus imports per kWh consumed, lifecycle excluded."
+    },
+    fingrid: {
+      name: "Fingrid",
+      url: "https://data.fingrid.fi/en/",
+      tip: "Finland, Fingrid open data (CC BY 4.0): direct emissions of production (dataset 266) " +
+        "or of consumption (265), lifecycle excluded."
+    },
+    energinet: {
+      name: "Energinet",
+      url: "https://www.energidataservice.dk/",
+      tip: "Denmark DK1 and DK2, Energinet Energi Data Service (CC BY 4.0): direct CO2 per kWh " +
+        "consumed, lifecycle excluded."
+    }
+  };
+
+  // Own keys only: the provider string comes from the report JSON.
+  function gridFeed(provider) {
+    return typeof provider === "string" && Object.prototype.hasOwnProperty.call(GRID_FEEDS, provider)
+      ? GRID_FEEDS[provider]
+      : null;
   }
 
   function buildScoringChip(label, modifier, tooltip) {
@@ -4045,15 +4077,17 @@
   function buildSourceCell(r) {
     var td = document.createElement("td");
     if (r.intensity_source === "real_time") {
-      // An absent provider means Electricity Maps (rows written before RTE).
-      var rte = r.intensity_provider === "rte_eco2mix";
-      var name = rte ? "RTE éCO2mix" : "Electricity Maps";
+      // An absent provider means Electricity Maps (rows written before the
+      // grid operator feeds).
+      var feed = gridFeed(r.intensity_provider);
+      var name = feed ? feed.name : "Electricity Maps";
       td.appendChild(document.createTextNode("real time ("));
-      var href = safeHttpsHref(rte
-        ? "https://www.rte-france.com/eco2mix"
+      var href = safeHttpsHref(feed
+        ? feed.url
         : "https://app.electricitymaps.com/map/live/fifteen_minutes");
       if (href) {
         var a = el("a", "ps-source-link", name);
+        if (feed) setAttr(a, "title", feed.tip);
         setAttr(a, "href", href);
         setAttr(a, "target", "_blank");
         setAttr(a, "rel", "noopener noreferrer");

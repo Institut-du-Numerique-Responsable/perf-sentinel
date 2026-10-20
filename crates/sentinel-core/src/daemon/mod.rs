@@ -45,7 +45,7 @@ use event_loop::{
 };
 use listeners::{
     init_ack_resources, setup_alumet_scraper, setup_cloud_scraper, setup_correlator,
-    setup_emaps_scraper, setup_kepler_scraper, setup_redfish_scraper, setup_rte_scraper,
+    setup_emaps_scraper, setup_grid_feed_scrapers, setup_kepler_scraper, setup_redfish_scraper,
     setup_scaphandre_scraper, spawn_ack_toml_reload, spawn_listeners,
 };
 
@@ -331,7 +331,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     let redfish = setup_redfish_scraper(&config, &metrics);
     let cloud = setup_cloud_scraper(&config, &metrics);
     let emaps = setup_emaps_scraper(&config);
-    let rte = setup_rte_scraper(&config);
+    let grid_feeds = setup_grid_feed_scrapers(&config);
 
     let archive_handle = match &config.daemon.archive {
         Some(cfg) => Some(archive::spawn(cfg, metrics.clone()).map_err(|source| {
@@ -411,8 +411,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         cloud_staleness_ms: cloud.staleness_ms,
         emaps_state: emaps.state.as_deref(),
         emaps_staleness_ms: emaps.staleness_ms,
-        rte_state: rte.state.as_deref(),
-        rte_staleness_ms: rte.staleness_ms,
+        grid_feeds: &grid_feeds,
     };
     let shutdown = ShutdownTargets {
         energy: EnergyScraperHandles {
@@ -422,7 +421,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             redfish: redfish.handle.as_ref(),
             cloud: cloud.handle.as_ref(),
             emaps: emaps.handle.as_ref(),
-            rte: rte.handle.as_ref(),
+            grid_feeds: &grid_feeds,
         },
         listeners: ListenerHandles {
             grpc: &grpc_handle,

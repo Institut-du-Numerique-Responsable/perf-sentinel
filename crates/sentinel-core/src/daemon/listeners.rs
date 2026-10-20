@@ -23,9 +23,9 @@ use crate::score;
 use crate::score::alumet::AlumetState;
 use crate::score::cloud_energy::CloudEnergyState;
 use crate::score::electricity_maps::ElectricityMapsState;
+use crate::score::grid_feed::GridFeedState;
 use crate::score::kepler::KeplerState;
 use crate::score::redfish::RedfishState;
-use crate::score::rte_eco2mix::RteEco2mixState;
 use crate::score::scaphandre::ScaphandreState;
 
 use super::DaemonError;
@@ -461,7 +461,7 @@ fn build_http_router(
             // `green.enabled`, and the API must not report it as absent.
             scoring_config: (config.green.enabled
                 || config.green.electricity_maps.is_some()
-                || config.green.rte_eco2mix.is_some())
+                || !config.green.grid_feeds.is_empty())
             .then(|| config.scoring_config()),
             green_summary,
             // Opt-in: no section, no ring, and both routes answer 503.
@@ -883,24 +883,30 @@ pub(super) fn setup_cloud_scraper(
     }
 }
 
-/// Spawn the RTE `éCO2mix` real-time intensity scraper when
-/// `[green.rte_eco2mix]` is configured.
-pub(super) fn setup_rte_scraper(config: &Config) -> ScraperSetup<RteEco2mixState> {
-    let Some(rte_cfg) = config.green.rte_eco2mix.clone() else {
-        return ScraperSetup {
-            state: None,
-            handle: None,
-            staleness_ms: 0,
-        };
-    };
-    let staleness_ms = rte_cfg.poll_interval.as_millis() as u64 * 3;
-    let state = RteEco2mixState::new(rte_cfg.regions.clone());
-    let handle = score::rte_eco2mix::spawn_rte_eco2mix_scraper(rte_cfg, state.clone());
-    ScraperSetup {
-        state: Some(state),
-        handle: Some(handle),
-        staleness_ms,
-    }
+/// One running grid operator feed.
+pub(super) struct GridFeedSetup {
+    pub(super) state: Arc<GridFeedState>,
+    pub(super) handle: tokio::task::JoinHandle<()>,
+    pub(super) staleness_ms: u64,
+}
+
+/// Spawn one scraper per configured grid operator feed
+/// (`[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`,
+/// `[green.energinet]`). Same staleness convention as Electricity Maps.
+pub(super) fn setup_grid_feed_scrapers(config: &Config) -> Vec<GridFeedSetup> {
+    config
+        .green
+        .grid_feeds
+        .iter()
+        .map(|feed| {
+            let state = GridFeedState::new(feed.kind.provider(), feed.regions.clone());
+            GridFeedSetup {
+                handle: score::grid_feed::spawn_grid_feed_scraper(feed.clone(), state.clone()),
+                state,
+                staleness_ms: feed.poll_interval.as_millis() as u64 * 3,
+            }
+        })
+        .collect()
 }
 
 /// Spawn the Electricity Maps real-time intensity scraper when

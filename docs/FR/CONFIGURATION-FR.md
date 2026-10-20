@@ -265,7 +265,7 @@ Les ops I/O sans région résolvable atterrissent dans un bucket synthétique `"
 
 Quand le scoring vert est activé et qu'au moins un événement est analysé, le `green_summary` du rapport JSON inclut :
 
-- **`co2`** : objet structuré `{ total, avoidable, operational_gco2, embodied_gco2 }`. `total` et `avoidable` sont tous deux `{ low, mid, high, model, methodology }` avec une **incertitude multiplicative 2×** (`low = mid/2`, `high = mid×2`). Le tag `methodology` distingue `total` (`"sci_v1_numerator+transport"` : `(E × I) + M + T` sommé sur les traces, y compris quand `T` vaut zéro) de `avoidable` (`"sci_v1_operational_ratio"` : ratio global aveugle à la région, exclut le carbone embarqué et le transport). Les rapports historiques peuvent porter `"sci_v1_numerator"`. Valeurs `model`, le plus précis gagne : `"electricity_maps_api"` > `"alumet_rapl"` > `"scaphandre_rapl"` > `"kepler_ebpf"` > `"redfish_bmc"` > `"cloud_specpower"` > `"io_proxy_v3"` > `"io_proxy_v2"` > `"io_proxy_v1"`. Quand des facteurs de calibration sont actifs sur les modèles proxy, `+cal` est ajouté (ex. `"io_proxy_v2+cal"`). Le suffixe `+cal` ne s'applique jamais à un tag mesuré.
+- **`co2`** : objet structuré `{ total, avoidable, operational_gco2, embodied_gco2 }`. `total` et `avoidable` sont tous deux `{ low, mid, high, model, methodology }` avec une **incertitude multiplicative 2×** (`low = mid/2`, `high = mid×2`). Le tag `methodology` distingue `total` (`"sci_v1_numerator+transport"` : `(E × I) + M + T` sommé sur les traces, y compris quand `T` vaut zéro) de `avoidable` (`"sci_v1_operational_ratio"` : ratio global aveugle à la région, exclut le carbone embarqué et le transport). Les rapports historiques peuvent porter `"sci_v1_numerator"`. Valeurs `model`, le plus précis gagne : `"electricity_maps_api"` > `"grid_operator_api"` > `"alumet_rapl"` > `"scaphandre_rapl"` > `"kepler_ebpf"` > `"redfish_bmc"` > `"cloud_specpower"` > `"io_proxy_v3"` > `"io_proxy_v2"` > `"io_proxy_v1"`. Quand des facteurs de calibration sont actifs sur les modèles proxy, `+cal` est ajouté (ex. `"io_proxy_v2+cal"`). Le suffixe `+cal` ne s'applique jamais à un tag mesuré.
 - **`regions[]`** : détail par région avec `{ region, grid_intensity_gco2_kwh, pue, io_ops, co2_gco2, intensity_source }`, **trié par `co2_gco2` décroissant** (régions à plus fort impact en premier) avec départage alphabétique. `intensity_source` vaut `"annual"`, `"hourly"`, `"monthly_hourly"` ou `"real_time"` (API Electricity Maps) selon la source d'intensité carbone utilisée pour la région.
 
 Les données d'intensité carbone sont embarquées dans le binaire (aucun appel réseau sortant). Voir `docs/FR/design/05-GREENOPS-AND-CARBON-FR.md` pour la formule complète et la méthodologie et [docs/FR/LIMITATIONS-FR.md](LIMITATIONS-FR.md#précision-des-estimations-carbone) pour l'avertissement directionnel / non-réglementaire.
@@ -646,28 +646,53 @@ poll_interval_secs = 300
 
 Les chips et la ligne du terminal d'Electricity Maps sont masqués quand `[green.electricity_maps]` n'est pas configuré.
 
-#### `[green.rte_eco2mix]` (optionnel, opt-in)
+#### Flux des gestionnaires de réseau : `[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`, `[green.energinet]` (optionnel, opt-in)
 
-Intensité carbone en temps réel pour les régions du réseau français, tirée du jeu public `eco2mix-national-tr` que RTE publie sur le portail open data ODRÉ. Gratuit, sans clé, sous Licence Ouverte v2.0 (attribution : RTE, données éCO2mix diffusées par ODRÉ). Mode daemon uniquement. La présence de la section l'active.
+Intensité carbone en temps réel publiée gratuitement par les gestionnaires de réseau eux-mêmes, pour les régions cloud de leur réseau. Mode daemon uniquement. La présence d'une section active son flux. Les quatre comptent les émissions directes, cycle de vie exclu, ils sont donc plus bas qu'un chiffre Electricity Maps `lifecycle` pour la même heure, et ils ne mesurent pas exactement la même chose :
 
-| Champ                | Type                  | Défaut                                             | Description                                                                                                                 |
-|----------------------|-----------------------|----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `regions`            | liste de chaînes      | aucun, obligatoire                                 | Régions cloud desservies par le réseau français (`eu-west-3`, `francecentral`, `europe-west9`...). Chacune reçoit la valeur nationale |
-| `endpoint`           | chaîne                | `https://odre.opendatasoft.com/api/explore/v2.1`   | URL de base de l'API Explore v2.1, `http://` ou `https://`                                                                   |
-| `poll_interval_secs` | entier                | `900`                                              | Intervalle de sondage en secondes (plage : 60-86400). Le jeu se rafraîchit toutes les 15 minutes                              |
+| Section | Gestionnaire, zone | Ce que mesure le chiffre | Pas | Clé | Licence |
+|---|---|---|---|---|---|
+| `[green.rte_eco2mix]` | RTE (`éCO2mix` sur ODRÉ), France | Émissions directes de la production française, imports exclus | 15 min | aucune | Licence Ouverte v2.0 |
+| `[green.neso]` | NESO Carbon Intensity API, Grande-Bretagne (hors Irlande du Nord) | CO2 direct de la production plus les imports, par kWh consommé | 30 min | aucune | CC BY 4.0 et conditions d'utilisation de l'API |
+| `[green.fingrid]` | Fingrid, Finlande | Émissions directes de la production (jeu 266, la base de RTE) ou de la consommation (265, imports à facteurs annuels fixes) | 3 min | gratuite | CC BY 4.0 |
+| `[green.energinet]` | Energinet Energi Data Service, Danemark `DK1` et `DK2` | CO2 direct par kWh consommé, imports compris | 5 min | aucune | CC BY 4.0 |
+
+Champs communs :
+
+| Champ                | Type    | Défaut | Description                                                                                            |
+|----------------------|---------|--------|--------------------------------------------------------------------------------------------------------|
+| `regions`            | liste   | aucun  | Régions cloud desservies par le réseau (`rte_eco2mix`, `neso`, `fingrid`). Chacune reçoit la valeur nationale |
+| `region_map`         | table   | aucun  | `[green.energinet]` seulement : région cloud vers zone d'enchères, `DK1` (ouest) ou `DK2` (est)        |
+| `endpoint`           | chaîne  | par flux | URL de base de l'API, `http://` ou `https://`                                                        |
+| `poll_interval_secs` | entier  | 900 (RTE), 300 (NESO, Energinet), 180 (Fingrid) | Intervalle de sondage (plage : 60-86400), proche du pas de chaque gestionnaire |
+| `dataset`            | chaîne  | `"production"` | `[green.fingrid]` seulement : `"production"` (266) ou `"consumption"` (265)                     |
+| `api_key`            | chaîne  | aucun  | `[green.fingrid]` seulement. Préférez la variable d'environnement `PERF_SENTINEL_FINGRID_API_KEY`      |
 
 ```toml
 [green.rte_eco2mix]
 regions = ["eu-west-3"]
+
+[green.neso]
+regions = ["eu-west-2", "uksouth"]
+
+[green.fingrid]                  # clé dans PERF_SENTINEL_FINGRID_API_KEY
+regions = ["europe-north1"]
+
+[green.energinet]
+region_map = { "dk-west" = "DK1", "dk-east" = "DK2" }
 ```
 
-**Ce que mesure le chiffre.** `taux_co2` estime les émissions directes de la production d'électricité en France, en gCO2/kWh. Il laisse de côté les imports et le cycle de vie des moyens de production, il est donc plus bas qu'un chiffre Electricity Maps `lifecycle` pour la même heure. Déclarez `carbon_intensity_source = "rte_eco2mix"` dans l'org-config d'une divulgation qui s'appuie dessus, pour qu'un lecteur ne mélange pas les deux méthodes.
+**Précédence.** Electricity Maps l'emporte pour toute région qu'il couvre aussi. Une région cloud ne peut figurer que dans un seul flux de gestionnaire, sinon le chargement échoue. Une ligne temps réel venant d'un flux de gestionnaire porte `intensity_provider` (`rte_eco2mix`, `neso`, `fingrid`, `energinet`) dans `green_summary.regions[]`, absent pour Electricity Maps afin que les rapports antérieurs gardent leur forme. Le tag de modèle vaut `grid_operator_api` quand aucune région n'a utilisé Electricity Maps. Le dashboard HTML ajoute un chip par flux au bandeau du scoring carbone, et le terminal une ligne `Carbon scoring: grid operator open data (...)`, dès qu'une région l'a utilisé : une section configurée ne prouve rien à elle seule, puisque le mode batch ne lance aucun scraper.
 
-**Quota.** Le portail autorise 50 000 appels par utilisateur et par mois. Les 900 s par défaut en consomment environ 2 900.
+**Fraîcheur.** Chaque gestionnaire a son propre retard. Le scraper rejette un dernier enregistrement de plus de 3 heures (RTE), 2 heures (NESO) ou 1 heure (Fingrid, Energinet) comme flux arrêté, et un enregistrement daté de plus de 15 minutes dans le futur comme pas encore mesuré. Après 3x `poll_interval_secs` sans valeur fraîche, le scoring retombe sur les profils embarqués, comme avec Electricity Maps. Les échecs sont comptés par zone, donc un `DK2` muet est signalé même quand `DK1` répond : un avertissement nomme le flux et la zone après 3 échecs consécutifs.
 
-**Fraîcheur.** Le scraper rejette un dernier enregistrement de plus de 3 heures comme flux arrêté, et un enregistrement daté de plus de 15 minutes dans le futur comme pas encore mesuré. Après 3x `poll_interval_secs` sans valeur fraîche, le scoring retombe sur les profils embarqués, comme avec Electricity Maps.
+**Divulgations.** Déclarez le flux dans l'org-config, `carbon_intensity_source = "rte_eco2mix"`, `"neso"`, `"fingrid"` ou `"energinet"` (ou `"mixed"` pour plusieurs), pour qu'un lecteur ne confonde pas leur base avec un chiffre Electricity Maps en cycle de vie. CC BY 4.0 et la Licence Ouverte demandent une attribution là où les chiffres sont publiés : le rapport HTML nomme le gestionnaire et pointe vers lui sur chaque ligne, une divulgation publiée devrait le créditer aussi.
 
-**Précédence.** Quand `[green.electricity_maps]` couvre aussi une région, Electricity Maps l'emporte pour cette région. Une ligne temps réel venant de RTE porte `intensity_provider = "rte_eco2mix"` dans `green_summary.regions[]`, et le tag de modèle vaut `rte_eco2mix_api` quand aucune région n'a utilisé Electricity Maps. Le dashboard HTML ajoute un chip `RTE éCO2mix` au bandeau du scoring carbone, et le terminal une ligne `Carbon scoring: RTE éCO2mix`, dès qu'une région l'a utilisé : une section configurée ne prouve rien à elle seule, puisque le mode batch ne lance aucun scraper.
+**Par flux :**
+- **RTE `éCO2mix` :** 50 000 appels par utilisateur et par mois sur ODRÉ, les 900 s par défaut en consomment environ 2 900. `taux_co2` est une estimation que RTE remplace ensuite par des chiffres consolidés.
+- **NESO :** les conditions interdisent de vendre, louer ou réhéberger l'accès à l'API, et le logo NESO demande un accord préalable : chaque daemon l'appelle pour son propre usage. Chaque sondage lit les 3 dernières heures de créneaux d'une demi-heure et retient l'estimation la plus récente (`actual`), datée par son propre créneau. NESO cesse parfois de mettre `actual` à jour et le recopie sur chaque nouveau créneau : quand il reste identique sur 4 créneaux consécutifs alors que la prévision bouge, ou quand aucun créneau n'en porte, la prévision du créneau le plus récent est utilisée à la place.
+- **Fingrid :** une clé gratuite sur data.fingrid.fi (portail développeur, « Open Data starter »), envoyée dans l'en-tête `x-api-key`, jamais dans l'URL, et débarrassée des espaces autour. Sans clé la section est désactivée avec un avertissement, comme Electricity Maps sans jeton ; une clé qui n'est pas en ASCII imprimable fait échouer le chargement, et un endpoint `http://` avec une clé journalise un avertissement de transmission en clair. Le jeu utilisé est enregistré dans `scoring_config.fingrid_dataset` (266 ou 265) et nommé sur le chip HTML et la ligne du terminal, puisque les deux bases diffèrent. Limites : 10 000 appels par jour et un toutes les 2 secondes par clé.
+- **Energinet :** les valeurs sont des estimations initiales qu'Energinet dit ne pas corriger en général. Son guide d'API demande aux éditeurs de ne pas interroger depuis chaque unité d'une application : gardez un daemon par site plutôt qu'un par hôte.
 
 #### `[green] calibration_file` (optionnel)
 
@@ -1175,6 +1200,7 @@ Les fichiers de configuration ne doivent jamais contenir de secrets. Pour les va
 | Variable                          | Surcharge                                                       | Lue par                                 |
 |-----------------------------------|-----------------------------------------------------------------|-----------------------------------------|
 | `PERF_SENTINEL_EMAPS_TOKEN`       | l'`api_key` Electricity Maps                                    | daemon et batch                         |
+| `PERF_SENTINEL_FINGRID_API_KEY`   | `[green.fingrid] api_key`                                       | daemon et batch                         |
 | `PERF_SENTINEL_ACK_API_KEY`       | `[daemon.ack] api_key`                                          | daemon et batch                         |
 | `PERF_SENTINEL_INCIDENTS_API_KEY` | `[daemon.incidents] api_key`                                    | daemon et batch                         |
 | `PERF_SENTINEL_READ_API_KEY`      | `[daemon] read_api_key`                                         | daemon et batch                         |
@@ -1183,7 +1209,7 @@ Les fichiers de configuration ne doivent jamais contenir de secrets. Pour les va
 | `PERF_SENTINEL_HUB_TOKEN`         | le jeton enregistré par `login`, pour `hub`                     | CLI, envoyée en `Authorization: Bearer` |
 | `PERF_SENTINEL_HUB_URL`           | l'URL `--hub` de `login` et `hub`                               | CLI                                     |
 
-Les surcharges s'appliquent à chaque exécution, commandes batch et exécution sans aucun fichier de config comprises, donc un job qui hérite du Secret du daemon doit lui aussi porter des valeurs valides (la clé d'incidents ne compte qu'une fois `[daemon.incidents] enabled` posé). Une variable définie à la chaîne vide compte comme définie : une clé vide est rejetée au chargement de la config plutôt qu'ignorée en silence, donc un Secret monté vide fait échouer toute commande qui la charge, daemon compris, au lieu d'ouvrir la route.
+Les surcharges s'appliquent à chaque exécution, commandes batch et exécution sans aucun fichier de config comprises, donc un job qui hérite du Secret du daemon doit lui aussi porter des valeurs valides (la clé d'incidents ne compte qu'une fois `[daemon.incidents] enabled` posé). Une variable définie à la chaîne vide compte comme définie : une clé vide est rejetée au chargement de la config plutôt qu'ignorée en silence, donc un Secret monté vide fait échouer toute commande qui la charge, daemon compris, au lieu d'ouvrir la route. Les deux clés de sources de données font exception : un `PERF_SENTINEL_EMAPS_TOKEN` ou un `PERF_SENTINEL_FINGRID_API_KEY` vide ou blanc compte comme absent, puisqu'une clé manquante ne fait que désactiver sa source (avec un avertissement pour Fingrid) et n'ouvre rien.
 
 ### Proxy sortant et CA privée
 

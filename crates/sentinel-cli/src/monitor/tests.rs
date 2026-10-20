@@ -418,10 +418,15 @@ fn energy_meas_dash_when_ratio_missing() {
 
 #[test]
 fn intensity_source_label_tags_cold_and_hot() {
-    assert!(intensity_source_label(IntensitySource::RealTime).contains("hot"));
-    assert!(intensity_source_label(IntensitySource::Annual).contains("cold"));
-    assert!(intensity_source_label(IntensitySource::Hourly).contains("cold"));
-    assert!(intensity_source_label(IntensitySource::MonthlyHourly).contains("cold"));
+    assert!(intensity_source_label(IntensitySource::RealTime, None).contains("hot"));
+    assert!(intensity_source_label(IntensitySource::Annual, None).contains("cold"));
+    assert!(intensity_source_label(IntensitySource::Hourly, None).contains("cold"));
+    assert!(intensity_source_label(IntensitySource::MonthlyHourly, None).contains("cold"));
+    let neso = Some(sentinel_core::score::carbon::RealTimeProvider::Neso);
+    assert_eq!(
+        intensity_source_label(IntensitySource::RealTime, neso),
+        "RealTime (neso)"
+    );
 }
 
 #[test]

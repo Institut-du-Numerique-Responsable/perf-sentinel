@@ -621,7 +621,7 @@ Ce qui capture :
 - **Les différences entre services** : Java vs .NET vs Node vs Go auront des empreintes énergétiques différentes même pour des charges I/O similaires.
 - **La variance de charge dans le temps** : un service idle et un service en charge obtiennent des coefficients différents pendant que le daemon tourne.
 
-Les rapports où au moins un service a utilisé un coefficient mesuré sont tagués `model = "scaphandre_rapl"`. Chaîne de priorité complète : `electricity_maps_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`. Quand des facteurs de calibration sont actifs sur les modèles proxy, le suffixe `+cal` est ajouté (ex. `io_proxy_v2+cal`). Le suffixe `+cal` ne s'applique jamais à un tag mesuré, le multiplicateur de calibration cible le coefficient proxy et n'a plus de sens dès qu'une lecture mesurée le remplace.
+Les rapports où au moins un service a utilisé un coefficient mesuré sont tagués `model = "scaphandre_rapl"`. Chaîne de priorité complète : `electricity_maps_api` > `grid_operator_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`. Quand des facteurs de calibration sont actifs sur les modèles proxy, le suffixe `+cal` est ajouté (ex. `io_proxy_v2+cal`). Le suffixe `+cal` ne s'applique jamais à un tag mesuré, le multiplicateur de calibration cible le coefficient proxy et n'a plus de sens dès qu'une lecture mesurée le remplace.
 
 **Ce que Scaphandre ne fait PAS.** C'est la limitation critique : **Scaphandre donne des coefficients par service, pas d'attribution par finding**. Spécifiquement :
 
@@ -895,12 +895,14 @@ Quand le daemon tourne avec `api_enabled = true`, l'API de requêtage expose les
 - **Mode daemon uniquement.** Le scraper Electricity Maps ne fonctionne qu'en mode `perf-sentinel watch`. Le mode batch (`analyze`, `tempo`, `calibrate`) utilise les profils embarqués.
 - **Repli en cas de données périmées.** Si l'API est inaccessible plus longtemps que 3x l'intervalle de sondage, le scraper retombe sur les profils horaires ou annuels embarqués.
 
-## RTE éCO2mix
+## Flux des gestionnaires de réseau (RTE éCO2mix, NESO, Fingrid, Energinet)
 
-- **France uniquement.** Le jeu couvre le réseau français. Chaque région listée dans `regions` reçoit la même valeur nationale, ce qui est faux pour une région hors de France.
-- **Émissions directes de la production française.** `taux_co2` ne compte ni les imports ni le cycle de vie des moyens de production, il est donc plus bas qu'une intensité de consommation en cycle de vie, et l'écart grandit quand la France importe. C'est une estimation que RTE remplace ensuite par des chiffres consolidés, que Perf Sentinel ne reprend jamais.
-- **Pas de métadonnées d'estimation.** Les lignes ne portent pas d'indicateur `intensity_estimated`, le jeu n'en expose pas.
-- **Proxys d'entreprise.** Certains proxys qui inspectent le TLS bloquent tout le domaine `opendatasoft.com`. Le scraper échoue alors et le scoring retombe sur les profils embarqués, avec un avertissement après 3 échecs consécutifs.
+- **Un pays chacun, valeurs nationales ou par zone d'enchères.** Chaque région rattachée à un flux reçoit la valeur de son réseau national (ou de `DK1` / `DK2`), ce qui est faux pour une région hors de ce réseau. NESO couvre la Grande-Bretagne, pas l'Irlande du Nord.
+- **Pas la même base.** RTE et Fingrid 266 comptent les émissions directes de la production nationale ; NESO, Fingrid 265 et Energinet comptent la consommation, imports compris. Aucun n'est en cycle de vie, tous sont donc plus bas qu'une intensité Electricity Maps `lifecycle`, et une base production sous-estime un réseau qui importe beaucoup. Comparez les régions entre elles en gardant cela en tête.
+- **Des estimations, pas des chiffres consolidés.** RTE remplace ensuite ses valeurs temps réel par des valeurs consolidées, Energinet dit que ses valeurs initiales ne seront en général pas corrigées, et l'`actual` de NESO est une estimation tirée de la production mesurée ; Perf Sentinel ne revient jamais sur une valeur passée. NESO cesse parfois de mettre `actual` à jour et le recopie sur chaque nouveau créneau ; Perf Sentinel considère comme figée une estimation identique sur 4 créneaux consécutifs alors que la prévision bouge, et utilise alors la prévision la plus récente, ce qui veut dire aussi qu'un réseau réellement stable dont la prévision bouge lit la prévision.
+- **Pas de métadonnées d'estimation.** Les lignes ne portent pas d'indicateur `intensity_estimated`, aucune de ces API n'en expose.
+- **Conditions d'utilisation.** NESO interdit de vendre ou de réhéberger l'accès à son API ; Energinet demande aux éditeurs de ne pas interroger depuis chaque unité d'une application ; Fingrid limite chaque clé à 10 000 appels par jour et un toutes les 2 secondes. Une clé partagée entre de nombreux daemons peut atteindre les limites de Fingrid.
+- **Proxys d'entreprise.** Certains proxys qui inspectent le TLS bloquent un domaine entier (`opendatasoft.com` pour RTE a été vu bloqué). Le scraper échoue alors et le scoring retombe sur les profils embarqués, avec un avertissement après 3 échecs consécutifs.
 - **Mode daemon uniquement.** Le mode batch utilise les profils embarqués.
 
 ## Ingestion Tempo

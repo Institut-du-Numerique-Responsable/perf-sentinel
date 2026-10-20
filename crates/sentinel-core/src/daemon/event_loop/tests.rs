@@ -1392,20 +1392,40 @@ fn build_tick_ctx_no_scrapers_yields_borrowed_cow() {
     assert!(ctx.energy_snapshot.is_none());
 }
 
-#[test]
-fn build_tick_ctx_electricity_maps_overrides_rte_per_region() {
+#[tokio::test]
+async fn build_tick_ctx_electricity_maps_overrides_grid_feeds_per_region() {
     use crate::score::carbon::RealTimeProvider;
+    use crate::score::grid_feed::GridFeedState;
+    use std::collections::BTreeMap;
     let base = Arc::new(score::carbon::CarbonContext::default());
-    let rte = crate::score::rte_eco2mix::RteEco2mixState::new(vec![
-        "eu-west-3".to_string(),
-        "francecentral".to_string(),
-    ]);
-    rte.publish(21.0, 900);
+    let feed = |provider, regions: &[(&str, &str)], zone: &str, gco2| {
+        let state = GridFeedState::new(
+            provider,
+            regions
+                .iter()
+                .map(|(r, z)| ((*r).to_string(), (*z).to_string()))
+                .collect::<BTreeMap<_, _>>(),
+        );
+        state.publish(&[(zone.to_string(), gco2)], 900);
+        super::super::listeners::GridFeedSetup {
+            state,
+            handle: tokio::spawn(async {}),
+            staleness_ms: 500,
+        }
+    };
+    let feeds = [
+        feed(
+            RealTimeProvider::RteEco2mix,
+            &[("eu-west-3", "FR"), ("francecentral", "FR")],
+            "FR",
+            21.0,
+        ),
+        feed(RealTimeProvider::Neso, &[("eu-west-2", "GB")], "GB", 120.0),
+    ];
     let emaps = ElectricityMapsState::default();
     emaps.insert_for_test("eu-west-3".into(), 30.0, 900);
     let mut sources = no_scrapers(&base);
-    sources.rte_state = Some(&rte);
-    sources.rte_staleness_ms = 500;
+    sources.grid_feeds = &feeds;
     sources.emaps_state = Some(&emaps);
     sources.emaps_staleness_ms = 500;
     let ctx = build_tick_ctx(&sources, 1_000);
@@ -1413,6 +1433,7 @@ fn build_tick_ctx_electricity_maps_overrides_rte_per_region() {
     assert_eq!(rt["eu-west-3"].provider, RealTimeProvider::ElectricityMaps);
     assert!((rt["eu-west-3"].gco2_per_kwh - 30.0).abs() < f64::EPSILON);
     assert_eq!(rt["francecentral"].provider, RealTimeProvider::RteEco2mix);
+    assert_eq!(rt["eu-west-2"].provider, RealTimeProvider::Neso);
 }
 
 #[test]
@@ -1984,8 +2005,7 @@ fn no_scrapers(base: &Arc<score::carbon::CarbonContext>) -> EnergySources<'_> {
         cloud_staleness_ms: 0,
         emaps_state: None,
         emaps_staleness_ms: 0,
-        rte_state: None,
-        rte_staleness_ms: 0,
+        grid_feeds: &[],
     }
 }
 
@@ -2557,7 +2577,7 @@ fn dummy_shutdown<'a>(
             redfish: None,
             cloud: None,
             emaps: None,
-            rte: None,
+            grid_feeds: &[],
         },
         listeners: ListenerHandles {
             grpc,

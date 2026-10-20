@@ -3121,7 +3121,7 @@ fn rte_realtime_row_names_its_provider_and_model() {
     let (_, summary, _) = score_green(&[trace], vec![], Some(&ctx));
     assert_eq!(
         summary.co2.as_ref().unwrap().total.model,
-        crate::score::carbon::CO2_MODEL_RTE
+        crate::score::carbon::CO2_MODEL_GRID_OPERATOR
     );
     let row = &summary.regions[0];
     assert_eq!(row.intensity_source, IntensitySource::RealTime);

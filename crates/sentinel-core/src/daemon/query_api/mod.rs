@@ -759,6 +759,25 @@ pub struct EnergyStatusResponse {
     pub backends: Vec<EnergyBackendStatus>,
 }
 
+/// A grid operator feed row of `/api/energy`: configured or not, and like
+/// Electricity Maps no freshness gauge, its liveness shows as `real_time`
+/// regions on the report.
+fn grid_feed_row<'a>(
+    state: &QueryApiState,
+    provider: crate::score::carbon::RealTimeProvider,
+) -> (
+    &'static str,
+    bool,
+    Option<&'a prometheus::Gauge>,
+    Option<(&'a prometheus::IntCounter, &'a prometheus::IntCounter)>,
+) {
+    let configured = state
+        .scoring_config
+        .as_ref()
+        .is_some_and(|c| c.grid_feeds.contains(&provider));
+    (provider.as_str(), configured, None, None)
+}
+
 /// Live health of the energy backends, from the shared metrics registry
 /// plus the configured flags frozen at startup. One table row per
 /// backend keeps the name, flag, gauge and counters together: adding a
@@ -774,7 +793,7 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
     type CounterPair<'a> = (&'a prometheus::IntCounter, &'a prometheus::IntCounter);
     let m = &state.metrics;
     let b = state.energy_backends;
-    let rows: [(&str, bool, Option<&prometheus::Gauge>, Option<CounterPair>); 7] = [
+    let rows: [(&str, bool, Option<&prometheus::Gauge>, Option<CounterPair>); 10] = [
         (
             "alumet",
             b.alumet,
@@ -817,15 +836,10 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
             None,
             None,
         ),
-        (
-            "rte_eco2mix",
-            state
-                .scoring_config
-                .as_ref()
-                .is_some_and(|c| c.rte_eco2mix == Some(true)),
-            None,
-            None,
-        ),
+        grid_feed_row(&state, crate::score::carbon::RealTimeProvider::RteEco2mix),
+        grid_feed_row(&state, crate::score::carbon::RealTimeProvider::Neso),
+        grid_feed_row(&state, crate::score::carbon::RealTimeProvider::Fingrid),
+        grid_feed_row(&state, crate::score::carbon::RealTimeProvider::Energinet),
     ];
     let backends = rows
         .into_iter()

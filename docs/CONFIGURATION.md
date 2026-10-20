@@ -250,7 +250,7 @@ I/O ops with no resolvable region land in a synthetic `"unknown"` bucket with ze
 
 When green scoring is enabled and at least one event is analyzed, the JSON report's `green_summary` includes:
 
-- **`co2`**: structured `{ total, avoidable, operational_gco2, embodied_gco2 }` object. Both `total` and `avoidable` are `{ low, mid, high, model, methodology }` with **2× multiplicative uncertainty** (`low = mid/2`, `high = mid×2`). The `methodology` tag distinguishes `total` (`"sci_v1_numerator+transport"`: `(E × I) + M + T` summed over traces, including when `T` is zero) from `avoidable` (`"sci_v1_operational_ratio"`: region-blind global ratio, excludes embodied and transport). Legacy reports can carry `"sci_v1_numerator"`. `model` values, most precise wins: `"electricity_maps_api"` > `"alumet_rapl"` > `"scaphandre_rapl"` > `"kepler_ebpf"` > `"redfish_bmc"` > `"cloud_specpower"` > `"io_proxy_v3"` > `"io_proxy_v2"` > `"io_proxy_v1"`. When calibration factors are active on proxy models, `+cal` is appended (e.g. `"io_proxy_v2+cal"`). The `+cal` suffix never applies to a measured tag.
+- **`co2`**: structured `{ total, avoidable, operational_gco2, embodied_gco2 }` object. Both `total` and `avoidable` are `{ low, mid, high, model, methodology }` with **2× multiplicative uncertainty** (`low = mid/2`, `high = mid×2`). The `methodology` tag distinguishes `total` (`"sci_v1_numerator+transport"`: `(E × I) + M + T` summed over traces, including when `T` is zero) from `avoidable` (`"sci_v1_operational_ratio"`: region-blind global ratio, excludes embodied and transport). Legacy reports can carry `"sci_v1_numerator"`. `model` values, most precise wins: `"electricity_maps_api"` > `"grid_operator_api"` > `"alumet_rapl"` > `"scaphandre_rapl"` > `"kepler_ebpf"` > `"redfish_bmc"` > `"cloud_specpower"` > `"io_proxy_v3"` > `"io_proxy_v2"` > `"io_proxy_v1"`. When calibration factors are active on proxy models, `+cal` is appended (e.g. `"io_proxy_v2+cal"`). The `+cal` suffix never applies to a measured tag.
 - **`regions[]`**: per-region breakdown with `{ region, grid_intensity_gco2_kwh, pue, io_ops, co2_gco2, intensity_source }`, **sorted by `co2_gco2` descending** (highest-impact regions first) with alphabetical tiebreak. `intensity_source` is `"annual"`, `"hourly"`, `"monthly_hourly"` or `"real_time"` (Electricity Maps API) depending on which carbon intensity source was used for the region.
 
 Carbon intensity data is embedded in the binary (no network egress). See `docs/design/05-GREENOPS-AND-CARBON.md` for the complete formula and methodology and [docs/LIMITATIONS.md](LIMITATIONS.md#carbon-estimates-accuracy) for the directional / non-regulatory disclaimer.
@@ -632,28 +632,53 @@ poll_interval_secs = 300
 
 The Electricity Maps chips and terminal line are hidden when `[green.electricity_maps]` is not configured.
 
-#### `[green.rte_eco2mix]` (optional, opt-in)
+#### Grid operator feeds: `[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`, `[green.energinet]` (optional, opt-in)
 
-Real-time carbon intensity for regions on the French grid, from the public `eco2mix-national-tr` dataset that RTE publishes on the ODRÉ open data portal. Free, no key, Licence Ouverte v2.0 (attribution: RTE, éCO2mix data published by ODRÉ). Daemon mode only. The section being present enables it.
+Real-time carbon intensity published for free by grid operators themselves, for the cloud regions on their grid. Daemon mode only. A section being present enables its feed. All four count direct emissions, lifecycle excluded, so they read lower than an Electricity Maps `lifecycle` figure for the same hour, and they do not measure exactly the same thing:
 
-| Field                | Type            | Default                                            | Description                                                                                                       |
-|----------------------|-----------------|----------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
-| `regions`            | list of strings | none, required                                     | Cloud regions served by the French grid (`eu-west-3`, `francecentral`, `europe-west9`...). Each gets the national value |
-| `endpoint`           | string          | `https://odre.opendatasoft.com/api/explore/v2.1`   | Base URL of the Explore API v2.1, `http://` or `https://`                                                          |
-| `poll_interval_secs` | integer         | `900`                                              | Poll interval in seconds (range: 60-86400). The dataset refreshes every 15 minutes                                  |
+| Section | Operator, zone | What the number is | Step | Key | Licence |
+|---|---|---|---|---|---|
+| `[green.rte_eco2mix]` | RTE (`éCO2mix` on ODRÉ), France | Direct emissions of French production, imports excluded | 15 min | none | Licence Ouverte v2.0 |
+| `[green.neso]` | NESO Carbon Intensity API, Great Britain (not Northern Ireland) | Direct CO2 of generation plus imports, per kWh consumed | 30 min | none | CC BY 4.0 and the API terms of use |
+| `[green.fingrid]` | Fingrid, Finland | Direct emissions of production (dataset 266, the RTE basis) or of consumption (265, imports at fixed yearly factors) | 3 min | free | CC BY 4.0 |
+| `[green.energinet]` | Energinet Energi Data Service, Denmark `DK1` and `DK2` | Direct CO2 per kWh consumed, imports included | 5 min | none | CC BY 4.0 |
+
+Shared fields:
+
+| Field                | Type    | Default | Description                                                                                       |
+|----------------------|---------|---------|---------------------------------------------------------------------------------------------------|
+| `regions`            | list    | none    | Cloud regions served by the grid (`rte_eco2mix`, `neso`, `fingrid`). Each gets the national value |
+| `region_map`         | table   | none    | `[green.energinet]` only: cloud region to bidding zone, `DK1` (west) or `DK2` (east)             |
+| `endpoint`           | string  | per feed | API base URL, `http://` or `https://`                                                            |
+| `poll_interval_secs` | integer | 900 (RTE), 300 (NESO, Energinet), 180 (Fingrid) | Poll interval (range: 60-86400), about each operator's refresh step |
+| `dataset`            | string  | `"production"` | `[green.fingrid]` only: `"production"` (266) or `"consumption"` (265)                  |
+| `api_key`            | string  | none    | `[green.fingrid]` only. Prefer the `PERF_SENTINEL_FINGRID_API_KEY` environment variable           |
 
 ```toml
 [green.rte_eco2mix]
 regions = ["eu-west-3"]
+
+[green.neso]
+regions = ["eu-west-2", "uksouth"]
+
+[green.fingrid]                  # key in PERF_SENTINEL_FINGRID_API_KEY
+regions = ["europe-north1"]
+
+[green.energinet]
+region_map = { "dk-west" = "DK1", "dk-east" = "DK2" }
 ```
 
-**What the figure is.** `taux_co2` estimates the direct emissions of electricity production in France, in gCO2/kWh. It leaves out imports and the lifecycle of generation assets, so it reads lower than an Electricity Maps `lifecycle` figure for the same hour. Declare `carbon_intensity_source = "rte_eco2mix"` in the org config of a disclosure built on it, so a reader does not mix the two methods.
+**Precedence.** Electricity Maps wins for any region it also covers. A cloud region may appear in one grid feed only, the load fails otherwise. A real-time row from a grid feed carries `intensity_provider` (`rte_eco2mix`, `neso`, `fingrid`, `energinet`) in `green_summary.regions[]`, absent for Electricity Maps so earlier reports keep their shape. The model tag is `grid_operator_api` when no region used Electricity Maps. The HTML dashboard adds one chip per feed to the carbon scoring bandeau, and the terminal a `Carbon scoring: grid operator open data (...)` line, as soon as one region drew on it: a configured section alone proves nothing, since batch runs start no scraper.
 
-**Quota.** The portal allows 50,000 calls per user per month. The default 900 s spends about 2,900.
+**Freshness.** Each operator has its own lag. The scraper rejects a latest record older than 3 hours (RTE), 2 hours (NESO) or 1 hour (Fingrid, Energinet) as a stalled feed, and one dated more than 15 minutes ahead as not yet measured. After 3x `poll_interval_secs` without a fresh value, scoring falls back to the embedded profiles, as with Electricity Maps. Failures are counted per zone, so a dead `DK2` is reported even while `DK1` answers: a warning names the feed and the zone after 3 consecutive failures.
 
-**Freshness.** The scraper rejects a latest record older than 3 hours as a stalled feed, and one dated more than 15 minutes ahead as not yet measured. After 3x `poll_interval_secs` without a fresh value, scoring falls back to the embedded profiles, as with Electricity Maps.
+**Disclosures.** Declare the feed in the org config, `carbon_intensity_source = "rte_eco2mix"`, `"neso"`, `"fingrid"` or `"energinet"` (or `"mixed"` across several), so a reader does not mix their basis with an Electricity Maps lifecycle figure. CC BY 4.0 and Licence Ouverte ask for attribution where the figures are published: the HTML report names and links the operator on each row, a published disclosure should credit it too.
 
-**Precedence.** When `[green.electricity_maps]` also covers a region, Electricity Maps wins for that region. A real-time row from RTE carries `intensity_provider = "rte_eco2mix"` in `green_summary.regions[]`, and the model tag is `rte_eco2mix_api` when no region used Electricity Maps. The HTML dashboard adds an `RTE éCO2mix` chip to the carbon scoring bandeau, and the terminal a `Carbon scoring: RTE éCO2mix` line, as soon as one region drew on it: a configured section alone proves nothing, since batch runs start no scraper.
+**Per feed:**
+- **RTE `éCO2mix`:** 50,000 calls per user per month on ODRÉ, the default 900 s spends about 2,900. `taux_co2` is an estimate that RTE later replaces with consolidated figures.
+- **NESO:** the terms forbid selling, leasing or re-hosting access to the API, and the NESO logo needs prior approval: each daemon calls it for its own use. Each poll reads the last 3 hours of half-hour windows and takes the newest estimate (`actual`), dated by its own window. NESO sometimes stops updating `actual` and copies it onto each new window: when it stays identical on 4 consecutive windows while the forecast moves, or when no window has one, the newest window's forecast is used instead.
+- **Fingrid:** a free key from data.fingrid.fi (developer portal, "Open Data starter"), sent in the `x-api-key` header, never in the URL, and trimmed of surrounding whitespace. Without a key the section is disabled with a warning, like Electricity Maps without a token; a key that is not printable ASCII fails the load, and an `http://` endpoint with a key logs a cleartext warning. The dataset scored is recorded as `scoring_config.fingrid_dataset` (266 or 265) and named on the HTML chip and the terminal line, since the two bases differ. Limits: 10,000 calls a day and one every 2 seconds per key.
+- **Energinet:** values are initial estimates that Energinet says it will generally not correct. Its API guide asks vendors not to poll from every unit of an application: keep one daemon per site rather than one per host.
 
 #### `[green] calibration_file` (optional)
 
@@ -1136,6 +1161,7 @@ Configuration files must never contain secrets. For sensitive values (API keys, 
 | Variable                          | Overrides                                                     | Read by                              |
 |-----------------------------------|---------------------------------------------------------------|--------------------------------------|
 | `PERF_SENTINEL_EMAPS_TOKEN`       | the Electricity Maps `api_key`                                | daemon and batch                     |
+| `PERF_SENTINEL_FINGRID_API_KEY`   | `[green.fingrid] api_key`                                     | daemon and batch                     |
 | `PERF_SENTINEL_ACK_API_KEY`       | `[daemon.ack] api_key`                                        | daemon and batch                     |
 | `PERF_SENTINEL_INCIDENTS_API_KEY` | `[daemon.incidents] api_key`                                  | daemon and batch                     |
 | `PERF_SENTINEL_READ_API_KEY`      | `[daemon] read_api_key`                                       | daemon and batch                     |
@@ -1144,7 +1170,7 @@ Configuration files must never contain secrets. For sensitive values (API keys, 
 | `PERF_SENTINEL_HUB_TOKEN`         | the token `login` stored, for `hub`                           | CLI, sent as `Authorization: Bearer` |
 | `PERF_SENTINEL_HUB_URL`           | the `--hub` URL of `login` and `hub`                          | CLI                                  |
 
-The overrides apply on every run, batch commands and a run without any config file included, so a job that inherits the daemon's Secret must carry valid values too (the incidents key only counts once `[daemon.incidents] enabled` is set). A variable set to an empty string counts as set: an empty key is rejected at config load rather than silently ignored, so a Secret mounted empty fails every command that loads it, the daemon included, instead of opening the route.
+The overrides apply on every run, batch commands and a run without any config file included, so a job that inherits the daemon's Secret must carry valid values too (the incidents key only counts once `[daemon.incidents] enabled` is set). A variable set to an empty string counts as set: an empty key is rejected at config load rather than silently ignored, so a Secret mounted empty fails every command that loads it, the daemon included, instead of opening the route. The two data-source keys are the exception: an empty or blank `PERF_SENTINEL_EMAPS_TOKEN` or `PERF_SENTINEL_FINGRID_API_KEY` counts as unset, since a missing key only disables its source (with a warning for Fingrid) and opens nothing.
 
 ### Outbound proxy and private CA
 

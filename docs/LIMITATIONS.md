@@ -612,7 +612,7 @@ This captures:
 - **Per-service differences**: Java vs .NET vs Node vs Go will have different energy footprints even for similar I/O work.
 - **Workload variance over time**: an idle service and a loaded service get different coefficients as the daemon runs.
 
-Reports where at least one service used a measured coefficient are tagged with `model = "scaphandre_rapl"`. Full precedence chain: `electricity_maps_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`. When calibration factors are active on proxy models, the suffix `+cal` is appended (e.g. `io_proxy_v2+cal`). The `+cal` suffix never applies to a measured tag, the calibration multiplier targets the proxy coefficient and has no meaning once a measured reading replaces it.
+Reports where at least one service used a measured coefficient are tagged with `model = "scaphandre_rapl"`. Full precedence chain: `electricity_maps_api` > `grid_operator_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`. When calibration factors are active on proxy models, the suffix `+cal` is appended (e.g. `io_proxy_v2+cal`). The `+cal` suffix never applies to a measured tag, the calibration multiplier targets the proxy coefficient and has no meaning once a measured reading replaces it.
 
 **What Scaphandre does NOT do.** This is the critical limitation: **Scaphandre gives per-service coefficients, not per-finding attribution**. Specifically:
 
@@ -886,12 +886,14 @@ When the daemon runs with `api_enabled = true`, the query API exposes findings (
 - **Daemon only.** The Electricity Maps scraper runs only in `perf-sentinel watch` mode. Batch mode (`analyze`, `tempo`, `calibrate`) uses the embedded profiles.
 - **Staleness fallback.** If the API is unreachable for longer than 3x the poll interval, the scraper falls back to embedded hourly or annual profiles.
 
-## RTE éCO2mix
+## Grid operator feeds (RTE éCO2mix, NESO, Fingrid, Energinet)
 
-- **France only.** The dataset covers the French grid. Every region listed in `regions` gets the same national value, which is wrong for a region outside France.
-- **Direct emissions of French production.** `taux_co2` counts neither imports nor the lifecycle of generation assets, so it is lower than a consumption-based lifecycle intensity, and the gap widens when France imports. It is an estimate that RTE later replaces with consolidated figures, which Perf Sentinel never revisits.
-- **No estimation metadata.** Rows carry no `intensity_estimated` flag, the dataset does not expose one.
-- **Corporate proxies.** Some TLS-inspecting proxies block the `opendatasoft.com` domain outright. The scraper then fails and scoring falls back to the embedded profiles, with a warning after 3 consecutive failures.
+- **One country each, national or bidding-zone values.** Every region mapped to a feed gets the value of its national grid (or of `DK1` / `DK2`), which is wrong for a region outside that grid. NESO covers Great Britain, not Northern Ireland.
+- **Not the same basis.** RTE and Fingrid 266 count the direct emissions of domestic production; NESO, Fingrid 265 and Energinet count consumption, imports included. None is lifecycle, so all read lower than an Electricity Maps `lifecycle` intensity, and a production basis understates a grid that imports a lot. Compare figures across regions with that in mind.
+- **Estimates, not settlements.** RTE replaces its real-time values with consolidated ones later, Energinet says its initial values will generally not be corrected, and NESO's `actual` is an estimate from metered generation; Perf Sentinel never revisits a past value. NESO sometimes stops updating `actual` and copies it onto each new window; Perf Sentinel treats an estimate identical on 4 consecutive windows while the forecast moves as frozen and uses the newest forecast instead, which also means a genuinely flat grid with a moving forecast reads the forecast.
+- **No estimation metadata.** Rows carry no `intensity_estimated` flag, none of these APIs exposes one.
+- **Terms of use.** NESO forbids selling or re-hosting access to its API; Energinet asks vendors not to poll from every unit of an application; Fingrid limits each key to 10,000 calls a day and one every 2 seconds. A key shared across many daemons can hit the Fingrid limits.
+- **Corporate proxies.** Some TLS-inspecting proxies block a whole domain (`opendatasoft.com` for RTE was seen blocked). The scraper then fails and scoring falls back to the embedded profiles, with a warning after 3 consecutive failures.
 - **Daemon only.** Batch mode uses the embedded profiles.
 
 ## Tempo ingestion

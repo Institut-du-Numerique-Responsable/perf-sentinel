@@ -1016,21 +1016,43 @@ fn print_carbon_summary(carbon: &sentinel_core::score::carbon::CarbonReport) {
     }
 }
 
+/// Header naming the grid operator feeds at least one region drew on, in
+/// their fixed order. A configured feed alone proves nothing: batch runs
+/// start no scraper.
+fn grid_scoring_line(summary: &sentinel_core::report::GreenSummary) -> Option<String> {
+    let fingrid_dataset = summary
+        .scoring_config
+        .as_ref()
+        .and_then(|cfg| cfg.fingrid_dataset);
+    let used: Vec<&str> = RealTimeProvider::GRID_OPERATORS
+        .iter()
+        .filter(|p| {
+            summary
+                .regions
+                .iter()
+                .any(|r| r.intensity_provider == Some(**p))
+        })
+        // Fingrid's two datasets differ in basis: name the one scored.
+        .map(|p| match (p, fingrid_dataset) {
+            (RealTimeProvider::Fingrid, Some(265)) => "Fingrid consumption",
+            (RealTimeProvider::Fingrid, Some(_)) => "Fingrid production",
+            _ => p.display_name(),
+        })
+        .collect();
+    (!used.is_empty()).then(|| {
+        format!(
+            "  Carbon scoring: grid operator open data ({}), direct emissions",
+            used.join(", ")
+        )
+    })
+}
+
 /// One `Per-region breakdown` line.
 ///
 /// `region` and `estimation_method` reach here from the OTLP `cloud.region`
 /// span attribute or a user-supplied `--input` JSON, so both are sanitized at
 /// this sink: a hostile producer must not inject ANSI / OSC 8 / control bytes
 /// into the operator's terminal.
-/// Header naming RTE `éCO2mix` when at least one region drew on it.
-fn rte_scoring_line(summary: &sentinel_core::report::GreenSummary) -> Option<&'static str> {
-    summary
-        .regions
-        .iter()
-        .any(|r| r.intensity_provider == Some(RealTimeProvider::RteEco2mix))
-        .then_some("  Carbon scoring: RTE éCO2mix, direct emissions of French production")
-}
-
 fn format_region_line(region: &sentinel_core::score::carbon::RegionBreakdown) -> String {
     let region_label = sanitize_for_terminal(&region.region);
     // Unresolved regions carry placeholder zero intensity. Render an explicit
@@ -1042,9 +1064,11 @@ fn format_region_line(region: &sentinel_core::score::carbon::RegionBreakdown) ->
             region.io_ops, region.co2_gco2,
         );
     }
-    let source_str = match region.intensity_provider {
-        Some(RealTimeProvider::RteEco2mix) => "real_time, rte_eco2mix",
-        _ => intensity_source_label(region.intensity_source),
+    let source_str: Cow<'static, str> = match region.intensity_provider {
+        Some(p) if p != RealTimeProvider::ElectricityMaps => {
+            Cow::Owned(format!("real_time, {}", p.as_str()))
+        }
+        _ => Cow::Borrowed(intensity_source_label(region.intensity_source)),
     };
     let raw_suffix = format_estimation_suffix(
         region.intensity_estimated,
@@ -1144,7 +1168,7 @@ fn print_green_summary(
     }
     // Only when a region used it: batch runs start no scraper, so a
     // configured section alone says nothing about the figures below.
-    if let Some(line) = rte_scoring_line(summary) {
+    if let Some(line) = grid_scoring_line(summary) {
         println!();
         println!("{line}");
     }

@@ -63,8 +63,9 @@ conformance = "core-required"
 # consumer interpret operational CO2 even though region-specific
 # grid-intensity data is sourced from the binary or the API.
 cloud_regions = ["eu-west-3"]
-# `electricity_maps` (real-time API), `rte_eco2mix` (free real-time
-# feed for the French grid, direct emissions), `static_tables`
+# `electricity_maps` (real-time API), `rte_eco2mix`, `neso`, `fingrid`
+# or `energinet` (free real-time feeds of the French, British, Finnish
+# and Danish grid operators, direct emissions), `static_tables`
 # (embedded annual averages), or `mixed`.
 carbon_intensity_source = "electricity_maps"
 # Version of the embedded SPECpower table that produced the cloud CPU%

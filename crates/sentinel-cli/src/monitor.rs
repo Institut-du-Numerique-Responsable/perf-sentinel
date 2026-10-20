@@ -1217,7 +1217,7 @@ fn build_energy_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
                 "  {:<14} {:>10.1} {:<22} {:<10} {:>8}  {:.6}",
                 truncate_cell(&r.region, 14),
                 r.grid_intensity_gco2_kwh,
-                intensity_source_label(r.intensity_source),
+                intensity_source_label(r.intensity_source, r.intensity_provider),
                 estimated,
                 r.io_ops,
                 r.co2_gco2,
@@ -1281,7 +1281,7 @@ fn build_scrapers_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "electricity_maps and rte_eco2mix have no freshness gauge: their liveness shows as",
+        "electricity_maps and the grid operator feeds have no freshness gauge: their liveness shows as",
         dim,
     )));
     lines.push(Line::from(Span::styled(
@@ -2250,13 +2250,22 @@ fn warning_kind_style(kind: &str) -> Style {
 }
 
 /// Label for a grid-intensity source, tagging cold (embedded reference
-/// data) vs hot (live Electricity Maps real-time).
-fn intensity_source_label(src: IntensitySource) -> &'static str {
-    match src {
-        IntensitySource::RealTime => "RealTime (hot)",
-        IntensitySource::MonthlyHourly => "MonthlyHourly (cold)",
-        IntensitySource::Hourly => "Hourly (cold)",
-        IntensitySource::Annual => "Annual (cold)",
+/// data) vs hot (live Electricity Maps real-time), or naming the grid
+/// operator feed that served a real-time row.
+fn intensity_source_label(
+    src: IntensitySource,
+    provider: Option<sentinel_core::score::carbon::RealTimeProvider>,
+) -> &'static str {
+    use sentinel_core::score::carbon::RealTimeProvider;
+    match (src, provider) {
+        (IntensitySource::RealTime, Some(RealTimeProvider::RteEco2mix)) => "RealTime (rte_eco2mix)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::Neso)) => "RealTime (neso)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::Fingrid)) => "RealTime (fingrid)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::Energinet)) => "RealTime (energinet)",
+        (IntensitySource::RealTime, _) => "RealTime (hot)",
+        (IntensitySource::MonthlyHourly, _) => "MonthlyHourly (cold)",
+        (IntensitySource::Hourly, _) => "Hourly (cold)",
+        (IntensitySource::Annual, _) => "Annual (cold)",
     }
 }
 

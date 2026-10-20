@@ -40,6 +40,9 @@ Le moteur ne fait aucun appel sortant tant que la configuration ou la ligne de c
 | Sources d'énergie : Alumet, Scaphandre, Kepler, BMC Redfish, énergie cloud via Prometheus | Une section `[green.*]` dans la configuration                                         |
 | Electricity Maps (`api.electricitymaps.com`)                                              | Une section `[green.electricity_maps]`                                                |
 | RTE éCO2mix sur ODRÉ (`odre.opendatasoft.com`)                                            | Une section `[green.rte_eco2mix]`                                                     |
+| NESO Carbon Intensity API (`api.carbonintensity.org.uk`)                                   | Une section `[green.neso]`                                                            |
+| Fingrid open data (`data.fingrid.fi`), avec l'en-tête `x-api-key`                          | Une section `[green.fingrid]` avec une clé                                            |
+| Energinet Energi Data Service (`api.energidataservice.dk`)                                 | Une section `[green.energinet]`                                                       |
 | Tempo, Jaeger, Victoria Traces                                                            | Les commandes `tempo` et `jaeger-query`                                               |
 | Prometheus                                                                                | `pg-stat` et `mysql-stat` avec `--prometheus`                                         |
 | PerfSentinelHub                                                                           | `[daemon.hub_export] enabled = true`                                                  |

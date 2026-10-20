@@ -108,10 +108,11 @@ pub const CO2_MODEL_CLOUD_SPECPOWER: &str = "cloud_specpower";
 /// energy model tag which tracks Scaphandre/cloud/proxy).
 pub const CO2_MODEL_EMAPS: &str = "electricity_maps_api";
 
-/// Carbon intensity source: RTE `éCO2mix` real-time data for France.
-/// Ranks right below [`CO2_MODEL_EMAPS`]: same real-time tier, but a
-/// direct-emissions figure for French production only.
-pub const CO2_MODEL_RTE: &str = "rte_eco2mix_api";
+/// Carbon intensity source: a grid operator's free real-time feed (RTE
+/// `éCO2mix`, NESO, Fingrid, Energinet). Ranks right below
+/// [`CO2_MODEL_EMAPS`]; which operator served a region is on its
+/// `intensity_provider`.
+pub const CO2_MODEL_GRID_OPERATOR: &str = "grid_operator_api";
 
 /// Readable name of a model tag, for documents a person reads.
 #[must_use]
@@ -126,7 +127,7 @@ pub fn co2_model_label(tag: &str) -> Option<&'static str> {
         CO2_MODEL_REDFISH => "Redfish, BMC chassis power",
         CO2_MODEL_CLOUD_SPECPOWER => "Cloud SPECpower table",
         CO2_MODEL_EMAPS => "Electricity Maps, live grid intensity",
-        CO2_MODEL_RTE => "RTE éCO2mix, live French grid intensity",
+        CO2_MODEL_GRID_OPERATOR => "Grid operator open data, live grid intensity",
         _ => return None,
     })
 }
@@ -358,8 +359,47 @@ pub enum RealTimeProvider {
     /// Electricity Maps: lifecycle or direct factors, consumption-based.
     #[default]
     ElectricityMaps,
-    /// RTE `éCO2mix`: direct emissions of French production, imports excluded.
+    /// RTE `éCO2mix` (France): direct emissions of production, imports excluded.
     RteEco2mix,
+    /// NESO Carbon Intensity API (Great Britain): direct emissions of
+    /// generation plus imports.
+    Neso,
+    /// Fingrid (Finland): direct emissions of production or of consumption,
+    /// depending on `[green.fingrid] dataset`.
+    Fingrid,
+    /// Energinet (Denmark DK1, DK2): emissions of consumption.
+    Energinet,
+}
+
+impl RealTimeProvider {
+    /// The grid operator feeds, in a fixed order (`/api/energy` rows,
+    /// display lists).
+    pub const GRID_OPERATORS: [Self; 4] =
+        [Self::RteEco2mix, Self::Neso, Self::Fingrid, Self::Energinet];
+
+    /// Wire name, as serialized.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ElectricityMaps => "electricity_maps",
+            Self::RteEco2mix => "rte_eco2mix",
+            Self::Neso => "neso",
+            Self::Fingrid => "fingrid",
+            Self::Energinet => "energinet",
+        }
+    }
+
+    /// Name for people.
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::ElectricityMaps => "Electricity Maps",
+            Self::RteEco2mix => "RTE éCO2mix",
+            Self::Neso => "NESO Carbon Intensity",
+            Self::Fingrid => "Fingrid",
+            Self::Energinet => "Energinet",
+        }
+    }
 }
 
 /// Per-region operational CO₂ breakdown row in `green_summary.regions[]`.
@@ -500,9 +540,15 @@ pub struct ScoringConfig {
     /// present `scoring_config` did mean the API was configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub electricity_maps: Option<bool>,
-    /// True when `[green.rte_eco2mix]` is configured. Absent otherwise.
+    /// Grid operator feeds configured (`[green.rte_eco2mix]`, `[green.neso]`,
+    /// `[green.fingrid]`, `[green.energinet]`). Absent when none is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grid_feeds: Vec<RealTimeProvider>,
+    /// Fingrid dataset scored when `[green.fingrid]` is configured: 266
+    /// (production) or 265 (consumption, imports included). The two bases
+    /// differ, the provider name alone does not tell them apart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rte_eco2mix: Option<bool>,
+    pub fingrid_dataset: Option<u16>,
     /// Coefficients that scale the published figures. Absent on windows
     /// written before they were recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]

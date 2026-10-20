@@ -1,4 +1,4 @@
-//! Wire schema (v1.7) for the periodic disclosure report.
+//! Wire schema (v1.8) for the periodic disclosure report.
 //! See `docs/design/08-PERIODIC-DISCLOSURE.md` for ordering and
 //! determinism invariants that any change here must preserve.
 //!
@@ -52,13 +52,16 @@
 //! `include_network_transport` did both before it was deprecated. Same
 //! `serde(default)` + `skip_serializing_if` rule, so an older report keeps
 //! its `content_hash` when re-hashed here.
+//!
+//! v1.8 adds the grid operator feeds to `CarbonIntensitySource`:
+//! `rte_eco2mix`, `neso`, `fingrid` and `energinet`.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: &str = "perf-sentinel-report/v1.7";
+pub const SCHEMA_VERSION: &str = "perf-sentinel-report/v1.8";
 
 /// Scope fields the operator declares by hand in the org config. These are
 /// unaudited inputs: the binary cannot verify the size of the portfolio they

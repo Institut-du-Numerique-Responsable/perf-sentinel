@@ -4662,54 +4662,59 @@ fn an_inert_electricity_maps_region_map_is_not_checked() {
     assert_eq!(validate_region_keys_raw_with_env(&raw, || None), Ok(()));
 }
 
-// --- [green.rte_eco2mix] ---
+// --- grid operator feeds: [green.rte_eco2mix], [green.neso], [green.fingrid], [green.energinet] ---
 
 #[test]
-fn rte_eco2mix_absent_by_default() {
+fn grid_feeds_absent_by_default() {
     let config = load_from_str("").unwrap();
-    assert!(config.green.rte_eco2mix.is_none());
-    assert_eq!(config.scoring_config().rte_eco2mix, None);
+    assert!(config.green.grid_feeds.is_empty());
+    assert_eq!(
+        config.scoring_config().grid_feeds,
+        [] as [crate::score::carbon::RealTimeProvider; 0]
+    );
 }
 
 #[test]
-fn rte_eco2mix_section_fills_defaults_and_lowercases_regions() {
+fn rte_eco2mix_section_fills_defaults_and_normalizes_regions() {
     let config =
         load_from_str("[green.rte_eco2mix]\nregions = [\" EU-WEST-3 \", \"francecentral\"]\n")
             .unwrap();
-    let rte = config.green.rte_eco2mix.as_ref().unwrap();
-    assert_eq!(
-        rte.endpoint,
-        crate::score::rte_eco2mix::config::DEFAULT_RTE_ECO2MIX_ENDPOINT
-    );
+    let rte = &config.green.grid_feeds[0];
+    assert_eq!(rte.kind, crate::score::grid_feed::GridFeedKind::RteEco2mix);
+    assert_eq!(rte.endpoint, rte.kind.default_endpoint());
     assert_eq!(rte.poll_interval, Duration::from_mins(15));
-    assert_eq!(rte.regions, ["eu-west-3", "francecentral"]);
+    assert_eq!(rte.regions["eu-west-3"], "FR");
+    assert_eq!(rte.regions["francecentral"], "FR");
     let scoring = config.scoring_config();
-    assert_eq!(scoring.rte_eco2mix, Some(true));
+    assert_eq!(
+        scoring.grid_feeds,
+        [crate::score::carbon::RealTimeProvider::RteEco2mix]
+    );
     assert_eq!(scoring.electricity_maps, Some(false));
 }
 
 #[test]
-fn rte_eco2mix_endpoint_trailing_slash_is_trimmed() {
+fn grid_feed_endpoint_trailing_slash_is_trimmed() {
     let config = load_from_str(
-        "[green.rte_eco2mix]\nendpoint = \"https://odre.example/api/explore/v2.1/\"\nregions = [\"eu-west-3\"]\n",
+        "[green.neso]\nendpoint = \"https://ci.example/\"\nregions = [\"eu-west-2\"]\n",
     )
     .unwrap();
-    assert_eq!(
-        config.green.rte_eco2mix.unwrap().endpoint,
-        "https://odre.example/api/explore/v2.1"
+    assert_eq!(config.green.grid_feeds[0].endpoint, "https://ci.example");
+}
+
+#[test]
+fn grid_feed_rejects_missing_regions() {
+    let err = load_from_str("[green.rte_eco2mix]\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("[green.rte_eco2mix]") && err.contains("region"),
+        "got {err}"
     );
 }
 
 #[test]
-fn rte_eco2mix_rejects_missing_regions() {
-    let err = load_from_str("[green.rte_eco2mix]\n")
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("regions"), "got {err}");
-}
-
-#[test]
-fn rte_eco2mix_rejects_non_http_endpoint() {
+fn grid_feed_rejects_non_http_endpoint() {
     let err = load_from_str(
         "[green.rte_eco2mix]\nendpoint = \"ftp://odre.example\"\nregions = [\"eu-west-3\"]\n",
     )
@@ -4719,17 +4724,148 @@ fn rte_eco2mix_rejects_non_http_endpoint() {
 }
 
 #[test]
-fn rte_eco2mix_rejects_out_of_range_poll_interval() {
-    let err =
-        load_from_str("[green.rte_eco2mix]\npoll_interval_secs = 30\nregions = [\"eu-west-3\"]\n")
-            .unwrap_err()
-            .to_string();
+fn grid_feed_rejects_out_of_range_poll_interval() {
+    let err = load_from_str("[green.neso]\npoll_interval_secs = 30\nregions = [\"eu-west-2\"]\n")
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("poll_interval_secs"), "got {err}");
 }
 
 #[test]
-fn rte_eco2mix_rejects_unknown_key() {
+fn grid_feed_rejects_unknown_key() {
     assert!(
         load_from_str("[green.rte_eco2mix]\nregions = [\"eu-west-3\"]\nzone = \"FR\"\n").is_err()
+    );
+}
+
+#[test]
+fn energinet_rejects_a_zone_that_is_not_dk1_or_dk2() {
+    let err = load_from_str("[green.energinet]\nregion_map = { denmarkeast = \"DK3\" }\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("DK3") && err.contains("DK1"), "got {err}");
+}
+
+#[test]
+fn fingrid_rejects_an_unknown_dataset() {
+    let err = load_from_str(
+        "[green.fingrid]\nregions = [\"europe-north1\"]\ndataset = \"lifecycle\"\napi_key = \"k\"\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("lifecycle"), "got {err}");
+}
+
+#[test]
+fn fingrid_key_from_env_wins_over_the_file() {
+    let raw: RawConfig =
+        toml::from_str("[green.fingrid]\nregions = [\"europe-north1\"]\napi_key = \"from-file\"\n")
+            .unwrap();
+    let feeds = raw::convert_grid_feed_sections(&raw.green, || Some("from-env".to_string()));
+    assert_eq!(feeds[0].api_key.as_deref(), Some("from-env"));
+    assert_eq!(
+        feeds[0].kind,
+        crate::score::grid_feed::GridFeedKind::Fingrid(
+            crate::score::grid_feed::FingridDataset::Production
+        )
+    );
+}
+
+#[test]
+fn a_region_served_by_two_feeds_is_rejected() {
+    let err = load_from_str(
+        "[green.rte_eco2mix]\nregions = [\"eu-west-3\"]\n[green.neso]\nregions = [\"eu-west-3\"]\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("[green.rte_eco2mix]") && err.contains("[green.neso]"),
+        "got {err}"
+    );
+}
+
+/// Grid feeds converted with no process env, then validated: the tests
+/// must not depend on a `PERF_SENTINEL_FINGRID_API_KEY` exported locally.
+fn grid_feeds_without_env(
+    toml: &str,
+) -> Result<Vec<crate::score::grid_feed::GridFeedConfig>, String> {
+    let raw: RawConfig = toml::from_str(toml).map_err(|e| e.to_string())?;
+    let feeds = raw::convert_grid_feed_sections(&raw.green, || None);
+    Config::validate_grid_feeds(&feeds).map(|()| feeds)
+}
+
+#[test]
+fn all_four_feeds_load_in_a_fixed_order() {
+    use crate::score::grid_feed::{FingridDataset, GridFeedKind};
+    let toml = "[green.energinet]\nregion_map = { denmarkeast = \"dk2\" }\n\
+                [green.fingrid]\nregions = [\"europe-north1\"]\ndataset = \"consumption\"\napi_key = \" k3y\\n\"\n\
+                [green.neso]\nregions = [\"eu-west-2\"]\n\
+                [green.rte_eco2mix]\nregions = [\"eu-west-3\"]\n";
+    let feeds = grid_feeds_without_env(toml).unwrap();
+    let kinds: Vec<GridFeedKind> = feeds.iter().map(|f| f.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            GridFeedKind::RteEco2mix,
+            GridFeedKind::Neso,
+            GridFeedKind::Fingrid(FingridDataset::Consumption),
+            GridFeedKind::Energinet,
+        ]
+    );
+    assert_eq!(feeds[1].poll_interval, Duration::from_mins(5));
+    // Trimmed, like a Secret mounted with a final newline.
+    assert_eq!(feeds[2].api_key.as_deref(), Some("k3y"));
+    assert_eq!(feeds[3].regions["denmarkeast"], "DK2");
+}
+
+#[test]
+fn fingrid_without_a_key_is_disabled_not_fatal() {
+    let feeds = grid_feeds_without_env("[green.fingrid]\nregions = [\"europe-north1\"]\n").unwrap();
+    assert!(feeds.is_empty());
+    let blank = grid_feeds_without_env(
+        "[green.fingrid]\nregions = [\"europe-north1\"]\napi_key = \"   \"\n",
+    )
+    .unwrap();
+    assert!(blank.is_empty());
+}
+
+#[test]
+fn fingrid_rejects_a_key_the_header_would_refuse() {
+    let err = grid_feeds_without_env(
+        "[green.fingrid]\nregions = [\"europe-north1\"]\napi_key = \"cl\u{e9} secr\u{e8}te\"\n",
+    )
+    .unwrap_err();
+    assert!(err.contains("printable ASCII"), "got {err}");
+}
+
+#[test]
+fn fingrid_dataset_is_recorded_in_the_scoring_config() {
+    let raw: RawConfig = toml::from_str(
+        "[green.fingrid]\nregions = [\"europe-north1\"]\ndataset = \"consumption\"\napi_key = \"k\"\n",
+    )
+    .unwrap();
+    let feeds = raw::convert_grid_feed_sections(&raw.green, || None);
+    let mut config = Config::from(raw);
+    config.green.grid_feeds = feeds;
+    assert_eq!(config.scoring_config().fingrid_dataset, Some(265));
+}
+
+#[test]
+fn energinet_region_keys_colliding_by_case_are_rejected() {
+    let err = load_from_str(
+        "[green.energinet]\nregion_map = { \"DK-West\" = \"DK2\", \"dk-west\" = \"DK1\" }\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("dk-west") && err.contains("DK-West"),
+        "got {err}"
+    );
+    // The same zone spelled twice is not a conflict.
+    assert!(
+        load_from_str(
+            "[green.energinet]\nregion_map = { \"DK-West\" = \"dk1\", \"dk-west\" = \"DK1\" }\n"
+        )
+        .is_ok()
     );
 }

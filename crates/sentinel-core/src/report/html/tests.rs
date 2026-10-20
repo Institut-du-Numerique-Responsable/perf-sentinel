@@ -1011,8 +1011,12 @@ fn template_carries_scoring_config_bandeau_and_helpers() {
         "function buildApiVersionChip",
         "function buildEmissionFactorChip",
         "function buildTemporalGranularityChip",
-        "function buildRteChip",
-        "intensity_provider === \"rte_eco2mix\"",
+        "var GRID_FEEDS",
+        "function gridFeed",
+        "rte_eco2mix:",
+        "neso:",
+        "fingrid:",
+        "energinet:",
     ] {
         assert!(
             TEMPLATE.contains(needle),

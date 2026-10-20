@@ -19,7 +19,6 @@ use crate::score::cloud_energy::CloudEnergyState;
 use crate::score::electricity_maps::ElectricityMapsState;
 use crate::score::kepler::KeplerState;
 use crate::score::redfish::RedfishState;
-use crate::score::rte_eco2mix::RteEco2mixState;
 use crate::score::scaphandre::ScaphandreState;
 #[cfg(test)]
 use detect::sanitizer_aware::SanitizerAwareMode;
@@ -72,7 +71,7 @@ pub(super) struct EnergyScraperHandles<'a> {
     pub(super) redfish: Option<&'a tokio::task::JoinHandle<()>>,
     pub(super) cloud: Option<&'a tokio::task::JoinHandle<()>>,
     pub(super) emaps: Option<&'a tokio::task::JoinHandle<()>>,
-    pub(super) rte: Option<&'a tokio::task::JoinHandle<()>>,
+    pub(super) grid_feeds: &'a [super::listeners::GridFeedSetup],
 }
 
 /// `JoinHandle`s for the listener tasks bound at startup.
@@ -107,8 +106,8 @@ pub(super) struct EnergySources<'a> {
     pub(super) cloud_staleness_ms: u64,
     pub(super) emaps_state: Option<&'a ElectricityMapsState>,
     pub(super) emaps_staleness_ms: u64,
-    pub(super) rte_state: Option<&'a RteEco2mixState>,
-    pub(super) rte_staleness_ms: u64,
+    /// Grid operator feeds, in config order. A region belongs to one feed.
+    pub(super) grid_feeds: &'a [super::listeners::GridFeedSetup],
 }
 
 /// One evicted/expired/drained batch handed to the analysis worker. The
@@ -1123,10 +1122,10 @@ fn realtime_snapshot(
     sources: &EnergySources<'_>,
     now: u64,
 ) -> HashMap<String, score::carbon::RealTimeIntensityEntry> {
-    let mut merged = sources
-        .rte_state
-        .map(|s| s.snapshot_with_metadata(now, sources.rte_staleness_ms))
-        .unwrap_or_default();
+    let mut merged = HashMap::new();
+    for feed in sources.grid_feeds {
+        merged.extend(feed.state.snapshot_with_metadata(now, feed.staleness_ms));
+    }
     if let Some(emaps) = sources.emaps_state {
         merged.extend(emaps.snapshot_with_metadata(now, sources.emaps_staleness_ms));
     }
@@ -1140,8 +1139,8 @@ fn shutdown_listeners(energy: EnergyScraperHandles<'_>, listeners: ListenerHandl
     if let Some(handle) = energy.emaps {
         handle.abort();
     }
-    if let Some(handle) = energy.rte {
-        handle.abort();
+    for feed in energy.grid_feeds {
+        feed.handle.abort();
     }
     if let Some(handle) = energy.cloud {
         handle.abort();

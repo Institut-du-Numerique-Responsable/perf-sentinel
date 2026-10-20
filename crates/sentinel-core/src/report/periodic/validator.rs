@@ -32,8 +32,15 @@ const KNOWN_PATTERNS: &[&str] = &[
 ];
 
 /// Values accepted for `methodology.calibration_inputs.carbon_intensity_source`.
-pub(crate) const CARBON_SOURCE_VALUES: &[&str] =
-    &["electricity_maps", "rte_eco2mix", "static_tables", "mixed"];
+pub(crate) const CARBON_SOURCE_VALUES: &[&str] = &[
+    "electricity_maps",
+    "rte_eco2mix",
+    "neso",
+    "fingrid",
+    "energinet",
+    "static_tables",
+    "mixed",
+];
 
 /// Minimum runtime-calibration ratio for an `official` intent report.
 /// Reports below this threshold are likely produced during a daemon

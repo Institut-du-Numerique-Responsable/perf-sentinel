@@ -40,6 +40,9 @@ The engine makes no outbound call unless the configuration or the command line n
 | Energy sources: Alumet, Scaphandre, Kepler, Redfish BMC, cloud energy through Prometheus | A `[green.*]` section in the configuration                                   |
 | Electricity Maps (`api.electricitymaps.com`)                                             | A `[green.electricity_maps]` section                                         |
 | RTE éCO2mix on ODRÉ (`odre.opendatasoft.com`)                                            | A `[green.rte_eco2mix]` section                                              |
+| NESO Carbon Intensity API (`api.carbonintensity.org.uk`)                                  | A `[green.neso]` section                                                     |
+| Fingrid open data (`data.fingrid.fi`), with the `x-api-key` header                        | A `[green.fingrid]` section with a key                                       |
+| Energinet Energi Data Service (`api.energidataservice.dk`)                                | A `[green.energinet]` section                                                |
 | Tempo, Jaeger, Victoria Traces                                                           | The `tempo` and `jaeger-query` commands                                      |
 | Prometheus                                                                               | `pg-stat` and `mysql-stat` with `--prometheus`                               |
 | PerfSentinelHub                                                                          | `[daemon.hub_export] enabled = true`                                         |

@@ -166,7 +166,7 @@ fn an_attestation_naming_another_hash_is_refused() {
 fn a_newer_schema_is_unrenderable() {
     let (_, bytes) = baked_report();
     let mut value: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
-    value["schema_version"] = "perf-sentinel-report/v1.8".into();
+    value["schema_version"] = "perf-sentinel-report/v1.9".into();
 
     let err = render_disclosure_pdf(&inputs(
         &serde_json::to_vec(&value).expect("json"),
@@ -175,7 +175,7 @@ fn a_newer_schema_is_unrenderable() {
     ))
     .expect_err("newer");
 
-    assert!(matches!(err, RenderError::UnsupportedSchema(v) if v == "perf-sentinel-report/v1.8"));
+    assert!(matches!(err, RenderError::UnsupportedSchema(v) if v == "perf-sentinel-report/v1.9"));
 }
 
 #[test]

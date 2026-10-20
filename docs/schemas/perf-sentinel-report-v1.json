@@ -28,7 +28,8 @@
         "perf-sentinel-report/v1.4",
         "perf-sentinel-report/v1.5",
         "perf-sentinel-report/v1.6",
-        "perf-sentinel-report/v1.7"
+        "perf-sentinel-report/v1.7",
+        "perf-sentinel-report/v1.8"
       ]
     },
     "report_metadata": { "$ref": "#/$defs/ReportMetadata" },
@@ -108,7 +109,7 @@
     },
     "CarbonIntensitySource": {
       "type": "string",
-      "enum": ["electricity_maps", "rte_eco2mix", "static_tables", "mixed"]
+      "enum": ["electricity_maps", "rte_eco2mix", "neso", "fingrid", "energinet", "static_tables", "mixed"]
     },
     "ReportMetadata": {
       "type": "object",

@@ -2172,7 +2172,7 @@ async fn energy_endpoint_reports_unconfigured_backends_without_metrics() {
     // age/counter fields (the pre-registered zero gauges must not
     // read as a misleading fresh scrape).
     let energy = fetch_energy(make_state()).await;
-    assert_eq!(energy.backends.len(), 7);
+    assert_eq!(energy.backends.len(), 10);
     for b in &energy.backends {
         assert!(!b.configured, "{} should be unconfigured", b.backend);
         assert!(b.last_scrape_age_seconds.is_none(), "{}", b.backend);
@@ -2191,7 +2191,10 @@ async fn energy_endpoint_reports_unconfigured_backends_without_metrics() {
             "redfish",
             "cloud_energy",
             "electricity_maps",
-            "rte_eco2mix"
+            "rte_eco2mix",
+            "neso",
+            "fingrid",
+            "energinet"
         ]
     );
 }

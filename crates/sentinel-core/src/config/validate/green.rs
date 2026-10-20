@@ -97,9 +97,7 @@ impl Config {
         if let Some(cfg) = &self.green.electricity_maps {
             Self::validate_electricity_maps(cfg)?;
         }
-        if let Some(cfg) = &self.green.rte_eco2mix {
-            Self::validate_rte_eco2mix(cfg)?;
-        }
+        Self::validate_grid_feeds(&self.green.grid_feeds)?;
         Ok(())
     }
 
@@ -254,33 +252,63 @@ impl Config {
         Ok(())
     }
 
-    /// Validate a parsed `[green.rte_eco2mix]` config section.
-    pub(in crate::config) fn validate_rte_eco2mix(
-        cfg: &crate::score::rte_eco2mix::RteEco2mixConfig,
+    /// Validate the grid operator feed sections. A cloud region may be
+    /// served by one feed only, so the merge order never decides silently.
+    pub(in crate::config) fn validate_grid_feeds(
+        feeds: &[crate::score::grid_feed::GridFeedConfig],
     ) -> Result<(), String> {
-        if !cfg.endpoint.starts_with("http://") && !cfg.endpoint.starts_with("https://") {
-            return Err(format!(
-                "[green.rte_eco2mix] endpoint '{}' must start with 'http://' or 'https://'",
-                cfg.endpoint
-            ));
-        }
-        validate_http_authority(&cfg.endpoint, "[green.rte_eco2mix] endpoint")?;
-        let secs = cfg.poll_interval.as_secs();
-        check_range("[green.rte_eco2mix] poll_interval_secs", &secs, &60, &86400)?;
-        if cfg.regions.is_empty() {
-            return Err(
-                "[green.rte_eco2mix] regions must list at least one cloud region on the French grid"
-                    .to_string(),
-            );
-        }
-        if let Some(region) = cfg
-            .regions
-            .iter()
-            .find(|r| r.is_empty() || has_control_char(r))
-        {
-            return Err(format!(
-                "[green.rte_eco2mix] region {region:?} is empty or contains control characters"
-            ));
+        let mut owner: HashMap<&str, &str> = HashMap::new();
+        for feed in feeds {
+            let section = feed.kind.section();
+            if !feed.endpoint.starts_with("http://") && !feed.endpoint.starts_with("https://") {
+                return Err(format!(
+                    "{section} endpoint '{}' must start with 'http://' or 'https://'",
+                    feed.endpoint
+                ));
+            }
+            validate_http_authority(&feed.endpoint, &format!("{section} endpoint"))?;
+            let secs = feed.poll_interval.as_secs();
+            check_range(&format!("{section} poll_interval_secs"), &secs, &60, &86400)?;
+            if feed.regions.is_empty() {
+                return Err(format!(
+                    "{section} must map at least one cloud region to the operator's grid"
+                ));
+            }
+            if let Some(key) = &feed.api_key {
+                // The rule the header sender applies, so a bad key fails here
+                // rather than silently disabling the feed at startup.
+                if !key.bytes().all(|b| b.is_ascii_graphic()) {
+                    return Err(format!(
+                        "{section} API key must be printable ASCII without spaces"
+                    ));
+                }
+                if feed.endpoint.starts_with("http://") {
+                    tracing::warn!(
+                        "{section} API key will be sent over http:// (no TLS). Use https:// \
+                         for production or set the endpoint to a loopback/private address \
+                         if this is intentional."
+                    );
+                }
+            }
+            for (region, zone) in &feed.regions {
+                if region.is_empty() || has_control_char(region) {
+                    return Err(format!(
+                        "{section} region {region:?} is empty or contains control characters"
+                    ));
+                }
+                if !feed.kind.zones().contains(&zone.as_str()) {
+                    return Err(format!(
+                        "{section} zone {zone:?} for region {region:?} is not one of {:?}",
+                        feed.kind.zones()
+                    ));
+                }
+                if let Some(other) = owner.insert(region, section) {
+                    return Err(format!(
+                        "region {region:?} is listed in both {other} and {section}; \
+                         keep it in the feed of the grid that serves it"
+                    ));
+                }
+            }
         }
         Ok(())
     }

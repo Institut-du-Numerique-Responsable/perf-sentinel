@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 
 use super::carbon::{
     self, CO2_MODEL, CO2_MODEL_ALUMET, CO2_MODEL_CLOUD_SPECPOWER, CO2_MODEL_EMAPS,
-    CO2_MODEL_KEPLER, CO2_MODEL_REDFISH, CO2_MODEL_RTE, CO2_MODEL_SCAPHANDRE, CO2_MODEL_V2,
-    CO2_MODEL_V3, CarbonEstimate, CarbonReport, GENERIC_PUE, IntensitySource, REGION_STATUS_KNOWN,
-    REGION_STATUS_OUT_OF_TABLE, REGION_STATUS_UNRESOLVED, RealTimeProvider, RegionBreakdown,
-    UNKNOWN_REGION, lookup_region_lower,
+    CO2_MODEL_GRID_OPERATOR, CO2_MODEL_KEPLER, CO2_MODEL_REDFISH, CO2_MODEL_SCAPHANDRE,
+    CO2_MODEL_V2, CO2_MODEL_V3, CarbonEstimate, CarbonReport, GENERIC_PUE, IntensitySource,
+    REGION_STATUS_KNOWN, REGION_STATUS_OUT_OF_TABLE, REGION_STATUS_UNRESOLVED, RealTimeProvider,
+    RegionBreakdown, UNKNOWN_REGION, lookup_region_lower,
 };
 
 /// Per-region CO₂ accumulator. `intensity_sum_per_op / total_ops`
@@ -67,8 +67,9 @@ pub(super) struct ReportFlags {
     any_cloud_specpower: bool,
     any_calibrated: bool,
     any_realtime: bool,
-    /// A `RealTime` region came from RTE `éCO2mix` rather than Electricity Maps.
-    any_realtime_rte: bool,
+    /// A `RealTime` region came from a grid operator feed rather than
+    /// Electricity Maps.
+    any_realtime_grid: bool,
 }
 
 impl ReportFlags {
@@ -125,8 +126,11 @@ pub(super) fn build_region_breakdowns(
 fn update_flags_from_accumulator(flags: &mut ReportFlags, acc: &RegionAccumulator) {
     match acc.max_intensity_source {
         IntensitySource::RealTime => {
-            if acc.realtime_provider == Some(RealTimeProvider::RteEco2mix) {
-                flags.any_realtime_rte = true;
+            if acc
+                .realtime_provider
+                .is_some_and(|p| p != RealTimeProvider::ElectricityMaps)
+            {
+                flags.any_realtime_grid = true;
             } else {
                 flags.any_realtime = true;
             }
@@ -250,7 +254,7 @@ fn realtime_metadata_for_row(
 /// Pick the top-level `co2.model` tag given the aggregate flags.
 ///
 /// Precedence (most to least precise): real-time (Electricity Maps, then
-/// RTE `éCO2mix` when no region used Electricity Maps), Alumet, Scaphandre,
+/// a grid operator feed when no region used Electricity Maps), Alumet, Scaphandre,
 /// Kepler, Redfish, cloud `SPECpower`, monthly/hourly proxy, annual
 /// proxy. The `+cal` suffix only applies to the proxy branches. The
 /// measured branches all short-circuit earlier, so the calibration flag
@@ -258,8 +262,8 @@ fn realtime_metadata_for_row(
 pub(super) fn select_co2_model_tag(flags: ReportFlags) -> &'static str {
     if flags.any_realtime {
         CO2_MODEL_EMAPS
-    } else if flags.any_realtime_rte {
-        CO2_MODEL_RTE
+    } else if flags.any_realtime_grid {
+        CO2_MODEL_GRID_OPERATOR
     } else if flags.any_alumet {
         CO2_MODEL_ALUMET
     } else if flags.any_scaphandre {

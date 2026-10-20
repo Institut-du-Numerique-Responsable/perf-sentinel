@@ -1352,7 +1352,7 @@ fn report_with_co2_data() {
 }
 
 #[test]
-fn rte_regions_are_labelled_and_announced() {
+fn grid_feed_regions_are_labelled_and_announced() {
     let row = |provider: &str| -> sentinel_core::score::carbon::RegionBreakdown {
         serde_json::from_str(&format!(
             r#"{{"status":"known","region":"eu-west-3","grid_intensity_gco2_kwh":21.0,"pue":1.135,"io_ops":4,"co2_gco2":0.001,"intensity_source":"real_time"{provider}}}"#
@@ -1366,7 +1366,16 @@ fn rte_regions_are_labelled_and_announced() {
 
     let mut gs = GreenSummary::disabled(10);
     gs.regions = vec![emaps];
-    assert_eq!(rte_scoring_line(&gs), None);
+    assert_eq!(grid_scoring_line(&gs), None);
     gs.regions.push(rte);
-    assert!(rte_scoring_line(&gs).is_some_and(|l| l.contains("RTE éCO2mix")));
+    let mut neso = row(r#","intensity_provider":"neso""#);
+    neso.region = "eu-west-2".to_string();
+    assert!(format_region_line(&neso).contains("source: real_time, neso"));
+    gs.regions.push(neso);
+    assert_eq!(
+        grid_scoring_line(&gs).as_deref(),
+        Some(
+            "  Carbon scoring: grid operator open data (RTE éCO2mix, NESO Carbon Intensity), direct emissions"
+        )
+    );
 }

@@ -607,19 +607,47 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # emission_factor_type = "lifecycle"               # default "lifecycle", or "direct" (combustion only)
 # temporal_granularity = "hourly"                  # default "hourly", or "5_minutes" / "15_minutes"
 
-# --- Carbon: RTE éCO2mix (opt-in, France only, no key) ----------------------
-# Free real-time intensity for regions on the French grid, from the public
-# `eco2mix-national-tr` dataset on the ODRÉ portal (Licence Ouverte v2.0,
-# 50,000 calls per month). Its `taux_co2` counts the direct emissions of
-# French production only, imports and lifecycle excluded, so it reads lower
-# than an Electricity Maps lifecycle figure. Electricity Maps wins for any
-# region both cover. Model tag `rte_eco2mix_api` when no region uses
-# Electricity Maps.
+# --- Carbon: grid operator open data (opt-in, free, daemon only) ------------
+# Real-time intensity published by grid operators themselves, for the regions
+# on their grid. All four count direct emissions, lifecycle excluded, so they
+# read lower than an Electricity Maps lifecycle figure. Electricity Maps wins
+# for any region both cover, and a region belongs to one feed only. Model tag
+# `grid_operator_api` when no region uses Electricity Maps; each region row
+# names its feed in `intensity_provider`.
 #
+# RTE éCO2mix, France: `eco2mix-national-tr` on the ODRÉ portal (Licence
+# Ouverte v2.0, no key, 50,000 calls a month). Direct emissions of French
+# production, imports excluded.
 # [green.rte_eco2mix]
 # endpoint = "https://odre.opendatasoft.com/api/explore/v2.1"  # default https://odre.opendatasoft.com/api/explore/v2.1
 # poll_interval_secs = 900                         # default 900 (the dataset refreshes every 15 minutes), bounds 60..86400
 # regions = ["eu-west-3", "francecentral", "europe-west9"]   # no default, at least one cloud region on the French grid
+#
+# NESO Carbon Intensity API, Great Britain (CC BY 4.0, no key). Direct CO2 of
+# generation plus imports per kWh consumed. Its terms forbid reselling or
+# re-hosting the API: each daemon calls it for its own use.
+# [green.neso]
+# endpoint = "https://api.carbonintensity.org.uk"  # default https://api.carbonintensity.org.uk
+# poll_interval_secs = 300                         # default 300 (half-hourly values), bounds 60..86400
+# regions = ["eu-west-2", "europe-west2", "uksouth"]   # no default, England, Scotland and Wales only
+#
+# Fingrid, Finland (CC BY 4.0). Needs a free key from data.fingrid.fi, set
+# through PERF_SENTINEL_FINGRID_API_KEY: without one the feed is disabled with
+# a warning. Limits: 10,000 calls a day, one every 2 seconds per key.
+# [green.fingrid]
+# endpoint = "https://data.fingrid.fi/api"         # default https://data.fingrid.fi/api
+# poll_interval_secs = 180                         # default 180 (3-minute values), bounds 60..86400
+# regions = ["europe-north1"]                      # no default, at least one cloud region on the Finnish grid
+# dataset = "production"                           # default "production" (266, the RTE basis), or "consumption" (265, imports included)
+# api_key = "your-fingrid-key"                     # no default, prefer PERF_SENTINEL_FINGRID_API_KEY
+#
+# Energinet Energi Data Service, Denmark (CC BY 4.0, no key). CO2 per kWh
+# consumed, 5-minute values per bidding zone. Energinet asks vendors not to
+# poll from every unit of an application: keep one daemon per site.
+# [green.energinet]
+# endpoint = "https://api.energidataservice.dk"    # default https://api.energidataservice.dk
+# poll_interval_secs = 300                         # default 300 (5-minute values), bounds 60..86400
+# region_map = { "dk-west" = "DK1", "dk-east" = "DK2" }   # no default, DK1 west of the Great Belt, DK2 east
 
 # --- Per-window NDJSON archive (input for `disclose`) ----------------------
 # Written only when `path` is set. Requires `[green] enabled = true`, the

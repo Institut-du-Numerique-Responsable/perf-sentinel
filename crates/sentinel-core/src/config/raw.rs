@@ -2,7 +2,7 @@
 //! `*Section` structs, the `RawConfig -> Config` conversion, and the
 //! per-section conversion helpers.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -110,7 +110,10 @@ pub(super) struct GreenSection {
     hourly_profiles_file: Option<String>,
     calibration_file: Option<String>,
     electricity_maps: ElectricityMapsSection,
-    rte_eco2mix: Option<RteEco2mixSection>,
+    rte_eco2mix: Option<NationalGridFeedSection>,
+    neso: Option<NationalGridFeedSection>,
+    fingrid: Option<FingridSection>,
+    energinet: Option<EnerginetSection>,
 }
 
 /// Raw deserialization target for `[green.scaphandre]`.
@@ -233,14 +236,44 @@ pub(super) struct CloudServiceRaw {
     cpu_query: Option<String>,
 }
 
-/// Raw deserialization target for `[green.rte_eco2mix]`. The section
-/// being present is what enables the source.
+/// Raw deserialization target for `[green.rte_eco2mix]` and `[green.neso]`,
+/// the national grid operator feeds: every listed region gets the national
+/// value. The section being present is what enables the source.
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
-pub(super) struct RteEco2mixSection {
+pub(super) struct NationalGridFeedSection {
     pub(super) endpoint: Option<String>,
     pub(super) poll_interval_secs: Option<u64>,
     pub(super) regions: Vec<String>,
+}
+
+/// Raw deserialization target for `[green.fingrid]`.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct FingridSection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) regions: Vec<String>,
+    pub(super) dataset: Option<FingridDatasetRaw>,
+    pub(super) api_key: Option<String>,
+}
+
+/// An unknown `dataset` fails the load with serde's variant list.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum FingridDatasetRaw {
+    Production,
+    Consumption,
+}
+
+/// Raw deserialization target for `[green.energinet]`: Denmark has two
+/// zones, so each region names its own (`DK1` or `DK2`).
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct EnerginetSection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) region_map: BTreeMap<String, String>,
 }
 
 /// Raw deserialization target for `[green.electricity_maps]`.
@@ -359,6 +392,10 @@ impl From<RawConfig> for Config {
         let detection_defaults = DetectionConfig::default();
         let green_defaults = GreenConfig::default();
         let daemon_defaults = DaemonConfig::default();
+        // Read before the field moves below take `raw.green` apart.
+        let grid_feeds = convert_grid_feed_sections(&raw.green, || {
+            std::env::var("PERF_SENTINEL_FINGRID_API_KEY").ok()
+        });
         let correlation_defaults = crate::detect::correlate_cross::CorrelationConfig::default();
         let ack_defaults = DaemonAckConfig::default();
 
@@ -557,7 +594,7 @@ impl From<RawConfig> for Config {
                     }
                 }),
                 electricity_maps: convert_electricity_maps_section(&raw.green.electricity_maps),
-                rte_eco2mix: raw.green.rte_eco2mix.as_ref().map(convert_rte_eco2mix_section),
+                grid_feeds,
                 }
             },
             daemon: DaemonConfig {
@@ -1047,6 +1084,15 @@ pub(super) fn validate_region_keys_raw_with_env(
     env_lookup: impl FnOnce() -> Option<String>,
 ) -> Result<(), String> {
     reject_case_colliding_keys("[green.service_regions]", &raw.green.service_regions)?;
+    if let Some(energinet) = &raw.green.energinet {
+        // Zones compare normalized: `dk1` and `DK1` name the same zone.
+        let zones: HashMap<String, String> = energinet
+            .region_map
+            .iter()
+            .map(|(region, zone)| (region.trim().to_string(), zone.trim().to_ascii_uppercase()))
+            .collect();
+        reject_case_colliding_keys("[green.energinet] region_map", &zones)?;
+    }
     let maps = &raw.green.electricity_maps;
     if electricity_maps_token(maps, env_lookup()).is_none() {
         return Ok(());
@@ -1349,31 +1395,109 @@ pub(super) fn convert_electricity_maps_section_with_env(
     })
 }
 
-/// Convert `[green.rte_eco2mix]`: defaults filled, endpoint trailing
-/// slashes trimmed, regions trimmed and lowercased so they match span regions.
-pub(super) fn convert_rte_eco2mix_section(
-    raw: &RteEco2mixSection,
-) -> crate::score::rte_eco2mix::RteEco2mixConfig {
-    use crate::score::rte_eco2mix::config::{
-        DEFAULT_RTE_ECO2MIX_ENDPOINT, DEFAULT_RTE_POLL_INTERVAL_SECS,
+/// Convert the grid operator feed sections, in a fixed order: defaults
+/// filled, endpoint trailing slashes trimmed, regions trimmed and lowercased
+/// so they match span regions. A Fingrid section without a key is dropped
+/// with a warning, like Electricity Maps without a token: the API refuses
+/// keyless calls. The env lookup is a closure so tests avoid the process env.
+pub(super) fn convert_grid_feed_sections(
+    green: &GreenSection,
+    fingrid_key_env: impl FnOnce() -> Option<String>,
+) -> Vec<crate::score::grid_feed::GridFeedConfig> {
+    use crate::score::grid_feed::{FingridDataset, GridFeedConfig, GridFeedKind};
+    let national = |kind: GridFeedKind, zone: &str, raw: &NationalGridFeedSection| {
+        (
+            kind,
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            region_map(&raw.regions, zone),
+            None::<String>,
+        )
     };
-    crate::score::rte_eco2mix::RteEco2mixConfig {
-        endpoint: raw
-            .endpoint
-            .as_deref()
-            .unwrap_or(DEFAULT_RTE_ECO2MIX_ENDPOINT)
-            .trim_end_matches('/')
-            .to_string(),
-        poll_interval: Duration::from_secs(
-            raw.poll_interval_secs
-                .unwrap_or(DEFAULT_RTE_POLL_INTERVAL_SECS),
-        ),
-        regions: raw
-            .regions
-            .iter()
-            .map(|r| r.trim().to_ascii_lowercase())
-            .collect(),
+    let mut feeds = Vec::new();
+    if let Some(raw) = &green.rte_eco2mix {
+        feeds.push(national(GridFeedKind::RteEco2mix, "FR", raw));
     }
+    if let Some(raw) = &green.neso {
+        feeds.push(national(GridFeedKind::Neso, "GB", raw));
+    }
+    if let Some(raw) = &green.fingrid {
+        // Trimmed like the daemon API keys, so a Secret with a final newline works.
+        let clean = |key: String| {
+            let key = key.trim().to_string();
+            (!key.is_empty()).then_some(key)
+        };
+        let from_env = fingrid_key_env().and_then(clean);
+        let from_file = raw.api_key.clone().and_then(clean);
+        if from_env.is_none() && from_file.is_some() {
+            tracing::warn!(
+                "[green.fingrid] api_key is set in the config file. Prefer the \
+                 PERF_SENTINEL_FINGRID_API_KEY environment variable to avoid \
+                 committing secrets to version control."
+            );
+        }
+        if let Some(key) = from_env.or(from_file) {
+            let dataset = match raw.dataset {
+                Some(FingridDatasetRaw::Consumption) => FingridDataset::Consumption,
+                _ => FingridDataset::Production,
+            };
+            feeds.push((
+                GridFeedKind::Fingrid(dataset),
+                raw.endpoint.clone(),
+                raw.poll_interval_secs,
+                region_map(&raw.regions, "FI"),
+                Some(key),
+            ));
+        } else {
+            tracing::warn!(
+                "[green.fingrid] has no API key (PERF_SENTINEL_FINGRID_API_KEY or \
+                 api_key), the feed is disabled"
+            );
+        }
+    }
+    if let Some(raw) = &green.energinet {
+        let regions = raw
+            .region_map
+            .iter()
+            .map(|(region, zone)| {
+                (
+                    region.trim().to_ascii_lowercase(),
+                    zone.trim().to_ascii_uppercase(),
+                )
+            })
+            .collect();
+        feeds.push((
+            GridFeedKind::Energinet,
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            regions,
+            None,
+        ));
+    }
+    feeds
+        .into_iter()
+        .map(
+            |(kind, endpoint, poll_secs, regions, api_key)| GridFeedConfig {
+                kind,
+                endpoint: endpoint
+                    .as_deref()
+                    .unwrap_or(kind.default_endpoint())
+                    .trim_end_matches('/')
+                    .to_string(),
+                poll_interval: Duration::from_secs(poll_secs.unwrap_or(kind.default_poll_secs())),
+                regions,
+                api_key,
+            },
+        )
+        .collect()
+}
+
+/// Map every listed region (trimmed, lowercased) to the feed's single zone.
+fn region_map(regions: &[String], zone: &str) -> BTreeMap<String, String> {
+    regions
+        .iter()
+        .map(|region| (region.trim().to_ascii_lowercase(), zone.to_string()))
+        .collect()
 }
 
 /// Resolve one of the daemon API keys (`[daemon.ack] api_key`,

@@ -423,10 +423,11 @@ l'ensemble complet listé sous **Forme de réponse**.)
 
 ### GET /api/energy
 
-Santé live des sept backends énergie/intensité (depuis 0.8.8) : les
+Santé live des dix backends énergie/intensité (depuis 0.8.8) : les
 cinq sources d'énergie mesurée scrappées (Alumet, Scaphandre, Kepler,
-Redfish, SPECpower cloud) et les deux API d'intensité temps réel,
-Electricity Maps et RTE éCO2mix. Alimente l'onglet Scrapers de `perf-sentinel query monitor`. Le
+Redfish, SPECpower cloud) et les cinq API d'intensité temps réel,
+Electricity Maps et les flux des gestionnaires de réseau (RTE éCO2mix,
+NESO, Fingrid, Energinet). Alimente l'onglet Scrapers de `perf-sentinel query monitor`. Le
 mix effectif lui-même (quelle source a gagné la chaîne de précédence
 par service, intensité de grille par région) vit sur
 `/api/export/report` sous `green_summary`. Cet endpoint répond
@@ -434,24 +435,24 @@ seulement "chaque backend est-il configuré, frais, et en succès".
 
 **Paramètres de requête :** aucun.
 
-**Forme de réponse :** un objet avec un tableau `backends` de sept
+**Forme de réponse :** un objet avec un tableau `backends` de dix
 entrées dans un ordre fixe suivant la chaîne de précédence de l'énergie
 mesurée (`alumet`, `scaphandre`, `kepler`, `redfish`, `cloud_energy`,
-`electricity_maps`, `rte_eco2mix`), chacune :
+`electricity_maps`, `rte_eco2mix`, `neso`, `fingrid`, `energinet`), chacune :
 
 | Champ                     | Type    | Description                                                                                                                                                                                      |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `backend`                 | string  | Nom stable du backend                                                                                                                                                                            |
 | `configured`              | boolean | Si le backend est configuré, d'après la config `[green]` figée au démarrage du daemon                                                                                                            |
 | `last_scrape_age_seconds` | number  | Secondes depuis le dernier scrape réussi, à la date du dernier tick du scraper (mêmes sémantiques que la gauge `/metrics`). Omis si non configuré ou si le backend n'a pas de gauge de fraîcheur |
-| `scrapes_ok`              | number  | Scrapes réussis depuis le démarrage. Omis si non configuré ou non scrappé (`cloud_energy`, `electricity_maps`, `rte_eco2mix`)                                                                    |
+| `scrapes_ok`              | number  | Scrapes réussis depuis le démarrage. Omis si non configuré ou non scrappé (`cloud_energy`, `electricity_maps`, flux réseau)                                                                      |
 | `scrapes_failed`          | number  | Scrapes échoués depuis le démarrage. Mêmes règles d'omission que `scrapes_ok`                                                                                                                    |
 
 Les champs optionnels sont omis plutôt que mis à zéro pour les backends
 non configurés : les gauges Prometheus sous-jacentes sont
 pré-enregistrées à 0, et un `0` littéral se lirait comme un scrape
-frais. `electricity_maps` et `rte_eco2mix` n'ont pas de gauge de
-fraîcheur. Leur vivacité se lit dans les entrées `intensity_source = "real_time"` de la ventilation
+frais. `electricity_maps` et les flux des gestionnaires de réseau n'ont
+pas de gauge de fraîcheur. Leur vivacité se lit dans les entrées `intensity_source = "real_time"` de la ventilation
 par région du rapport.
 
 Deux précautions de lecture sur l'âge. Un backend configuré lit encore
@@ -483,7 +484,10 @@ curl -sS http://127.0.0.1:4318/api/energy
     { "backend": "redfish", "configured": false },
     { "backend": "cloud_energy", "configured": false },
     { "backend": "electricity_maps", "configured": true },
-    { "backend": "rte_eco2mix", "configured": false }
+    { "backend": "rte_eco2mix", "configured": false },
+    { "backend": "neso", "configured": false },
+    { "backend": "fingrid", "configured": false },
+    { "backend": "energinet", "configured": false }
   ]
 }
 ```
