@@ -45,4 +45,9 @@ default_instance_type = "c5.4xlarge"
 "api-us" = { provider = "aws", instance_type = "m7i.4xlarge" }
 "api-asia" = { provider = "gcp", instance_type = "c4d-standard-8" }
 "analytics" = { provider = "azure", instance_type = "Standard_D8s_v6" }
-"on-prem-box" = { idle_watts = 45.0, max_watts = 120.0 }
+# Services reading one CPU query are taken to share one node and split its
+# watts by operation count, when the query returns one series. Services on
+# one node give the same query, services on different nodes need a query
+# filtered to their node. on-prem-box has no provider, so without its own
+# query it would read the AWS default of api-us.
+"on-prem-box" = { idle_watts = 45.0, max_watts = 120.0, cpu_query = "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\",instance=\"on-prem-box:9100\"}[5m])) * 100)" }

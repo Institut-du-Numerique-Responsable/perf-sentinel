@@ -557,17 +557,23 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # scrape_interval_secs = 30             # default 15
 # default_provider = "aws"              # default unset, used when a service omits it
 # default_instance_type = "c5.4xlarge"  # default unset, same
-# cpu_metric = "aws_ec2_cpuutilization_average"  # default unset
+# `cpu_metric` replaces the provider default query for every service without
+# its own `cpu_query`, so those services would read one node. It stays
+# commented when the block is enabled, the services below sit on different
+# nodes.
+# # cpu_metric = "aws_ec2_cpuutilization_average"  # default unset
 # auth_header = "Authorization: Bearer TOKEN"    # default unset, prefer PERF_SENTINEL_CLOUD_AUTH_HEADER
 #
 # Per service, either an instance type read from the embedded SPECpower
 # table, or the two watt figures when your hardware is not in it.
-# `cpu_query` overrides `cpu_metric` for one service.
+# `cpu_query` overrides `cpu_metric` for one service. Services reading one
+# CPU query split that node's watts by operation count when it returns one
+# series, so services on different nodes need a query filtered to their node.
 # [green.cloud.services]
 # "api-us" = { provider = "aws", instance_type = "c5.4xlarge" }
 # "api-asia" = { provider = "gcp", instance_type = "n2-standard-8" }
 # "analytics" = { provider = "azure", instance_type = "Standard_D8s_v3" }
-# "custom" = { idle_watts = 45.0, max_watts = 120.0 }
+# "custom" = { idle_watts = 45.0, max_watts = 120.0, cpu_query = "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\",instance=\"custom:9100\"}[5m])) * 100)" }
 # "special" = { provider = "aws", instance_type = "c5.4xlarge", cpu_query = "avg(node_cpu{job=\"special\"})" }
 
 # --- Declared broker cluster (opt-in, no agent needed) ---------------------

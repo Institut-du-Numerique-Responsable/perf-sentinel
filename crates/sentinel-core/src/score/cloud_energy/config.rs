@@ -1,7 +1,7 @@
 //! User-facing configuration for cloud-native energy estimation.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use super::table;
@@ -176,6 +176,26 @@ impl CloudEnergyConfig {
             "azure" => Cow::Borrowed(DEFAULT_CPU_QUERY_AZURE),
             _ => Cow::Borrowed(DEFAULT_CPU_QUERY_GENERIC),
         }
+    }
+
+    /// Group the configured services by their resolved CPU query.
+    ///
+    /// Keys are the trimmed queries of [`Self::service_cpu_query`], values
+    /// the sorted service names reading each one. Services on one query
+    /// read one CPU figure, so the scraper fetches it once per group.
+    #[must_use]
+    pub fn cpu_query_groups(&self) -> BTreeMap<String, Vec<String>> {
+        let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (name, svc) in &self.services {
+            groups
+                .entry(self.service_cpu_query(svc).into_owned())
+                .or_default()
+                .push(name.clone());
+        }
+        for names in groups.values_mut() {
+            names.sort();
+        }
+        groups
     }
 }
 
@@ -372,5 +392,30 @@ mod tests {
         };
         let cfg = sample_config();
         assert_eq!(cfg.service_cpu_query(&svc), "custom_metric{job=\"db\"}");
+    }
+
+    fn manual(cpu_query: Option<&str>) -> ServiceCloudConfig {
+        ServiceCloudConfig::ManualWatts {
+            idle_watts: 10.0,
+            max_watts: 50.0,
+            cpu_query: cpu_query.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn cpu_query_groups_merge_default_and_padded_queries() {
+        let mut cfg = sample_config();
+        cfg.services.insert("b".into(), manual(None));
+        cfg.services.insert("a".into(), manual(None));
+        cfg.services
+            .insert("c".into(), manual(Some("node_cpu{x=\"1\"}")));
+        cfg.services
+            .insert("d".into(), manual(Some("  node_cpu{x=\"1\"} ")));
+        cfg.services.insert("e".into(), manual(Some("other_query")));
+        let groups = cfg.cpu_query_groups();
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[DEFAULT_CPU_QUERY_AWS], ["a", "b"]);
+        assert_eq!(groups["node_cpu{x=\"1\"}"], ["c", "d"]);
+        assert_eq!(groups["other_query"], ["e"]);
     }
 }

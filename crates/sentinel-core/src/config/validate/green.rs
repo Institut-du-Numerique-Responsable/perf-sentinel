@@ -27,6 +27,39 @@ pub(crate) fn unpriced_instance_suffix(instance_type: &str) -> Option<String> {
 
 /// Validate `[green.broker_static]`: a declared cluster must be
 /// countable and its instance type nameable.
+/// One message per CPU query read by services whose resolved power
+/// envelopes differ (rule C1), naming the first conflicting pair in
+/// sorted order. Such a query names no single node, so the scraper
+/// prices each of its services alone.
+pub(crate) fn mixed_query_envelope_conflicts(cfg: &CloudEnergyConfig) -> Vec<String> {
+    let mut out = Vec::new();
+    for (query, services) in cfg.cpu_query_groups() {
+        let mut members = services
+            .iter()
+            .map(|name| (name, cfg.service_power(&cfg.services[name])));
+        let Some((first, envelope)) = members.next() else {
+            continue;
+        };
+        if let Some((other, other_envelope)) = members.find(|(_, e)| *e != envelope) {
+            out.push(format!(
+                "[green.cloud.services] '{first}' ({} to {} W) and '{other}' ({} to {} W) \
+                 read the same CPU query '{query}' with different power envelopes, so each \
+                 is priced alone on the full reading instead of sharing one node. Give each \
+                 node a cpu_query filtered to it, or one instance type for the services of \
+                 one node",
+                envelope.0, envelope.1, other_envelope.0, other_envelope.1
+            ));
+        }
+    }
+    out
+}
+
+fn warn_mixed_query_envelopes(cfg: &CloudEnergyConfig) {
+    for message in mixed_query_envelope_conflicts(cfg) {
+        tracing::warn!("{message}");
+    }
+}
+
 pub(super) fn validate_broker_static(
     cfg: &crate::score::broker_static::StaticBrokerConfig,
 ) -> Result<(), String> {
@@ -871,6 +904,7 @@ impl Config {
                 )?,
             }
         }
+        warn_mixed_query_envelopes(cfg);
         Ok(())
     }
 

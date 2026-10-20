@@ -4967,3 +4967,37 @@ instance_type = "db.serverless"
         Some("")
     );
 }
+
+#[test]
+fn mixed_envelopes_on_one_cpu_query_load_with_a_warning() {
+    let toml = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+cpu_metric = "node_cpu"
+
+[green.cloud.services]
+"b-svc" = { idle_watts = 20.0, max_watts = 80.0 }
+"a-svc" = { idle_watts = 10.0, max_watts = 50.0 }
+"c-svc" = { idle_watts = 10.0, max_watts = 50.0, cpu_query = "other_cpu" }
+"#;
+    let config = load_from_str(toml).expect("mixed envelopes warn, they do not reject");
+    let cloud = config.green.cloud_energy.expect("cloud section");
+    let conflicts = validate::green::mixed_query_envelope_conflicts(&cloud);
+    assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+    let message = &conflicts[0];
+    assert!(message.contains("'a-svc' (10 to 50 W)"), "{message}");
+    assert!(message.contains("'b-svc' (20 to 80 W)"), "{message}");
+    assert!(message.contains("'node_cpu'"), "{message}");
+}
+
+#[test]
+fn shipped_cloud_examples_share_no_query_across_envelopes() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let text = std::fs::read_to_string(root.join("31-green-cloud.toml")).expect("read example");
+    let config = load_from_str(&text).expect("example loads");
+    let cloud = config.green.cloud_energy.expect("cloud section");
+    assert_eq!(
+        validate::green::mixed_query_envelope_conflicts(&cloud),
+        Vec::<String>::new()
+    );
+}
