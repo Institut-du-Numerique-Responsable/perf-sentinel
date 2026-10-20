@@ -272,6 +272,30 @@ fn apply_scrape_reports_matched_services_independently_of_ops() {
 }
 
 #[test]
+fn services_sharing_a_domain_split_its_energy() {
+    // `label_key = "domain"`: every service on the host maps to the
+    // one `package` value, which must be counted once, not per service.
+    let state = AlumetState::default();
+    let mut cfg = sample_config();
+    cfg.label_key = "domain".to_string();
+    cfg.service_mappings = HashMap::from([
+        ("checkout".to_string(), "package".to_string()),
+        ("billing".to_string(), "package".to_string()),
+    ]);
+    let samples = vec![PromSample {
+        label_value: "package".to_string(),
+        value: 10.0,
+    }];
+    let op_deltas = HashMap::from([("checkout".to_string(), 75), ("billing".to_string(), 25)]);
+    let matched = apply_scrape(&state, None, None, &samples, &op_deltas, &cfg, 1000);
+    assert_eq!(matched, 2);
+    let snap = state.snapshot(1000, 10_000);
+    let summed: f64 = op_deltas.iter().map(|(svc, n)| snap[svc] * *n as f64).sum();
+    let window = compute_window_kwh(10.0, cfg.energy_interval_secs, 5.0).unwrap();
+    assert!((summed - window).abs() < 1e-18, "{summed} vs {window}");
+}
+
+#[test]
 fn zero_joules_reading_keeps_the_previous_entry() {
     // A zero reading means the exporter's last flush caught the consumer
     // idle, not that the window's work was free. Publishing 0.0 would

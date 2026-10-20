@@ -99,8 +99,7 @@ impl AgedEnergyMap {
 
 /// Insert or overwrite one service's row without re-cloning the key in
 /// the steady state (the common case: the service already has an
-/// entry, only its coefficient moves). Used by the Kepler and Alumet
-/// `apply_scrape` paths and by [`split_by_ops`].
+/// entry, only its coefficient moves). Used by [`split_by_ops`].
 pub(crate) fn upsert_row(map: &mut HashMap<String, EnergyRow>, service: &str, row: EnergyRow) {
     if let Some(slot) = map.get_mut(service) {
         *slot = row;

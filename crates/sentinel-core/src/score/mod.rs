@@ -8,11 +8,11 @@ mod carbon_data;
 pub(crate) mod carbon_profiles;
 pub mod cloud_energy;
 pub mod electricity_maps;
-// `energy_state` is the shared `ArcSwap`-backed storage used by the
-// Scaphandre and cloud SPECpower scrapers. It depends on the `arc-swap`
-// crate which is optional (only pulled in under the `daemon` feature),
-// and its only callers (`scaphandre::state` and `cloud_energy::state`)
-// are themselves gated on `daemon`. Gating the module here keeps
+// `energy_state` is the shared `ArcSwap`-backed storage and one-source
+// split used by the Scaphandre, cloud, Kepler, Alumet and Redfish
+// scrapers. It depends on the `arc-swap` crate which is optional (only
+// pulled in under the `daemon` feature), and every caller is itself
+// gated on `daemon`. Gating the module here keeps
 // `cargo publish -p perf-sentinel-core` (default features off) green.
 #[cfg(feature = "daemon")]
 pub(crate) mod energy_state;

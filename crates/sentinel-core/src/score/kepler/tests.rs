@@ -20,25 +20,28 @@ use crate::score::prom_parser::{PromSample, sum_by_label};
 
 // --- counter-delta tests ----------------------------------------------
 
+/// `label value -> services` index with one service on `order`.
+fn order_label() -> HashMap<String, Vec<String>> {
+    HashMap::from([("order".to_string(), vec!["order-svc".to_string()])])
+}
+
 #[test]
 fn first_observation_records_raw_no_delta() {
     let mut last = HashMap::new();
-    let mut mappings = HashMap::new();
-    mappings.insert("order-svc".to_string(), "order".to_string());
+    let mappings = order_label();
     let samples = vec![PromSample {
         label_value: "order".to_string(),
         value: 1000.0,
     }];
     let (deltas, _) = joules_deltas(&samples, &mappings, &mut last);
     assert!(deltas.is_empty(), "first tick must not emit a delta");
-    assert_eq!(last.get("order-svc"), Some(&1000.0));
+    assert_eq!(last.get("order"), Some(&1000.0));
 }
 
 #[test]
 fn second_observation_emits_positive_delta() {
     let mut last = HashMap::new();
-    let mut mappings = HashMap::new();
-    mappings.insert("order-svc".to_string(), "order".to_string());
+    let mappings = order_label();
 
     let first = vec![PromSample {
         label_value: "order".to_string(),
@@ -52,15 +55,14 @@ fn second_observation_emits_positive_delta() {
     }];
     let (deltas, _) = joules_deltas(&second, &mappings, &mut last);
     assert_eq!(deltas.len(), 1);
-    assert!((deltas.get("order-svc").unwrap() - 234.0).abs() < f64::EPSILON);
-    assert_eq!(last.get("order-svc"), Some(&1234.0));
+    assert!((deltas.get("order").unwrap() - 234.0).abs() < f64::EPSILON);
+    assert_eq!(last.get("order"), Some(&1234.0));
 }
 
 #[test]
 fn counter_reset_clamps_to_no_delta() {
     let mut last = HashMap::new();
-    let mut mappings = HashMap::new();
-    mappings.insert("order-svc".to_string(), "order".to_string());
+    let mappings = order_label();
 
     let first = vec![PromSample {
         label_value: "order".to_string(),
@@ -79,14 +81,13 @@ fn counter_reset_clamps_to_no_delta() {
         "negative delta must be omitted, not surfaced"
     );
     // The raw counter is still advanced so the NEXT delta is correct.
-    assert_eq!(last.get("order-svc"), Some(&100.0));
+    assert_eq!(last.get("order"), Some(&100.0));
 }
 
 #[test]
 fn no_change_produces_empty_deltas() {
     let mut last = HashMap::new();
-    let mut mappings = HashMap::new();
-    mappings.insert("order-svc".to_string(), "order".to_string());
+    let mappings = order_label();
 
     let samples = vec![PromSample {
         label_value: "order".to_string(),
@@ -105,8 +106,7 @@ fn counters_sharing_a_label_value_are_summed() {
     // the two counters with exposition order and produce garbage
     // deltas in both directions.
     let mut last = HashMap::new();
-    let mut mappings = HashMap::new();
-    mappings.insert("order-svc".to_string(), "order".to_string());
+    let mappings = order_label();
 
     let first = vec![
         PromSample {
@@ -119,7 +119,7 @@ fn counters_sharing_a_label_value_are_summed() {
         },
     ];
     let _ = joules_deltas(&first, &mappings, &mut last);
-    assert_eq!(last.get("order-svc"), Some(&1500.0), "baseline is the sum");
+    assert_eq!(last.get("order"), Some(&1500.0), "baseline is the sum");
 
     let second = vec![
         PromSample {
@@ -134,7 +134,7 @@ fn counters_sharing_a_label_value_are_summed() {
     let (deltas, matched) = joules_deltas(&second, &mappings, &mut last);
     assert_eq!(matched, 1);
     // (1100 + 650) - (1000 + 500) = 250 J across both pods.
-    assert!((deltas.get("order-svc").unwrap() - 250.0).abs() < f64::EPSILON);
+    assert!((deltas.get("order").unwrap() - 250.0).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -143,8 +143,7 @@ fn nan_counter_row_does_not_poison_the_sum() {
     // must not turn the summed counter into NaN and wedge the delta
     // pipeline for the label.
     let mut last = HashMap::new();
-    let mut mappings = HashMap::new();
-    mappings.insert("order-svc".to_string(), "order".to_string());
+    let mappings = order_label();
 
     let first = vec![
         PromSample {
@@ -157,21 +156,20 @@ fn nan_counter_row_does_not_poison_the_sum() {
         },
     ];
     let _ = joules_deltas(&first, &mappings, &mut last);
-    assert_eq!(last.get("order-svc"), Some(&1000.0), "NaN row skipped");
+    assert_eq!(last.get("order"), Some(&1000.0), "NaN row skipped");
 
     let second = vec![PromSample {
         label_value: "order".to_string(),
         value: 1234.0,
     }];
     let (deltas, _) = joules_deltas(&second, &mappings, &mut last);
-    assert!((deltas.get("order-svc").unwrap() - 234.0).abs() < f64::EPSILON);
+    assert!((deltas.get("order").unwrap() - 234.0).abs() < f64::EPSILON);
 }
 
 #[test]
 fn unmapped_label_is_ignored() {
     let mut last = HashMap::new();
-    let mut mappings = HashMap::new();
-    mappings.insert("order-svc".to_string(), "order".to_string());
+    let mappings = order_label();
 
     let samples = vec![PromSample {
         label_value: "different-label".to_string(),
@@ -179,7 +177,7 @@ fn unmapped_label_is_ignored() {
     }];
     let (deltas, _) = joules_deltas(&samples, &mappings, &mut last);
     assert!(deltas.is_empty());
-    assert!(!last.contains_key("order-svc"));
+    assert!(!last.contains_key("order"));
 }
 
 // --- energy-per-op math ----------------------------------------------
@@ -271,10 +269,10 @@ fn real_capture_keeps_one_zone_per_workload() {
 fn apply_scrape_updates_state_with_coefficient() {
     let state = KeplerState::default();
     let mut joule_deltas_map = HashMap::new();
-    joule_deltas_map.insert("order-svc".to_string(), 7_200_000.0); // 2 kWh worth
+    joule_deltas_map.insert("order".to_string(), 7_200_000.0); // 2 kWh worth
     let mut op_deltas = HashMap::new();
     op_deltas.insert("order-svc".to_string(), 200);
-    apply_scrape(&state, &joule_deltas_map, &op_deltas, 1000);
+    apply_scrape(&state, &joule_deltas_map, &order_label(), &op_deltas, 1000);
     let snap = state.snapshot(1000, 10_000);
     assert_eq!(snap.len(), 1);
     // 7.2e6 J / 3.6e6 = 2 kWh / 200 ops = 0.01 kWh per op.
@@ -286,9 +284,9 @@ fn apply_scrape_keeps_prior_entry_when_ops_zero() {
     let state = KeplerState::default();
     state.insert_for_test("order-svc".to_string(), 5e-7, 100);
     let mut joule_deltas_map = HashMap::new();
-    joule_deltas_map.insert("order-svc".to_string(), 1.0);
+    joule_deltas_map.insert("order".to_string(), 1.0);
     let op_deltas = HashMap::new(); // no ops for the service
-    apply_scrape(&state, &joule_deltas_map, &op_deltas, 200);
+    apply_scrape(&state, &joule_deltas_map, &order_label(), &op_deltas, 200);
     let snap = state.snapshot(200, 10_000);
     assert_eq!(snap.len(), 1);
     assert!((snap["order-svc"] - 5e-7).abs() < f64::EPSILON);
@@ -303,10 +301,10 @@ fn apply_scrape_skips_service_with_zero_ops_explicit_entry() {
     let state = KeplerState::default();
     state.insert_for_test("order-svc".to_string(), 5e-7, 100);
     let mut joule_deltas_map = HashMap::new();
-    joule_deltas_map.insert("order-svc".to_string(), 1.0);
+    joule_deltas_map.insert("order".to_string(), 1.0);
     let mut op_deltas = HashMap::new();
     op_deltas.insert("order-svc".to_string(), 0);
-    apply_scrape(&state, &joule_deltas_map, &op_deltas, 200);
+    apply_scrape(&state, &joule_deltas_map, &order_label(), &op_deltas, 200);
     let snap = state.snapshot(200, 10_000);
     assert_eq!(snap.len(), 1);
     assert!((snap["order-svc"] - 5e-7).abs() < f64::EPSILON);
@@ -339,6 +337,41 @@ fn process_scrape_end_to_end_after_two_ticks() {
     let snap = state.snapshot(2000, 10_000);
     assert_eq!(snap.len(), 1);
     assert!((snap["order-svc"] - 0.01).abs() < 1e-12);
+}
+
+#[test]
+fn two_services_on_one_label_split_its_joules() {
+    let state = KeplerState::default();
+    let mut cfg = sample_config();
+    cfg.service_mappings
+        .insert("order-worker".to_string(), "order".to_string());
+    let mut last_raw = HashMap::new();
+    let tick = |value: f64| {
+        vec![PromSample {
+            label_value: "order".to_string(),
+            value,
+        }]
+    };
+    let ops = HashMap::from([
+        ("order-svc".to_string(), 30),
+        ("order-worker".to_string(), 10),
+    ]);
+
+    let matched = process_scrape(&state, &tick(1_000.0), &ops, &cfg, &mut last_raw, 1000);
+    assert_eq!(matched, 2);
+    assert_eq!(last_raw.len(), 1, "one counter per label: {last_raw:?}");
+
+    let matched = process_scrape(&state, &tick(1_360.0), &ops, &cfg, &mut last_raw, 2000);
+    assert_eq!(matched, 2);
+    assert_eq!(last_raw.get("order"), Some(&1_360.0));
+    let snap = state.snapshot(2000, 10_000);
+    let joules: f64 = ops
+        .iter()
+        .map(|(svc, n)| snap[svc] * *n as f64 * 3_600_000.0)
+        .sum();
+    assert!((joules - 360.0).abs() < 1e-9, "{joules}");
+    // Same coefficient for both: the label is read once, then split.
+    assert!((snap["order-svc"] - snap["order-worker"]).abs() < 1e-20);
 }
 
 // --- state staleness ---------------------------------------------------

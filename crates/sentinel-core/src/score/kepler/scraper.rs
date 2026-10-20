@@ -94,7 +94,7 @@ pub(super) fn parse_samples(body: &str, cfg: &KeplerConfig) -> Vec<PromSample> {
 /// Returns a `JoinHandle` the daemon captures and aborts on Ctrl-C.
 /// The task reads per-service op counts from `MetricsState`, scrapes
 /// the Kepler endpoint, computes joule deltas vs the previous scrape
-/// (held in an internal `last_raw_joules` table), and publishes
+/// (held per label value in an internal `last_raw_joules` table), and publishes
 /// refreshed coefficients via [`KeplerState::publish`].
 #[must_use]
 pub fn spawn_scraper(
@@ -144,9 +144,11 @@ async fn run_scraper_loop(cfg: KeplerConfig, state: Arc<KeplerState>, metrics: A
     ticker.tick().await;
 
     let mut snapshot_diff = OpsSnapshotDiff::default();
-    // Size by the mapped-services count, not by samples returned: idle
-    // services may not show up in a given scrape, but we still want to
-    // remember their raw counter once they become active.
+    // Keyed by label value, one counter per label however many services
+    // map to it. Sized by the mapped-services count (an upper bound on
+    // distinct labels), not by samples returned: an idle label may not
+    // show up in a given scrape, but we still want to remember its raw
+    // counter once it becomes active.
     let mut last_raw_joules: HashMap<String, f64> =
         HashMap::with_capacity(cfg.service_mappings.len());
     let mut failure_streak_warned = false;

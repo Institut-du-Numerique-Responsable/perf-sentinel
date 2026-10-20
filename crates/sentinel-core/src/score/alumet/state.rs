@@ -3,9 +3,8 @@
 //! nominal type so the daemon cannot accidentally swap a Scaphandre or
 //! Kepler state for an Alumet one.
 
-/// Row type used by [`super::apply::apply_scrape`] when constructing
-/// fresh entries. Aliased to the shared [`EnergyRow`] so every energy
-/// state has one definition.
+/// Row type of the table [`super::apply::apply_scrape`] publishes.
+/// Aliased to the shared [`EnergyRow`] so every energy state has one definition.
 ///
 /// [`EnergyRow`]: crate::score::energy_state::EnergyRow
 pub(super) use crate::score::energy_state::EnergyRow as ServiceEnergy;

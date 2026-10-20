@@ -334,6 +334,38 @@ fn apply_scrape_matches_on_exe_only_when_cmdline_unset() {
 }
 
 #[test]
+fn two_matchers_selecting_one_process_split_its_power() {
+    // Two services whose matchers both select the one JVM: its power is
+    // counted once and split by ops.
+    let state = ScaphandreState::default();
+    let readings = vec![ProcessPower {
+        exe: "/usr/bin/java".to_string(),
+        cmdline: "java-jar/tmp/monolith.jar".to_string(),
+        power_microwatts: 8_000_000.0,
+    }];
+    let deltas = HashMap::from([("web".to_string(), 300u64), ("jobs".to_string(), 100u64)]);
+    let matcher = ProcessMatcher {
+        exe_contains: "bin/java".to_string(),
+        cmdline_contains: Some("monolith.jar".to_string()),
+    };
+    let cfg = ScaphandreConfig {
+        endpoint: "http://localhost:8080/metrics".to_string(),
+        scrape_interval: Duration::from_secs(5),
+        process_map: HashMap::from([
+            ("web".to_string(), matcher.clone()),
+            ("jobs".to_string(), matcher),
+        ]),
+        auth_header: None,
+    };
+    apply_scrape(&state, &readings, &deltas, &cfg, &mut HashSet::new(), 100);
+    let snap = state.snapshot(100, 60_000);
+    let summed: f64 = deltas.iter().map(|(svc, n)| snap[svc] * *n as f64).sum();
+    // 8 W over the 5 s window, in kWh.
+    let process_kwh = 8.0 * 5.0 / 3_600_000.0;
+    assert!((summed - process_kwh).abs() < 1e-18, "{summed}");
+}
+
+#[test]
 fn apply_scrape_skips_on_ambiguous_matcher() {
     // Misconfigured matcher: two JVMs share the runtime AND the
     // cmdline_contains substring is loose enough to match both

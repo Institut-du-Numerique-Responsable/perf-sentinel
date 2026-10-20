@@ -6,9 +6,8 @@
 //! cloud-energy state for a Scaphandre one) while delegating all storage
 //! behavior to the shared impl.
 
-/// Row type expected by [`super::ops::apply_scrape`] when constructing
-/// fresh entries. Aliased to the shared [`EnergyRow`] so both states
-/// share one definition.
+/// Row type of the table [`super::ops::apply_scrape`] publishes.
+/// Aliased to the shared [`EnergyRow`] so both states share one definition.
 ///
 /// [`EnergyRow`]: crate::score::energy_state::EnergyRow
 pub(super) use crate::score::energy_state::EnergyRow as ServiceEnergy;
