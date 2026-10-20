@@ -1033,7 +1033,12 @@ fn format_region_line(region: &sentinel_core::score::carbon::RegionBreakdown) ->
             region.io_ops, region.co2_gco2,
         );
     }
-    let source_str = intensity_source_label(region.intensity_source);
+    let source_str = match region.intensity_provider {
+        Some(sentinel_core::score::carbon::RealTimeProvider::RteEco2mix) => {
+            "real_time, rte_eco2mix"
+        }
+        _ => intensity_source_label(region.intensity_source),
+    };
     let raw_suffix = format_estimation_suffix(
         region.intensity_estimated,
         region.intensity_estimation_method.as_deref(),
@@ -1129,6 +1134,15 @@ fn print_green_summary(
     {
         println!();
         println!("{}", format_scoring_config_line(scoring));
+    }
+    // Fixed text: RTE éCO2mix has no knobs to report.
+    if summary
+        .scoring_config
+        .as_ref()
+        .is_some_and(|cfg| cfg.rte_eco2mix == Some(true))
+    {
+        println!();
+        println!("  Carbon scoring: RTE éCO2mix, direct emissions of French production");
     }
 
     // Per-region breakdown whenever at least one region was resolved.

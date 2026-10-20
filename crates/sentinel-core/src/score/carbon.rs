@@ -108,6 +108,11 @@ pub const CO2_MODEL_CLOUD_SPECPOWER: &str = "cloud_specpower";
 /// energy model tag which tracks Scaphandre/cloud/proxy).
 pub const CO2_MODEL_EMAPS: &str = "electricity_maps_api";
 
+/// Carbon intensity source: RTE `éCO2mix` real-time data for France.
+/// Ranks right below [`CO2_MODEL_EMAPS`]: same real-time tier, but a
+/// direct-emissions figure for French production only.
+pub const CO2_MODEL_RTE: &str = "rte_eco2mix_api";
+
 /// Readable name of a model tag, for documents a person reads.
 #[must_use]
 pub fn co2_model_label(tag: &str) -> Option<&'static str> {
@@ -121,6 +126,7 @@ pub fn co2_model_label(tag: &str) -> Option<&'static str> {
         CO2_MODEL_REDFISH => "Redfish, BMC chassis power",
         CO2_MODEL_CLOUD_SPECPOWER => "Cloud SPECpower table",
         CO2_MODEL_EMAPS => "Electricity Maps, live grid intensity",
+        CO2_MODEL_RTE => "RTE éCO2mix, live French grid intensity",
         _ => return None,
     })
 }
@@ -340,8 +346,20 @@ pub enum IntensitySource {
     Annual,
     Hourly,
     MonthlyHourly,
-    /// Real-time data from Electricity Maps API (highest fidelity).
+    /// Real-time data from a live API (highest fidelity), see
+    /// [`RealTimeProvider`] for which one.
     RealTime,
+}
+
+/// Which live API produced a `RealTime` intensity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RealTimeProvider {
+    /// Electricity Maps: lifecycle or direct factors, consumption-based.
+    #[default]
+    ElectricityMaps,
+    /// RTE `éCO2mix`: direct emissions of French production, imports excluded.
+    RteEco2mix,
 }
 
 /// Per-region operational CO₂ breakdown row in `green_summary.regions[]`.
@@ -373,6 +391,11 @@ pub struct RegionBreakdown {
     /// Only present when `intensity_estimated == Some(true)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intensity_estimation_method: Option<String>,
+    /// Live API behind a `RealTime` row, present only when it is not
+    /// Electricity Maps so earlier reports keep their exact shape:
+    /// absent on a `RealTime` row means Electricity Maps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intensity_provider: Option<RealTimeProvider>,
 }
 
 /// Carbon scoring configuration. Built via [`Config::carbon_context()`].
@@ -477,6 +500,9 @@ pub struct ScoringConfig {
     /// present `scoring_config` did mean the API was configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub electricity_maps: Option<bool>,
+    /// True when `[green.rte_eco2mix]` is configured. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rte_eco2mix: Option<bool>,
     /// Coefficients that scale the published figures. Absent on windows
     /// written before they were recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -534,16 +560,20 @@ pub struct RealTimeIntensityEntry {
     /// `"TIME_SLICER_AVERAGE"` or `"GENERAL_PURPOSE_ZONE_DEVELOPMENT"`.
     /// Typically `Some` only when `is_estimated == Some(true)`.
     pub estimation_method: Option<String>,
+    /// Live API the value came from.
+    pub provider: RealTimeProvider,
 }
 
 impl RealTimeIntensityEntry {
-    /// Build a measured entry with no estimation metadata. Convenience
-    /// constructor for tests and callers that only have a raw `f64`.
+    /// Build a measured Electricity Maps entry with no estimation
+    /// metadata. Convenience constructor for tests and callers that only
+    /// have a raw `f64`.
     pub fn measured(gco2_per_kwh: f64) -> Self {
         Self {
             gco2_per_kwh,
             is_estimated: None,
             estimation_method: None,
+            provider: RealTimeProvider::ElectricityMaps,
         }
     }
 }

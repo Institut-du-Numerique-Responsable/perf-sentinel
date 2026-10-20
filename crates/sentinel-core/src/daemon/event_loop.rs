@@ -19,6 +19,7 @@ use crate::score::cloud_energy::CloudEnergyState;
 use crate::score::electricity_maps::ElectricityMapsState;
 use crate::score::kepler::KeplerState;
 use crate::score::redfish::RedfishState;
+use crate::score::rte_eco2mix::RteEco2mixState;
 use crate::score::scaphandre::ScaphandreState;
 #[cfg(test)]
 use detect::sanitizer_aware::SanitizerAwareMode;
@@ -71,6 +72,7 @@ pub(super) struct EnergyScraperHandles<'a> {
     pub(super) redfish: Option<&'a tokio::task::JoinHandle<()>>,
     pub(super) cloud: Option<&'a tokio::task::JoinHandle<()>>,
     pub(super) emaps: Option<&'a tokio::task::JoinHandle<()>>,
+    pub(super) rte: Option<&'a tokio::task::JoinHandle<()>>,
 }
 
 /// `JoinHandle`s for the listener tasks bound at startup.
@@ -105,6 +107,8 @@ pub(super) struct EnergySources<'a> {
     pub(super) cloud_staleness_ms: u64,
     pub(super) emaps_state: Option<&'a ElectricityMapsState>,
     pub(super) emaps_staleness_ms: u64,
+    pub(super) rte_state: Option<&'a RteEco2mixState>,
+    pub(super) rte_staleness_ms: u64,
 }
 
 /// One evicted/expired/drained batch handed to the analysis worker. The
@@ -1114,11 +1118,29 @@ async fn drain_to_worker_and_join(
     let _ = worker.await;
 }
 
+/// RTE `éCO2mix` first, then Electricity Maps overrides the regions both cover.
+fn realtime_snapshot(
+    sources: &EnergySources<'_>,
+    now: u64,
+) -> HashMap<String, score::carbon::RealTimeIntensityEntry> {
+    let mut merged = sources
+        .rte_state
+        .map(|s| s.snapshot_with_metadata(now, sources.rte_staleness_ms))
+        .unwrap_or_default();
+    if let Some(emaps) = sources.emaps_state {
+        merged.extend(emaps.snapshot_with_metadata(now, sources.emaps_staleness_ms));
+    }
+    merged
+}
+
 /// Abort all spawned tasks before the daemon returns. Order matters:
 /// scrapers first so their log lines don't interleave with the shutdown
 /// message, then the listeners.
 fn shutdown_listeners(energy: EnergyScraperHandles<'_>, listeners: ListenerHandles<'_>) {
     if let Some(handle) = energy.emaps {
+        handle.abort();
+    }
+    if let Some(handle) = energy.rte {
         handle.abort();
     }
     if let Some(handle) = energy.cloud {
@@ -1182,8 +1204,6 @@ fn build_tick_ctx<'s>(
         redfish_staleness_ms,
         cloud_state,
         cloud_staleness_ms,
-        emaps_state,
-        emaps_staleness_ms,
         ..
     } = *sources;
 
@@ -1207,10 +1227,7 @@ fn build_tick_ctx<'s>(
     let alumet_snap = alumet_state
         .map(|s| s.snapshot(now, alumet_staleness_ms))
         .unwrap_or_default();
-    // Electricity Maps real-time intensity (independent of energy snapshot).
-    let emaps_snap = emaps_state
-        .map(|s| s.snapshot_with_metadata(now, emaps_staleness_ms))
-        .unwrap_or_default();
+    let emaps_snap = realtime_snapshot(sources, now);
     // Database energy accumulated since the previous scored batch.
     // Consuming here (once per built batch) keeps shed batches from
     // losing energy: they never build a context.

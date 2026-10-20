@@ -31,6 +31,7 @@ Chaque ligne de ce tableau remplace ou affine la ligne au-dessus. Vous pouvez vo
 | `[green.scaphandre]`                           | L'énergie CPU depuis les compteurs Intel RAPL, attribuée par processus par Scaphandre.                                                                                                                                                      | `scaphandre_rapl`              |
 | `[green.alumet]`                               | L'énergie CPU depuis RAPL, attribuée par cgroup par Alumet. Le backend mesuré recommandé : mêmes compteurs que Scaphandre, échantillonnage caractérisé comme moins sujet à erreur par ses auteurs, attribution taillée pour les conteneurs. | `alumet_rapl`                  |
 | `[green.electricity_maps]`                     | Ne change pas E. Remplace l'intensité annuelle du réseau par la valeur en direct de votre région, le plus gros levier sur les chiffres de gCO2 dans les régions au mix électrique variable.                                                 | source d'intensité `real_time` |
+| `[green.rte_eco2mix]`                          | Ne change pas E. L'équivalent gratuit pour les régions françaises : émissions directes en direct de la production française, publiées par RTE, plus basses qu'un chiffre en cycle de vie. Electricity Maps l'emporte là où les deux s'appliquent. | source d'intensité `real_time`, fournisseur `rte_eco2mix` |
 
 Quand plusieurs backends couvrent le même service, le daemon garde la lecture la plus fidèle : `alumet_rapl` bat `scaphandre_rapl`, qui bat `kepler_ebpf`, puis `redfish_bmc`, puis `cloud_specpower`, puis le proxy. Tous les backends mesurés sont réservés au daemon (`watch`). Le mode batch `analyze` utilise toujours le chemin proxy.
 
@@ -81,5 +82,6 @@ Ce que chaque source externe apporte aux chiffres ci-dessus :
 - **Les résultats publiés SPEC SPECpower_ssj2008 et la méthodologie Cloud Carbon Footprint** : l'interpolation utilisation-vers-watts derrière `cloud_specpower`.
 - **Boavizta** : les analyses de cycle de vie de serveurs derrière le terme incorporé.
 - **Electricity Maps** : l'API d'intensité du réseau en direct derrière la source d'intensité `real_time`.
+- **RTE éCO2mix** (open data sur ODRÉ, Licence Ouverte v2.0) : l'intensité en direct gratuite du réseau français, émissions directes de la production française, derrière les lignes `real_time` étiquetées `rte_eco2mix`.
 
 La justification de conception plus profonde, y compris la normalisation de la forme de lecture de chaque backend, se trouve dans `docs/FR/design/05-GREENOPS-AND-CARBON-FR.md`.

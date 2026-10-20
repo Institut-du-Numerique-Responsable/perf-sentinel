@@ -4024,16 +4024,21 @@
   function buildSourceCell(r) {
     var td = document.createElement("td");
     if (r.intensity_source === "real_time") {
+      // An absent provider means Electricity Maps (rows written before RTE).
+      var rte = r.intensity_provider === "rte_eco2mix";
+      var name = rte ? "RTE éCO2mix" : "Electricity Maps";
       td.appendChild(document.createTextNode("real time ("));
-      var href = safeHttpsHref("https://app.electricitymaps.com/map/live/fifteen_minutes");
+      var href = safeHttpsHref(rte
+        ? "https://www.rte-france.com/eco2mix"
+        : "https://app.electricitymaps.com/map/live/fifteen_minutes");
       if (href) {
-        var a = el("a", "ps-source-link", "Electricity Maps");
+        var a = el("a", "ps-source-link", name);
         setAttr(a, "href", href);
         setAttr(a, "target", "_blank");
         setAttr(a, "rel", "noopener noreferrer");
         td.appendChild(a);
       } else {
-        td.appendChild(document.createTextNode("Electricity Maps"));
+        td.appendChild(document.createTextNode(name));
       }
       td.appendChild(document.createTextNode(")"));
     } else {

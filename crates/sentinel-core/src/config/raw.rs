@@ -110,6 +110,7 @@ pub(super) struct GreenSection {
     hourly_profiles_file: Option<String>,
     calibration_file: Option<String>,
     electricity_maps: ElectricityMapsSection,
+    rte_eco2mix: Option<RteEco2mixSection>,
 }
 
 /// Raw deserialization target for `[green.scaphandre]`.
@@ -230,6 +231,16 @@ pub(super) struct CloudServiceRaw {
     idle_watts: Option<f64>,
     max_watts: Option<f64>,
     cpu_query: Option<String>,
+}
+
+/// Raw deserialization target for `[green.rte_eco2mix]`. The section
+/// being present is what enables the source.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct RteEco2mixSection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) regions: Vec<String>,
 }
 
 /// Raw deserialization target for `[green.electricity_maps]`.
@@ -546,6 +557,7 @@ impl From<RawConfig> for Config {
                     }
                 }),
                 electricity_maps: convert_electricity_maps_section(&raw.green.electricity_maps),
+                rte_eco2mix: raw.green.rte_eco2mix.as_ref().map(convert_rte_eco2mix_section),
                 }
             },
             daemon: DaemonConfig {
@@ -1335,6 +1347,29 @@ pub(super) fn convert_electricity_maps_section_with_env(
         emission_factor_type,
         temporal_granularity,
     })
+}
+
+/// Convert `[green.rte_eco2mix]`: defaults filled, endpoint trailing
+/// slashes trimmed, regions lowercased like `service_regions`.
+pub(super) fn convert_rte_eco2mix_section(
+    raw: &RteEco2mixSection,
+) -> crate::score::rte_eco2mix::RteEco2mixConfig {
+    use crate::score::rte_eco2mix::config::{
+        DEFAULT_RTE_ECO2MIX_ENDPOINT, DEFAULT_RTE_POLL_INTERVAL_SECS,
+    };
+    crate::score::rte_eco2mix::RteEco2mixConfig {
+        endpoint: raw
+            .endpoint
+            .as_deref()
+            .unwrap_or(DEFAULT_RTE_ECO2MIX_ENDPOINT)
+            .trim_end_matches('/')
+            .to_string(),
+        poll_interval: Duration::from_secs(
+            raw.poll_interval_secs
+                .unwrap_or(DEFAULT_RTE_POLL_INTERVAL_SECS),
+        ),
+        regions: raw.regions.iter().map(|r| r.to_ascii_lowercase()).collect(),
+    }
 }
 
 /// Resolve one of the daemon API keys (`[daemon.ack] api_key`,

@@ -97,6 +97,9 @@ impl Config {
         if let Some(cfg) = &self.green.electricity_maps {
             Self::validate_electricity_maps(cfg)?;
         }
+        if let Some(cfg) = &self.green.rte_eco2mix {
+            Self::validate_rte_eco2mix(cfg)?;
+        }
         Ok(())
     }
 
@@ -247,6 +250,37 @@ impl Config {
                      contains control characters"
                 ));
             }
+        }
+        Ok(())
+    }
+
+    /// Validate a parsed `[green.rte_eco2mix]` config section.
+    pub(in crate::config) fn validate_rte_eco2mix(
+        cfg: &crate::score::rte_eco2mix::RteEco2mixConfig,
+    ) -> Result<(), String> {
+        if !cfg.endpoint.starts_with("http://") && !cfg.endpoint.starts_with("https://") {
+            return Err(format!(
+                "[green.rte_eco2mix] endpoint '{}' must start with 'http://' or 'https://'",
+                cfg.endpoint
+            ));
+        }
+        validate_http_authority(&cfg.endpoint, "[green.rte_eco2mix] endpoint")?;
+        let secs = cfg.poll_interval.as_secs();
+        check_range("[green.rte_eco2mix] poll_interval_secs", &secs, &60, &86400)?;
+        if cfg.regions.is_empty() {
+            return Err(
+                "[green.rte_eco2mix] regions must list at least one cloud region on the French grid"
+                    .to_string(),
+            );
+        }
+        if let Some(region) = cfg
+            .regions
+            .iter()
+            .find(|r| r.is_empty() || has_control_char(r))
+        {
+            return Err(format!(
+                "[green.rte_eco2mix] region {region:?} is empty or contains control characters"
+            ));
         }
         Ok(())
     }

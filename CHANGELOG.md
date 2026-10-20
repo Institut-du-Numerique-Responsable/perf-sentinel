@@ -6,10 +6,14 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Added
 
+- `[green.rte_eco2mix]`, a free real-time carbon intensity source for regions on the French grid. The daemon polls the public `eco2mix-national-tr` dataset that RTE publishes on the ODRÉ portal (Licence Ouverte v2.0, no key, 50,000 calls a month, every 900 s by default) and gives its `taux_co2` to every region listed in `regions`. The figure counts the direct emissions of French production, imports and lifecycle excluded, so it reads lower than an Electricity Maps lifecycle intensity. Electricity Maps wins for any region both cover. A latest record older than 3 hours is rejected as a stalled feed, and a missing value falls back to the embedded profiles after 3x the poll interval, as with Electricity Maps.
+- A real-time row of `green_summary.regions[]` names its source in `intensity_provider` when it is not Electricity Maps, and the window's model tag becomes `rte_eco2mix_api` when no region used Electricity Maps. Rows from Electricity Maps keep their earlier shape, without the field. `scoring_config.rte_eco2mix` records that the source is configured, `/api/energy` gains a seventh `rte_eco2mix` row, the terminal prints a `Carbon scoring: RTE éCO2mix` line and the HTML dashboard links real-time rows to the right provider.
+- `carbon_intensity_source = "rte_eco2mix"` is accepted in the org config and the disclosure schema, so a report built on this feed does not pass for an Electricity Maps one.
 - `perf-sentinel disclose --total-requests-in-period <N>` sets the denominator of `coverage_percentage` for one run and takes precedence over `scope_manifest.total_requests_in_period` in the org config. The total is only known once the period closes, so the org config no longer needs a copy edited per report. The `--tui` preview applies the flag and repeats it in the command it prints.
 
 ### Changed
 
+- The documentation no longer steers toward the Electricity Maps free tier for production: it is for non-commercial use only, and the "about 30 requests per zone per month" figure contradicted the 3600 s interval it recommended, which spends about 720.
 - `methodology.calibration.specpower_table_version` in the org config is optional. Left out, `disclose` fills it with the date of the SPECpower table the running binary embeds, so an upgrade that changes the table no longer breaks an official disclosure until someone edits the org config. A declared value keeps its meaning and must still equal that date. Existing org configs load unchanged.
 - The daemon startup gate for `[reporting] intent = "official"` now rejects a declared `specpower_table_version` that differs from the running binary's table date. Only `disclose` checked it before, so the drift surfaced when the report was produced rather than at deploy time. A daemon whose org config declares a stale date refuses to start after this upgrade: align the date or remove the line.
 

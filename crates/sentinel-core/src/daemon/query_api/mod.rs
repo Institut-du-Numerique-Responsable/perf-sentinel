@@ -774,7 +774,7 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
     type CounterPair<'a> = (&'a prometheus::IntCounter, &'a prometheus::IntCounter);
     let m = &state.metrics;
     let b = state.energy_backends;
-    let rows: [(&str, bool, Option<&prometheus::Gauge>, Option<CounterPair>); 6] = [
+    let rows: [(&str, bool, Option<&prometheus::Gauge>, Option<CounterPair>); 7] = [
         (
             "alumet",
             b.alumet,
@@ -814,6 +814,15 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
                 .scoring_config
                 .as_ref()
                 .is_some_and(crate::score::carbon::ScoringConfig::uses_electricity_maps),
+            None,
+            None,
+        ),
+        (
+            "rte_eco2mix",
+            state
+                .scoring_config
+                .as_ref()
+                .is_some_and(|c| c.rte_eco2mix == Some(true)),
             None,
             None,
         ),

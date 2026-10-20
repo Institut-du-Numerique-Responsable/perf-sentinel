@@ -45,8 +45,8 @@ use event_loop::{
 };
 use listeners::{
     init_ack_resources, setup_alumet_scraper, setup_cloud_scraper, setup_correlator,
-    setup_emaps_scraper, setup_kepler_scraper, setup_redfish_scraper, setup_scaphandre_scraper,
-    spawn_ack_toml_reload, spawn_listeners,
+    setup_emaps_scraper, setup_kepler_scraper, setup_redfish_scraper, setup_rte_scraper,
+    setup_scaphandre_scraper, spawn_ack_toml_reload, spawn_listeners,
 };
 
 /// Bounded OTLP source context carried independently of normalized I/O events.
@@ -331,6 +331,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     let redfish = setup_redfish_scraper(&config, &metrics);
     let cloud = setup_cloud_scraper(&config, &metrics);
     let emaps = setup_emaps_scraper(&config);
+    let rte = setup_rte_scraper(&config);
 
     let archive_handle = match &config.daemon.archive {
         Some(cfg) => Some(archive::spawn(cfg, metrics.clone()).map_err(|source| {
@@ -410,6 +411,8 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         cloud_staleness_ms: cloud.staleness_ms,
         emaps_state: emaps.state.as_deref(),
         emaps_staleness_ms: emaps.staleness_ms,
+        rte_state: rte.state.as_deref(),
+        rte_staleness_ms: rte.staleness_ms,
     };
     let shutdown = ShutdownTargets {
         energy: EnergyScraperHandles {
@@ -419,6 +422,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             redfish: redfish.handle.as_ref(),
             cloud: cloud.handle.as_ref(),
             emaps: emaps.handle.as_ref(),
+            rte: rte.handle.as_ref(),
         },
         listeners: ListenerHandles {
             grpc: &grpc_handle,

@@ -1362,6 +1362,29 @@ fn build_tick_ctx_no_scrapers_yields_borrowed_cow() {
 }
 
 #[test]
+fn build_tick_ctx_electricity_maps_overrides_rte_per_region() {
+    use crate::score::carbon::RealTimeProvider;
+    let base = Arc::new(score::carbon::CarbonContext::default());
+    let rte = crate::score::rte_eco2mix::RteEco2mixState::new(vec![
+        "eu-west-3".to_string(),
+        "francecentral".to_string(),
+    ]);
+    rte.publish(21.0, 900);
+    let emaps = ElectricityMapsState::default();
+    emaps.insert_for_test("eu-west-3".into(), 30.0, 900);
+    let mut sources = no_scrapers(&base);
+    sources.rte_state = Some(&rte);
+    sources.rte_staleness_ms = 500;
+    sources.emaps_state = Some(&emaps);
+    sources.emaps_staleness_ms = 500;
+    let ctx = build_tick_ctx(&sources, 1_000);
+    let rt = ctx.real_time_intensity.as_ref().unwrap();
+    assert_eq!(rt["eu-west-3"].provider, RealTimeProvider::ElectricityMaps);
+    assert!((rt["eu-west-3"].gco2_per_kwh - 30.0).abs() < f64::EPSILON);
+    assert_eq!(rt["francecentral"].provider, RealTimeProvider::RteEco2mix);
+}
+
+#[test]
 fn build_tick_ctx_scaphandre_only() {
     let base = Arc::new(score::carbon::CarbonContext::default());
     let scaph = ScaphandreState::new();
@@ -1930,6 +1953,8 @@ fn no_scrapers(base: &Arc<score::carbon::CarbonContext>) -> EnergySources<'_> {
         cloud_staleness_ms: 0,
         emaps_state: None,
         emaps_staleness_ms: 0,
+        rte_state: None,
+        rte_staleness_ms: 0,
     }
 }
 
@@ -2501,6 +2526,7 @@ fn dummy_shutdown<'a>(
             redfish: None,
             cloud: None,
             emaps: None,
+            rte: None,
         },
         listeners: ListenerHandles {
             grpc,

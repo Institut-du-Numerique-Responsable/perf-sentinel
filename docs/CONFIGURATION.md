@@ -598,7 +598,7 @@ Real-time carbon intensity from the Electricity Maps API. Daemon-only.
 |------------------------|---------|--------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `api_key`              | string  | none                                 | API auth token. Prefer `PERF_SENTINEL_EMAPS_TOKEN` env var for security                                                                                                                                     |
 | `endpoint`             | string  | `https://api.electricitymaps.com/v4` | API base URL (`http://` or `https://`). v3 still works but emits a deprecation warning at startup                                                                                                           |
-| `poll_interval_secs`   | integer | `300`                                | Poll interval in seconds (range: 60-86400). Free tier: use 3600+                                                                                                                                            |
+| `poll_interval_secs`   | integer | `300`                                | Poll interval in seconds (range: 60-86400). Size it to your plan's quota                                                                                                                                            |
 | `emission_factor_type` | string  | `lifecycle`                          | Emission factor model. `lifecycle` (default) includes upstream emissions (manufacturing, transport). `direct` includes only combustion. Some Scope 2 frameworks prefer `direct` for stricter accountability |
 | `temporal_granularity` | string  | `hourly`                             | API response aggregation. `hourly` (default), `5_minutes`, or `15_minutes`. Sub-hour values require a paid plan that exposes them, otherwise the API silently coarsens to hourly                            |
 
@@ -618,7 +618,7 @@ poll_interval_secs = 300
 **Staleness:** if the last successful poll is older than 3x `poll_interval_secs`, the scraper falls back to embedded hourly profiles.
 
 
-**Rate limits:** the Electricity Maps free tier allows approximately 30 requests per month per zone. For free tier users, set `poll_interval_secs = 3600` or higher. The default of 300s is intended for paid plans.
+**Plans and rate limits:** the Electricity Maps free tier is for non-commercial use only, and its terms count any production system as commercial use. Commercial access is sold per signal and per zone, the real-time carbon intensity signal listing at €6,000 per zone per year in October 2026. Size `poll_interval_secs` to the quota of your plan: one zone polled every 3600 s spends about 720 requests a month. For French regions, `[green.rte_eco2mix]` below is a free alternative.
 
 **API version:** the default endpoint targets v4 since Perf Sentinel 0.5.11. v3 remains accepted (the response schema is identical on `carbon-intensity/latest`), but a deprecation warning is logged once at daemon startup. To silence the warning, set `endpoint = "https://api.electricitymaps.com/v4"` explicitly. To keep v3 (for example to A/B-validate against v4), leave `endpoint = "https://api.electricitymaps.com/v3"` and acknowledge the warning.
 
@@ -631,6 +631,29 @@ poll_interval_secs = 300
 - The terminal `print_green_summary` output prepends a one-liner `Carbon scoring: Electricity Maps v4, lifecycle, hourly` before the per-region breakdown.
 
 The bandeau and the terminal line are hidden when `[green.electricity_maps]` is not configured.
+
+#### `[green.rte_eco2mix]` (optional, opt-in)
+
+Real-time carbon intensity for regions on the French grid, from the public `eco2mix-national-tr` dataset that RTE publishes on the ODRÉ open data portal. Free, no key, Licence Ouverte v2.0 (attribution: RTE, éCO2mix data published by ODRÉ). Daemon mode only. The section being present enables it.
+
+| Field                | Type            | Default                                            | Description                                                                                                       |
+|----------------------|-----------------|----------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| `regions`            | list of strings | none, required                                     | Cloud regions served by the French grid (`eu-west-3`, `francecentral`, `europe-west9`...). Each gets the national value |
+| `endpoint`           | string          | `https://odre.opendatasoft.com/api/explore/v2.1`   | Base URL of the Explore API v2.1, `http://` or `https://`                                                          |
+| `poll_interval_secs` | integer         | `900`                                              | Poll interval in seconds (range: 60-86400). The dataset refreshes every 15 minutes                                  |
+
+```toml
+[green.rte_eco2mix]
+regions = ["eu-west-3"]
+```
+
+**What the figure is.** `taux_co2` estimates the direct emissions of electricity production in France, in gCO2/kWh. It leaves out imports and the lifecycle of generation assets, so it reads lower than an Electricity Maps `lifecycle` figure for the same hour. Declare `carbon_intensity_source = "rte_eco2mix"` in the org config of a disclosure built on it, so a reader does not mix the two methods.
+
+**Quota.** The portal allows 50,000 calls per user per month. The default 900 s spends about 2,900.
+
+**Freshness.** The scraper rejects a latest record older than 3 hours as a stalled feed. After 3x `poll_interval_secs` without a fresh value, scoring falls back to the embedded profiles, as with Electricity Maps.
+
+**Precedence.** When `[green.electricity_maps]` also covers a region, Electricity Maps wins for that region. A real-time row from RTE carries `intensity_provider = "rte_eco2mix"` in `green_summary.regions[]`, and the model tag is `rte_eco2mix_api` when no region used Electricity Maps.
 
 #### `[green] calibration_file` (optional)
 

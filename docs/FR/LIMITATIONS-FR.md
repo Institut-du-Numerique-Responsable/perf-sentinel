@@ -889,11 +889,19 @@ Quand le daemon tourne avec `api_enabled = true`, l'API de requêtage expose les
 
 ## API Electricity Maps
 
-- **Clé API requise.** L'intégration Electricity Maps nécessite une clé API (offre gratuite ou payante). La clé doit être fournie via la variable `PERF_SENTINEL_EMAPS_TOKEN` plutôt que dans le fichier de config.
+- **Clé API requise.** L'intégration Electricity Maps nécessite une clé API. L'offre gratuite est réservée aux usages non commerciaux, un déploiement en production demande donc une offre payante. La clé doit être fournie via la variable `PERF_SENTINEL_EMAPS_TOKEN` plutôt que dans le fichier de config.
 - **HTTPS fortement recommandé.** Quand l'endpoint configuré est `http://` (en clair) et qu'un auth token est défini, Perf Sentinel émet un avertissement au chargement de la config. L'API production d'Electricity Maps est servie uniquement en HTTPS, donc un endpoint `http://` est presque toujours une erreur de configuration ou un environnement de test local.
-- **Limites de débit.** L'offre gratuite permet environ 30 requêtes par mois par zone. Avec le `poll_interval_secs = 300` par défaut, ce budget serait épuisé en moins de 3 heures. Les utilisateurs de l'offre gratuite doivent utiliser `poll_interval_secs = 3600` ou plus, ou s'en tenir aux profils horaires embarqués.
+- **Limites de débit.** Chaque offre a son propre quota de requêtes. Une zone coûte 8 640 requêtes par mois avec le `poll_interval_secs = 300` par défaut et environ 720 à 3600, dimensionnez donc l'intervalle selon l'offre, ou tenez-vous-en aux profils horaires embarqués.
 - **Mode daemon uniquement.** Le scraper Electricity Maps ne fonctionne qu'en mode `perf-sentinel watch`. Le mode batch (`analyze`, `tempo`, `calibrate`) utilise les profils embarqués.
 - **Repli en cas de données périmées.** Si l'API est inaccessible plus longtemps que 3x l'intervalle de sondage, le scraper retombe sur les profils horaires ou annuels embarqués.
+
+## RTE éCO2mix
+
+- **France uniquement.** Le jeu couvre le réseau français. Chaque région listée dans `regions` reçoit la même valeur nationale, ce qui est faux pour une région hors de France.
+- **Émissions directes de la production française.** `taux_co2` ne compte ni les imports ni le cycle de vie des moyens de production, il est donc plus bas qu'une intensité de consommation en cycle de vie, et l'écart grandit quand la France importe. C'est une estimation que RTE remplace ensuite par des chiffres consolidés, que Perf Sentinel ne reprend jamais.
+- **Pas de métadonnées d'estimation.** Les lignes ne portent pas d'indicateur `intensity_estimated`, le jeu n'en expose pas.
+- **Proxys d'entreprise.** Certains proxys qui inspectent le TLS bloquent tout le domaine `opendatasoft.com`. Le scraper échoue alors et le scoring retombe sur les profils embarqués, avec un avertissement après 3 échecs consécutifs.
+- **Mode daemon uniquement.** Le mode batch utilise les profils embarqués.
 
 ## Ingestion Tempo
 

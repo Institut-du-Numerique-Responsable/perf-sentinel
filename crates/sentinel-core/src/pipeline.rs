@@ -166,6 +166,7 @@ fn daemon_only_green_backend_warning(
             "`[green.electricity_maps]`",
             green.electricity_maps.is_some(),
         ),
+        ("`[green.rte_eco2mix]`", green.rte_eco2mix.is_some()),
     ]
     .into_iter()
     .filter_map(|(name, set)| set.then_some(name))

@@ -43,8 +43,8 @@ config:
       # There is no "env:VAR" indirection: a value in that shape is used
       # literally.
       #
-      # The free tier is about 30 requests per zone per month, so it needs
-      # 3600 or more.
+      # Size it to your plan's quota: one zone polled every 3600 s spends
+      # about 720 requests a month. The free tier is for non-commercial use only.
       poll_interval_secs = 3600   # default 300, bounds 60..86400
       # Map your region IDs to Electricity Maps zone IDs. Region IDs are the
       # ones your spans carry in cloud.region, or the default_region set in

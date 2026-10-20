@@ -39,6 +39,7 @@ Le moteur ne fait aucun appel sortant tant que la configuration ou la ligne de c
 |-------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
 | Sources d'énergie : Alumet, Scaphandre, Kepler, BMC Redfish, énergie cloud via Prometheus | Une section `[green.*]` dans la configuration                                         |
 | Electricity Maps (`api.electricitymaps.com`)                                              | Une section `[green.electricity_maps]`                                                |
+| RTE éCO2mix sur ODRÉ (`odre.opendatasoft.com`)                                            | Une section `[green.rte_eco2mix]`                                                     |
 | Tempo, Jaeger, Victoria Traces                                                            | Les commandes `tempo` et `jaeger-query`                                               |
 | Prometheus                                                                                | `pg-stat` et `mysql-stat` avec `--prometheus`                                         |
 | PerfSentinelHub                                                                           | `[daemon.hub_export] enabled = true`                                                  |

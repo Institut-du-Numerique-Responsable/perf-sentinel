@@ -11,8 +11,9 @@ use crate::correlate::Trace;
 
 use super::carbon::{
     CarbonContext, CarbonReport, ENERGY_PER_IO_OP_KWH, GENERIC_PUE, IntensitySource,
-    RegionBreakdown, energy_coefficient, extract_hostname, hourly_profile_for_region_lower,
-    is_valid_region_id, lookup_region_lower, per_op_gco2, resolve_region,
+    RealTimeProvider, RegionBreakdown, energy_coefficient, extract_hostname,
+    hourly_profile_for_region_lower, is_valid_region_id, lookup_region_lower, per_op_gco2,
+    resolve_region,
 };
 use super::carbon_profiles;
 use super::region_breakdown::{
@@ -401,10 +402,12 @@ struct SpanIntensity<'a> {
     source: IntensitySource,
     realtime_estimated: Option<bool>,
     realtime_estimation_method: Option<&'a str>,
+    realtime_provider: Option<RealTimeProvider>,
 }
 
 /// Pick the best-available intensity (g/kWh) + its source tag for a
-/// single span. Precedence: Electricity Maps real-time > custom
+/// single span. Precedence: real-time (Electricity Maps over RTE `éCO2mix`,
+/// merged per region before scoring) > custom
 /// hourly > embedded hourly > flat annual.
 ///
 /// Mirrors `resolve_hourly_intensity` in carbon.rs but uses the
@@ -430,6 +433,7 @@ fn resolve_span_intensity<'a>(
             source: IntensitySource::RealTime,
             realtime_estimated: entry.is_estimated,
             realtime_estimation_method: entry.estimation_method.as_deref(),
+            realtime_provider: Some(entry.provider),
         };
     }
 
@@ -441,6 +445,7 @@ fn resolve_span_intensity<'a>(
             source: IntensitySource::Annual,
             realtime_estimated: None,
             realtime_estimation_method: None,
+            realtime_provider: None,
         };
     }
 
@@ -453,6 +458,7 @@ fn resolve_span_intensity<'a>(
             source: IntensitySource::Annual,
             realtime_estimated: None,
             realtime_estimation_method: None,
+            realtime_provider: None,
         };
     };
     let month_opt = crate::time::parse_utc_month(&span.event.timestamp);
@@ -469,6 +475,7 @@ fn resolve_span_intensity<'a>(
             source: src,
             realtime_estimated: None,
             realtime_estimation_method: None,
+            realtime_provider: None,
         };
     }
     if let Some(ep) = region_ctx.embedded_profile {
@@ -483,6 +490,7 @@ fn resolve_span_intensity<'a>(
             source: src,
             realtime_estimated: None,
             realtime_estimation_method: None,
+            realtime_provider: None,
         };
     }
 
@@ -494,6 +502,7 @@ fn resolve_span_intensity<'a>(
         source: IntensitySource::Annual,
         realtime_estimated: None,
         realtime_estimation_method: None,
+        realtime_provider: None,
     }
 }
 
@@ -578,6 +587,7 @@ fn accumulate_span_into_region(
     // O(1 alloc) per region per batch instead of O(spans).
     if intensity.source == IntensitySource::RealTime {
         acc.realtime_estimated = intensity.realtime_estimated;
+        acc.realtime_provider = intensity.realtime_provider;
         if acc.realtime_estimation_method.as_deref() != intensity.realtime_estimation_method {
             acc.realtime_estimation_method =
                 intensity.realtime_estimation_method.map(str::to_string);

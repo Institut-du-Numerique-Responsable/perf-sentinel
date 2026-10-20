@@ -409,10 +409,10 @@ set listed under **Response shape**.)
 
 ### GET /api/energy
 
-Live health of the six energy/intensity backends (since 0.8.8): the
+Live health of the seven energy/intensity backends (since 0.8.8): the
 five scraped measured-energy sources (Alumet, Scaphandre, Kepler,
-Redfish, cloud SPECpower) and the Electricity Maps real-time intensity
-API.
+Redfish, cloud SPECpower) and the two real-time intensity APIs,
+Electricity Maps and RTE éCO2mix.
 Backs the Scrapers tab of `perf-sentinel query monitor`. The effective
 mix itself (which source won the precedence chain per service, grid
 intensity per region) lives on `/api/export/report` under
@@ -421,23 +421,23 @@ configured, fresh, and succeeding".
 
 **Query parameters:** none.
 
-**Response shape:** an object with a `backends` array of six entries in
+**Response shape:** an object with a `backends` array of seven entries in
 a fixed order following the measured-energy precedence chain (`alumet`,
-`scaphandre`, `kepler`, `redfish`, `cloud_energy`, `electricity_maps`),
-each:
+`scaphandre`, `kepler`, `redfish`, `cloud_energy`, `electricity_maps`,
+`rte_eco2mix`), each:
 
 | Field                     | Type    | Description                                                                                                                                                                                            |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `backend`                 | string  | Stable backend name                                                                                                                                                                                    |
 | `configured`              | boolean | Whether the backend is configured, from the `[green]` config frozen at daemon startup                                                                                                                  |
 | `last_scrape_age_seconds` | number  | Seconds since the last successful scrape, as of the backend's most recent scrape tick (same semantics as the `/metrics` gauge). Omitted when not configured or when the backend has no freshness gauge |
-| `scrapes_ok`              | number  | Successful scrapes since daemon start. Omitted when not configured or not scraped (`cloud_energy`, `electricity_maps`)                                                                                 |
+| `scrapes_ok`              | number  | Successful scrapes since daemon start. Omitted when not configured or not scraped (`cloud_energy`, `electricity_maps`, `rte_eco2mix`)                                                                  |
 | `scrapes_failed`          | number  | Failed scrapes since daemon start. Same omission rules as `scrapes_ok`                                                                                                                                 |
 
 The optional fields are omitted rather than zeroed for unconfigured
 backends: the underlying Prometheus gauges are pre-registered at 0, and
-a literal `0` would read as a fresh scrape. `electricity_maps` carries
-no freshness gauge. Its liveness shows as
+a literal `0` would read as a fresh scrape. `electricity_maps` and
+`rte_eco2mix` carry no freshness gauge. Its liveness shows as
 `intensity_source = "real_time"` entries on the report's region
 breakdown.
 
@@ -469,7 +469,8 @@ curl -sS http://127.0.0.1:4318/api/energy
     { "backend": "kepler", "configured": false },
     { "backend": "redfish", "configured": false },
     { "backend": "cloud_energy", "configured": false },
-    { "backend": "electricity_maps", "configured": true }
+    { "backend": "electricity_maps", "configured": true },
+    { "backend": "rte_eco2mix", "configured": false }
   ]
 }
 ```

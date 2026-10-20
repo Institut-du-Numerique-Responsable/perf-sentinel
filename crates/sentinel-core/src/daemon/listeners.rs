@@ -25,6 +25,7 @@ use crate::score::cloud_energy::CloudEnergyState;
 use crate::score::electricity_maps::ElectricityMapsState;
 use crate::score::kepler::KeplerState;
 use crate::score::redfish::RedfishState;
+use crate::score::rte_eco2mix::RteEco2mixState;
 use crate::score::scaphandre::ScaphandreState;
 
 use super::DaemonError;
@@ -458,8 +459,10 @@ fn build_http_router(
             // only the Electricity Maps dimensions. Ungated when the EM
             // backend is configured: the scraper polls regardless of
             // `green.enabled`, and the API must not report it as absent.
-            scoring_config: (config.green.enabled || config.green.electricity_maps.is_some())
-                .then(|| config.scoring_config()),
+            scoring_config: (config.green.enabled
+                || config.green.electricity_maps.is_some()
+                || config.green.rte_eco2mix.is_some())
+            .then(|| config.scoring_config()),
             green_summary,
             // Opt-in: no section, no ring, and both routes answer 503.
             incident_store,
@@ -873,6 +876,26 @@ pub(super) fn setup_cloud_scraper(
     let state = CloudEnergyState::new();
     let handle =
         score::cloud_energy::spawn_cloud_scraper(cloud_cfg, state.clone(), metrics.clone());
+    ScraperSetup {
+        state: Some(state),
+        handle: Some(handle),
+        staleness_ms,
+    }
+}
+
+/// Spawn the RTE `éCO2mix` real-time intensity scraper when
+/// `[green.rte_eco2mix]` is configured.
+pub(super) fn setup_rte_scraper(config: &Config) -> ScraperSetup<RteEco2mixState> {
+    let Some(rte_cfg) = config.green.rte_eco2mix.clone() else {
+        return ScraperSetup {
+            state: None,
+            handle: None,
+            staleness_ms: 0,
+        };
+    };
+    let staleness_ms = rte_cfg.poll_interval.as_millis() as u64 * 3;
+    let state = RteEco2mixState::new(rte_cfg.regions.clone());
+    let handle = score::rte_eco2mix::spawn_rte_eco2mix_scraper(rte_cfg, state.clone());
     ScraperSetup {
         state: Some(state),
         handle: Some(handle),

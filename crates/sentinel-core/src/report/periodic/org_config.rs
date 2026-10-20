@@ -139,9 +139,10 @@ pub fn validate_for_official(cfg: &OrgConfig) -> Vec<String> {
     if src.is_empty() {
         errors
             .push("methodology.calibration.carbon_intensity_source must not be empty".to_string());
-    } else if !matches!(src, "electricity_maps" | "static_tables" | "mixed") {
+    } else if !super::validator::CARBON_SOURCE_VALUES.contains(&src) {
         errors.push(format!(
-            "methodology.calibration.carbon_intensity_source must be one of \"electricity_maps\", \"static_tables\", \"mixed\", got {src:?}"
+            "methodology.calibration.carbon_intensity_source must be one of {:?}, got {src:?}",
+            super::validator::CARBON_SOURCE_VALUES
         ));
     }
     if let Some(declared) = cfg
@@ -339,6 +340,34 @@ environments_measured = ["prod"]
             errors
                 .iter()
                 .any(|e| e.contains("specpower_table_version must not be empty")),
+            "got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn rte_eco2mix_carbon_source_is_accepted() {
+        let toml = sample_toml().replace(
+            "carbon_intensity_source = \"electricity_maps\"",
+            "carbon_intensity_source = \"rte_eco2mix\"",
+        );
+        let file = write_toml(&toml);
+        let cfg = load_from_path(file.path()).unwrap();
+        assert_eq!(validate_for_official(&cfg), Vec::<String>::new());
+    }
+
+    #[test]
+    fn unknown_carbon_source_is_flagged() {
+        let toml = sample_toml().replace(
+            "carbon_intensity_source = \"electricity_maps\"",
+            "carbon_intensity_source = \"ademe\"",
+        );
+        let file = write_toml(&toml);
+        let cfg = load_from_path(file.path()).unwrap();
+        let errors = validate_for_official(&cfg);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("carbon_intensity_source") && e.contains("rte_eco2mix")),
             "got {errors:?}"
         );
     }

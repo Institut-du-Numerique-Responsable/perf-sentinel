@@ -86,6 +86,7 @@ impl ElectricityMapsState {
                             gco2_per_kwh: reading.gco2_per_kwh,
                             is_estimated: reading.is_estimated,
                             estimation_method: reading.estimation_method.clone(),
+                            provider: crate::score::carbon::RealTimeProvider::ElectricityMaps,
                         },
                     ))
                 } else {

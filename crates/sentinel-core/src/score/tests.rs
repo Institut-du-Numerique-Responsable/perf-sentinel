@@ -3100,6 +3100,78 @@ fn realtime_intensity_overrides_annual() {
     assert!((summary.regions[0].grid_intensity_gco2_kwh - 200.0).abs() < 1e-6);
 }
 
+fn rte_entry(gco2_per_kwh: f64) -> RealTimeIntensityEntry {
+    RealTimeIntensityEntry {
+        provider: crate::score::carbon::RealTimeProvider::RteEco2mix,
+        ..RealTimeIntensityEntry::measured(gco2_per_kwh)
+    }
+}
+
+#[test]
+fn rte_realtime_row_names_its_provider_and_model() {
+    let trace = make_trace_with_region("trace-1", "eu-west-3", 4);
+    let rt = HashMap::from([("eu-west-3".to_string(), rte_entry(21.0))]);
+    let ctx = CarbonContext {
+        default_region: None,
+        use_hourly_profiles: false,
+        per_operation_coefficients: false,
+        real_time_intensity: Some(rt),
+        ..CarbonContext::default()
+    };
+    let (_, summary, _) = score_green(&[trace], vec![], Some(&ctx));
+    assert_eq!(
+        summary.co2.as_ref().unwrap().total.model,
+        crate::score::carbon::CO2_MODEL_RTE
+    );
+    let row = &summary.regions[0];
+    assert_eq!(row.intensity_source, IntensitySource::RealTime);
+    assert_eq!(
+        row.intensity_provider,
+        Some(crate::score::carbon::RealTimeProvider::RteEco2mix)
+    );
+    assert!((row.grid_intensity_gco2_kwh - 21.0).abs() < 1e-6);
+    let json = serde_json::to_value(row).unwrap();
+    assert_eq!(json["intensity_provider"], "rte_eco2mix");
+}
+
+#[test]
+fn electricity_maps_keeps_the_model_tag_next_to_rte() {
+    let traces = [
+        make_trace_with_region("trace-1", "eu-west-3", 4),
+        make_trace_with_region("trace-2", "us-east-1", 4),
+    ];
+    let rt = HashMap::from([
+        ("eu-west-3".to_string(), rte_entry(21.0)),
+        (
+            "us-east-1".to_string(),
+            RealTimeIntensityEntry::measured(380.0),
+        ),
+    ]);
+    let ctx = CarbonContext {
+        default_region: None,
+        use_hourly_profiles: false,
+        per_operation_coefficients: false,
+        real_time_intensity: Some(rt),
+        ..CarbonContext::default()
+    };
+    let (_, summary, _) = score_green(&traces, vec![], Some(&ctx));
+    assert_eq!(summary.co2.as_ref().unwrap().total.model, CO2_MODEL_EMAPS);
+    let provider = |region: &str| {
+        summary
+            .regions
+            .iter()
+            .find(|r| r.region == region)
+            .unwrap()
+            .intensity_provider
+    };
+    assert_eq!(
+        provider("eu-west-3"),
+        Some(crate::score::carbon::RealTimeProvider::RteEco2mix)
+    );
+    // Electricity Maps stays implicit, as on rows written before RTE.
+    assert_eq!(provider("us-east-1"), None);
+}
+
 #[test]
 fn realtime_intensity_overrides_hourly_profile() {
     // eu-west-3 has an hourly profile, but real-time should win.
@@ -3172,6 +3244,7 @@ fn realtime_intensity_estimation_metadata_round_trips_through_json() {
             gco2_per_kwh: 200.0,
             is_estimated: Some(true),
             estimation_method: Some("TIME_SLICER_AVERAGE".to_string()),
+            provider: crate::score::carbon::RealTimeProvider::ElectricityMaps,
         },
     );
     let ctx = CarbonContext {
@@ -3227,6 +3300,7 @@ fn realtime_intensity_estimation_metadata_lands_in_region_breakdown() {
             gco2_per_kwh: 200.0,
             is_estimated: Some(true),
             estimation_method: Some("TIME_SLICER_AVERAGE".to_string()),
+            provider: crate::score::carbon::RealTimeProvider::ElectricityMaps,
         },
     );
 

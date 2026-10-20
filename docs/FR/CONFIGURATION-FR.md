@@ -613,7 +613,7 @@ Intensité carbone en temps réel via l'API Electricity Maps. Mode daemon unique
 |------------------------|--------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `api_key`              | chaîne | aucun                                | Token d'authentification de l'API. Préférez la variable d'environnement `PERF_SENTINEL_EMAPS_TOKEN` par sécurité                                                                                                                      |
 | `endpoint`             | chaîne | `https://api.electricitymaps.com/v4` | URL de base (`http://` ou `https://`). v3 reste accepté mais émet un avertissement de dépréciation au démarrage                                                                                                                       |
-| `poll_interval_secs`   | entier | `300`                                | Intervalle de sondage en secondes (plage : 60-86400). Offre gratuite : utilisez 3600+                                                                                                                                                 |
+| `poll_interval_secs`   | entier | `300`                                | Intervalle de sondage en secondes (plage : 60-86400). À dimensionner selon le quota de votre offre                                                                                                                                                 |
 | `emission_factor_type` | chaîne | `lifecycle`                          | Modèle de facteur d'émission. `lifecycle` (défaut) inclut les émissions amont (fabrication, transport). `direct` inclut uniquement la combustion. Certains référentiels Scope 2 préfèrent `direct` pour une comptabilité plus stricte |
 | `temporal_granularity` | chaîne | `hourly`                             | Agrégation temporelle de la réponse API. `hourly` (défaut), `5_minutes` ou `15_minutes`. Les valeurs sub-horaires nécessitent un plan payant qui les expose, sinon l'API agrège silencieusement en horaire                            |
 
@@ -632,7 +632,7 @@ poll_interval_secs = 300
 
 **Obsolescence :** si le dernier sondage réussi date de plus de 3x `poll_interval_secs`, le scraper se rabat sur les profils horaires embarqués.
 
-**Limites de débit :** l'offre gratuite d'Electricity Maps autorise environ 30 requêtes par mois et par zone. Les utilisateurs de l'offre gratuite doivent mettre `poll_interval_secs = 3600` ou plus. La valeur par défaut de 300s est prévue pour les plans payants.
+**Offres et limites de débit :** l'offre gratuite d'Electricity Maps est réservée aux usages non commerciaux, et ses conditions comptent tout système de production comme un usage commercial. L'accès commercial se vend par signal et par zone, le signal d'intensité carbone en temps réel étant affiché à 6 000 € par zone et par an en octobre 2026. Dimensionnez `poll_interval_secs` selon le quota de votre offre : une zone sondée toutes les 3600 s consomme environ 720 requêtes par mois. Pour les régions françaises, `[green.rte_eco2mix]` ci-dessous est une alternative gratuite.
 
 **Version d'API :** l'endpoint par défaut cible v4 depuis Perf Sentinel 0.5.11. v3 reste accepté (le schéma de réponse est identique sur `carbon-intensity/latest`), mais un avertissement de dépréciation est journalisé une fois au démarrage du daemon. Pour le faire taire, mettez `endpoint = "https://api.electricitymaps.com/v4"` explicitement. Pour rester sur v3 (par exemple pour valider A/B contre v4), laissez `endpoint = "https://api.electricitymaps.com/v3"` et acceptez l'avertissement.
 
@@ -645,6 +645,29 @@ poll_interval_secs = 300
 - La sortie `print_green_summary` du terminal ajoute une ligne `Carbon scoring: Electricity Maps v4, lifecycle, hourly` avant le détail par région.
 
 Le bandeau et la ligne du terminal sont masqués quand `[green.electricity_maps]` n'est pas configuré.
+
+#### `[green.rte_eco2mix]` (optionnel, opt-in)
+
+Intensité carbone en temps réel pour les régions du réseau français, tirée du jeu public `eco2mix-national-tr` que RTE publie sur le portail open data ODRÉ. Gratuit, sans clé, sous Licence Ouverte v2.0 (attribution : RTE, données éCO2mix diffusées par ODRÉ). Mode daemon uniquement. La présence de la section l'active.
+
+| Champ                | Type                  | Défaut                                             | Description                                                                                                                 |
+|----------------------|-----------------------|----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `regions`            | liste de chaînes      | aucun, obligatoire                                 | Régions cloud desservies par le réseau français (`eu-west-3`, `francecentral`, `europe-west9`...). Chacune reçoit la valeur nationale |
+| `endpoint`           | chaîne                | `https://odre.opendatasoft.com/api/explore/v2.1`   | URL de base de l'API Explore v2.1, `http://` ou `https://`                                                                   |
+| `poll_interval_secs` | entier                | `900`                                              | Intervalle de sondage en secondes (plage : 60-86400). Le jeu se rafraîchit toutes les 15 minutes                              |
+
+```toml
+[green.rte_eco2mix]
+regions = ["eu-west-3"]
+```
+
+**Ce que mesure le chiffre.** `taux_co2` estime les émissions directes de la production d'électricité en France, en gCO2/kWh. Il laisse de côté les imports et le cycle de vie des moyens de production, il est donc plus bas qu'un chiffre Electricity Maps `lifecycle` pour la même heure. Déclarez `carbon_intensity_source = "rte_eco2mix"` dans l'org-config d'une divulgation qui s'appuie dessus, pour qu'un lecteur ne mélange pas les deux méthodes.
+
+**Quota.** Le portail autorise 50 000 appels par utilisateur et par mois. Les 900 s par défaut en consomment environ 2 900.
+
+**Fraîcheur.** Le scraper rejette un dernier enregistrement de plus de 3 heures comme flux arrêté. Après 3x `poll_interval_secs` sans valeur fraîche, le scoring retombe sur les profils embarqués, comme avec Electricity Maps.
+
+**Précédence.** Quand `[green.electricity_maps]` couvre aussi une région, Electricity Maps l'emporte pour cette région. Une ligne temps réel venant de RTE porte `intensity_provider = "rte_eco2mix"` dans `green_summary.regions[]`, et le tag de modèle vaut `rte_eco2mix_api` quand aucune région n'a utilisé Electricity Maps.
 
 #### `[green] calibration_file` (optionnel)
 

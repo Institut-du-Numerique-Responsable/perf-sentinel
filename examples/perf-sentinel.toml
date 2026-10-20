@@ -601,11 +601,25 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # [green.electricity_maps]
 # api_key = "your-api-key"                         # no default, required, prefer PERF_SENTINEL_EMAPS_TOKEN
 # endpoint = "https://api.electricitymaps.com/v4"  # default https://api.electricitymaps.com/v4
-# poll_interval_secs = 3600                        # default 300, bounds 60..86400. The free tier is about 30 requests
-#                                                  # per zone per month, so it needs 3600 or more
+# poll_interval_secs = 3600                        # default 300, bounds 60..86400. Size it to your plan's quota: the
+#                                                  # free tier is for non-commercial use only
 # region_map = { "eu-west-3" = "FR", "us-east-1" = "US-MIDA-PJM", "eu-central-1" = "DE" }   # no default, at least one entry required
 # emission_factor_type = "lifecycle"               # default "lifecycle", or "direct" (combustion only)
 # temporal_granularity = "hourly"                  # default "hourly", or "5_minutes" / "15_minutes"
+
+# --- Carbon: RTE éCO2mix (opt-in, France only, no key) ----------------------
+# Free real-time intensity for regions on the French grid, from the public
+# `eco2mix-national-tr` dataset on the ODRÉ portal (Licence Ouverte v2.0,
+# 50,000 calls per month). Its `taux_co2` counts the direct emissions of
+# French production only, imports and lifecycle excluded, so it reads lower
+# than an Electricity Maps lifecycle figure. Electricity Maps wins for any
+# region both cover. Model tag `rte_eco2mix_api` when no region uses
+# Electricity Maps.
+#
+# [green.rte_eco2mix]
+# endpoint = "https://odre.opendatasoft.com/api/explore/v2.1"  # default https://odre.opendatasoft.com/api/explore/v2.1
+# poll_interval_secs = 900                         # default 900 (the dataset refreshes every 15 minutes), bounds 60..86400
+# regions = ["eu-west-3", "francecentral", "europe-west9"]   # no default, at least one cloud region on the French grid
 
 # --- Per-window NDJSON archive (input for `disclose`) ----------------------
 # Written only when `path` is set. Requires `[green] enabled = true`, the

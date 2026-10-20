@@ -108,7 +108,7 @@
     },
     "CarbonIntensitySource": {
       "type": "string",
-      "enum": ["electricity_maps", "static_tables", "mixed"]
+      "enum": ["electricity_maps", "rte_eco2mix", "static_tables", "mixed"]
     },
     "ReportMetadata": {
       "type": "object",

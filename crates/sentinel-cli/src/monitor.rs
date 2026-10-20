@@ -1281,7 +1281,7 @@ fn build_scrapers_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "electricity_maps has no freshness gauge: its liveness shows as",
+        "electricity_maps and rte_eco2mix have no freshness gauge: their liveness shows as",
         dim,
     )));
     lines.push(Line::from(Span::styled(

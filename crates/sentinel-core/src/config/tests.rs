@@ -4661,3 +4661,75 @@ fn an_inert_electricity_maps_region_map_is_not_checked() {
     let raw: RawConfig = toml::from_str(COLLIDING_REGION_MAP).unwrap();
     assert_eq!(validate_region_keys_raw_with_env(&raw, || None), Ok(()));
 }
+
+// --- [green.rte_eco2mix] ---
+
+#[test]
+fn rte_eco2mix_absent_by_default() {
+    let config = load_from_str("").unwrap();
+    assert!(config.green.rte_eco2mix.is_none());
+    assert_eq!(config.scoring_config().rte_eco2mix, None);
+}
+
+#[test]
+fn rte_eco2mix_section_fills_defaults_and_lowercases_regions() {
+    let config =
+        load_from_str("[green.rte_eco2mix]\nregions = [\"EU-WEST-3\", \"francecentral\"]\n")
+            .unwrap();
+    let rte = config.green.rte_eco2mix.as_ref().unwrap();
+    assert_eq!(
+        rte.endpoint,
+        crate::score::rte_eco2mix::config::DEFAULT_RTE_ECO2MIX_ENDPOINT
+    );
+    assert_eq!(rte.poll_interval, Duration::from_mins(15));
+    assert_eq!(rte.regions, ["eu-west-3", "francecentral"]);
+    let scoring = config.scoring_config();
+    assert_eq!(scoring.rte_eco2mix, Some(true));
+    assert_eq!(scoring.electricity_maps, Some(false));
+}
+
+#[test]
+fn rte_eco2mix_endpoint_trailing_slash_is_trimmed() {
+    let config = load_from_str(
+        "[green.rte_eco2mix]\nendpoint = \"https://odre.example/api/explore/v2.1/\"\nregions = [\"eu-west-3\"]\n",
+    )
+    .unwrap();
+    assert_eq!(
+        config.green.rte_eco2mix.unwrap().endpoint,
+        "https://odre.example/api/explore/v2.1"
+    );
+}
+
+#[test]
+fn rte_eco2mix_rejects_missing_regions() {
+    let err = load_from_str("[green.rte_eco2mix]\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("regions"), "got {err}");
+}
+
+#[test]
+fn rte_eco2mix_rejects_non_http_endpoint() {
+    let err = load_from_str(
+        "[green.rte_eco2mix]\nendpoint = \"ftp://odre.example\"\nregions = [\"eu-west-3\"]\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("http://"), "got {err}");
+}
+
+#[test]
+fn rte_eco2mix_rejects_out_of_range_poll_interval() {
+    let err =
+        load_from_str("[green.rte_eco2mix]\npoll_interval_secs = 30\nregions = [\"eu-west-3\"]\n")
+            .unwrap_err()
+            .to_string();
+    assert!(err.contains("poll_interval_secs"), "got {err}");
+}
+
+#[test]
+fn rte_eco2mix_rejects_unknown_key() {
+    assert!(
+        load_from_str("[green.rte_eco2mix]\nregions = [\"eu-west-3\"]\nzone = \"FR\"\n").is_err()
+    );
+}

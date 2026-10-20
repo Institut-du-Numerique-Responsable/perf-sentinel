@@ -880,11 +880,19 @@ When the daemon runs with `api_enabled = true`, the query API exposes findings (
 
 ## Electricity Maps API
 
-- **API key required.** The Electricity Maps integration requires an API key (free or paid tier). The key should be provided via the `PERF_SENTINEL_EMAPS_TOKEN` environment variable rather than in the config file.
+- **API key required.** The Electricity Maps integration requires an API key. The free tier is for non-commercial use only, so a production deployment needs a paid plan. The key should be provided via the `PERF_SENTINEL_EMAPS_TOKEN` environment variable rather than in the config file.
 - **HTTPS strongly recommended.** When the configured endpoint is `http://` (cleartext) and an auth token is set, Perf Sentinel emits a warning at config load. The Electricity Maps production API is served over HTTPS only, so an `http://` endpoint is almost always a misconfiguration or a local test setup.
-- **Rate limits.** The free tier allows approximately 30 requests per month per zone. With the default `poll_interval_secs = 300` (5 minutes), this budget would be exhausted in under 3 hours. Free tier users should set `poll_interval_secs = 3600` or higher or use the embedded hourly profiles instead.
+- **Rate limits.** Each plan carries its own request quota. One zone costs 8,640 requests a month at the default `poll_interval_secs = 300` and about 720 at 3600, so size the interval to the plan, or use the embedded hourly profiles instead.
 - **Daemon only.** The Electricity Maps scraper runs only in `perf-sentinel watch` mode. Batch mode (`analyze`, `tempo`, `calibrate`) uses the embedded profiles.
 - **Staleness fallback.** If the API is unreachable for longer than 3x the poll interval, the scraper falls back to embedded hourly or annual profiles.
+
+## RTE éCO2mix
+
+- **France only.** The dataset covers the French grid. Every region listed in `regions` gets the same national value, which is wrong for a region outside France.
+- **Direct emissions of French production.** `taux_co2` counts neither imports nor the lifecycle of generation assets, so it is lower than a consumption-based lifecycle intensity, and the gap widens when France imports. It is an estimate that RTE later replaces with consolidated figures, which Perf Sentinel never revisits.
+- **No estimation metadata.** Rows carry no `intensity_estimated` flag, the dataset does not expose one.
+- **Corporate proxies.** Some TLS-inspecting proxies block the `opendatasoft.com` domain outright. The scraper then fails and scoring falls back to the embedded profiles, with a warning after 3 consecutive failures.
+- **Daemon only.** Batch mode uses the embedded profiles.
 
 ## Tempo ingestion
 

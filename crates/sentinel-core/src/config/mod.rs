@@ -256,6 +256,8 @@ pub struct GreenConfig {
     pub calibration: Option<crate::calibrate::CalibrationData>,
     /// Electricity Maps real-time carbon intensity config (daemon only).
     pub electricity_maps: Option<crate::score::electricity_maps::ElectricityMapsConfig>,
+    /// RTE `éCO2mix` real-time French grid intensity config (daemon only).
+    pub rte_eco2mix: Option<crate::score::rte_eco2mix::RteEco2mixConfig>,
 }
 
 /// Daemon runtime config. Maps to `[daemon]`, whose `tls_cert_path` and
@@ -579,6 +581,7 @@ impl Default for GreenConfig {
             calibration_file: None,
             calibration: None,
             electricity_maps: None,
+            rte_eco2mix: None,
         }
     }
 }
@@ -721,6 +724,9 @@ impl Config {
             },
             crate::score::carbon::ScoringConfig::from_electricity_maps,
         );
+        if self.green.rte_eco2mix.is_some() {
+            scoring_config.rte_eco2mix = Some(true);
+        }
         scoring_config.embodied_per_request_gco2 = Some(self.effective_embodied_per_request_gco2());
         scoring_config.network_energy_per_byte_kwh =
             Some(crate::score::carbon::DEFAULT_NETWORK_ENERGY_PER_BYTE_KWH);
