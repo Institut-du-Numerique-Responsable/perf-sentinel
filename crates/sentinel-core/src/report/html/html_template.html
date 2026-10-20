@@ -3870,7 +3870,7 @@
     }
 
     renderCarbonFormula();
-    renderScoringConfigBandeau(greenSummary.scoring_config);
+    renderScoringConfigBandeau(greenSummary.scoring_config, greenSummary.regions);
 
     var regions = greenSummary.regions || [];
     var header = document.getElementById("green-regions-header");
@@ -3899,20 +3899,41 @@
   // run to carry the applied coefficients, so its presence alone means
   // nothing here. The 3 fields are bounded enums on the Rust side, no
   // escaping needed.
-  function renderScoringConfigBandeau(cfg) {
+  function renderScoringConfigBandeau(cfg, regions) {
     var bandeau = document.getElementById("green-scoring-config");
     if (!bandeau) return;
-    if (!cfg || cfg.electricity_maps === false) {
+    var chips = [];
+    if (cfg && cfg.electricity_maps !== false) {
+      chips.push(
+        buildApiVersionChip(cfg.api_version),
+        buildEmissionFactorChip(cfg.emission_factor_type),
+        buildTemporalGranularityChip(cfg.temporal_granularity)
+      );
+    }
+    // RTE has no knobs: one chip, shown when a region drew on it, as the
+    // CLI does (a configured section alone proves nothing in batch runs).
+    if ((regions || []).some(function (r) { return r && r.intensity_provider === "rte_eco2mix"; })) {
+      chips.push(buildRteChip());
+    }
+    if (!chips.length) {
       bandeau.style.display = "none";
       return;
     }
-    bandeau.replaceChildren(
-      el("span", "ps-scoring-label", "Carbon scoring:"),
-      buildApiVersionChip(cfg.api_version),
-      buildEmissionFactorChip(cfg.emission_factor_type),
-      buildTemporalGranularityChip(cfg.temporal_granularity)
+    bandeau.replaceChildren.apply(
+      bandeau,
+      [el("span", "ps-scoring-label", "Carbon scoring:")].concat(chips)
     );
     bandeau.style.display = "";
+  }
+
+  function buildRteChip() {
+    return buildScoringChip(
+      "RTE éCO2mix",
+      "neutral",
+      "Live intensity of the French grid from RTE open data: direct emissions of " +
+        "French production, imports and lifecycle excluded, so lower than an " +
+        "Electricity Maps lifecycle figure."
+    );
   }
 
   function buildScoringChip(label, modifier, tooltip) {

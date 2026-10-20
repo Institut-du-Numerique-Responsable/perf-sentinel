@@ -19,6 +19,8 @@ const FAILURE_THRESHOLD: u32 = 3;
 /// The latest non-null `taux_co2` lags real time by up to an hour or so;
 /// an older one means the feed stalled and the value is no longer live.
 const MAX_READING_AGE: chrono::TimeDelta = chrono::TimeDelta::hours(3);
+/// A record dated further ahead than clock skew explains is not a measurement.
+const MAX_CLOCK_SKEW: chrono::TimeDelta = chrono::TimeDelta::minutes(15);
 
 /// Latest record with a CO2 rate, newest first, two fields only.
 const RECORDS_QUERY: &str = "catalog/datasets/eco2mix-national-tr/records\
@@ -41,6 +43,8 @@ pub(crate) enum RteScraperError {
     InvalidValue,
     #[error("latest record is {0} minutes old, the feed looks stalled")]
     Stale(i64),
+    #[error("latest record is dated {0} minutes in the future")]
+    Future(i64),
 }
 
 #[derive(Deserialize)]
@@ -135,6 +139,9 @@ fn parse_latest(body: &[u8], now: DateTime<Utc>) -> Result<f64, RteScraperError>
     if age > MAX_READING_AGE {
         return Err(RteScraperError::Stale(age.num_minutes()));
     }
+    if age < -MAX_CLOCK_SKEW {
+        return Err(RteScraperError::Future(-age.num_minutes()));
+    }
     Ok(value)
 }
 
@@ -206,6 +213,16 @@ mod tests {
             parse_latest(BODY.as_bytes(), at("2026-10-20T12:00:00Z")),
             Err(RteScraperError::Stale(225))
         ));
+    }
+
+    #[test]
+    fn future_dated_record_is_rejected() {
+        assert!(matches!(
+            parse_latest(BODY.as_bytes(), at("2026-10-20T07:00:00Z")),
+            Err(RteScraperError::Future(75))
+        ));
+        // Within the clock-skew allowance.
+        assert!(parse_latest(BODY.as_bytes(), at("2026-10-20T08:05:00Z")).is_ok());
     }
 
     #[test]

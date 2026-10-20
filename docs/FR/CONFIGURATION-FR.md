@@ -644,7 +644,7 @@ poll_interval_secs = 300
 - Le dashboard HTML rend un bandeau de chips au-dessus de la table green-regions. Les valeurs par défaut (`v4`, `lifecycle`, `hourly`) apparaissent en chips neutres, les opt-ins (`direct`, `5_minutes`, `15_minutes`) en chips accent, l'ancien endpoint `v3` en chip d'avertissement, miroir de l'avertissement de dépréciation. Les infobulles natives du navigateur expliquent chaque valeur.
 - La sortie `print_green_summary` du terminal ajoute une ligne `Carbon scoring: Electricity Maps v4, lifecycle, hourly` avant le détail par région.
 
-Le bandeau et la ligne du terminal sont masqués quand `[green.electricity_maps]` n'est pas configuré.
+Les chips et la ligne du terminal d'Electricity Maps sont masqués quand `[green.electricity_maps]` n'est pas configuré.
 
 #### `[green.rte_eco2mix]` (optionnel, opt-in)
 
@@ -665,9 +665,9 @@ regions = ["eu-west-3"]
 
 **Quota.** Le portail autorise 50 000 appels par utilisateur et par mois. Les 900 s par défaut en consomment environ 2 900.
 
-**Fraîcheur.** Le scraper rejette un dernier enregistrement de plus de 3 heures comme flux arrêté. Après 3x `poll_interval_secs` sans valeur fraîche, le scoring retombe sur les profils embarqués, comme avec Electricity Maps.
+**Fraîcheur.** Le scraper rejette un dernier enregistrement de plus de 3 heures comme flux arrêté, et un enregistrement daté de plus de 15 minutes dans le futur comme pas encore mesuré. Après 3x `poll_interval_secs` sans valeur fraîche, le scoring retombe sur les profils embarqués, comme avec Electricity Maps.
 
-**Précédence.** Quand `[green.electricity_maps]` couvre aussi une région, Electricity Maps l'emporte pour cette région. Une ligne temps réel venant de RTE porte `intensity_provider = "rte_eco2mix"` dans `green_summary.regions[]`, et le tag de modèle vaut `rte_eco2mix_api` quand aucune région n'a utilisé Electricity Maps.
+**Précédence.** Quand `[green.electricity_maps]` couvre aussi une région, Electricity Maps l'emporte pour cette région. Une ligne temps réel venant de RTE porte `intensity_provider = "rte_eco2mix"` dans `green_summary.regions[]`, et le tag de modèle vaut `rte_eco2mix_api` quand aucune région n'a utilisé Electricity Maps. Le dashboard HTML ajoute un chip `RTE éCO2mix` au bandeau du scoring carbone, et le terminal une ligne `Carbon scoring: RTE éCO2mix`, dès qu'une région l'a utilisé : une section configurée ne prouve rien à elle seule, puisque le mode batch ne lance aucun scraper.
 
 #### `[green] calibration_file` (optionnel)
 

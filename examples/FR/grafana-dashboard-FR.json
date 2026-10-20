@@ -1823,7 +1823,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(perf_sentinel_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "expr": "sum(increase(perf_sentinel_scored_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
           "refId": "A",
           "instant": true,
           "legendFormat": "total"
@@ -1851,7 +1851,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(perf_sentinel_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "expr": "sum(increase(perf_sentinel_scored_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
           "refId": "A",
           "instant": true,
           "legendFormat": "total"

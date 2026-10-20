@@ -527,13 +527,13 @@ impl MetricsState {
         .expect("metric creation should not fail");
 
         let energy_kwh_total = Counter::new(
-            "perf_sentinel_energy_kwh_total",
+            "perf_sentinel_scored_energy_kwh_total",
             "Workload energy summed over every scoring window since start, kWh",
         )
         .expect("metric creation should not fail");
 
         let carbon_gco2_total = Counter::new(
-            "perf_sentinel_carbon_gco2_total",
+            "perf_sentinel_scored_carbon_gco2_total",
             "Operational carbon summed over every scoring window since start, grams CO2e (excludes embodied and network transport)",
         )
         .expect("metric creation should not fail");

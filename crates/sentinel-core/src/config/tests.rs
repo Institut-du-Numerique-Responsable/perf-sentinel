@@ -4674,7 +4674,7 @@ fn rte_eco2mix_absent_by_default() {
 #[test]
 fn rte_eco2mix_section_fills_defaults_and_lowercases_regions() {
     let config =
-        load_from_str("[green.rte_eco2mix]\nregions = [\"EU-WEST-3\", \"francecentral\"]\n")
+        load_from_str("[green.rte_eco2mix]\nregions = [\" EU-WEST-3 \", \"francecentral\"]\n")
             .unwrap();
     let rte = config.green.rte_eco2mix.as_ref().unwrap();
     assert_eq!(

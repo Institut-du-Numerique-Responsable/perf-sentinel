@@ -249,7 +249,8 @@ fn realtime_metadata_for_row(
 
 /// Pick the top-level `co2.model` tag given the aggregate flags.
 ///
-/// Precedence (most to least precise): real-time, Alumet, Scaphandre,
+/// Precedence (most to least precise): real-time (Electricity Maps, then
+/// RTE `éCO2mix` when no region used Electricity Maps), Alumet, Scaphandre,
 /// Kepler, Redfish, cloud `SPECpower`, monthly/hourly proxy, annual
 /// proxy. The `+cal` suffix only applies to the proxy branches. The
 /// measured branches all short-circuit earlier, so the calibration flag

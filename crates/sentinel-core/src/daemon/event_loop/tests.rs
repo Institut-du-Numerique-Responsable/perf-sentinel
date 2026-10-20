@@ -1351,8 +1351,8 @@ async fn energy_and_carbon_counters_sum_every_window() {
     assert!((metrics.energy_kwh_total.get() - kwh).abs() < 1e-12);
     assert!((metrics.carbon_gco2_total.get() - gco2).abs() < 1e-9);
     let output = metrics.render();
-    assert!(output.contains("perf_sentinel_energy_kwh_total"));
-    assert!(output.contains("perf_sentinel_carbon_gco2_total"));
+    assert!(output.contains("perf_sentinel_scored_energy_kwh_total"));
+    assert!(output.contains("perf_sentinel_scored_carbon_gco2_total"));
 }
 
 #[tokio::test]

@@ -384,13 +384,12 @@ impl DiscloseState {
         state
     }
 
-    /// Apply `--total-requests-in-period` the way `cmd_disclose` does, and
-    /// keep it so the equivalent command reproduces it.
+    /// Record `--total-requests-in-period` so the equivalent command
+    /// reproduces it. The caller applies it to the org config before
+    /// [`Self::new`], which keeps the archive read to a single pass.
     #[must_use]
-    pub(crate) fn with_total_requests_override(mut self, total: Option<u64>) -> Self {
-        super::apply_total_requests_override(&mut self.org, total);
+    pub(crate) fn with_total_requests_cli(mut self, total: Option<u64>) -> Self {
         self.total_requests_cli = total;
-        self.recompute();
         self
     }
 
@@ -553,6 +552,9 @@ impl DiscloseState {
             &self.input,
             &self.org_config_path,
         );
+        if self.strict_attribution {
+            cmd.push_str(" --strict-attribution");
+        }
         if let Some(total) = self.total_requests_cli {
             use std::fmt::Write as _;
             let _ = write!(cmd, " --total-requests-in-period {total}");
@@ -912,22 +914,25 @@ mod tests {
     }
 
     #[test]
-    fn total_requests_override_is_applied_and_echoed() {
+    fn cli_flags_are_echoed_in_the_equivalent_command() {
         let state = empty_state(d(2026, 5, 15));
+        let cmd = state.equivalent_command();
+        assert!(!cmd.contains("--total-requests-in-period"));
+        assert!(!cmd.contains("--strict-attribution"));
+        let state = DiscloseState::new(
+            Vec::new(),
+            sample_org(),
+            PathBuf::from("org.toml"),
+            true,
+            None,
+            d(2026, 5, 15),
+        )
+        .with_total_requests_cli(Some(4_200_000));
+        let cmd = state.equivalent_command();
+        assert!(cmd.contains(" --strict-attribution"), "got {cmd}");
         assert!(
-            !state
-                .equivalent_command()
-                .contains("--total-requests-in-period")
-        );
-        let state = state.with_total_requests_override(Some(4_200_000));
-        assert_eq!(
-            state.org.scope_manifest.total_requests_in_period,
-            Some(4_200_000)
-        );
-        assert!(
-            state
-                .equivalent_command()
-                .ends_with(" --total-requests-in-period 4200000")
+            cmd.ends_with(" --total-requests-in-period 4200000"),
+            "got {cmd}"
         );
     }
 

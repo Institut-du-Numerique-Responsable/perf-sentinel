@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use sentinel_core::detect::Severity;
 use sentinel_core::report::json::JsonReportSink;
 use sentinel_core::report::{Report, ReportSink};
-use sentinel_core::score::carbon::IntensitySource;
+use sentinel_core::score::carbon::{IntensitySource, RealTimeProvider};
 use sentinel_core::text_safety::{safe_url, sanitize_for_terminal, strip_code_ticks};
 
 use crate::OutputFormat;
@@ -1022,6 +1022,15 @@ fn print_carbon_summary(carbon: &sentinel_core::score::carbon::CarbonReport) {
 /// span attribute or a user-supplied `--input` JSON, so both are sanitized at
 /// this sink: a hostile producer must not inject ANSI / OSC 8 / control bytes
 /// into the operator's terminal.
+/// Header naming RTE `éCO2mix` when at least one region drew on it.
+fn rte_scoring_line(summary: &sentinel_core::report::GreenSummary) -> Option<&'static str> {
+    summary
+        .regions
+        .iter()
+        .any(|r| r.intensity_provider == Some(RealTimeProvider::RteEco2mix))
+        .then_some("  Carbon scoring: RTE éCO2mix, direct emissions of French production")
+}
+
 fn format_region_line(region: &sentinel_core::score::carbon::RegionBreakdown) -> String {
     let region_label = sanitize_for_terminal(&region.region);
     // Unresolved regions carry placeholder zero intensity. Render an explicit
@@ -1034,9 +1043,7 @@ fn format_region_line(region: &sentinel_core::score::carbon::RegionBreakdown) ->
         );
     }
     let source_str = match region.intensity_provider {
-        Some(sentinel_core::score::carbon::RealTimeProvider::RteEco2mix) => {
-            "real_time, rte_eco2mix"
-        }
+        Some(RealTimeProvider::RteEco2mix) => "real_time, rte_eco2mix",
         _ => intensity_source_label(region.intensity_source),
     };
     let raw_suffix = format_estimation_suffix(
@@ -1135,14 +1142,11 @@ fn print_green_summary(
         println!();
         println!("{}", format_scoring_config_line(scoring));
     }
-    // Fixed text: RTE éCO2mix has no knobs to report.
-    if summary
-        .scoring_config
-        .as_ref()
-        .is_some_and(|cfg| cfg.rte_eco2mix == Some(true))
-    {
+    // Only when a region used it: batch runs start no scraper, so a
+    // configured section alone says nothing about the figures below.
+    if let Some(line) = rte_scoring_line(summary) {
         println!();
-        println!("  Carbon scoring: RTE éCO2mix, direct emissions of French production");
+        println!("{line}");
     }
 
     // Per-region breakdown whenever at least one region was resolved.

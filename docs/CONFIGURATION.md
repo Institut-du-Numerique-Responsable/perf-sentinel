@@ -630,7 +630,7 @@ poll_interval_secs = 300
 - The HTML dashboard renders a chip bandeau above the green-regions table. Default values (`v4`, `lifecycle`, `hourly`) are neutral chips, opt-in values (`direct`, `5_minutes`, `15_minutes`) are accent chips, the legacy `v3` endpoint shows as a warning chip mirroring the deprecation warning. Native browser tooltips explain each value.
 - The terminal `print_green_summary` output prepends a one-liner `Carbon scoring: Electricity Maps v4, lifecycle, hourly` before the per-region breakdown.
 
-The bandeau and the terminal line are hidden when `[green.electricity_maps]` is not configured.
+The Electricity Maps chips and terminal line are hidden when `[green.electricity_maps]` is not configured.
 
 #### `[green.rte_eco2mix]` (optional, opt-in)
 
@@ -651,9 +651,9 @@ regions = ["eu-west-3"]
 
 **Quota.** The portal allows 50,000 calls per user per month. The default 900 s spends about 2,900.
 
-**Freshness.** The scraper rejects a latest record older than 3 hours as a stalled feed. After 3x `poll_interval_secs` without a fresh value, scoring falls back to the embedded profiles, as with Electricity Maps.
+**Freshness.** The scraper rejects a latest record older than 3 hours as a stalled feed, and one dated more than 15 minutes ahead as not yet measured. After 3x `poll_interval_secs` without a fresh value, scoring falls back to the embedded profiles, as with Electricity Maps.
 
-**Precedence.** When `[green.electricity_maps]` also covers a region, Electricity Maps wins for that region. A real-time row from RTE carries `intensity_provider = "rte_eco2mix"` in `green_summary.regions[]`, and the model tag is `rte_eco2mix_api` when no region used Electricity Maps.
+**Precedence.** When `[green.electricity_maps]` also covers a region, Electricity Maps wins for that region. A real-time row from RTE carries `intensity_provider = "rte_eco2mix"` in `green_summary.regions[]`, and the model tag is `rte_eco2mix_api` when no region used Electricity Maps. The HTML dashboard adds an `RTE éCO2mix` chip to the carbon scoring bandeau, and the terminal a `Carbon scoring: RTE éCO2mix` line, as soon as one region drew on it: a configured section alone proves nothing, since batch runs start no scraper.
 
 #### `[green] calibration_file` (optional)
 

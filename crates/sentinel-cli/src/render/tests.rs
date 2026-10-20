@@ -1350,3 +1350,23 @@ fn report_with_co2_data() {
     };
     format_colored_report(&report, "report", false);
 }
+
+#[test]
+fn rte_regions_are_labelled_and_announced() {
+    let row = |provider: &str| -> sentinel_core::score::carbon::RegionBreakdown {
+        serde_json::from_str(&format!(
+            r#"{{"status":"known","region":"eu-west-3","grid_intensity_gco2_kwh":21.0,"pue":1.135,"io_ops":4,"co2_gco2":0.001,"intensity_source":"real_time"{provider}}}"#
+        ))
+        .unwrap()
+    };
+    let rte = row(r#","intensity_provider":"rte_eco2mix""#);
+    let emaps = row("");
+    assert!(format_region_line(&rte).contains("source: real_time, rte_eco2mix"));
+    assert!(!format_region_line(&emaps).contains("rte_eco2mix"));
+
+    let mut gs = GreenSummary::disabled(10);
+    gs.regions = vec![emaps];
+    assert_eq!(rte_scoring_line(&gs), None);
+    gs.regions.push(rte);
+    assert!(rte_scoring_line(&gs).is_some_and(|l| l.contains("RTE éCO2mix")));
+}

@@ -1350,7 +1350,7 @@ pub(super) fn convert_electricity_maps_section_with_env(
 }
 
 /// Convert `[green.rte_eco2mix]`: defaults filled, endpoint trailing
-/// slashes trimmed, regions lowercased like `service_regions`.
+/// slashes trimmed, regions trimmed and lowercased so they match span regions.
 pub(super) fn convert_rte_eco2mix_section(
     raw: &RteEco2mixSection,
 ) -> crate::score::rte_eco2mix::RteEco2mixConfig {
@@ -1368,7 +1368,11 @@ pub(super) fn convert_rte_eco2mix_section(
             raw.poll_interval_secs
                 .unwrap_or(DEFAULT_RTE_POLL_INTERVAL_SECS),
         ),
-        regions: raw.regions.iter().map(|r| r.to_ascii_lowercase()).collect(),
+        regions: raw
+            .regions
+            .iter()
+            .map(|r| r.trim().to_ascii_lowercase())
+            .collect(),
     }
 }
 

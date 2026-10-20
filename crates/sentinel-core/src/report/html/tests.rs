@@ -1011,6 +1011,8 @@ fn template_carries_scoring_config_bandeau_and_helpers() {
         "function buildApiVersionChip",
         "function buildEmissionFactorChip",
         "function buildTemporalGranularityChip",
+        "function buildRteChip",
+        "intensity_provider === \"rte_eco2mix\"",
     ] {
         assert!(
             TEMPLATE.contains(needle),

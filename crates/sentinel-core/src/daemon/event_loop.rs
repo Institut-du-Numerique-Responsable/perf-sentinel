@@ -1227,7 +1227,7 @@ fn build_tick_ctx<'s>(
     let alumet_snap = alumet_state
         .map(|s| s.snapshot(now, alumet_staleness_ms))
         .unwrap_or_default();
-    let emaps_snap = realtime_snapshot(sources, now);
+    let realtime_snap = realtime_snapshot(sources, now);
     // Database energy accumulated since the previous scored batch.
     // Consuming here (once per built batch) keeps shed batches from
     // losing energy: they never build a context.
@@ -1245,7 +1245,7 @@ fn build_tick_ctx<'s>(
         && kepler_snap.is_empty()
         && scaph_snap.is_empty()
         && alumet_snap.is_empty()
-        && emaps_snap.is_empty()
+        && realtime_snap.is_empty()
         && db_window_kwh.is_none()
         && measured_broker_kwh.is_none()
         && declared_broker_kwh.is_none()
@@ -1283,8 +1283,8 @@ fn build_tick_ctx<'s>(
     } else {
         Some(merged)
     };
-    if !emaps_snap.is_empty() {
-        ctx.real_time_intensity = Some(emaps_snap);
+    if !realtime_snap.is_empty() {
+        ctx.real_time_intensity = Some(realtime_snap);
     }
     if let (Some(kwh), Some(db)) = (db_window_kwh, ctx.db_energy.as_mut()) {
         db.window_kwh = kwh;
