@@ -20,6 +20,9 @@ const MAX_BODY_BYTES: usize = 64 * 1024;
 /// for the NEM.
 const MAX_OPEN_ELECTRICITY_BODY_BYTES: usize = 512 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// Names the project to operators that publish for people, not robots.
+const USER_AGENT: &str =
+    "perf-sentinel/grid-feed (+https://github.com/Institut-du-Numerique-Responsable/perf-sentinel)";
 /// Consecutive failed ticks before the one-shot fallback warning.
 const FAILURE_THRESHOLD: u32 = 3;
 /// A record dated further ahead than clock skew explains is not a measurement.
@@ -186,7 +189,7 @@ async fn fetch(
     let body = http_client::fetch_get_with_headers(
         client,
         uri,
-        "perf-sentinel",
+        USER_AGENT,
         REQUEST_TIMEOUT,
         headers,
         max_bytes,

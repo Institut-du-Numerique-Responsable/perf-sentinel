@@ -10,15 +10,20 @@ use chrono::{DateTime, TimeDelta, Utc};
 use super::scraper::{FeedError, check_value};
 
 const QUARTER_SECS: i64 = 900;
-/// Measured ratio, without household and self-consumption solar, which
-/// MAVIR fills 25 to 40 minutes late.
-const ACTUAL: &str = "Termelők által kiadott üvegház hatású gázok aránya a hazai bruttó termelésben - tény - HMKE és SCTE nélkül";
+/// Words that pick, among the four ratio columns, the measured one ("tény",
+/// not "becsült") without household and self-consumption solar ("nélkül",
+/// not "-vel"), which MAVIR fills 25 to 40 minutes late. Its header reads
+/// "Termelők által kiadott üvegház hatású gázok aránya a hazai bruttó
+/// termelésben - tény - HMKE és SCTE nélkül". Matching words rather than the
+/// whole label survives a rewording, and two matches fail rather than guess.
+const ACTUAL: [&str; 3] = ["aránya", "tény", "nélkül"];
 const TIME: &str = "Időpont";
 /// Pins the Hungarian headers and timestamps the parser expects.
 pub(super) const COOKIE: &str = "PLAY_LANG=hu";
 /// The unit, tCO2 per `MWh`, is printed nowhere: a ratio above any fossil
-/// plant's means it changed.
-const MAX_RATIO: f64 = 1.5;
+/// plant's, or below what a grid with gas plants online reaches, means it
+/// changed (g/kWh reads 1000 times higher, t/kWh 1000 times lower).
+const RATIO_RANGE: std::ops::RangeInclusive<f64> = 0.01..=1.5;
 const WORKSHEET: &[u8] = b"xl/worksheets/sheet1.xml";
 /// The sheet holds a few rows: this only bounds a malformed archive.
 const MAX_WORKSHEET_BYTES: u64 = 1024 * 1024;
@@ -45,14 +50,17 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
     })?;
     let rows = rows(&xml);
     let header = rows.first().ok_or(FeedError::Empty)?;
-    let column = |name: &str| {
-        header
+    let column = |words: &[&str]| {
+        let mut found = header
             .iter()
-            .find(|(_, text)| text.trim() == name)
-            .map(|(column, _)| *column)
-            .ok_or_else(|| FeedError::Parse(format!("no column {name:?}")))
+            .filter(|(_, text)| words.iter().all(|w| text.contains(w)))
+            .map(|(column, _)| *column);
+        match (found.next(), found.next()) {
+            (Some(column), None) => Ok(column),
+            _ => Err(FeedError::Parse(format!("no single column with {words:?}"))),
+        }
     };
-    let (time, actual) = (column(TIME)?, column(ACTUAL)?);
+    let (time, actual) = (column(&[TIME])?, column(&ACTUAL)?);
     let mut latest: Option<(f64, DateTime<Utc>)> = None;
     for row in rows.iter().skip(1) {
         let cell = |wanted: &str| {
@@ -74,7 +82,7 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
         }
     }
     let (ratio, at) = latest.ok_or(FeedError::Empty)?;
-    if ratio > MAX_RATIO {
+    if !RATIO_RANGE.contains(&ratio) {
         return Err(FeedError::InvalidValue);
     }
     Ok(vec![(
@@ -213,10 +221,14 @@ mod tests {
         out
     }
 
+    /// The measured column's header in the live export.
+    const LABEL: &str = "Termelők által kiadott üvegház hatású gázok aránya a hazai bruttó termelésben - tény - HMKE és SCTE nélkül";
+
     fn header() -> String {
-        let estimated = ACTUAL.replace("tény", "becsült");
+        let estimated = LABEL.replace("tény", "becsült");
+        let with_solar = LABEL.replace("nélkül", "-vel");
         format!(
-            r#"<row r="1"><c r="A1" s="1" t="inlineStr"><is><t>Időpont</t></is></c><c r="B1" s="1" t="inlineStr"><is><t>{estimated}</t></is></c><c r="D1" s="1" t="inlineStr"><is><t>{ACTUAL}</t></is></c></row>"#
+            r#"<row r="1"><c r="A1" s="1" t="inlineStr"><is><t>Időpont</t></is></c><c r="B1" s="1" t="inlineStr"><is><t>{estimated}</t></is></c><c r="D1" s="1" t="inlineStr"><is><t>{LABEL}</t></is></c><c r="E1" s="1" t="inlineStr"><is><t>{with_solar}</t></is></c></row>"#
         )
     }
 
@@ -255,8 +267,21 @@ mod tests {
     }
 
     #[test]
+    fn a_reworded_header_is_still_found_but_two_matches_fail() {
+        let reworded = header().replace("Termelők által kiadott", "Erőművek");
+        let zones = parse(&xlsx(&sheet(&reworded))).unwrap();
+        assert!((zones[0].1 - 78.0).abs() < 1e-9);
+        let twice = header().replace("becsült", "tény");
+        let err = parse(&xlsx(&sheet(&twice))).unwrap_err();
+        assert!(
+            matches!(err, FeedError::Parse(ref m) if m.contains("no single column")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
     fn english_headers_are_a_parse_error() {
-        let english = header().replace(ACTUAL, "Measured ratio of greenhouse gas emission");
+        let english = header().replace(LABEL, "Measured ratio of greenhouse gas emission");
         let err = parse(&xlsx(&sheet(&english))).unwrap_err();
         assert!(
             matches!(err, FeedError::Parse(ref m) if m.contains("tény")),
@@ -265,9 +290,14 @@ mod tests {
     }
 
     #[test]
-    fn a_ratio_no_plant_reaches_means_the_unit_changed() {
+    fn a_ratio_out_of_any_grid_range_means_the_unit_changed() {
         let grams = sheet(&header()).replace("<v>0.078</v>", "<v>78</v>");
         assert!(matches!(parse(&xlsx(&grams)), Err(FeedError::InvalidValue)));
+        let per_kwh = sheet(&header()).replace("<v>0.078</v>", "<v>0.000078</v>");
+        assert!(matches!(
+            parse(&xlsx(&per_kwh)),
+            Err(FeedError::InvalidValue)
+        ));
     }
 
     #[test]
