@@ -182,19 +182,23 @@ pub struct DisclosureWaste {
 /// be shrunk by raising the operator threshold.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DisclosureDbWaste {
-    /// Window energy of the database figure (measured or estimated).
+    /// Window energy of the database figure: the database host energy on
+    /// the measured path, the application-side share of the SQL spans on
+    /// the estimated path.
     pub energy_kwh: f64,
-    /// Provenance tag of that energy (`alumet_rapl` measured,
-    /// `estimated` fallback).
+    /// Provenance tag of that energy: `alumet_rapl` for a reading of the
+    /// database cgroup, `estimated` for the application-side share of the
+    /// SQL spans, already inside the totals.
     pub model: String,
     pub operational_waste_kwh: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operational_waste_gco2: Option<f64>,
     pub canonical_waste_kwh: f64,
     /// Total carbon of the subsystem for the window, not just its waste.
-    /// `None` when the window energy had no carbon conversion. Reported
-    /// beside the totals, never inside them: this is a different scope
-    /// from the instrumented services.
+    /// `None` when the window energy had no carbon conversion. On the
+    /// measured path this is host carbon reported beside the totals. On
+    /// the estimated path it is a share of the services' own carbon,
+    /// already inside the totals, so never add it to them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_gco2: Option<f64>,
     /// Window `energy_gco2` scaled by the canonical SQL ratio. `None`
@@ -424,31 +428,40 @@ pub struct GreenSummary {
     /// Fraction of spans whose energy was resolved by a measured backend
     /// (versus proxy fallback) per service, in `[0.0,
     /// 1.0]`. `1.0` means every span had measured energy, `0.0` means
-    /// the service fell back to proxy entirely. Pair with
+    /// the service fell back to proxy entirely. The measurement covers the
+    /// service's own host only, never its database or broker. Pair with
     /// `per_service_energy_model` to assess fidelity. The aggregator
     /// surfaces a simple arithmetic mean of these per-window ratios
     /// under `aggregate.per_service_measured_ratio`, not a span-weighted
     /// average. Empty on pre-per-service-ratio baselines.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_service_measured_ratio: BTreeMap<String, f64>,
-    /// Database-side waste figure, on every run. Measured on the
-    /// declared `[green.alumet.database]` cgroup when a reading landed
-    /// (daemon), otherwise estimated from the modeled energy of the
-    /// window's SQL spans, and `model` says which. Never summed into
-    /// `energy_kwh`/`co2` (the estimated energy is a re-presented share
-    /// of them), published in the disclosure only as the separate
+    /// Database waste figure, on every run, in one of two forms that
+    /// `model` names. Measured (`alumet_rapl`): the energy of the declared
+    /// `[green.alumet.database]` cgroup when a reading landed (daemon),
+    /// host energy reported beside `energy_kwh`/`co2`, never summed into
+    /// them. Estimated (`estimated`): the application-side share of the
+    /// window's SQL spans, the energy the span scoring gave the emitting
+    /// services, already inside `energy_kwh`/`co2` and never added to
+    /// them again. Published in the disclosure as the separate
     /// `aggregate.database_waste` block (`docs/METHODOLOGY.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_waste: Option<DatabaseWaste>,
-    /// Broker-side avoidable energy, same construction and same status.
-    /// `None` when no broker energy was available for the window.
+    /// Messaging twin of `database_waste`. Measured (`alumet_rapl`) or
+    /// declared (`broker_specpower`): broker host energy beside the
+    /// totals. Estimated: the application-side share of the window's
+    /// publish spans, already inside the totals. `None` when a declared
+    /// broker delivered no reading, or when the window has no publish
+    /// energy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messaging_waste: Option<MessagingWaste>,
 }
 
-/// `model` value on the estimated [`DatabaseWaste`] path: the figure is
-/// built from the modeled energy of the SQL spans, not a measurement of
-/// the database. The measured path carries `alumet_rapl` instead.
+/// `model` value on the estimated [`DatabaseWaste`] and [`MessagingWaste`]
+/// path: the figure is the application-side share of the SQL or publish
+/// spans, the energy the span scoring gave the emitting services, already
+/// inside the report totals. It is not a reading of the database or the
+/// broker host. The measured path carries `alumet_rapl` instead.
 pub const DB_WASTE_MODEL_ESTIMATED: &str = "estimated";
 
 /// Provenance tag of a broker figure built from a declared cluster and
@@ -456,11 +469,15 @@ pub const DB_WASTE_MODEL_ESTIMATED: &str = "estimated";
 /// which means a CPU scrape rather than a declaration.
 pub const BROKER_WASTE_MODEL_SPECPOWER: &str = "broker_specpower";
 
-/// Database window energy × the SQL-only waste ratio. Informational,
-/// never summed into the report totals.
+/// Database window energy × the SQL-only waste ratio. Informational, a
+/// breakdown never added to the report totals: on the measured path the
+/// energy sits beside them, on the estimated path it is already a share
+/// of them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseWaste {
-    /// Window energy of the database cgroup in kWh (CPU share only).
+    /// Window energy in kWh. Measured path: the database cgroup (CPU
+    /// share only). Estimated path: the application-side share of the
+    /// window's SQL spans.
     pub energy_kwh: f64,
     /// `energy_kwh × sql_waste_ratio`.
     pub waste_kwh: f64,
@@ -481,24 +498,25 @@ pub struct DatabaseWaste {
     /// `avoidable_sql_io_ops / total_sql_io_ops`, in `[0, 1]`.
     pub sql_waste_ratio: f64,
     /// Provenance tag: `alumet_rapl` when the energy is measured on the
-    /// declared database cgroup, otherwise the window's energy model
-    /// (`io_proxy_v3`, ...) for the estimated fallback built from the
-    /// modeled energy of the window's SQL spans. Empty on baselines
-    /// predating the field.
+    /// declared database cgroup, otherwise `estimated` for the
+    /// application-side share of the window's SQL spans. Empty on
+    /// baselines predating the field.
     #[serde(default)]
     pub model: String,
 }
 
-/// Broker-side avoidable energy for the window, the messaging twin of
-/// [`DatabaseWaste`]. Informational, never folded into the report
-/// totals. Which way it errs depends on `model`, since the three
+/// Messaging avoidable energy for the window, the twin of
+/// [`DatabaseWaste`]. Informational, a breakdown never added to the
+/// report totals. Which way it errs depends on `model`, since the three
 /// sources do not agree: `alumet_rapl` reads CPU only and so
 /// under-counts, `broker_specpower` bounds the declared vCPUs at full
-/// load without storage or network, `estimated` re-presents a share of
-/// the totals.
+/// load without storage or network, `estimated` is the application-side
+/// share of the publish spans, already inside the totals, and holds no
+/// broker host energy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MessagingWaste {
-    /// Window energy of the broker, measured or declared.
+    /// Window energy: the broker host when measured or declared, the
+    /// application-side share of the publish spans when estimated.
     pub energy_kwh: f64,
     /// `energy_kwh` × `messaging_waste_ratio`.
     pub waste_kwh: f64,
@@ -516,7 +534,7 @@ pub struct MessagingWaste {
     pub messaging_waste_ratio: f64,
     /// Provenance: `alumet_rapl` measured on the declared cgroup,
     /// `broker_specpower` for a declared cluster, `estimated` for the
-    /// fallback built from the modeled energy of the window's publishes.
+    /// application-side share of the window's publish spans.
     #[serde(default)]
     pub model: String,
 }

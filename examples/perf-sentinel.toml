@@ -488,17 +488,17 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # service_mappings = { "account-svc" = "account-pod", "game-svc" = "game-pod" }   # default empty
 # auth_header = "Authorization: Bearer TOKEN"    # default unset, prefer PERF_SENTINEL_ALUMET_AUTH_HEADER
 #
-# Attribute the database cgroup, which turns the estimated database waste
-# figure into a measured one. `label_value` is the series label of that
+# Attribute the database cgroup, which replaces the estimated database waste
+# figure (the application-side share of the SQL spans) with a measured one. `label_value` is the series label of that
 # cgroup on your endpoint.
 # [green.alumet.database]
 # label_value = "postgres-pod"   # no default
-# region = "eu-west-3"           # default: the service region
+# region = "eu-west-3"           # no default, without a region the figure is in kWh only
 #
 # Same for the message broker, feeding messaging waste.
 # [green.alumet.broker]
 # label_value = "kafka-pod"      # no default
-# region = "eu-west-3"           # default: the service region
+# region = "eu-west-3"           # no default, without a region the figure is in kWh only
 
 # --- Kepler energy scraper (opt-in, no default egress) ---------------------
 # Kepler 0.10+ reads RAPL through sysfs (hwmon as an experimental fallback
@@ -571,7 +571,9 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # "special" = { provider = "aws", instance_type = "c5.4xlarge", cpu_query = "avg(node_cpu{job=\"special\"})" }
 
 # --- Declared broker cluster (opt-in, no agent needed) ---------------------
-# Messaging energy for a managed broker you cannot instrument. Declared, not
+# Messaging energy for a provisioned broker cluster with a typed instance
+# class and no agent (a managed Kafka or MQ cluster, self-managed VMs).
+# Serverless and capacity-unit brokers cannot be declared. Declared, not
 # measured: the disclosure schema keeps it in its own provenance bucket so it
 # is never published as a measurement. Prefer [green.alumet.broker] when an
 # agent can reach the broker cgroup.
@@ -579,7 +581,7 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # nodes = 3                      # no default, cluster size
 # instance_type = "m5.large"     # no default, looked up in the SPECpower table
 # provider = "aws"               # no default
-# region = "eu-west-3"           # default: the service region
+# region = "eu-west-3"           # no default, without a region the figure is in kWh only
 
 # --- Carbon: per-service regions -------------------------------------------
 # Region override when the OTel `cloud.region` resource attribute is absent.

@@ -463,7 +463,7 @@ energy_interval_secs = 1.0
 
 ##### `[green.alumet.database]` (optionnel)
 
-Déclare une charge de base de données mesurée par Alumet. Une base n'émet pas de spans, elle ne peut donc jamais apparaître dans `service_mappings` (zéro op, le chemin des coefficients par op l'ignore). À la place, son énergie sur chaque fenêtre de scoring est multipliée par le ratio de gaspillage SQL (`avoidable_sql_io_ops / total_sql_io_ops`) et publiée dans `green_summary.database_waste`, un chiffre autonome exclu de `energy_kwh`, de `co2` et de la divulgation publique. Voir `docs/FR/METHODOLOGY-FR.md` pour la formule et [Limites de précision Alumet](LIMITATIONS-FR.md#limites-de-précision-alumet) pour la raison d'une borne basse.
+Déclare une charge de base de données mesurée par Alumet. Une base n'émet pas de spans, elle ne peut donc jamais apparaître dans `service_mappings` (zéro op, le chemin des coefficients par op l'ignore). À la place, son énergie sur chaque fenêtre de scoring est multipliée par le ratio de gaspillage SQL (`avoidable_sql_io_ops / total_sql_io_ops`) et publiée dans `green_summary.database_waste`, une énergie d'hôte tenue à côté de `energy_kwh` et de `co2`, jamais ajoutée à eux. La divulgation la publie dans le bloc séparé `aggregate.database_waste`. Sans cette section, le bloc porte la forme estimée, la part côté application des spans SQL, déjà comprise dans les totaux. Voir `docs/FR/METHODOLOGY-FR.md` pour la formule et [Limites de précision Alumet](LIMITATIONS-FR.md#limites-de-précision-alumet) pour la raison d'une borne basse.
 
 ```toml
 [green.alumet.database]
@@ -475,7 +475,7 @@ region = "eu-west-3"           # optionnel, active la conversion gCO2 (déclaré
 
 ##### `[green.alumet.broker]` (optionnel)
 
-Le jumeau messaging de la section ci-dessus. Déclare un broker de messages mesuré par Alumet : un broker n'émet pas de spans propres non plus, donc son énergie de fenêtre est multipliée par le ratio de gaspillage messaging (`avoidable_messaging_io_ops / total_messaging_io_ops`) et rapportée en `green_summary.messaging_waste`.
+Le jumeau messaging de la section ci-dessus. Déclare un broker de messages mesuré par Alumet : un broker n'émet pas de spans propres non plus, donc son énergie de fenêtre est multipliée par le ratio de gaspillage messaging (`avoidable_messaging_io_ops / total_messaging_io_ops`) et rapportée en `green_summary.messaging_waste`, une énergie d'hôte tenue à côté des totaux et publiée dans la divulgation en `aggregate.messaging_waste`.
 
 ```toml
 [green.alumet.broker]
@@ -483,11 +483,11 @@ label_value = "kafka-pod"      # valeur portée par label_key pour le cgroup du 
 region = "eu-west-3"           # optionnel, active la conversion gCO2
 ```
 
-Un même cgroup ne peut pas alimenter deux chiffres : un `label_value` qui apparaît aussi dans `service_mappings`, ou qui correspond à la déclaration de base de données, est rejeté au chargement de la config. Exige un agent sur l'hôte du broker, donc inapplicable à un broker managé. Pour ceux-là, voir `[green.broker_static]`.
+Un même cgroup ne peut pas alimenter deux chiffres : un `label_value` qui apparaît aussi dans `service_mappings`, ou qui correspond à la déclaration de base de données, est rejeté au chargement de la config. Exige un agent sur l'hôte du broker, donc inapplicable à un broker managé. Pour un cluster provisionné, voir `[green.broker_static]`.
 
 #### `[green.broker_static]` (optionnel, opt-in)
 
-Déclare un cluster de brokers **provisionné**, sans agent ni métrique. C'est la seule voie qui fonctionne pour un broker managé (Confluent Cloud, MSK, SQS, Pulsar managé), où aucun hôte n'est instrumentable.
+Déclare un cluster de brokers **provisionné**, sans agent ni métrique. C'est la voie d'un cluster de brokers provisionné avec une classe d'instance typée et aucun hôte instrumentable, comme un cluster Kafka ou MQ managé, ou des VM autogérées sans agent. Les brokers serverless ou facturés en unités de capacité n'ont aucun nœud provisionné et ne peuvent pas être déclarés.
 
 ```toml
 [green.broker_static]

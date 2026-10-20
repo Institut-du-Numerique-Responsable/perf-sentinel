@@ -448,7 +448,7 @@ energy_interval_secs = 1.0
 
 ##### `[green.alumet.database]` (optional)
 
-Declares one database workload measured by Alumet. A database emits no spans, so it can never appear in `service_mappings` (zero ops, the per-op coefficient path skips it). Instead, its energy over each scoring window is multiplied by the SQL-only waste ratio (`avoidable_sql_io_ops / total_sql_io_ops`) and reported as `green_summary.database_waste`, a standalone figure excluded from `energy_kwh`, `co2` and the public disclosure. See `docs/METHODOLOGY.md` for the formula and [docs/LIMITATIONS.md](LIMITATIONS.md#alumet-precision-bounds) for why it is a lower bound.
+Declares one database workload measured by Alumet. A database emits no spans, so it can never appear in `service_mappings` (zero ops, the per-op coefficient path skips it). Instead, its energy over each scoring window is multiplied by the SQL-only waste ratio (`avoidable_sql_io_ops / total_sql_io_ops`) and reported as `green_summary.database_waste`, host energy kept beside `energy_kwh` and `co2` and never added to them. The disclosure publishes it as the separate `aggregate.database_waste` block. Without this section the block carries the estimated form, the application-side share of the SQL spans, already inside the totals. See `docs/METHODOLOGY.md` for the formula and [docs/LIMITATIONS.md](LIMITATIONS.md#alumet-precision-bounds) for why it is a lower bound.
 
 ```toml
 [green.alumet.database]
@@ -460,7 +460,7 @@ region = "eu-west-3"           # optional, enables the gCO2 conversion (declared
 
 ##### `[green.alumet.broker]` (optional)
 
-The messaging twin of the section above. Declares one message broker measured by Alumet: a broker emits no spans of its own either, so its window energy is multiplied by the messaging-only waste ratio (`avoidable_messaging_io_ops / total_messaging_io_ops`) and reported as `green_summary.messaging_waste`.
+The messaging twin of the section above. Declares one message broker measured by Alumet: a broker emits no spans of its own either, so its window energy is multiplied by the messaging-only waste ratio (`avoidable_messaging_io_ops / total_messaging_io_ops`) and reported as `green_summary.messaging_waste`, host energy kept beside the totals and published in the disclosure as `aggregate.messaging_waste`.
 
 ```toml
 [green.alumet.broker]
@@ -468,11 +468,11 @@ label_value = "kafka-pod"      # value carried by label_key for the broker cgrou
 region = "eu-west-3"           # optional, enables the gCO2 conversion
 ```
 
-The same cgroup cannot feed two figures: a `label_value` that also appears in `service_mappings`, or that matches the database declaration, is rejected at config load. Requires an agent on the broker host, so it does not apply to a managed broker. For those, see `[green.broker_static]`.
+The same cgroup cannot feed two figures: a `label_value` that also appears in `service_mappings`, or that matches the database declaration, is rejected at config load. Requires an agent on the broker host, so it does not apply to a managed broker. For a provisioned cluster, see `[green.broker_static]`.
 
 #### `[green.broker_static]` (optional, opt-in)
 
-Declares a **provisioned** broker cluster, with no agent and no metric. This is the only path that works for a managed broker (Confluent Cloud, MSK, SQS, managed Pulsar), where there is no host to instrument.
+Declares a **provisioned** broker cluster, with no agent and no metric. This is the path for a provisioned broker cluster with a typed instance class and no host to instrument, such as a managed Kafka or MQ cluster, or self-managed VMs without an agent. Serverless and capacity-unit brokers have no provisioned node and cannot be declared.
 
 ```toml
 [green.broker_static]
