@@ -929,11 +929,8 @@ mod tests {
         )
         .with_total_requests_cli(Some(4_200_000));
         let cmd = state.equivalent_command();
-        assert!(cmd.contains(" --strict-attribution"), "got {cmd}");
-        assert!(
-            cmd.ends_with(" --total-requests-in-period 4200000"),
-            "got {cmd}"
-        );
+        assert!(cmd.contains(" --strict-attribution"));
+        assert!(cmd.ends_with(" --total-requests-in-period 4200000"));
     }
 
     #[test]
