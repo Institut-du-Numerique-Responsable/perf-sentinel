@@ -18,10 +18,11 @@ use crate::score::ops_snapshot_diff::OpsSnapshotDiff;
 
 use std::collections::HashMap;
 
-use super::apply::{apply_chassis_scrape, build_chassis_services};
+use super::apply::apply_chassis_scrape;
 use super::config::{RedfishConfig, RedfishSchema};
 use super::parser::{ParseOutcome, parse_redfish_power};
 use super::state::{RedfishState, ServiceEnergy, monotonic_ms};
+use crate::score::energy_state::services_by_key;
 
 /// Three consecutive failures across all chassis trigger the one-shot
 /// "endpoint likely misconfigured" warning.
@@ -297,7 +298,7 @@ async fn run_scraper_loop(
 
     // Services per chassis_id, computed once to avoid a per-tick walk
     // of cfg.service_mappings inside apply_chassis_scrape.
-    let chassis_services = build_chassis_services(&cfg.service_mappings);
+    let chassis_services = services_by_key(&cfg.service_mappings);
 
     let client = http_client::build_client();
     let mut ticker = tokio::time::interval(cfg.scrape_interval);
