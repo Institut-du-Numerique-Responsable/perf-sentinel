@@ -695,7 +695,9 @@ fn host_perimeter_disclaimer(
     )
 }
 
-/// The host models and placements, as a parenthetical, empty when none.
+/// The host models and placements of the whole block, windows beside the
+/// totals included (the aggregate keeps no per-window split), as a
+/// parenthetical, empty when none.
 fn host_labels(block: &DatabaseWasteAggregate) -> String {
     let models: Vec<&str> = block
         .models
@@ -712,7 +714,7 @@ fn host_labels(block: &DatabaseWasteAggregate) -> String {
     if parts.is_empty() {
         String::new()
     } else {
-        format!(" ({})", parts.join(", "))
+        format!(" (over the period, {})", parts.join(", "))
     }
 }
 
@@ -1290,7 +1292,7 @@ mod tests {
                 "{text}"
             );
             assert!(
-                text.contains("(models database_specpower, placements dedicated)"),
+                text.contains("(over the period, models database_specpower, placements dedicated)"),
                 "{text}"
             );
             assert!(text.contains("in no application's figures"), "{text}");

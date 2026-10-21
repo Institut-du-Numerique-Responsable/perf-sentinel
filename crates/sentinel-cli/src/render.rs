@@ -1010,10 +1010,12 @@ pub(crate) fn host_carbon_terms(
     gs: &sentinel_core::report::GreenSummary,
 ) -> Vec<(&'static str, f64, String)> {
     let detail = |model: Option<&str>| {
-        model.filter(|m| !m.is_empty()).map_or_else(
-            || "host energy".to_string(),
-            |m| format!("host energy, model {}", sanitize_for_terminal(m)),
-        )
+        model
+            .and_then(sentinel_core::report::display_tag)
+            .map_or_else(
+                || "host energy".to_string(),
+                |m| format!("host energy, model {m}"),
+            )
     };
     let db = carbon.database_gco2.map(|g| {
         let model = gs.database_waste.as_ref().map(|w| w.model.as_str());

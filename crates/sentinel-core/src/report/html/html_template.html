@@ -1693,9 +1693,9 @@
       ["Limits", "A relative ranking signal: it tells you where to look first, not how many joules the endpoint burns."]
     ]},
     db_waste: { t: "Database waste", u: ENERGY_URL, s: [
-      ["What it measures", "The avoidable share of the energy of SQL work. Measured mode reads the database host's own energy, the side of an N+1 the application trace cannot see. Estimated mode is the application-side share: the energy the services spent issuing the SQL spans."],
-      ["How it is computed", "Measured mode: the declared database cgroup's energy (Alumet) times the SQL waste ratio, a CPU-only lower bound. Estimated mode, on every run without a measured reading: the energy the span scoring gave the window's SQL spans times the same ratio, a share the totals already count, never additional. The model tag says which mode produced the figure."],
-      ["Limits", "A measured host figure is inside the totals as a host term next to the instrumented services, once its carbon converts in a known region, and stays outside them otherwise. An estimated one is already inside them and holds no database host energy. The two modes err in different directions."]
+      ["What it measures", "The avoidable share of the energy of SQL work. Measured or declared mode covers the database host's own energy, the side of an N+1 the application trace cannot see. Estimated mode is the application-side share: the energy the services spent issuing the SQL spans."],
+      ["How it is computed", "Measured on the database cgroup (Alumet), a CPU-only lower bound, or declared from a provisioned cluster via the embedded SPECpower table, each times the SQL waste ratio. Estimated mode, when no database is declared: the energy the span scoring gave the window's SQL spans times the same ratio, a share the totals already count, never additional. The model tag says which mode produced the figure."],
+      ["Limits", "A declaration bounds compute at full load without storage or network. A measured or declared host figure is inside the totals as a host term next to the instrumented services, once its carbon converts in a known region, and stays outside them otherwise. An estimated one is already inside them and holds no database host energy. A measurement and an estimate err in different directions."]
     ]},
     broker_waste: { t: "Broker waste", u: ENERGY_URL, s: [
       ["What it measures", "The avoidable share of the energy of publish work, the twin of database waste. Measured or declared mode covers the broker host, estimated mode the application-side share of the publish spans."],
@@ -3843,7 +3843,7 @@
     metrics.appendChild(greenCard(
       "Avoidable",
       formatGco2(avoidMid),
-      percent(avoidMid, avoidBase) + (avoidBase > co2.operational_gco2 ? " of operational and host" : " of operational"),
+      percent(avoidMid, avoidBase) + ([co2.database_gco2, co2.messaging_gco2].some(Number.isFinite) ? " of operational and host" : " of operational"),
       avoidMid > 0 ? "accent" : "neutral",
       "The operational share attributable to avoidable I/O: operational carbon times avoidable ops over accounted ops, plus the waste share of the database and broker host terms counted in the totals. This is the number an anti-pattern fix shrinks.",
       "avoidable_co2"
@@ -3867,10 +3867,10 @@
       "I/O Intensity Score of the worst endpoint: its I/O operations (SQL, outbound HTTP, publishes) per call. Bands at 2, 5 and 10.",
       "iis"
     ));
-    // Measured on the declared Alumet database cgroup (host energy, inside
-    // the totals once its carbon converts), or the application-side share
-    // of the SQL spans (already inside them). The model tag and the scope
-    // say which.
+    // Measured on the Alumet database cgroup or declared cluster (host
+    // energy, inside the totals once its carbon converts), or the
+    // application-side share of the SQL spans (already inside them). The
+    // model tag and the scope say which.
     var dbw = greenSummary.database_waste;
     if (dbw) {
       var dbValue = Number.isFinite(dbw.waste_gco2) ? formatGco2(dbw.waste_gco2) : formatKwh(dbw.waste_kwh);
@@ -3884,7 +3884,7 @@
         dbValue,
         dbSub,
         dbw.waste_kwh > 0 ? "accent" : "neutral",
-        "Avoidable energy of SQL work: measured on the declared database cgroup (Alumet), host energy counted in the report totals, or estimated as the application-side share of the SQL spans, already inside the totals, each times the SQL waste ratio. The model tag says which.",
+        "Avoidable energy of SQL work: database host energy from a measured cgroup (Alumet) or a declared cluster (SPECpower), counted in the report totals, or estimated as the application-side share of the SQL spans, already inside the totals, each times the SQL waste ratio. The model tag says which.",
         "db_waste"
       ));
     } else {
@@ -3894,7 +3894,7 @@
         "-",
         "not available · no SQL activity this window, or no database reading yet, see `[green.database_static]` or `[green.alumet.database]`",
         "muted",
-        "Avoidable energy of SQL work: measured on the declared database cgroup (Alumet), host energy counted in the report totals, or estimated as the application-side share of the SQL spans, already inside the totals, each times the SQL waste ratio. The model tag says which.",
+        "Avoidable energy of SQL work: database host energy from a measured cgroup (Alumet) or a declared cluster (SPECpower), counted in the report totals, or estimated as the application-side share of the SQL spans, already inside the totals, each times the SQL waste ratio. The model tag says which.",
         "db_waste"
       ));
     }

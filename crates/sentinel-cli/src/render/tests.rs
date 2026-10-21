@@ -1156,7 +1156,8 @@ fn host_carbon_lines_name_their_model_sanitized() {
         ("Database:", 0.25, "host energy, model database_specpower")
     );
     assert_eq!(terms[1].0, "Broker:");
-    assert!(!terms[1].2.contains('\u{1b}'), "{}", terms[1].2);
+    // A hostile tag drops to the bare scope, as in the HTML card.
+    assert_eq!(terms[1].2, "host energy");
     // A carbon term without its figure keeps the bare scope.
     let mut bare = host_summary(true, false);
     bare.database_waste = None;

@@ -868,7 +868,8 @@ fn fmt_kwh(v: f64) -> String {
 
 /// A per-service energy tag without its `+cal` suffix, or `None` when it
 /// is not a short `[A-Za-z0-9_+-]` token (hostile `--input`, bidi bytes).
-fn display_tag(tag: &str) -> Option<&str> {
+#[must_use]
+pub fn display_tag(tag: &str) -> Option<&str> {
     let tag = tag.strip_suffix(CO2_MODEL_CAL_SUFFIX).unwrap_or(tag);
     let valid = (1..=64).contains(&tag.len())
         && tag

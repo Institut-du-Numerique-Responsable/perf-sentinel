@@ -114,7 +114,7 @@ Publier les deux permet à un lecteur de les comparer et de voir combien de gasp
 
 Chaque rapport énonce ce périmètre trois fois :
 
-- `notes.disclaimers` se termine par une ligne par sous-système, base de données puis broker, ajoutée après les avertissements personnalisés ou par défaut. Elle dit que les hôtes sont dans les totaux sur les N fenêtres qui portaient un chiffre (avec leurs modèles et placements), sur K fenêtres sur N (en nommant les fenêtres estimées et celles gardées à côté des totaux), ou que les totaux ne contiennent aucune énergie des hôtes de ce sous-système. Quand un hôte est inclus, la ligne ajoute que son carbone est dans `total_carbon_kgco2eq` et dans les chiffres d'aucune application.
+- `notes.disclaimers` se termine par une ligne par sous-système, base de données puis broker, ajoutée après les avertissements personnalisés ou par défaut. Elle dit que les hôtes sont dans les totaux sur les N fenêtres qui portaient un chiffre ou sur K fenêtres sur N (en nommant les fenêtres estimées et celles gardées à côté des totaux), avec les modèles et placements vus sur la période, ou que les totaux ne contiennent aucune énergie des hôtes de ce sous-système. Quand un hôte est inclus, la ligne ajoute que son carbone est dans `total_carbon_kgco2eq` et dans les chiffres d'aucune application.
 - La page « At a glance » du PDF nomme les hôtes de base de données et de broker dont le `in_totals_windows` n'est pas nul, le test de `notes.disclaimers`, avec leur `in_totals_energy_kwh`, et dit que les autres sont hors des totaux.
 - `carbon_breakdown.database_kgco2eq` et `messaging_kgco2eq` portent le carbone des hôtes inclus, `database_waste.in_totals_energy_kwh` et `messaging_waste.in_totals_energy_kwh` leur énergie.
 
