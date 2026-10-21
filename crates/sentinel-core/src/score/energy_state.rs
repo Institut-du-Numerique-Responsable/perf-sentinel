@@ -225,7 +225,7 @@ macro_rules! impl_energy_state {
 pub(crate) use impl_energy_state;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -272,7 +272,9 @@ mod tests {
         assert_eq!(snap.len(), 1);
     }
 
-    fn ops(pairs: &[(&str, u64)]) -> HashMap<String, u64> {
+    /// A `service -> ops` delta map for the split tests, here and in
+    /// the cloud scraper.
+    pub(crate) fn ops(pairs: &[(&str, u64)]) -> HashMap<String, u64> {
         pairs.iter().map(|(s, n)| ((*s).to_string(), *n)).collect()
     }
 

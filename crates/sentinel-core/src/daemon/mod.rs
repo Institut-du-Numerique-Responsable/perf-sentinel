@@ -799,15 +799,21 @@ mod tests {
         assert_matches!(err, DaemonError::InvalidAddr(_));
     }
 
-    #[tokio::test]
-    async fn daemon_run_refuses_official_without_org_config_path() {
-        let config = Config {
+    /// A default config whose `[reporting]` declares official intent.
+    fn official_config(org_config_path: Option<String>) -> Config {
+        Config {
             reporting: crate::config::ReportingConfig {
                 intent: Some("official".to_string()),
+                org_config_path,
                 ..Default::default()
             },
             ..Config::default()
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn daemon_run_refuses_official_without_org_config_path() {
+        let config = official_config(None);
         let err = run(config).await.expect_err("must refuse");
         match err {
             DaemonError::ReportingValidation { errors } => {
@@ -822,14 +828,7 @@ mod tests {
 
     #[tokio::test]
     async fn daemon_run_refuses_official_with_unreadable_org_config() {
-        let config = Config {
-            reporting: crate::config::ReportingConfig {
-                intent: Some("official".to_string()),
-                org_config_path: Some("/no/such/path/org.toml".to_string()),
-                ..Default::default()
-            },
-            ..Config::default()
-        };
+        let config = official_config(Some("/no/such/path/org.toml".to_string()));
         let err = run(config).await.expect_err("must refuse");
         assert_matches!(err, DaemonError::ReportingValidation { .. });
     }
@@ -862,14 +861,7 @@ total_applications_declared = 1
         )
         .unwrap();
 
-        let config = Config {
-            reporting: crate::config::ReportingConfig {
-                intent: Some("official".to_string()),
-                org_config_path: Some(file.path().display().to_string()),
-                ..Default::default()
-            },
-            ..Config::default()
-        };
+        let config = official_config(Some(file.path().display().to_string()));
         let err = run(config).await.expect_err("must refuse");
         match err {
             DaemonError::ReportingValidation { errors } => {
@@ -908,14 +900,7 @@ total_applications_declared = 1
         )
         .unwrap();
 
-        let config = Config {
-            reporting: crate::config::ReportingConfig {
-                intent: Some("official".to_string()),
-                org_config_path: Some(file.path().display().to_string()),
-                ..Default::default()
-            },
-            ..Config::default()
-        };
+        let config = official_config(Some(file.path().display().to_string()));
         let err = run(config).await.expect_err("must refuse");
         match err {
             DaemonError::ReportingValidation { errors } => {

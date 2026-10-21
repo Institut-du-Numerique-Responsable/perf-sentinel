@@ -125,7 +125,7 @@ fn groups_by_value(section: &str, map: &HashMap<String, String>) -> Vec<NodeGrou
 /// Node-level groups ranked by precedence, lowest first: cloud CPU
 /// queries, Redfish chassis, then Alumet domains (only under
 /// `label_key = "domain"`, the one Alumet key that names a node).
-fn node_level_groups(green: &crate::config::GreenConfig) -> [Vec<NodeGroup>; 3] {
+fn node_level_groups(green: &GreenConfig) -> [Vec<NodeGroup>; 3] {
     let cloud = green.cloud_energy.as_ref().map_or_else(Vec::new, |cfg| {
         cfg.cpu_query_groups()
             .into_iter()
@@ -149,7 +149,7 @@ fn node_level_groups(green: &crate::config::GreenConfig) -> [Vec<NodeGroup>; 3] 
 /// (rule O1). A lower group X sharing services with a higher group Y,
 /// with members outside Y, still splits its node among those members
 /// while Y bills the same node again.
-pub(crate) fn overlapping_node_readings(green: &crate::config::GreenConfig) -> Vec<String> {
+pub(crate) fn overlapping_node_readings(green: &GreenConfig) -> Vec<String> {
     let ranks = node_level_groups(green);
     let mut out = Vec::new();
     for (i, lower) in ranks.iter().enumerate() {

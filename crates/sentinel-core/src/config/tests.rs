@@ -4101,11 +4101,7 @@ region = "eu-west-3"
     );
     let ceiling = b.ceiling().expect("dedicated with hosts bills a ceiling");
     assert!(ceiling.cluster_watts() > 0.0);
-    assert_eq!(
-        cfg.green
-            .host_region(crate::score::host_static::Subsystem::Broker),
-        Some("eu-west-3")
-    );
+    assert_eq!(cfg.green.host_region(Subsystem::Broker), Some("eu-west-3"));
 }
 
 #[test]
@@ -4287,8 +4283,7 @@ region = "eu-west-3"
     assert_eq!(db.nodes, Some(2));
     assert_eq!(db.instance_type.as_deref(), Some("db.r6i.large"), "trimmed");
     assert_eq!(
-        cfg.green
-            .host_region(crate::score::host_static::Subsystem::Database),
+        cfg.green.host_region(Subsystem::Database),
         Some("eu-west-3")
     );
 }
@@ -4423,8 +4418,7 @@ fn alumet_database_needs_an_effective_region() {
     ))
     .expect("the default region applies");
     assert_eq!(
-        cfg.green
-            .host_region(crate::score::host_static::Subsystem::Database),
+        cfg.green.host_region(Subsystem::Database),
         Some("eu-west-3")
     );
 }
@@ -4460,20 +4454,17 @@ queue = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-b"})'
 
 const HOST_QUERY: &str = r#"cpu_query = 'avg(container_cpu{container="host", node="node-a"})'"#;
 
-const SUBSYSTEMS: [crate::score::host_static::Subsystem; 2] = [
-    crate::score::host_static::Subsystem::Database,
-    crate::score::host_static::Subsystem::Broker,
-];
+const SUBSYSTEMS: [Subsystem; 2] = [Subsystem::Database, Subsystem::Broker];
 
-fn alumet_workload(subsystem: crate::score::host_static::Subsystem) -> &'static str {
+fn alumet_workload(subsystem: Subsystem) -> &'static str {
     match subsystem {
-        crate::score::host_static::Subsystem::Database => ALUMET_DATABASE,
-        crate::score::host_static::Subsystem::Broker => ALUMET_BROKER,
+        Subsystem::Database => ALUMET_DATABASE,
+        Subsystem::Broker => ALUMET_BROKER,
     }
 }
 
 /// A shared declaration of `subsystem` next to [`CLOUD_NODES`].
-fn shared_host_toml(subsystem: crate::score::host_static::Subsystem, keys: &str) -> String {
+fn shared_host_toml(subsystem: Subsystem, keys: &str) -> String {
     format!(
         "{CLOUD_NODES}\n{}\nplacement = \"shared\"\nregion = \"eu-west-3\"\n{keys}\n",
         subsystem.section()
@@ -4657,7 +4648,7 @@ fn shared_with_rejections_name_their_rule() {
 #[test]
 fn shared_with_two_query_groups_names_each_side() {
     let err = load_from_str(&shared_host_toml(
-        crate::score::host_static::Subsystem::Database,
+        Subsystem::Database,
         &format!("{HOST_QUERY}\nshared_with = [\"orders\", \"billing\", \"api\", \"search\"]"),
     ))
     .expect_err("two groups must be rejected")
@@ -5543,7 +5534,7 @@ fn grid_feeds_absent_by_default() {
     assert!(config.green.grid_feeds.is_empty());
     assert_eq!(
         config.scoring_config().grid_feeds,
-        [] as [crate::score::carbon::RealTimeProvider; 0]
+        Vec::<crate::score::carbon::RealTimeProvider>::new()
     );
 }
 

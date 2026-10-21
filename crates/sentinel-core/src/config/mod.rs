@@ -228,7 +228,7 @@ pub struct GreenConfig {
     /// Declared broker hosts (`[green.broker_static]`, daemon only).
     /// Needs no agent, so it covers provisioned managed brokers (not
     /// serverless ones). A dedicated declaration bills its ceiling
-    /// ([`crate::score::host_static::StaticHostsConfig::ceiling`]), or
+    /// ([`StaticHostsConfig::ceiling`]), or
     /// prices its hosts from its `cpu_query`, and a shared one bills its
     /// pod's share of its node.
     pub broker_static: Option<StaticHostsConfig>,

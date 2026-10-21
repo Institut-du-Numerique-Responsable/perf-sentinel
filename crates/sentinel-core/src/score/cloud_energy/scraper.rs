@@ -870,6 +870,7 @@ fn apply_group_per_service(
 mod tests {
     use super::super::config::ServiceCloudConfig;
     use super::*;
+    use crate::score::energy_state::tests::ops;
     use core::assert_matches;
 
     // ------------------------------------------------------------------
@@ -975,10 +976,6 @@ mod tests {
                 .collect(),
             auth_header: None,
         }
-    }
-
-    fn ops(pairs: &[(&str, u64)]) -> HashMap<String, u64> {
-        pairs.iter().map(|(s, n)| ((*s).to_string(), *n)).collect()
     }
 
     /// Every group's query reads `cpu` with `series` series.

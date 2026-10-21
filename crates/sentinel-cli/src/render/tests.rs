@@ -1099,10 +1099,10 @@ fn energy_line_names_the_energy_source() {
 
 /// A summary with a declared database figure and a measured broker one,
 /// each in the totals or not.
-fn host_summary(db_in: bool, mw_in: bool) -> sentinel_core::report::GreenSummary {
+fn host_summary(db_in: bool, mw_in: bool) -> GreenSummary {
     let db_gco2 = db_in.then_some(0.25);
     let mw_gco2 = mw_in.then_some(0.125);
-    let gs: sentinel_core::report::GreenSummary = serde_json::from_value(serde_json::json!({
+    let gs: GreenSummary = serde_json::from_value(serde_json::json!({
         "total_io_ops": 10, "avoidable_io_ops": 0, "io_waste_ratio": 0.0,
         "io_waste_ratio_band": "healthy", "top_offenders": [],
         "energy_kwh": 0.5, "per_service_measured_ratio": {"a": 0.0},
