@@ -90,6 +90,12 @@ strip is approximate where a modifier changes the CPU generation: `c5n`
 is a Skylake part while the `c5` rows are Cascade Lake, a gap inside the
 2x bracket. A class whose base family has no row stays unknown.
 
+Graviton 2 (`m6g`, `c6g`, `r6g`, `t4g`) and memory-optimized Graviton
+(`r6g`, `r7g`, `r8g`) have rows, so `db.r6g.large`, `cache.t4g.micro` or
+`db.m6gd.large` resolve. The Azure flexible-server Burstable classes are
+the `Standard_B*` rows themselves, priced at their full vCPU since burst
+credit is not modeled.
+
 Not modeled. The startup warning, or the load error in
 `[green.database_static]` and `[green.broker_static]`, names the reason
 for the first three rows, the others are reported as unknown types:
@@ -139,6 +145,13 @@ modificateur change la génération de CPU : `c5n` est une puce Skylake
 alors que les lignes `c5` sont Cascade Lake, un écart qui reste dans la
 fourchette 2x. Une classe dont la famille de base n'a pas de ligne reste
 inconnue.
+
+Graviton 2 (`m6g`, `c6g`, `r6g`, `t4g`) et les Graviton optimisés mémoire
+(`r6g`, `r7g`, `r8g`) ont des lignes, donc `db.r6g.large`,
+`cache.t4g.micro` ou `db.m6gd.large` se résolvent. Les classes Burstable
+des serveurs flexibles Azure sont les lignes `Standard_B*` elles-mêmes,
+valorisées à leurs vCPU complets puisque le crédit de rafale n'est pas
+modélisé.
 
 Non modélisées. L'avertissement de démarrage, ou l'erreur de chargement
 dans `[green.database_static]` et `[green.broker_static]`, donne la raison

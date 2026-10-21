@@ -166,6 +166,15 @@ fn modern_architecture_keys_present() {
         "Standard_D2s_v6",
         "Standard_D2ps_v6",
         "xeon-6780e",
+        "m6g.large",
+        "r6g.large",
+        "t4g.micro",
+        "r7g.large",
+        "r8g.large",
+        "m7g.medium",
+        "n1-standard-4",
+        "Standard_E4as_v5",
+        "Standard_B2ms",
     ] {
         assert!(is_known_instance_type(key), "missing modern entry: {key}");
     }
@@ -395,6 +404,9 @@ fn managed_and_modifier_names_resolve_to_their_vm_row() {
         ("Standard_E8ds_v5", "Standard_E8s_v5"),
         ("Standard_D4ads_v5", "Standard_D4as_v5"),
         ("Standard_D4pds_v6", "Standard_D4ps_v6"),
+        ("db.m6g.large", "m6g.large"),
+        ("db.m6gd.large", "m6g.large"),
+        ("cache.r7g.large", "r7g.large"),
     ] {
         assert_eq!(resolve_instance_class(alias), row_class(row), "{alias}");
     }
@@ -417,14 +429,8 @@ fn left_out_classes_carry_their_reason() {
 
 #[test]
 fn ungrounded_names_stay_unknown() {
-    // z, e and i are never stripped, and Graviton 2 has no row yet.
-    for name in [
-        "m5zn.large",
-        "db.x2iedn.large",
-        "Standard_E80ids_v4",
-        "db.m6g.large",
-        "",
-    ] {
+    // z, e and i are never stripped.
+    for name in ["m5zn.large", "db.x2iedn.large", "Standard_E80ids_v4", ""] {
         assert_eq!(
             resolve_instance_class(name),
             InstanceClass::Unknown,
@@ -451,4 +457,46 @@ fn lookup_keeps_the_provider_default_for_unresolved_names() {
     );
     assert!(is_known_instance_type("db.r6i.large"));
     assert!(!is_known_instance_type("db.serverless"));
+}
+
+// ------------------------------------------------------------------
+// Row relations (hold whatever the refreshed coefficients are)
+// ------------------------------------------------------------------
+
+/// One rounding step of the generated rows, which round to 0.1 W.
+const ROUNDING_STEP: f64 = 0.1 + 1e-9;
+
+fn row(name: &str) -> (f64, f64) {
+    *INSTANCE_POWER.get(name).expect("generated row")
+}
+
+fn assert_within_step(actual: f64, expected: f64, what: &str) {
+    assert!(
+        (actual - expected).abs() <= ROUNDING_STEP,
+        "{what}: {actual} vs {expected}"
+    );
+}
+
+#[test]
+fn memory_optimized_graviton_adds_the_dram_premium_per_vcpu() {
+    let (r_idle, r_max) = row("r6g.large");
+    let (m_idle, m_max) = row("m6g.large");
+    assert_within_step(r_idle - m_idle, 2.0 * 0.16, "idle premium");
+    assert_within_step(r_max - m_max, 2.0 * 0.40, "max premium");
+}
+
+#[test]
+fn graviton_medium_is_one_vcpu() {
+    let (medium_idle, medium_max) = row("m6g.medium");
+    let (large_idle, large_max) = row("m6g.large");
+    assert_within_step(medium_idle, large_idle / 2.0, "idle");
+    assert_within_step(medium_max, large_max / 2.0, "max");
+}
+
+#[test]
+fn equal_vcpu_rows_of_one_platform_are_equal() {
+    // t4g counts its sub-xlarge sizes at 2 vCPU like t3, and n1-highmem
+    // sits below the 8 GiB per vCPU DRAM threshold.
+    assert_eq!(row("t4g.nano"), row("t4g.large"));
+    assert_eq!(row("n1-highmem-8"), row("n1-standard-8"));
 }

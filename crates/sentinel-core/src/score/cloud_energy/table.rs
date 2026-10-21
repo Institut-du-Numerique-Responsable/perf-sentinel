@@ -17,9 +17,15 @@
 //! `SPECpower_ssj 2008` entries absent from the provider CSV are kept
 //! as-is in [`MANUAL_INSTANCE_ROWS`] below.
 //!
-//! Rows exist for Graviton 3 (`m7g`, `c7g`) and Graviton 4 (`m8g`,
-//! `c8g`), and the CSV gives both the EPYC 2nd Gen coefficient (no
-//! published `SPECpower` submissions for this silicon). The
+//! Rows exist for Graviton 2 (`m6g`, `c6g`, `r6g`, `t4g`), Graviton 3
+//! (`m7g`, `c7g`, `r7g`) and Graviton 4 (`m8g`, `c8g`, `r8g`), and the
+//! CSV gives all three the EPYC 2nd Gen coefficient (no published
+//! `SPECpower` submissions for this silicon). A Graviton `.medium` is
+//! 1 vCPU. Burstable families (AWS `t3`, `t3a`, `t4g`, Azure
+//! `Standard_B*`) count their full vCPU, burst credit is not modeled.
+//! GCP `n1` and Azure `Standard_B*` run on several processor
+//! generations and take the one with the highest max W/vCPU the
+//! provider CSV publishes (Skylake and Haswell). The
 //! Cobalt 100 ARM and Ampere Altra entries that are absent from the
 //! Azure / GCP CSV are kept on the `SPECpower` direct compute.
 //! Sierra Forest entries (`xeon-6780e`) are 1-chip system level for
