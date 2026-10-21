@@ -960,6 +960,55 @@ pub(super) fn setup_emaps_scraper(config: &Config) -> ScraperSetup<ElectricityMa
 }
 
 #[cfg(test)]
+mod cloud_scraper_tests {
+    use super::*;
+
+    const CLOUD: &str = r#"
+[green]
+default_region = "eu-west-3"
+
+[green.cloud]
+prometheus_endpoint = "http://127.0.0.1:9"
+scrape_interval_secs = 10
+
+[green.cloud.services]
+orders = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-a"})' }
+"#;
+
+    fn setup(hosts: &str) -> (ScraperSetup<CloudEnergyState>, HostCpuStates) {
+        let config = crate::config::load_from_str(&format!("{CLOUD}\n{hosts}")).expect("loads");
+        setup_cloud_scraper(&config, &Arc::new(MetricsState::new()))
+    }
+
+    #[tokio::test]
+    async fn host_cpu_queries_hand_their_states_to_the_event_loop() {
+        let (cloud, host_cpu) = setup(
+            "[green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+             instance_type = \"m5.large\"\ncpu_query = 'avg(db_cpu)'\n\n\
+             [green.broker_static]\nplacement = \"shared\"\ninstance_type = \"m5.large\"\n\
+             cpu_query = 'avg(broker_cpu)'\n",
+        );
+        assert!(host_cpu.database.is_some());
+        assert!(host_cpu.broker.is_some());
+        assert_eq!(host_cpu.staleness_ms, 30_000);
+        cloud.handle.expect("scraper spawned").abort();
+    }
+
+    #[tokio::test]
+    async fn no_cpu_query_runs_no_probe() {
+        let (cloud, host_cpu) = setup(
+            "[green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+             instance_type = \"m5.large\"\n",
+        );
+        assert!(host_cpu.database.is_none());
+        assert!(host_cpu.broker.is_none());
+        assert_eq!(host_cpu.staleness_ms, 0);
+        assert_eq!(cloud.staleness_ms, 30_000);
+        cloud.handle.expect("scraper spawned").abort();
+    }
+}
+
+#[cfg(test)]
 mod correlator_tests {
     use super::*;
 

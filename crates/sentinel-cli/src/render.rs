@@ -913,17 +913,48 @@ pub(crate) fn fmt_tiny(v: f64) -> String {
     }
 }
 
-/// The fields one waste line needs, borrowed from either twin.
-struct WasteLine<'a> {
-    label: &'a str,
-    ratio_label: &'a str,
-    waste_kwh: f64,
-    energy_kwh: f64,
-    ratio: f64,
-    model: &'a str,
-    in_totals: bool,
-    region: Option<&'a str>,
-    waste_gco2: Option<f64>,
+/// The fields one waste line needs, borrowed from either twin. Shared
+/// with the monitor TUI.
+pub(crate) struct WasteLine<'a> {
+    pub(crate) label: &'a str,
+    pub(crate) ratio_label: &'a str,
+    pub(crate) waste_kwh: f64,
+    pub(crate) energy_kwh: f64,
+    pub(crate) ratio: f64,
+    pub(crate) model: &'a str,
+    pub(crate) in_totals: bool,
+    pub(crate) region: Option<&'a str>,
+    pub(crate) waste_gco2: Option<f64>,
+}
+
+impl<'a> WasteLine<'a> {
+    pub(crate) fn database(db: &'a sentinel_core::report::DatabaseWaste) -> Self {
+        Self {
+            label: "Database waste:",
+            ratio_label: "SQL",
+            waste_kwh: db.waste_kwh,
+            energy_kwh: db.energy_kwh,
+            ratio: db.sql_waste_ratio,
+            model: &db.model,
+            in_totals: db.in_totals,
+            region: db.region.as_deref(),
+            waste_gco2: db.waste_gco2,
+        }
+    }
+
+    pub(crate) fn messaging(mw: &'a sentinel_core::report::MessagingWaste) -> Self {
+        Self {
+            label: "Broker waste:",
+            ratio_label: "messaging",
+            waste_kwh: mw.waste_kwh,
+            energy_kwh: mw.energy_kwh,
+            ratio: mw.messaging_waste_ratio,
+            model: &mw.model,
+            in_totals: mw.in_totals,
+            region: mw.region.as_deref(),
+            waste_gco2: mw.waste_gco2,
+        }
+    }
 }
 
 /// One waste text line, database or broker. Pure so the sanitization and
@@ -956,31 +987,11 @@ fn format_waste_line(w: &WasteLine<'_>) -> String {
 }
 
 fn format_database_waste_line(db: &sentinel_core::report::DatabaseWaste) -> String {
-    format_waste_line(&WasteLine {
-        label: "Database waste:",
-        ratio_label: "SQL",
-        waste_kwh: db.waste_kwh,
-        energy_kwh: db.energy_kwh,
-        ratio: db.sql_waste_ratio,
-        model: &db.model,
-        in_totals: db.in_totals,
-        region: db.region.as_deref(),
-        waste_gco2: db.waste_gco2,
-    })
+    format_waste_line(&WasteLine::database(db))
 }
 
 fn format_messaging_waste_line(mw: &sentinel_core::report::MessagingWaste) -> String {
-    format_waste_line(&WasteLine {
-        label: "Broker waste:",
-        ratio_label: "messaging",
-        waste_kwh: mw.waste_kwh,
-        energy_kwh: mw.energy_kwh,
-        ratio: mw.messaging_waste_ratio,
-        model: &mw.model,
-        in_totals: mw.in_totals,
-        region: mw.region.as_deref(),
-        waste_gco2: mw.waste_gco2,
-    })
+    format_waste_line(&WasteLine::messaging(mw))
 }
 
 /// The `Energy:` line, named by its energy source rather than the window

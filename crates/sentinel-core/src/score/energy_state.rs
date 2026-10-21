@@ -109,8 +109,9 @@ pub(crate) fn upsert_row(map: &mut HashMap<String, EnergyRow>, service: &str, ro
 }
 
 /// Build the `source key -> Vec<service>` reverse index from a
-/// `service -> source key` mapping. Built once at scraper startup, so a
-/// tick does not walk the full mapping per source, an O(K x S) cost.
+/// `service -> source key` mapping, so a tick does not walk the full
+/// mapping per source, an O(K x S) cost. Redfish builds it once at
+/// startup, Alumet and Kepler once per tick, one O(S) pass.
 #[must_use]
 #[allow(clippy::implicit_hasher)]
 pub(crate) fn services_by_key(map: &HashMap<String, String>) -> HashMap<String, Vec<String>> {

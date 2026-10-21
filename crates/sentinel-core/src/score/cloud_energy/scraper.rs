@@ -428,7 +428,8 @@ fn single_series(
     }
 }
 
-/// Fetch every probe in order, one reading per probe.
+/// Fetch every probe, one reading per probe in probe order. The database
+/// and broker probes run together, so a slow endpoint costs one timeout.
 async fn fetch_host_probes(
     probes: &mut [HostProbe],
     client: &HttpClient,
@@ -436,6 +437,13 @@ async fn fetch_host_probes(
     auth: Option<&AuthHeader>,
     metrics: &MetricsState,
 ) -> Vec<Option<f64>> {
+    if let [database, broker] = probes {
+        let (a, b) = tokio::join!(
+            fetch_host_cpu(database, client, uri, auth, metrics),
+            fetch_host_cpu(broker, client, uri, auth, metrics),
+        );
+        return vec![a, b];
+    }
     let mut readings = Vec::with_capacity(probes.len());
     for probe in probes {
         readings.push(fetch_host_cpu(probe, client, uri, auth, metrics).await);
@@ -622,11 +630,14 @@ async fn run_cloud_scraper_loop(
             });
         }
 
-        let cpu_readings = collect_readings(set, groups.len()).await;
+        // The host probes do not depend on the service readings: fetch
+        // both at once so a slow endpoint stretches the tick only once.
+        let (cpu_readings, probe_cpu) = tokio::join!(
+            collect_readings(set, groups.len()),
+            fetch_host_probes(&mut probes, &client, &uri, parsed_auth.as_deref(), &metrics),
+        );
         warn_multi_series_groups(&groups, &cpu_readings, &mut multi_series_warned);
         let any_success = !cpu_readings.is_empty();
-        let probe_cpu =
-            fetch_host_probes(&mut probes, &client, &uri, parsed_auth.as_deref(), &metrics).await;
         let now_ms = monotonic_ms();
         // Whether or not a service reading landed: the hosts are billed on
         // their own query, and a shared one's watts leave its node first.

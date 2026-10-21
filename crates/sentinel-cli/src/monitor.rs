@@ -1046,30 +1046,23 @@ fn build_advisor_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
     lines
 }
 
-/// One waste line, database or broker. `provenance` bundles the
-/// daemon-sourced fields so the signature stays under the argument cap.
-fn waste_line(
-    label: &'static str,
-    ratio_label: &str,
-    waste_kwh: f64,
-    energy_kwh: f64,
-    ratio: f64,
-    provenance: (&str, bool, Option<&str>, Option<f64>),
-    dim: Style,
-) -> Line<'static> {
-    let (model, in_totals, region, waste_gco2) = provenance;
-    let gco2 = waste_gco2.map_or_else(|| "-".to_string(), |g| format!("{} gCO2", fmt_tiny(g)));
+/// One waste line, database or broker.
+fn waste_line(w: &WasteLine<'_>, dim: Style) -> Line<'static> {
+    let gco2 = w
+        .waste_gco2
+        .map_or_else(|| "-".to_string(), |g| format!("{} gCO2", fmt_tiny(g)));
     // Daemon-sourced strings: sanitize + cap like every other cell.
-    let region = truncate_cell(region.unwrap_or("-"), 24);
-    let model_cell = truncate_cell(if model.is_empty() { "-" } else { model }, 24);
-    let scope = sentinel_core::report::waste_scope_label(model, in_totals);
+    let region = truncate_cell(w.region.unwrap_or("-"), 24);
+    let model_cell = truncate_cell(if w.model.is_empty() { "-" } else { w.model }, 24);
+    let scope = sentinel_core::report::waste_scope_label(w.model, w.in_totals);
     Line::from(vec![
-        Span::styled(label, dim),
+        Span::styled(format!("{:<16}", w.label), dim),
         Span::raw(format!(
-            "{} kWh of {} kWh ({:.0}% {ratio_label} ratio)   {gco2}",
-            fmt_tiny(waste_kwh),
-            fmt_tiny(energy_kwh),
-            ratio * 100.0,
+            "{} kWh of {} kWh ({:.0}% {} ratio)   {gco2}",
+            fmt_tiny(w.waste_kwh),
+            fmt_tiny(w.energy_kwh),
+            w.ratio * 100.0,
+            w.ratio_label,
         )),
         Span::styled(
             format!("   model {model_cell}   region {region}   {scope}"),
@@ -1158,26 +1151,10 @@ fn build_energy_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
 
     lines.push(window_energy_line(gs, dim));
     if let Some(db) = &gs.database_waste {
-        lines.push(waste_line(
-            "Database waste: ",
-            "SQL",
-            db.waste_kwh,
-            db.energy_kwh,
-            db.sql_waste_ratio,
-            (&db.model, db.in_totals, db.region.as_deref(), db.waste_gco2),
-            dim,
-        ));
+        lines.push(waste_line(&WasteLine::database(db), dim));
     }
     if let Some(mw) = &gs.messaging_waste {
-        lines.push(waste_line(
-            "Broker waste:   ",
-            "messaging",
-            mw.waste_kwh,
-            mw.energy_kwh,
-            mw.messaging_waste_ratio,
-            (&mw.model, mw.in_totals, mw.region.as_deref(), mw.waste_gco2),
-            dim,
-        ));
+        lines.push(waste_line(&WasteLine::messaging(mw), dim));
     }
     lines.push(Line::from(""));
 
@@ -2274,7 +2251,7 @@ fn intensity_source_label(
     }
 }
 
-use crate::render::fmt_tiny;
+use crate::render::{WasteLine, fmt_tiny};
 
 /// Sanitize a daemon-sourced cell value and hard-cap its length (with an
 /// ellipsis) so the fixed-width energy tables stay aligned.
