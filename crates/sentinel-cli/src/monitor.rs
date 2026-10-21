@@ -1087,10 +1087,13 @@ fn window_energy_line(gs: &GreenSummary, dim: Style) -> Line<'static> {
             dim,
         ));
     };
+    let split = gs
+        .energy_split_label()
+        .map_or_else(String::new, |split| format!("   = {split}"));
     Line::from(vec![
         Span::styled("Window energy: ", dim),
         Span::raw(format!("{} kWh", fmt_tiny(gs.energy_kwh))),
-        Span::styled(format!("   {src}"), dim),
+        Span::styled(format!("   {src}{split}"), dim),
     ])
 }
 

@@ -14,6 +14,7 @@ async function loadCarbon(
   rows: Row[],
   calibrated = false,
   co2Model?: string,
+  patch?: (gs: any) => void,
 ) {
   await page.route("**/dashboard.html", async (route) => {
     const response = await route.fetch();
@@ -29,6 +30,7 @@ async function loadCarbon(
         gs.per_service_energy_model = Object.fromEntries(rows.map(([s, t]) => [s, t]));
         gs.per_service_measured_ratio = Object.fromEntries(rows.map(([s, , r]) => [s, r]));
         if (co2Model !== undefined) gs.co2.total.model = co2Model;
+        if (patch) patch(gs);
         return open + JSON.stringify(payload) + close;
       },
     );
@@ -197,4 +199,36 @@ test("14. the Overview Total CO2 card carries the same model tag", async ({ page
   await page.goto("/dashboard.html#overview");
   const card = page.locator("#findings-metrics > .ps-metric", { hasText: "Total CO2" });
   await expect(card.locator(".ps-metric-sub")).toContainText("· model io_proxy_v2+cal");
+});
+
+test("15. in-total hosts split the energy and get their own carbon card", async ({ page }) => {
+  await loadCarbon(page, 0.5, "io_proxy_v3", [["a", "io_proxy_v3", 0]], false, undefined, (gs) => {
+    gs.database_waste = {
+      energy_kwh: 0.1, waste_kwh: 0.02, sql_waste_ratio: 0.2,
+      model: "database_specpower", in_totals: true, placement: "dedicated",
+    };
+    gs.messaging_waste = {
+      energy_kwh: 0.05, waste_kwh: 0, messaging_waste_ratio: 0, model: "alumet_rapl",
+    };
+    gs.co2.operational_gco2 = 3;
+    gs.co2.database_gco2 = 1;
+    gs.co2.avoidable.mid = 2;
+  });
+  await expectEnergySub(
+    page,
+    "modeled from I/O counts · plus database hosts, database_specpower = applications 0.400 kWh + database hosts 0.100 kWh",
+  );
+  const cards = page.locator("#green-metrics > .ps-metric");
+  await expect(cards).toHaveCount(10);
+  const byLabel = (label: string) =>
+    cards.filter({ has: page.locator(".ps-metric-label", { hasText: new RegExp("^" + label) }) });
+  const dbCard = byLabel("Database CO2");
+  await expect(dbCard.locator(".ps-metric-sub")).toHaveText("host energy · model\u00a0database_specpower");
+  await expect(page.locator("#green-metrics")).not.toContainText("Broker CO2");
+  const avoidable = byLabel("Avoidable");
+  await expect(avoidable.locator(".ps-metric-sub")).toHaveText("50% of operational and host");
+  const dbWaste = byLabel("Database waste");
+  await expect(dbWaste.locator(".ps-metric-sub")).toContainText("· dedicated hosts · host energy, in the report totals");
+  const broker = byLabel("Broker waste");
+  await expect(broker.locator(".ps-metric-sub")).toContainText("outside these totals");
 });

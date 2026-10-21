@@ -989,13 +989,49 @@ fn format_messaging_waste_line(mw: &sentinel_core::report::MessagingWaste) -> St
 fn format_energy_line(gs: &sentinel_core::report::GreenSummary, dim: &str, reset: &str) -> String {
     gs.energy_source_label().map_or_else(
         || format!("  {dim}Energy:            not computed (no span resolved to a region){reset}"),
-        |src| format!("  {:<19}{} kWh ({src})", "Energy:", fmt_tiny(gs.energy_kwh)),
+        |src| {
+            let split = gs
+                .energy_split_label()
+                .map_or_else(String::new, |split| format!(" = {split}"));
+            format!(
+                "  {:<19}{} kWh ({src}){split}",
+                "Energy:",
+                fmt_tiny(gs.energy_kwh)
+            )
+        },
     )
+}
+
+/// `(label, gCO2, detail)` of the database and broker host carbon terms
+/// counted in `co2.total`, for the text report and the TUI. The model
+/// comes from `--input` JSON, so it is sanitized here.
+pub(crate) fn host_carbon_terms(
+    carbon: &sentinel_core::score::carbon::CarbonReport,
+    gs: &sentinel_core::report::GreenSummary,
+) -> Vec<(&'static str, f64, String)> {
+    let detail = |model: Option<&str>| {
+        model.filter(|m| !m.is_empty()).map_or_else(
+            || "host energy".to_string(),
+            |m| format!("host energy, model {}", sanitize_for_terminal(m)),
+        )
+    };
+    let db = carbon.database_gco2.map(|g| {
+        let model = gs.database_waste.as_ref().map(|w| w.model.as_str());
+        ("Database:", g, detail(model))
+    });
+    let mw = carbon.messaging_gco2.map(|g| {
+        let model = gs.messaging_waste.as_ref().map(|w| w.model.as_str());
+        ("Broker:", g, detail(model))
+    });
+    db.into_iter().chain(mw).collect()
 }
 
 /// The CO2 block of the `GreenOps` summary. Split out of
 /// [`print_green_summary`] to keep that function's branching shallow.
-fn print_carbon_summary(carbon: &sentinel_core::score::carbon::CarbonReport) {
+fn print_carbon_summary(
+    carbon: &sentinel_core::score::carbon::CarbonReport,
+    gs: &sentinel_core::report::GreenSummary,
+) {
     println!(
         "  Est. CO\u{2082}:          {:.6} g (low {:.6}, high {:.6}, model {})",
         carbon.total.mid, carbon.total.low, carbon.total.high, carbon.total.model,
@@ -1010,6 +1046,9 @@ fn print_carbon_summary(carbon: &sentinel_core::score::carbon::CarbonReport) {
     );
     if let Some(transport) = carbon.transport_gco2 {
         println!("  Transport:         {transport:.6} g    (cross-region network bytes)");
+    }
+    for (label, gco2, detail) in host_carbon_terms(carbon, gs) {
+        println!("  {label:<19}{gco2:.6} g    ({detail})");
     }
 }
 
@@ -1089,7 +1128,7 @@ fn print_absent_aware_figures(
 ) {
     match summary.co2.as_ref() {
         Some(carbon) => {
-            print_carbon_summary(carbon);
+            print_carbon_summary(carbon, summary);
             println!("{}", format_energy_line(summary, dim, reset));
         }
         // The trace count is the only reliable discriminant: a daemon stamps
@@ -1103,13 +1142,15 @@ fn print_absent_aware_figures(
     match &summary.database_waste {
         Some(db) => println!("{}", format_database_waste_line(db)),
         None => println!(
-            "  {dim}Database waste:    not measured (no SQL activity, a measured reading needs [green.alumet.database]){reset}"
+            "  {dim}Database waste:    {}{reset}",
+            sentinel_core::report::DATABASE_WASTE_ABSENT
         ),
     }
     match &summary.messaging_waste {
         Some(mw) => println!("{}", format_messaging_waste_line(mw)),
         None => println!(
-            "  {dim}Broker waste:      not measured (no broker publish spans, or no broker energy backend){reset}"
+            "  {dim}Broker waste:      {}{reset}",
+            sentinel_core::report::MESSAGING_WASTE_ABSENT
         ),
     }
 }

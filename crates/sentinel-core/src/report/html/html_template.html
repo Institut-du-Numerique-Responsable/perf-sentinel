@@ -3725,7 +3725,37 @@
     // No-break space: a wrap never strands "model" away from its tag.
     return typeof m === "string" && ENERGY_TAG_RE.test(m) ? sub + " · model\u00a0" + m : sub;
   }
+  // Host figures inside energy_kwh, database first, as
+  // GreenSummary::hosts_in_totals returns them.
+  function hostsInTotals(gs) {
+    var out = [];
+    [["database hosts", gs.database_waste], ["broker hosts", gs.messaging_waste]].forEach(function (h) {
+      var w = h[1];
+      if (w && w.in_totals === true && Number.isFinite(w.energy_kwh)) {
+        out.push({ noun: h[0], model: w.model, kwh: w.energy_kwh });
+      }
+    });
+    return out;
+  }
+  // One " · plus <noun>, <tag>" suffix per subsystem in the totals.
   function energySourceLabel(gs) {
+    var label = applicationSourceLabel(gs);
+    hostsInTotals(gs).forEach(function (h) {
+      label += " · plus " + h.noun + ", " + (energyDisplayTag(h.model) || "unknown");
+    });
+    return label;
+  }
+  // GreenSummary::energy_split_label: the applications' share plus each
+  // in-total host term, null when no host energy is in the totals.
+  function energySplitLabel(gs) {
+    var hosts = hostsInTotals(gs);
+    if (hosts.length === 0) return null;
+    var hostKwh = hosts.reduce(function (sum, h) { return sum + h.kwh; }, 0);
+    var label = "applications " + formatKwh(Math.max(0, gs.energy_kwh - hostKwh));
+    hosts.forEach(function (h) { label += " + " + h.noun + " " + formatKwh(h.kwh); });
+    return label;
+  }
+  function applicationSourceLabel(gs) {
     var ratios = gs.per_service_measured_ratio || {};
     var models = gs.per_service_energy_model || {};
     var services = Object.keys(ratios);
@@ -3750,11 +3780,32 @@
   // Plain text sub, not a code chip: the chip highlighter paints
   // underscored identifiers in the warning color.
   function buildEnergyCard(gs) {
-    var help = "Energy used by the analyzed traffic, the `E` of `E x I`. The sub names its source: an energy backend for the services it covered, per-operation I/O counts otherwise.";
+    var help = "Energy used by the analyzed traffic, the `E` of `E x I`. The sub names its source: an energy backend for the services it covered, per-operation I/O counts otherwise, plus the database and broker hosts counted in the totals, then the split between applications and hosts.";
     if (!(gs.energy_kwh > 0)) {
       return greenCard("Energy", "-", "not computed · no span resolved to a region", "muted", help, "energy");
     }
-    return greenCard("Energy", formatKwh(gs.energy_kwh), energySourceLabel(gs), null, help, "energy");
+    var split = energySplitLabel(gs);
+    var sub = energySourceLabel(gs) + (split ? " = " + split : "");
+    return greenCard("Energy", formatKwh(gs.energy_kwh), sub, null, help, "energy");
+  }
+  // Operational plus the in-total host terms, the base the avoidable
+  // share is taken from.
+  function scoredCarbon(co2) {
+    var hosts = [co2.database_gco2, co2.messaging_gco2].filter(Number.isFinite);
+    return hosts.reduce(function (sum, g) { return sum + g; }, co2.operational_gco2 || 0);
+  }
+  // Card of a host carbon term inside co2.total, only when it is a number.
+  function appendHostCarbonCard(metrics, label, gco2, waste) {
+    if (!Number.isFinite(gco2)) return;
+    var tag = waste && energyDisplayTag(waste.model);
+    metrics.appendChild(greenCard(label, formatGco2(gco2), "host energy" + (tag ? " · model\u00a0" + tag : ""), null,
+      "Carbon of the hosts behind this subsystem, counted inside Total CO2 as its own term next to operational. No application's figures hold it."));
+  }
+  // "dedicated hosts" or "shared host" when the operator declared one.
+  function placementLabel(w) {
+    if (w.placement === "dedicated") return " · dedicated hosts";
+    if (w.placement === "shared") return " · shared host";
+    return "";
   }
   function renderGreenPanel() {
     if (!hasGreen) {
@@ -3776,7 +3827,7 @@
       formatGco2(co2.total.mid),
       co2TotalSub(co2.total),
       null,
-      "The SCI v1.0 numerator summed over analyzed traces: operational `(E x I)` + embodied `M` + network transport `T`. The low/high bracket is log-symmetric (half, double): a directional estimate, not a wattmeter reading.",
+      "The SCI v1.0 numerator summed over analyzed traces: operational `(E x I)` + embodied `M` + network transport `T`, plus the database and broker host terms when their host energy is in the totals. The low/high bracket is log-symmetric (half, double): a directional estimate, not a wattmeter reading.",
       "total_co2"
     ));
     metrics.appendChild(buildEnergyCard(greenSummary));
@@ -3784,14 +3835,17 @@
       "Carbon from actually running the workload: energy used times the grid carbon intensity of the resolved region. The only term a code fix can reduce.", "operational_co2"));
     metrics.appendChild(greenCard("Embodied CO2", formatGco2(co2.embodied_gco2), "SCI v1.0 · M term", null,
       "Hardware manufacturing carbon amortized over traffic: `[green] embodied_carbon_per_request_gco2` per request. Real, but irreducible by fixing an anti-pattern.", "embodied_co2"));
+    appendHostCarbonCard(metrics, "Database CO2", co2.database_gco2, greenSummary.database_waste);
+    appendHostCarbonCard(metrics, "Broker CO2", co2.messaging_gco2, greenSummary.messaging_waste);
     var avoidMid = co2.avoidable.mid;
+    var avoidBase = scoredCarbon(co2);
     // Accent marks actionable savings. A zero amount has nothing to act on.
     metrics.appendChild(greenCard(
       "Avoidable",
       formatGco2(avoidMid),
-      percent(avoidMid, co2.operational_gco2) + " of operational",
+      percent(avoidMid, avoidBase) + (avoidBase > co2.operational_gco2 ? " of operational and host" : " of operational"),
       avoidMid > 0 ? "accent" : "neutral",
-      "The operational share attributable to avoidable I/O: operational carbon times avoidable ops over accounted ops. This is the number an anti-pattern fix shrinks.",
+      "The operational share attributable to avoidable I/O: operational carbon times avoidable ops over accounted ops, plus the waste share of the database and broker host terms counted in the totals. This is the number an anti-pattern fix shrinks.",
       "avoidable_co2"
     ));
     metrics.appendChild(greenCard(
@@ -3822,9 +3876,9 @@
       var dbValue = Number.isFinite(dbw.waste_gco2) ? formatGco2(dbw.waste_gco2) : formatKwh(dbw.waste_kwh);
       var dbSub = formatKwh(dbw.waste_kwh) + " of " + formatKwh(dbw.energy_kwh) + " · " +
         Math.round((dbw.sql_waste_ratio || 0) * 100) + "% SQL · " +
-        (dbw.model || "-") + (dbw.region ? " · " + dbw.region : "") +
+        (dbw.model || "-") + (dbw.region ? " · " + dbw.region : "") + placementLabel(dbw) +
         " · " + wasteScope(dbw) +
-        (dbw.model === "estimated" ? " · measured needs `[green.alumet.database]`" : "");
+        (dbw.model === "estimated" ? " · a host figure needs `[green.database_static]` or `[green.alumet.database]`" : "");
       metrics.appendChild(greenCard(
         "Database waste",
         dbValue,
@@ -3838,7 +3892,7 @@
       metrics.appendChild(greenCard(
         "Database waste",
         "-",
-        "not measured · no SQL activity, a measured reading needs `[green.alumet.database]`",
+        "not available · no SQL activity this window, or no database reading yet, see `[green.database_static]` or `[green.alumet.database]`",
         "muted",
         "Avoidable energy of SQL work: measured on the declared database cgroup (Alumet), host energy counted in the report totals, or estimated as the application-side share of the SQL spans, already inside the totals, each times the SQL waste ratio. The model tag says which.",
         "db_waste"
@@ -3852,9 +3906,9 @@
       var mwValue = Number.isFinite(mw.waste_gco2) ? formatGco2(mw.waste_gco2) : formatKwh(mw.waste_kwh);
       var mwSub = formatKwh(mw.waste_kwh) + " of " + formatKwh(mw.energy_kwh) + " · " +
         Math.round((mw.messaging_waste_ratio || 0) * 100) + "% messaging · " +
-        (mw.model || "-") + (mw.region ? " · " + mw.region : "") +
+        (mw.model || "-") + (mw.region ? " · " + mw.region : "") + placementLabel(mw) +
         " · " + wasteScope(mw) +
-        (mw.model === "estimated" ? " · measured needs `[green.alumet.broker]`" : "");
+        (mw.model === "estimated" ? " · a host figure needs `[green.broker_static]` or `[green.alumet.broker]`" : "");
       metrics.appendChild(greenCard(
         "Broker waste",
         mwValue,
@@ -3867,7 +3921,7 @@
       metrics.appendChild(greenCard(
         "Broker waste",
         "-",
-        "not measured · no broker publish spans, or no broker energy backend",
+        "not available · no broker publish spans this window, or no broker reading yet, see `[green.broker_static]` or `[green.alumet.broker]`",
         "muted",
         "Same as database waste, for publish work: broker host energy from a measured cgroup (Alumet) or a declared cluster (SPECpower), counted in the report totals, or the application-side share of the publish spans, already inside them.",
         "broker_waste"

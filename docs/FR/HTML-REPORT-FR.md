@@ -236,6 +236,28 @@ calibration fournis par l'opérateur l'ont recalée. La carte lit
 ou Electricity Maps fixe le tag de la fenêtre et retire son suffixe
 `+cal`.
 
+Quand l'énergie des hôtes d'un chiffre de base de données ou de broker
+est dans les totaux (`in_totals`), le libellé gagne
+`· plus database hosts, <model>` et `· plus broker hosts, <model>`, puis
+la répartition de `energy_kwh` :
+`= applications A kWh + database hosts D kWh + broker hosts B kWh`,
+chaque terme d'hôte seulement quand il est dans les totaux. Un chiffre
+d'hôte hors des totaux, issu d'un rapport plus ancien ou sans conversion
+carbone, n'ajoute ni l'un ni l'autre, et sa carte de gaspillage affiche
+`outside these totals`.
+
+La même fenêtre affiche alors une carte `Database CO2` et une carte
+`Broker CO2` à côté de `Embodied CO2`, chacune seulement quand
+`co2.database_gco2` ou `co2.messaging_gco2` est présent, avec le modèle
+de son chiffre. `Total CO2` les compte, et la carte `Avoidable` calcule
+son pourcentage sur l'opérationnel plus ces termes d'hôtes
+(`of operational and host`). Les cartes de gaspillage nomment le
+placement déclaré (`dedicated hosts`, `shared host`). Quand un
+sous-système n'a pas de chiffre, sa carte affiche `not available` et
+nomme ses deux sources : `[green.database_static]` ou
+`[green.alumet.database]`, `[green.broker_static]` ou
+`[green.alumet.broker]`.
+
 Un service compte comme couvert dès qu'une de ses opérations a été
 mesurée par son backend (Scaphandre, Kepler, Alumet, Redfish, ou la
 table SPECpower pour les instances cloud déclarées). La carte n'affiche
@@ -243,7 +265,9 @@ jamais le tag `energy_model` de la fenêtre comme source : sur un daemon
 où Electricity Maps est configuré, ce tag nomme la source d'intensité,
 pas celle de l'énergie. La carte est grisée avec `not computed` quand
 aucun span n'a été rattaché à une région. `analyze`, `inspect` et
-`query monitor` affichent le même libellé. Sous 920 pixels de large, la
+`query monitor` affichent le même libellé et la même répartition, et
+`analyze` et `inspect` affichent le carbone des hôtes en lignes
+`Database:` et `Broker:` à côté de `Transport:`. Sous 920 pixels de large, la
 grille Carbon passe à deux colonnes, et la dernière carte occupe les
 deux quand le nombre de cartes est impair.
 

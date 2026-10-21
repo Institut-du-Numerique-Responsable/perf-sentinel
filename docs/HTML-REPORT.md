@@ -220,13 +220,34 @@ factors rescaled it. The card reads `green_summary.energy_calibrated`,
 which holds even when a measured backend or Electricity Maps sets the
 window tag and drops its `+cal` suffix.
 
+When the host energy of a database or broker figure is inside the totals
+(`in_totals`), the label gains `· plus database hosts, <model>` and
+`· plus broker hosts, <model>`, then the split of `energy_kwh`:
+`= applications A kWh + database hosts D kWh + broker hosts B kWh`, each
+host term only when it is in the totals. A host figure outside the
+totals, from an older report or without a carbon conversion, adds
+neither, and its waste card reads `outside these totals`.
+
+The same window then shows a `Database CO2` and a `Broker CO2` card next
+to `Embodied CO2`, each only when `co2.database_gco2` or
+`co2.messaging_gco2` is present, with the model of its figure.
+`Total CO2` counts them, and the `Avoidable` card takes its percentage over
+operational plus these host terms (`of operational and host`). The waste
+cards name the declared placement (`dedicated hosts`, `shared host`).
+When a subsystem has no figure, its card says `not available` and names
+both of its sources: `[green.database_static]` or
+`[green.alumet.database]`, `[green.broker_static]` or
+`[green.alumet.broker]`.
+
 A service counts as covered once any of its operations was measured by
 its backend (Scaphandre, Kepler, Alumet, Redfish, or the SPECpower table
 for declared cloud instances). The card never shows the window
 `energy_model` tag as the source: on a daemon with Electricity Maps
 configured, that tag names the intensity source, not the energy one.
 The card is greyed out with `not computed` when no span resolved to a
-region. `analyze`, `inspect` and `query monitor` print the same label.
+region. `analyze`, `inspect` and `query monitor` print the same label
+and split, and `analyze` and `inspect` print the host carbon as
+`Database:` and `Broker:` lines next to `Transport:`.
 Below 920 pixels wide the Carbon grid drops to two columns, and the
 last card spans both when the card count is odd.
 

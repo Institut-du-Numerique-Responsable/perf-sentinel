@@ -1269,10 +1269,13 @@ impl App {
         // Electricity Maps daemon (`query inspect`) that tag is an
         // intensity source. The label only keeps `[A-Za-z0-9_+-]` tags.
         if let Some(src) = gs.energy_source_label() {
+            let split = gs
+                .energy_split_label()
+                .map_or_else(String::new, |split| format!(" = {split}"));
             lines.push(Line::from(vec![
                 Span::styled("Energy: ".to_string(), dim),
                 Span::raw(format!("{:.6} kWh", gs.energy_kwh)),
-                Span::styled(format!("  ({src})"), dim),
+                Span::styled(format!("  ({src}){split}"), dim),
             ]));
         }
         push_carbon_lines(&mut lines, gs, summary.analysis.traces_analyzed, dim);
@@ -1447,6 +1450,11 @@ fn push_carbon_lines(
             "Transport: {transport:.6} g (cross-region network bytes)"
         ))));
     }
+    for (label, gco2, detail) in crate::render::host_carbon_terms(carbon, gs) {
+        lines.push(Line::from(Span::raw(format!(
+            "{label} {gco2:.6} g ({detail})"
+        ))));
+    }
 }
 
 /// The quality-gate verdict and its per-rule lines. Split out of
@@ -1501,29 +1509,32 @@ fn push_quality_gate_lines(lines: &mut Vec<Line<'static>>, gate: &QualityGate, d
 /// the figure is absent. Split out of `build_analyze_lines` to keep that
 /// function under the cognitive-complexity gate.
 fn push_subsystem_waste_lines(lines: &mut Vec<Line<'static>>, gs: &GreenSummary, dim: Style) {
-    match &gs.database_waste {
-        Some(db) => lines.push(Line::from(Span::raw(format!(
-            "Database waste: {:.6} kWh of {:.6} kWh (model {})",
-            db.waste_kwh,
-            db.energy_kwh,
-            sanitize_for_terminal(&db.model),
-        )))),
-        None => lines.push(Line::from(Span::styled(
-            "Database waste: not measured (no SQL activity, a measured reading needs [green.alumet.database])",
-            dim,
-        ))),
-    }
-    match &gs.messaging_waste {
-        Some(mw) => lines.push(Line::from(Span::raw(format!(
-            "Broker waste: {:.6} kWh of {:.6} kWh (model {})",
-            mw.waste_kwh,
-            mw.energy_kwh,
-            sanitize_for_terminal(&mw.model),
-        )))),
-        None => lines.push(Line::from(Span::styled(
-            "Broker waste: not measured (no broker publish spans, or no broker energy backend)",
-            dim,
-        ))),
+    use sentinel_core::report::{DATABASE_WASTE_ABSENT, MESSAGING_WASTE_ABSENT};
+    let figures = [
+        (
+            "Database waste:",
+            gs.database_waste
+                .as_ref()
+                .map(|w| (w.waste_kwh, w.energy_kwh, w.model.as_str(), w.in_totals)),
+            DATABASE_WASTE_ABSENT,
+        ),
+        (
+            "Broker waste:",
+            gs.messaging_waste
+                .as_ref()
+                .map(|w| (w.waste_kwh, w.energy_kwh, w.model.as_str(), w.in_totals)),
+            MESSAGING_WASTE_ABSENT,
+        ),
+    ];
+    for (label, figure, absent) in figures {
+        lines.push(match figure {
+            Some((waste_kwh, energy_kwh, model, in_totals)) => Line::from(Span::raw(format!(
+                "{label} {waste_kwh:.6} kWh of {energy_kwh:.6} kWh (model {}) [{}]",
+                sanitize_for_terminal(model),
+                sentinel_core::report::waste_scope_label(model, in_totals),
+            ))),
+            None => Line::from(Span::styled(format!("{label} {absent}"), dim)),
+        });
     }
 }
 

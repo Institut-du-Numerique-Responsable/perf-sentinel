@@ -44,6 +44,7 @@ use crate::score::carbon::{CO2_MODEL_CAL_SUFFIX, CarbonReport, RegionBreakdown, 
 use crate::score::host_static::HostPlacement;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 /// Read `detection_config` without ever failing the enclosing report: a
 /// shape this binary cannot parse becomes `None`.
@@ -517,6 +518,13 @@ pub fn waste_scope_label(model: &str, in_totals: bool) -> &'static str {
     }
 }
 
+/// Why a window has no database waste figure, for the text report and
+/// the TUI (the HTML dashboard words its muted card the same way).
+pub const DATABASE_WASTE_ABSENT: &str = "not available: no SQL activity this window, or no database reading yet, see [green.database_static] or [green.alumet.database]";
+
+/// Broker twin of [`DATABASE_WASTE_ABSENT`].
+pub const MESSAGING_WASTE_ABSENT: &str = "not available: no broker publish spans this window, or no broker reading yet, see [green.broker_static] or [green.alumet.broker]";
+
 /// Database window energy × the SQL-only waste ratio. On the measured
 /// and declared paths the host energy is inside the report totals when
 /// `in_totals` is set, beside them otherwise. On the estimated path it
@@ -732,11 +740,57 @@ impl GreenSummary {
     /// daemons it holds an intensity tag, and `io_proxy_vN` names the
     /// intensity tier. The HTML dashboard's `energySourceLabel` mirrors
     /// these rules and strings.
+    ///
+    /// Each subsystem whose host energy is inside `energy_kwh` adds a
+    /// `" · plus database hosts, <tag>"` (or broker) suffix.
     #[must_use]
     pub fn energy_source_label(&self) -> Option<String> {
         if self.energy_kwh.is_nan() || self.energy_kwh <= 0.0 {
             return None;
         }
+        let mut label = self.application_source_label();
+        for (noun, model, _) in self.hosts_in_totals() {
+            let tag = display_tag(model).unwrap_or("unknown");
+            let _ = write!(label, " \u{b7} plus {noun}, {tag}");
+        }
+        Some(label)
+    }
+
+    /// `energy_kwh` split into its terms, `"applications A kWh + database
+    /// hosts D kWh + broker hosts B kWh"`, the host terms only when inside
+    /// the totals. `None` when no host energy is in them. The HTML
+    /// dashboard's `energySplitLabel` mirrors it.
+    #[must_use]
+    pub fn energy_split_label(&self) -> Option<String> {
+        let hosts = self.hosts_in_totals();
+        if hosts.is_empty() {
+            return None;
+        }
+        let mut label = format!(
+            "applications {} kWh",
+            fmt_kwh(self.application_energy_kwh())
+        );
+        for (noun, _, kwh) in hosts {
+            let _ = write!(label, " + {noun} {} kWh", fmt_kwh(kwh));
+        }
+        Some(label)
+    }
+
+    /// `(noun, model, kWh)` of each host figure inside the totals, database
+    /// first.
+    fn hosts_in_totals(&self) -> Vec<(&'static str, &str, f64)> {
+        let db = self
+            .database_in_totals()
+            .map(|w| ("database hosts", w.model.as_str(), w.energy_kwh));
+        let mw = self
+            .messaging_in_totals()
+            .map(|w| ("broker hosts", w.model.as_str(), w.energy_kwh));
+        db.into_iter().chain(mw).collect()
+    }
+
+    /// The application part of [`Self::energy_source_label`], for a
+    /// window with energy.
+    fn application_source_label(&self) -> String {
         let ratios = &self.per_service_measured_ratio;
         let covered: Vec<&String> = ratios
             .iter()
@@ -752,7 +806,7 @@ impl GreenSummary {
                 .any(|m| m.ends_with(CO2_MODEL_CAL_SUFFIX));
         let calibrated = if calibrated { " \u{b7} calibrated" } else { "" };
         if covered.is_empty() {
-            return Some(format!("modeled from I/O counts{calibrated}"));
+            return format!("modeled from I/O counts{calibrated}");
         }
         let tags: BTreeSet<&str> = covered
             .iter()
@@ -765,13 +819,13 @@ impl GreenSummary {
             tags.into_iter().collect::<Vec<_>>().join(", ")
         };
         if ratios.values().all(|r| *r >= 1.0) {
-            return Some(format!("source {tags}"));
+            return format!("source {tags}");
         }
-        Some(format!(
+        format!(
             "source {tags} on {} of {} services \u{b7} rest modeled from I/O counts{calibrated}",
             covered.len(),
             ratios.len()
-        ))
+        )
     }
 
     /// Energy source of one service for display: its tag, through the
@@ -793,6 +847,18 @@ impl GreenSummary {
                 .and_then(|tag| display_tag(tag))
                 .unwrap_or("unknown"),
         )
+    }
+}
+
+/// kWh for a label: six decimals, scientific below 1e-5 so a tiny host
+/// term never reads as zero (the CLI's `fmt_tiny` rule).
+fn fmt_kwh(v: f64) -> String {
+    // Normalize negative zero so a floored term never renders "-0.000000".
+    let v = if v == 0.0 { 0.0 } else { v };
+    if v == 0.0 || v >= 1e-5 {
+        format!("{v:.6}")
+    } else {
+        format!("{v:.3e}")
     }
 }
 
@@ -1279,6 +1345,58 @@ mod tests {
         let mut gs = waste_summary(true, true);
         gs.energy_kwh = 2.0;
         assert!(gs.application_energy_kwh().abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn energy_labels_name_only_in_total_host_terms() {
+        // Legacy or carbon-less host figures stay outside: no suffix, no split.
+        let none = waste_summary(false, false);
+        assert_eq!(
+            none.energy_source_label().as_deref(),
+            Some("modeled from I/O counts")
+        );
+        assert_eq!(none.energy_split_label(), None);
+
+        let db_only = waste_summary(true, false);
+        assert_eq!(
+            db_only.energy_source_label().as_deref(),
+            Some("modeled from I/O counts \u{b7} plus database hosts, alumet_rapl")
+        );
+        assert_eq!(
+            db_only.energy_split_label().as_deref(),
+            Some("applications 1.000000 kWh + database hosts 2.000000 kWh")
+        );
+
+        let mut both = waste_summary(true, true);
+        both.messaging_waste.as_mut().unwrap().model = "broker\u{1b}[2J".to_string();
+        assert_eq!(
+            both.energy_source_label().as_deref(),
+            Some(
+                "modeled from I/O counts \u{b7} plus database hosts, alumet_rapl \u{b7} plus broker hosts, unknown"
+            )
+        );
+        assert_eq!(
+            both.energy_split_label().as_deref(),
+            Some(
+                "applications 0.500000 kWh + database hosts 2.000000 kWh + broker hosts 0.500000 kWh"
+            )
+        );
+
+        let broker_only = waste_summary(false, true);
+        let split = broker_only.energy_split_label().unwrap();
+        assert!(split.starts_with("applications 2.500000 kWh + broker hosts"));
+        assert!(!split.contains("database"), "{split}");
+    }
+
+    #[test]
+    fn split_label_keeps_a_tiny_host_term_visible() {
+        let mut gs = waste_summary(true, false);
+        gs.database_waste.as_mut().unwrap().energy_kwh = 3e-7;
+        assert!(
+            gs.energy_split_label()
+                .unwrap()
+                .ends_with("database hosts 3.000e-7 kWh")
+        );
     }
 
     #[test]

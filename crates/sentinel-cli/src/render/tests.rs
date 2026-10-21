@@ -1097,6 +1097,82 @@ fn energy_line_names_the_energy_source() {
     );
 }
 
+/// A summary with a declared database figure and a measured broker one,
+/// each in the totals or not.
+fn host_summary(db_in: bool, mw_in: bool) -> sentinel_core::report::GreenSummary {
+    let db_gco2 = db_in.then_some(0.25);
+    let mw_gco2 = mw_in.then_some(0.125);
+    let gs: sentinel_core::report::GreenSummary = serde_json::from_value(serde_json::json!({
+        "total_io_ops": 10, "avoidable_io_ops": 0, "io_waste_ratio": 0.0,
+        "io_waste_ratio_band": "healthy", "top_offenders": [],
+        "energy_kwh": 0.5, "per_service_measured_ratio": {"a": 0.0},
+        "co2": {
+            "total": {"low": 0.5, "mid": 1.0, "high": 2.0, "model": "io_proxy_v3", "methodology": "sci_v1"},
+            "avoidable": {"low": 0.0, "mid": 0.0, "high": 0.0, "model": "io_proxy_v3", "methodology": "sci_v1"},
+            "operational_gco2": 0.5, "embodied_gco2": 0.0,
+            "database_gco2": db_gco2,
+            "messaging_gco2": mw_gco2
+        },
+        "database_waste": {"energy_kwh": 0.1, "waste_kwh": 0.0, "sql_waste_ratio": 0.0,
+            "model": "database_specpower", "in_totals": db_in},
+        "messaging_waste": {"energy_kwh": 0.05, "waste_kwh": 0.0, "messaging_waste_ratio": 0.0,
+            "model": "alumet\u{1b}[2J", "in_totals": mw_in}
+    }))
+    .expect("summary");
+    gs
+}
+
+#[test]
+fn energy_line_splits_only_in_total_hosts() {
+    let outside = host_summary(false, false);
+    assert_eq!(
+        format_energy_line(&outside, "", ""),
+        "  Energy:            0.500000 kWh (modeled from I/O counts)"
+    );
+    assert_eq!(
+        host_carbon_terms(outside.co2.as_ref().unwrap(), &outside),
+        Vec::new()
+    );
+
+    let db = host_summary(true, false);
+    assert_eq!(
+        format_energy_line(&db, "", ""),
+        "  Energy:            0.500000 kWh (modeled from I/O counts \u{b7} plus database hosts, database_specpower) = applications 0.400000 kWh + database hosts 0.100000 kWh"
+    );
+    // The database line is in, the broker figure stays outside.
+    assert!(
+        format_messaging_waste_line(db.messaging_waste.as_ref().unwrap())
+            .contains("[outside these totals]")
+    );
+}
+
+#[test]
+fn host_carbon_lines_name_their_model_sanitized() {
+    let both = host_summary(true, true);
+    let terms = host_carbon_terms(both.co2.as_ref().unwrap(), &both);
+    assert_eq!(terms.len(), 2);
+    assert_eq!(
+        (terms[0].0, terms[0].1, terms[0].2.as_str()),
+        ("Database:", 0.25, "host energy, model database_specpower")
+    );
+    assert_eq!(terms[1].0, "Broker:");
+    assert!(!terms[1].2.contains('\u{1b}'), "{}", terms[1].2);
+    // A carbon term without its figure keeps the bare scope.
+    let mut bare = host_summary(true, false);
+    bare.database_waste = None;
+    let terms = host_carbon_terms(bare.co2.as_ref().unwrap(), &bare);
+    assert_eq!(terms[0].2, "host energy");
+    print_green_summary(&both, 1, false);
+}
+
+#[test]
+fn absent_waste_messages_name_both_sources() {
+    use sentinel_core::report::{DATABASE_WASTE_ABSENT, MESSAGING_WASTE_ABSENT};
+    assert!(DATABASE_WASTE_ABSENT.contains("[green.database_static] or [green.alumet.database]"));
+    assert!(MESSAGING_WASTE_ABSENT.contains("[green.broker_static] or [green.alumet.broker]"));
+    print_green_summary(&sentinel_core::report::GreenSummary::disabled(0), 1, false);
+}
+
 #[test]
 fn duration_format_covers_all_branches() {
     assert_eq!(format_duration_compact(0), "0ms");

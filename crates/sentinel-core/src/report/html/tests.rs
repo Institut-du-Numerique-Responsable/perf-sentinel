@@ -218,18 +218,43 @@ fn green_panel_carries_database_waste_card() {
 }
 
 #[test]
+fn green_panel_shows_the_application_and_host_split() {
+    let report = minimal_report(vec![]);
+    let (html, _) = render(&report, &[], &opts("traces.json", None));
+    for needle in [
+        "function energySplitLabel",
+        "\" · plus \" + h.noun",
+        "[\"database hosts\", gs.database_waste], [\"broker hosts\", gs.messaging_waste]",
+        "appendHostCarbonCard(metrics, \"Database CO2\", co2.database_gco2",
+        "appendHostCarbonCard(metrics, \"Broker CO2\", co2.messaging_gco2",
+        "[co2.database_gco2, co2.messaging_gco2].filter(Number.isFinite)",
+        "placementLabel(dbw)",
+        "placementLabel(mw)",
+        "a host figure needs `[green.database_static]` or `[green.alumet.database]`",
+        "a host figure needs `[green.broker_static]` or `[green.alumet.broker]`",
+        "plus the database and broker host terms when their host energy is in the totals",
+    ] {
+        assert!(html.contains(needle), "missing: {needle}");
+    }
+}
+
+#[test]
 fn green_panel_greys_out_absent_figures_instead_of_hiding_them() {
     let report = minimal_report(vec![]);
     let (html, _) = render(&report, &[], &opts("traces.json", None));
     // An absent figure renders as a muted card naming the cause, and the
     // Carbon tab is registered even when green scoring is disabled.
     assert!(
-        html.contains("a measured reading needs `[green.alumet.database]`"),
-        "absent database figure must say what produces one"
+        html.contains(
+            "no SQL activity this window, or no database reading yet, see `[green.database_static]` or `[green.alumet.database]`"
+        ),
+        "absent database figure must name both sources"
     );
     assert!(
-        html.contains("no broker publish spans, or no broker energy backend"),
-        "absent broker figure must name its causes"
+        html.contains(
+            "no broker publish spans this window, or no broker reading yet, see `[green.broker_static]` or `[green.alumet.broker]`"
+        ),
+        "absent broker figure must name both sources"
     );
     assert!(
         html.contains("GreenOps scoring is off ([green] enabled = false)"),

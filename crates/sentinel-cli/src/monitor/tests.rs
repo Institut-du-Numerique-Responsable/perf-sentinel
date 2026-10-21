@@ -342,6 +342,24 @@ fn energy_waste_line_in_the_totals_says_so() {
 }
 
 #[test]
+fn window_energy_splits_only_in_total_hosts() {
+    let mut snapshot = snapshot_with_energy_mix();
+    let text = line_text(&build_energy_lines(Some(&snapshot)));
+    assert!(!text.contains("applications"), "outside figures: {text}");
+    assert!(!text.contains("plus database hosts"), "got: {text}");
+    let db = snapshot.green_summary.database_waste.as_mut().unwrap();
+    db.in_totals = true;
+    let text = line_text(&build_energy_lines(Some(&snapshot)));
+    assert!(
+        text.contains(
+            "rest modeled from I/O counts \u{b7} plus database hosts, alumet_rapl   = applications 1.590000 kWh + database hosts 0.010000 kWh"
+        ),
+        "got: {text}"
+    );
+    assert!(!text.contains("broker hosts"), "got: {text}");
+}
+
+#[test]
 fn energy_renders_broker_waste_line() {
     let snapshot = snapshot_with_energy_mix();
     let text = line_text(&build_energy_lines(Some(&snapshot)));
