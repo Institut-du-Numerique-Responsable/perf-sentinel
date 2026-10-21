@@ -5,7 +5,9 @@
 //! CPU query, interpolates watts via the `SPECpower` table, and
 //! publishes per-service energy-per-op coefficients to the shared
 //! [`CloudEnergyState`]. Services reading one single-series query with
-//! one power envelope share that node's watts by op count.
+//! one power envelope share that node's watts by op count. A declared
+//! database or broker on hosts of its own with a `cpu_query` is a
+//! [`HostProbe`], billed into its own state on the same ticks.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -19,7 +21,9 @@ use crate::score::ops_snapshot_diff::OpsSnapshotDiff;
 use super::config::CloudEnergyConfig;
 use super::state::{CloudEnergyState, ServiceEnergy, monotonic_ms};
 use super::table;
+use crate::score::alumet::DbEnergyState;
 use crate::score::energy_state::split_by_ops;
+use crate::score::host_static::{HostPlacement, StaticHostsConfig, Subsystem};
 
 /// Number of consecutive scrape failures before a diagnostic warning.
 const FAILURE_THRESHOLD: u32 = 3;
@@ -46,6 +50,10 @@ pub(super) enum CloudScraperError {
     EmptyResult { query: String },
     #[error("Prometheus query returned error status: {0}")]
     QueryError(String),
+    /// A host CPU query must name one reading: the average CPU of the
+    /// declared hosts.
+    #[error("host CPU query '{query}' returned {count} series, expected one")]
+    MultipleSeries { query: String, count: usize },
 }
 
 // ---------------------------------------------------------------
@@ -244,10 +252,160 @@ fn warn_multi_series(group: &CloudGroup, count: usize, warned: &mut HashSet<Stri
 }
 
 // ---------------------------------------------------------------
+// Host CPU probes
+// ---------------------------------------------------------------
+
+/// The CPU query of a declared database or broker on hosts of its own,
+/// priced on the `SPECpower` envelope of its instance type and billed
+/// into `state` each tick.
+#[derive(Debug)]
+pub struct HostProbe {
+    pub subsystem: Subsystem,
+    /// Trimmed at load.
+    pub query: String,
+    pub nodes: u32,
+    pub idle_watts: f64,
+    pub max_watts: f64,
+    /// Read by the event loop as the subsystem's live source.
+    pub state: Arc<DbEnergyState>,
+    last_success_ms: u64,
+    warned: bool,
+}
+
+impl HostProbe {
+    /// A probe for a dedicated declaration with a `cpu_query`, `nodes`
+    /// and an instance type that resolves to an envelope. `None` for any
+    /// other declaration.
+    #[must_use]
+    pub fn dedicated(subsystem: Subsystem, cfg: &StaticHostsConfig) -> Option<Self> {
+        if cfg.placement != HostPlacement::Dedicated {
+            return None;
+        }
+        let (idle_watts, max_watts) = cfg.node_power()?;
+        Some(Self {
+            subsystem,
+            query: cfg.cpu_query.clone()?,
+            nodes: cfg.nodes?,
+            idle_watts,
+            max_watts,
+            state: DbEnergyState::new(),
+            last_success_ms: monotonic_ms(),
+            warned: false,
+        })
+    }
+
+    fn age_gauge<'m>(&self, metrics: &'m MetricsState) -> &'m prometheus::Gauge {
+        match self.subsystem {
+            Subsystem::Database => &metrics.database_cpu_last_scrape_age_seconds,
+            Subsystem::Broker => &metrics.broker_cpu_last_scrape_age_seconds,
+        }
+    }
+
+    /// Advance the age gauge and warn on the first failure of a run of
+    /// failures, debug after.
+    fn record_failure(&mut self, metrics: &MetricsState, reason: &str) {
+        #[allow(clippy::cast_precision_loss)]
+        let age_secs = monotonic_ms().saturating_sub(self.last_success_ms) as f64 / 1000.0;
+        self.age_gauge(metrics).set(age_secs);
+        if self.warned {
+            tracing::debug!(query = %self.query, reason, "Host CPU scrape failed");
+            return;
+        }
+        tracing::warn!(
+            subsystem = self.subsystem.noun(),
+            query = %self.query,
+            reason,
+            "Host CPU scrape failed, so no host energy is billed from it this tick. \
+             The query must return one series, the average CPU of the declared hosts. \
+             Subsequent failures at debug level"
+        );
+        self.warned = true;
+    }
+}
+
+/// Fetch one probe's CPU percent. A response with several series, an
+/// error or a non-finite value is a failure.
+async fn fetch_host_cpu(
+    probe: &mut HostProbe,
+    client: &HttpClient,
+    uri: &hyper::Uri,
+    auth: Option<&AuthHeader>,
+    metrics: &MetricsState,
+) -> Option<f64> {
+    let fetched = fetch_cpu_percent(client, uri, &probe.query, auth).await;
+    match single_series(fetched, &probe.query) {
+        Ok(cpu) if cpu.is_finite() => {
+            probe.last_success_ms = monotonic_ms();
+            probe.warned = false;
+            probe.age_gauge(metrics).set(0.0);
+            Some(cpu)
+        }
+        Ok(cpu) => {
+            probe.record_failure(metrics, &format!("non-finite CPU% {cpu}"));
+            None
+        }
+        Err(e) => {
+            probe.record_failure(metrics, &e.to_string());
+            None
+        }
+    }
+}
+
+/// A host reading is one series: several fail with
+/// [`CloudScraperError::MultipleSeries`].
+fn single_series(
+    fetched: Result<Reading, CloudScraperError>,
+    query: &str,
+) -> Result<f64, CloudScraperError> {
+    match fetched {
+        Ok((_, count)) if count > 1 => Err(CloudScraperError::MultipleSeries {
+            query: query.to_string(),
+            count,
+        }),
+        other => other.map(|(cpu, _)| cpu),
+    }
+}
+
+/// Fetch every probe in order, one reading per probe.
+async fn fetch_host_probes(
+    probes: &mut [HostProbe],
+    client: &HttpClient,
+    uri: &hyper::Uri,
+    auth: Option<&AuthHeader>,
+    metrics: &MetricsState,
+) -> Vec<Option<f64>> {
+    let mut readings = Vec::with_capacity(probes.len());
+    for probe in probes {
+        readings.push(fetch_host_cpu(probe, client, uri, auth, metrics).await);
+    }
+    readings
+}
+
+/// Bill each probe with a reading: `nodes × interpolate(idle, max, cpu)`
+/// watts over the interval.
+fn bill_host_probes(
+    probes: &[HostProbe],
+    probe_cpu: &[Option<f64>],
+    interval_secs: f64,
+    now_ms: u64,
+) {
+    for (probe, cpu) in probes.iter().zip(probe_cpu) {
+        let Some(cpu) = *cpu else { continue };
+        let watts = f64::from(probe.nodes)
+            * table::interpolate_watts(probe.idle_watts, probe.max_watts, cpu);
+        probe
+            .state
+            .add_window_kwh(watts * interval_secs / 3_600_000.0, now_ms);
+    }
+}
+
+// ---------------------------------------------------------------
 // Scraper loop
 // ---------------------------------------------------------------
 
-/// Spawn the periodic cloud energy scraper task.
+/// Spawn the periodic cloud energy scraper task. `probes` are the host
+/// CPU probes, database first, fetched and billed after the service
+/// queries on every tick.
 ///
 /// Returns a `JoinHandle` that the daemon captures and aborts on
 /// Ctrl-C shutdown.
@@ -255,10 +413,11 @@ fn warn_multi_series(group: &CloudGroup, count: usize, warned: &mut HashSet<Stri
 pub fn spawn_cloud_scraper(
     cfg: CloudEnergyConfig,
     state: Arc<CloudEnergyState>,
+    probes: Vec<HostProbe>,
     metrics: Arc<MetricsState>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        run_cloud_scraper_loop(cfg, state, metrics).await;
+        run_cloud_scraper_loop(cfg, state, probes, metrics).await;
     })
 }
 
@@ -266,6 +425,7 @@ pub fn spawn_cloud_scraper(
 async fn run_cloud_scraper_loop(
     cfg: CloudEnergyConfig,
     state: Arc<CloudEnergyState>,
+    mut probes: Vec<HostProbe>,
     metrics: Arc<MetricsState>,
 ) {
     use std::str::FromStr;
@@ -323,6 +483,7 @@ async fn run_cloud_scraper_loop(
         scrape_interval_secs = cfg.scrape_interval.as_secs(),
         services = cfg.services.len(),
         queries = groups.len(),
+        host_probes = probes.len(),
         "Cloud energy scraper started"
     );
 
@@ -358,11 +519,13 @@ async fn run_cloud_scraper_loop(
         let cpu_readings = collect_readings(set, groups.len()).await;
         warn_multi_series_groups(&groups, &cpu_readings, &mut multi_series_warned);
         let any_success = !cpu_readings.is_empty();
+        let probe_cpu =
+            fetch_host_probes(&mut probes, &client, &uri, parsed_auth.as_deref(), &metrics).await;
+        let now_ms = monotonic_ms();
 
         if any_success {
             first_failure_warned = false;
             consecutive_failures = 0;
-            let now_ms = monotonic_ms();
             apply_cloud_scrape(
                 &state,
                 &groups,
@@ -393,6 +556,9 @@ async fn run_cloud_scraper_loop(
                 consecutive_failures,
             );
         }
+        // Whether or not a service reading landed: the hosts are billed on
+        // their own query.
+        bill_host_probes(&probes, &probe_cpu, interval_secs, now_ms);
         warn_if_slow(&cfg, tick_start.elapsed());
     }
 }
@@ -854,6 +1020,129 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
+    // Host CPU probes
+    // ------------------------------------------------------------------
+
+    fn probe(nodes: u32, idle_watts: f64, max_watts: f64) -> HostProbe {
+        HostProbe {
+            subsystem: Subsystem::Database,
+            query: "avg(db_cpu)".to_string(),
+            nodes,
+            idle_watts,
+            max_watts,
+            state: DbEnergyState::new(),
+            last_success_ms: 0,
+            warned: false,
+        }
+    }
+
+    fn hosts(placement: HostPlacement, cpu_query: Option<&str>) -> StaticHostsConfig {
+        StaticHostsConfig {
+            placement,
+            nodes: Some(2),
+            instance_type: Some("m5.large".to_string()),
+            region: None,
+            cpu_query: cpu_query.map(str::to_string),
+            shared_with: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_probe_is_built_for_a_dedicated_cpu_query_only() {
+        let p = HostProbe::dedicated(
+            Subsystem::Broker,
+            &hosts(HostPlacement::Dedicated, Some("avg(cpu)")),
+        )
+        .expect("dedicated with cpu_query");
+        let envelope = table::lookup_instance_power("m5.large", "generic");
+        assert_eq!((p.idle_watts, p.max_watts), envelope);
+        assert_eq!((p.nodes, p.query.as_str()), (2, "avg(cpu)"));
+        let without = hosts(HostPlacement::Dedicated, None);
+        assert!(HostProbe::dedicated(Subsystem::Broker, &without).is_none());
+        let shared = hosts(HostPlacement::Shared, Some("avg(cpu)"));
+        assert!(HostProbe::dedicated(Subsystem::Broker, &shared).is_none());
+    }
+
+    #[test]
+    fn a_dedicated_probe_bills_nodes_times_the_interpolated_watts() {
+        let probes = [probe(2, 10.0, 50.0)];
+        bill_host_probes(&probes, &[Some(25.0)], INTERVAL, 1_000);
+        // 25% on 10/50 W is 20 W per node, 40 W for two.
+        let kwh = probes[0].state.take_window_kwh(1_000, 45_000).unwrap();
+        let expected = 40.0 * INTERVAL / 3.6e6;
+        assert!((kwh - expected).abs() <= expected * 1e-12, "{kwh} kWh");
+        assert!(probes[0].state.has_recent_sample(1_000, 45_000));
+    }
+
+    #[test]
+    fn a_probe_without_reading_bills_nothing() {
+        let probes = [probe(2, 10.0, 50.0)];
+        bill_host_probes(&probes, &[None], INTERVAL, 1_000);
+        assert_eq!(probes[0].state.take_window_kwh(1_000, 45_000), None);
+        assert!(!probes[0].state.has_recent_sample(1_000, 45_000));
+    }
+
+    #[test]
+    fn a_host_reading_must_hold_one_series() {
+        assert_matches!(
+            single_series(Ok((25.0, 2)), "q"),
+            Err(CloudScraperError::MultipleSeries { count: 2, .. })
+        );
+        assert!((single_series(Ok((25.0, 1)), "q").unwrap() - 25.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_dedicated_probe_leaves_the_application_rows_alone() {
+        let cfg = config_with(&[
+            ("a", manual(10.0, 50.0, Some("node_cpu"))),
+            ("b", manual(10.0, 50.0, Some("node_cpu"))),
+        ]);
+        let state = CloudEnergyState::new();
+        let snap = scrape(&cfg, &state, 50.0, 1, &ops(&[("a", 100), ("b", 300)]));
+        bill_host_probes(&[probe(2, 10.0, 50.0)], &[Some(90.0)], INTERVAL, 100);
+        assert_eq!(state.snapshot(200, 500), snap);
+        let total = watts_of(snap["a"], 100) + watts_of(snap["b"], 300);
+        assert!((total - 30.0).abs() <= 30.0 * 1e-9, "node watts {total}");
+    }
+
+    #[tokio::test]
+    async fn a_two_series_probe_response_fails_and_bills_nothing() {
+        let body = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{"instance":"a"},"value":[1.0,"10"]},{"metric":{"instance":"b"},"value":[1.0,"90"]}]}}"#;
+        let (endpoint, server) = spawn_one_shot_server(http_200_json(body)).await;
+        let client = http_client::build_client();
+        let uri = <hyper::Uri as std::str::FromStr>::from_str(&endpoint).unwrap();
+        let metrics = MetricsState::new();
+        let mut probes = [probe(2, 10.0, 50.0)];
+        let cpu = fetch_host_probes(&mut probes, &client, &uri, None, &metrics).await;
+        assert_eq!(cpu, vec![None]);
+        assert!(probes[0].warned, "the first failure warns");
+        bill_host_probes(&probes, &cpu, INTERVAL, monotonic_ms());
+        assert_eq!(
+            probes[0].state.take_window_kwh(monotonic_ms(), 45_000),
+            None
+        );
+        assert!(metrics.database_cpu_last_scrape_age_seconds.get() > 0.0);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_one_series_probe_response_resets_its_age_gauge() {
+        let body = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1.0,"25"]}]}}"#;
+        let (endpoint, server) = spawn_one_shot_server(http_200_json(body)).await;
+        let client = http_client::build_client();
+        let uri = <hyper::Uri as std::str::FromStr>::from_str(&endpoint).unwrap();
+        let metrics = MetricsState::new();
+        metrics.database_cpu_last_scrape_age_seconds.set(30.0);
+        let mut probes = [probe(2, 10.0, 50.0)];
+        probes[0].warned = true;
+        let cpu = fetch_host_probes(&mut probes, &client, &uri, None, &metrics).await;
+        assert_eq!(cpu, vec![Some(25.0)]);
+        assert!(!probes[0].warned, "a success re-arms the warning");
+        assert!(metrics.database_cpu_last_scrape_age_seconds.get().abs() < 1e-12);
+        server.await.unwrap();
+    }
+
+    // ------------------------------------------------------------------
     // warn_if_slow
     // ------------------------------------------------------------------
 
@@ -1023,7 +1312,7 @@ mod tests {
         };
         let state = CloudEnergyState::new();
         let metrics = Arc::new(MetricsState::new());
-        let handle = spawn_cloud_scraper(cfg, state, metrics);
+        let handle = spawn_cloud_scraper(cfg, state, Vec::new(), metrics);
         // The task returns almost immediately on the InvalidUri branch.
         tokio::time::timeout(Duration::from_secs(2), handle)
             .await
@@ -1048,7 +1337,7 @@ mod tests {
         };
         let state = CloudEnergyState::new();
         let metrics = Arc::new(MetricsState::new());
-        let handle = spawn_cloud_scraper(cfg, state, metrics);
+        let handle = spawn_cloud_scraper(cfg, state, Vec::new(), metrics);
         // Let a couple of ticks fire.
         tokio::time::sleep(Duration::from_millis(180)).await;
         handle.abort();
@@ -1080,7 +1369,7 @@ mod tests {
         };
         let state = CloudEnergyState::new();
         let metrics = Arc::new(MetricsState::new());
-        let handle = spawn_cloud_scraper(cfg, state.clone(), metrics.clone());
+        let handle = spawn_cloud_scraper(cfg, state.clone(), Vec::new(), metrics.clone());
         // Enough ticks to step past the FAILURE_THRESHOLD.
         tokio::time::sleep(Duration::from_millis(220)).await;
         handle.abort();

@@ -324,7 +324,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     let scaphandre = setup_scaphandre_scraper(&config, &metrics);
     let kepler = setup_kepler_scraper(&config, &metrics);
     let redfish = setup_redfish_scraper(&config, &metrics);
-    let cloud = setup_cloud_scraper(&config, &metrics);
+    let (cloud, host_cpu) = setup_cloud_scraper(&config, &metrics);
     let emaps = setup_emaps_scraper(&config);
     let grid_feeds = setup_grid_feed_scrapers(&config);
 
@@ -352,16 +352,28 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     let energy_sources = EnergySources {
         base_carbon_ctx,
         alumet_state: alumet.state.as_deref(),
+        // D6/B6 refuse a cpu_query next to the Alumet workload, so at
+        // most one live state exists per subsystem.
         database: host_sources(
             green_on,
-            alumet_db.as_deref(),
-            alumet.staleness_ms,
+            alumet_db
+                .as_deref()
+                .map(|s| (s, alumet.staleness_ms))
+                .or(host_cpu
+                    .database
+                    .as_deref()
+                    .map(|s| (s, host_cpu.staleness_ms))),
             database_ceiling.as_ref(),
         ),
         broker: host_sources(
             green_on,
-            alumet_broker.as_deref(),
-            alumet.staleness_ms,
+            alumet_broker
+                .as_deref()
+                .map(|s| (s, alumet.staleness_ms))
+                .or(host_cpu
+                    .broker
+                    .as_deref()
+                    .map(|s| (s, host_cpu.staleness_ms))),
             broker_ceiling.as_ref(),
         ),
         alumet_staleness_ms: alumet.staleness_ms,
@@ -420,7 +432,11 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             analysis_queue_capacity: config.daemon.analysis_queue_capacity,
             per_service_labels: config.daemon.per_service_labels,
             per_grouping_labels: config.daemon.per_grouping_labels,
-            waste_sticky_ttl_ms: waste_sticky_ttl_ms(&config, alumet.staleness_ms),
+            waste_sticky_ttl_ms: waste_sticky_ttl_ms(
+                &config,
+                alumet.staleness_ms,
+                host_cpu.staleness_ms,
+            ),
         },
         green_summary_cell,
         archive_handle.as_ref().map(|h| h.tx.clone()),
@@ -469,33 +485,33 @@ fn declared_ceiling(
     ))
 }
 
-/// One subsystem's host sources, each live state with its own staleness.
-/// Green scoring off means `score_green` never runs: the loop must not
-/// consume (and thus destroy) the accumulated host energy, so the bundle
-/// is empty.
+/// One subsystem's host sources, the live state (the Alumet workload or
+/// the CPU probe) with its own staleness. Green scoring off means
+/// `score_green` never runs: the loop must not consume (and thus destroy)
+/// the accumulated host energy, so the bundle is empty.
 fn host_sources<'a>(
     green_on: bool,
-    live: Option<&'a crate::score::alumet::DbEnergyState>,
-    live_staleness_ms: u64,
+    live: Option<(&'a crate::score::alumet::DbEnergyState, u64)>,
     declared: Option<&'a crate::score::broker_static::StaticBrokerState>,
 ) -> SubsystemSources<'a> {
     if !green_on {
         return SubsystemSources::default();
     }
     SubsystemSources {
-        live,
-        live_staleness_ms,
+        live: live.map(|(state, _)| state),
+        live_staleness_ms: live.map_or(0, |(_, staleness_ms)| staleness_ms),
         declared,
     }
 }
 
-/// Lifetime of the live cell's last host waste figure. 2x the scraper
-/// staleness window: flap-free between scrapes, aged out shortly after a
-/// dead scraper's last reading. A declared ceiling (database or broker)
-/// has no scraper, so it falls back to the batch cadence: its figure is
-/// skipped on sub-second takes and would otherwise flap with nothing to
-/// bridge it.
-fn waste_sticky_ttl_ms(config: &Config, alumet_staleness_ms: u64) -> u64 {
+/// Lifetime of the live cell's last host waste figure. 2x the staleness
+/// window of each live scraper (Alumet, and the cloud scraper when it runs
+/// a host CPU probe, `probe_staleness_ms`, 0 otherwise): flap-free between
+/// scrapes, aged out shortly after a dead scraper's last reading. A
+/// declared ceiling (database or broker) has no scraper, so it falls back
+/// to the batch cadence: its figure is skipped on sub-second takes and
+/// would otherwise flap with nothing to bridge it.
+fn waste_sticky_ttl_ms(config: &Config, alumet_staleness_ms: u64, probe_staleness_ms: u64) -> u64 {
     let any_ceiling = [Subsystem::Database, Subsystem::Broker]
         .into_iter()
         .any(|s| {
@@ -510,7 +526,10 @@ fn waste_sticky_ttl_ms(config: &Config, alumet_staleness_ms: u64) -> u64 {
     } else {
         0
     };
-    alumet_staleness_ms.saturating_mul(2).max(ceiling_ttl)
+    alumet_staleness_ms
+        .max(probe_staleness_ms)
+        .saturating_mul(2)
+        .max(ceiling_ttl)
 }
 
 /// The host context of one subsystem, built only when it has a source the
@@ -709,9 +728,12 @@ mod tests {
     fn a_database_ceiling_alone_keeps_the_live_cell_across_batches() {
         let mut config = crate::config::load_from_str(DATABASE_CEILING).expect("config loads");
         config.daemon.trace_ttl_ms = 30_000;
-        assert_eq!(waste_sticky_ttl_ms(&config, 0), 30_000);
-        assert_eq!(waste_sticky_ttl_ms(&Config::default(), 0), 0);
-        assert_eq!(waste_sticky_ttl_ms(&config, 20_000), 40_000);
+        assert_eq!(waste_sticky_ttl_ms(&config, 0, 0), 30_000);
+        assert_eq!(waste_sticky_ttl_ms(&Config::default(), 0, 0), 0);
+        assert_eq!(waste_sticky_ttl_ms(&config, 20_000, 0), 40_000);
+        // A CPU probe bridges two of its own staleness windows.
+        assert_eq!(waste_sticky_ttl_ms(&config, 0, 45_000), 90_000);
+        assert_eq!(waste_sticky_ttl_ms(&config, 20_000, 45_000), 90_000);
     }
 
     #[test]
@@ -724,9 +746,9 @@ mod tests {
             region: None,
         };
         let declared = crate::score::broker_static::StaticBrokerState::new(0, &cfg);
-        let off = host_sources(false, Some(&live), 60_000, Some(&declared));
+        let off = host_sources(false, Some((&live, 60_000)), Some(&declared));
         assert!(off.live.is_none() && off.declared.is_none());
-        let on = host_sources(true, Some(&live), 60_000, Some(&declared));
+        let on = host_sources(true, Some((&live, 60_000)), Some(&declared));
         assert!(on.live.is_some() && on.declared.is_some());
         assert_eq!(on.live_staleness_ms, 60_000);
     }

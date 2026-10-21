@@ -596,6 +596,12 @@ The stationarity assumption is the same one Scaphandre carries: the sampled inte
 
 Next to `[green.alumet.database]`, the ceiling bills only the stretches where the Alumet series is stale, so these bounds apply to those stretches and the measured ones to the rest.
 
+With a `cpu_query`, the hosts are priced on their CPU instead, `nodes × (idle + (P_max - idle) × cpu / 100)`, tagged `cloud_specpower`, and the ceiling bills only the stretches where no reading landed for three scrape intervals. That figure follows the load, so the first bound no longer over-states a quiet database, and the others hold. It adds bounds of its own:
+
+- **Managed CPU metrics lag the hosts.** Cloud monitoring publishes CPU utilization one to five minutes after the fact, and an exporter adds its own delay, so each interval is billed at the CPU of a few minutes earlier. Totals over a period are close, a single window is not.
+- **The query is the operator's average.** It must return one series, the average CPU of the declared hosts. A query that leaves out a reader or a standby, or averages hosts of other databases, prices the cluster on the wrong CPU, and the daemon cannot see it. A response with several series bills nothing.
+- **`idle` is the SPECpower idle of the class.** A host at 0 % CPU still bills `nodes × idle`, the provisioned floor, which is the intent, and it is a table value, not the host's measured idle.
+
 ### Scaphandre precision bounds
 
 Perf Sentinel ships an opt-in integration with [Scaphandre](https://github.com/hubblo-org/scaphandre) for per-process energy measurement via Intel RAPL counters. When `[green.scaphandre]` is configured, the `watch` daemon scrapes the Scaphandre Prometheus endpoint every few seconds and uses the measured power readings to replace the fixed `ENERGY_PER_IO_OP_KWH` proxy constant for each mapped service.
@@ -928,7 +934,7 @@ The carbon estimation uses a fixed energy constant (`0.1 mWh per I/O operation`)
 
 ## pg_stat_statements ingestion
 
-- **No trace correlation.** `pg_stat_statements` data has no `trace_id` or `span_id`. It cannot be used for per-trace anti-pattern detection (N+1, redundant). It provides complementary hotspot analysis and cross-referencing with trace-based findings. Like `performance_schema` digests, it drives rankings only and never feeds energy, carbon or waste: the only database host energy signals are a measured cgroup (`[green.alumet.database]`) and a declared cluster (`[green.database_static]`).
+- **No trace correlation.** `pg_stat_statements` data has no `trace_id` or `span_id`. It cannot be used for per-trace anti-pattern detection (N+1, redundant). It provides complementary hotspot analysis and cross-referencing with trace-based findings. Like `performance_schema` digests, it drives rankings only and never feeds energy, carbon or waste: the only database host energy signals are a measured cgroup (`[green.alumet.database]`), a declared cluster (`[green.database_static]`) and the CPU query of that cluster (its `cpu_query`).
 - **CSV parsing.** The CSV parser handles RFC 4180 quoting (double-quoted fields, escaped `""`), but assumes UTF-8 input. Non-UTF-8 files will fail to parse.
 - **Pre-normalized queries.** PostgreSQL normalizes `pg_stat_statements` queries at the server level. Perf Sentinel applies its own normalization on top for cross-referencing, which may produce slightly different templates.
 - **No direct PostgreSQL connection.** In file mode (`--input`), Perf Sentinel reads exported CSV or JSON files. The `--prometheus` flag scrapes `postgres_exporter` metrics instead of connecting to PostgreSQL directly. See "Automated pg_stat ingestion from Prometheus" above for Prometheus-specific limitations.

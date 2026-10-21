@@ -2027,6 +2027,53 @@ fn a_database_ceiling_covers_only_the_alumet_outage() {
 }
 
 #[test]
+fn a_cpu_probe_owns_the_timeline_until_three_intervals_pass() {
+    // The cloud staleness of a 15 s scrape interval.
+    const CLOUD_STALENESS_MS: u64 = 45_000;
+    let cfg = database_cfg(2);
+    let state = score::broker_static::StaticBrokerState::new(0, &cfg);
+    let probe = DbEnergyState::new();
+    let base = database_base(score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+    let mut sources = no_scrapers(&base);
+    sources.database = SubsystemSources {
+        live: Some(&probe),
+        live_staleness_ms: CLOUD_STALENESS_MS,
+        declared: Some(&state),
+    };
+
+    // A fresh CPU reading bills under cloud_specpower, the ceiling stays
+    // silent.
+    probe.add_window_kwh(2e-6, 15_000);
+    let ctx = build_tick_ctx(&sources, 15_000);
+    let db = ctx.db_energy.as_ref().expect("database context");
+    assert_eq!(db.model, score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+    assert!((db.window_kwh - 2e-6).abs() < 1e-18);
+
+    // Still fresh at three intervals: nothing new, nothing billed.
+    let ctx = build_tick_ctx(&sources, 15_000 + CLOUD_STALENESS_MS);
+    assert!(matches!(ctx, std::borrow::Cow::Borrowed(_)));
+
+    // Past three intervals the ceiling bills the stretch since that last
+    // take under the declared tag.
+    let stale = 15_000 + CLOUD_STALENESS_MS + 5_000;
+    let ctx = build_tick_ctx(&sources, stale);
+    let db = ctx.db_energy.as_ref().expect("database context");
+    assert_eq!(db.model, crate::report::DB_WASTE_MODEL_SPECPOWER);
+    let expected = ceiling_kwh(cfg.cluster_watts(), 5_000);
+    assert!((db.window_kwh - expected).abs() < 1e-12);
+
+    // Recovery drops the first delta, once, then the probe bills again.
+    probe.add_window_kwh(3e-6, 75_000);
+    let ctx = build_tick_ctx(&sources, 75_000);
+    assert!(matches!(ctx, std::borrow::Cow::Borrowed(_)));
+    probe.add_window_kwh(4e-6, 90_000);
+    let ctx = build_tick_ctx(&sources, 90_000);
+    let db = ctx.db_energy.as_ref().expect("database context");
+    assert_eq!(db.model, score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+    assert!((db.window_kwh - 4e-6).abs() < 1e-18);
+}
+
+#[test]
 fn each_subsystem_is_gated_by_its_own_staleness() {
     let base = Arc::new(score::carbon::CarbonContext {
         db_energy: Some(score::carbon::DbEnergyContext {

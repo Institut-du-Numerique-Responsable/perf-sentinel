@@ -294,6 +294,14 @@ pub struct MetricsState {
     /// Same pattern as [`Self::scaphandre_last_scrape_age_seconds`].
     /// Stays at 0 when cloud energy is not configured.
     pub cloud_energy_last_scrape_age_seconds: Gauge,
+    /// Age in seconds since the last successful `[green.database_static]`
+    /// `cpu_query` scrape. Same pattern as
+    /// [`Self::cloud_energy_last_scrape_age_seconds`], stays at 0 when no
+    /// database CPU query is configured.
+    pub database_cpu_last_scrape_age_seconds: Gauge,
+    /// The `[green.broker_static]` twin of
+    /// [`Self::database_cpu_last_scrape_age_seconds`].
+    pub broker_cpu_last_scrape_age_seconds: Gauge,
     /// Duration histogram for spans exceeding the slow threshold, labeled
     /// by event type (`sql`, `http_out` or `messaging`), service and
     /// grouping. Enables accurate global
@@ -902,6 +910,24 @@ impl MetricsState {
             .register(Box::new(cloud_energy_last_scrape_age_seconds.clone()))
             .expect("registration should not fail");
 
+        let database_cpu_last_scrape_age_seconds = Gauge::new(
+            "perf_sentinel_database_cpu_last_scrape_age_seconds",
+            "Age in seconds since the last successful database host CPU scrape",
+        )
+        .expect("metric creation should not fail");
+        registry
+            .register(Box::new(database_cpu_last_scrape_age_seconds.clone()))
+            .expect("registration should not fail");
+
+        let broker_cpu_last_scrape_age_seconds = Gauge::new(
+            "perf_sentinel_broker_cpu_last_scrape_age_seconds",
+            "Age in seconds since the last successful broker host CPU scrape",
+        )
+        .expect("metric creation should not fail");
+        registry
+            .register(Box::new(broker_cpu_last_scrape_age_seconds.clone()))
+            .expect("registration should not fail");
+
         let kepler_last_scrape_age_seconds = Gauge::new(
             "perf_sentinel_kepler_last_scrape_age_seconds",
             "Age in seconds since the last successful Kepler scrape",
@@ -1257,6 +1283,8 @@ impl MetricsState {
             service_io_ops_grouping_overflow_total,
             scaphandre_last_scrape_age_seconds,
             cloud_energy_last_scrape_age_seconds,
+            database_cpu_last_scrape_age_seconds,
+            broker_cpu_last_scrape_age_seconds,
             slow_duration_seconds,
             slow_duration_service_overflow_total,
             slow_duration_grouping_overflow_total,

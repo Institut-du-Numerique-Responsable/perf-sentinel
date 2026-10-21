@@ -605,6 +605,12 @@ L'hypothèse de stationnarité est la même que celle que porte Scaphandre : l'i
 
 À côté de `[green.alumet.database]`, le plafond ne facture que les périodes où la série Alumet est périmée : ces bornes s'appliquent à ces périodes, et les bornes mesurées au reste.
 
+Avec une `cpu_query`, les hôtes sont plutôt chiffrés sur leur CPU, `nodes × (idle + (P_max - idle) × cpu / 100)`, avec l'étiquette `cloud_specpower`, et le plafond ne facture que les périodes sans aucune lecture depuis trois intervalles de scrape. Ce chiffre suit la charge : la première borne ne surestime plus une base calme, et les autres tiennent. Il ajoute ses propres bornes :
+
+- **Les métriques CPU managées sont en retard sur les hôtes.** La supervision cloud publie l'utilisation CPU une à cinq minutes après coup, et un exporteur ajoute son propre délai : chaque intervalle est donc facturé au CPU de quelques minutes plus tôt. Les totaux sur une période sont proches, une fenêtre isolée ne l'est pas.
+- **La requête est la moyenne de l'opérateur.** Elle doit renvoyer une seule série, le CPU moyen des hôtes déclarés. Une requête qui oublie un lecteur ou un standby, ou qui moyenne des hôtes d'autres bases, chiffre le cluster sur le mauvais CPU, et le daemon ne peut pas le voir. Une réponse à plusieurs séries ne facture rien.
+- **`idle` est la puissance au repos SPECpower de la classe.** Un hôte à 0 % de CPU facture encore `nodes × idle`, le plancher provisionné, ce qui est voulu, et c'est une valeur de table, pas le repos mesuré de l'hôte.
+
 ### Limites de précision Scaphandre
 
 Perf Sentinel embarque une intégration opt-in avec [Scaphandre](https://github.com/hubblo-org/scaphandre) pour la mesure énergétique par processus via les compteurs Intel RAPL. Quand `[green.scaphandre]` est configuré, le daemon `watch` scrape l'endpoint Prometheus Scaphandre toutes les quelques secondes et utilise les lectures de puissance mesurées pour remplacer la constante proxy `ENERGY_PER_IO_OP_KWH` fixe pour chaque service mappé.
@@ -937,7 +943,7 @@ L'estimation carbone utilise une constante énergétique fixe (`0,1 mWh par opé
 
 ## Ingestion pg_stat_statements
 
-- **Pas de corrélation par trace.** Les données `pg_stat_statements` n'ont pas de `trace_id` ni de `span_id`. Elles ne peuvent pas servir à la détection d'anti-patterns par trace (N+1, redondant). Elles fournissent une analyse complémentaire de hotspots et une référence croisée avec les findings basés sur les traces. Comme les digests `performance_schema`, elles n'alimentent que les classements, jamais l'énergie, le carbone ni le gaspillage : les seuls signaux d'énergie d'hôte de base de données sont un cgroup mesuré (`[green.alumet.database]`) et un cluster déclaré (`[green.database_static]`).
+- **Pas de corrélation par trace.** Les données `pg_stat_statements` n'ont pas de `trace_id` ni de `span_id`. Elles ne peuvent pas servir à la détection d'anti-patterns par trace (N+1, redondant). Elles fournissent une analyse complémentaire de hotspots et une référence croisée avec les findings basés sur les traces. Comme les digests `performance_schema`, elles n'alimentent que les classements, jamais l'énergie, le carbone ni le gaspillage : les seuls signaux d'énergie d'hôte de base de données sont un cgroup mesuré (`[green.alumet.database]`), un cluster déclaré (`[green.database_static]`) et la requête CPU de ce cluster (sa `cpu_query`).
 - **Parsing CSV.** Le parseur CSV gère le quoting RFC 4180 (champs entre guillemets doubles, `""` échappé), mais suppose une entrée UTF-8. Les fichiers non-UTF-8 échoueront au parsing.
 - **Requêtes pré-normalisées.** PostgreSQL normalise les requêtes `pg_stat_statements` au niveau du serveur. Perf Sentinel applique sa propre normalisation par dessus pour la référence croisée, ce qui peut produire des templates légèrement différents.
 - **Pas de connexion directe à PostgreSQL.** En mode fichier (`--input`), Perf Sentinel lit des fichiers CSV ou JSON exportés. Le flag `--prometheus` scrape les métriques `postgres_exporter` au lieu de se connecter directement à PostgreSQL. Voir "Ingestion automatisée pg_stat depuis Prometheus" ci-dessus pour les limitations spécifiques au mode Prometheus.

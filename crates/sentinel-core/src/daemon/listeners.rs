@@ -24,6 +24,7 @@ use crate::score::alumet::AlumetState;
 use crate::score::cloud_energy::CloudEnergyState;
 use crate::score::electricity_maps::ElectricityMapsState;
 use crate::score::grid_feed::GridFeedState;
+use crate::score::host_static::Subsystem;
 use crate::score::kepler::KeplerState;
 use crate::score::redfish::RedfishState;
 use crate::score::scaphandre::ScaphandreState;
@@ -859,28 +860,59 @@ pub(super) fn setup_redfish_scraper(
     }
 }
 
+/// The live states the cloud scraper bills from the host CPU queries.
+/// `staleness_ms` is the cloud staleness when a probe runs, 0 otherwise.
+#[derive(Default)]
+pub(super) struct HostCpuStates {
+    pub(super) database: Option<Arc<score::alumet::DbEnergyState>>,
+    pub(super) broker: Option<Arc<score::alumet::DbEnergyState>>,
+    pub(super) staleness_ms: u64,
+}
+
 /// Spawn the cloud energy (`SPECpower`) scraper when `[green.cloud]` is
-/// configured. Same staleness convention as Scaphandre.
+/// configured, with a CPU probe for each dedicated host declaration that
+/// sets a `cpu_query`. Same staleness convention as Scaphandre.
 pub(super) fn setup_cloud_scraper(
     config: &Config,
     metrics: &Arc<MetricsState>,
-) -> ScraperSetup<CloudEnergyState> {
+) -> (ScraperSetup<CloudEnergyState>, HostCpuStates) {
     let Some(cloud_cfg) = config.green.cloud_energy.clone() else {
-        return ScraperSetup {
+        let setup = ScraperSetup {
             state: None,
             handle: None,
             staleness_ms: 0,
         };
+        return (setup, HostCpuStates::default());
+    };
+    let probe = |subsystem| {
+        let cfg = config.green.static_hosts(subsystem)?;
+        score::cloud_energy::scraper::HostProbe::dedicated(subsystem, cfg)
+    };
+    let probes: Vec<_> = [probe(Subsystem::Database), probe(Subsystem::Broker)]
+        .into_iter()
+        .flatten()
+        .collect();
+    let state_of = |subsystem| {
+        probes
+            .iter()
+            .find(|p| p.subsystem == subsystem)
+            .map(|p| p.state.clone())
     };
     let staleness_ms = cloud_cfg.scrape_interval.as_millis() as u64 * 3;
+    let host_cpu = HostCpuStates {
+        database: state_of(Subsystem::Database),
+        broker: state_of(Subsystem::Broker),
+        staleness_ms: if probes.is_empty() { 0 } else { staleness_ms },
+    };
     let state = CloudEnergyState::new();
     let handle =
-        score::cloud_energy::spawn_cloud_scraper(cloud_cfg, state.clone(), metrics.clone());
-    ScraperSetup {
+        score::cloud_energy::spawn_cloud_scraper(cloud_cfg, state.clone(), probes, metrics.clone());
+    let setup = ScraperSetup {
         state: Some(state),
         handle: Some(handle),
         staleness_ms,
-    }
+    };
+    (setup, host_cpu)
 }
 
 /// One running grid operator feed.

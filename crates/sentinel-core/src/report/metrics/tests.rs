@@ -1514,3 +1514,18 @@ fn correlation_export_series_are_registered_label_free() {
     assert!(text.contains("\nperf_sentinel_hub_export_correlations_pending 3\n"));
     assert!(text.contains("\nperf_sentinel_hub_export_correlations_dropped_total 2\n"));
 }
+
+#[test]
+fn host_cpu_age_gauges_render_from_startup() {
+    let state = MetricsState::new();
+    state.broker_cpu_last_scrape_age_seconds.set(12.5);
+    let output = state.render();
+    assert!(
+        output.contains("perf_sentinel_database_cpu_last_scrape_age_seconds 0"),
+        "an unconfigured probe reads 0, got:\n{output}"
+    );
+    assert!(
+        output.contains("perf_sentinel_broker_cpu_last_scrape_age_seconds 12.5"),
+        "each subsystem has its own gauge, got:\n{output}"
+    );
+}

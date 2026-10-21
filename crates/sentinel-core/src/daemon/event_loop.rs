@@ -87,7 +87,8 @@ pub(super) struct ListenerHandles<'a> {
 /// live state paired with its own staleness window.
 #[derive(Clone, Copy, Default)]
 pub(super) struct SubsystemSources<'a> {
-    /// The live series: the Alumet workload.
+    /// The live series: the Alumet workload, or the `cpu_query` the cloud
+    /// scraper bills (never both).
     pub(super) live: Option<&'a DbEnergyState>,
     pub(super) live_staleness_ms: u64,
     /// Declared cluster fallback, used only while the live series is
