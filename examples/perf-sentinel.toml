@@ -600,10 +600,10 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # instance_type = "kafka.m5.large"  # an embedded row or a managed class, an unknown type fails the load
 # region = "eu-west-3"           # else [green.alumet.broker] region, else [green] default_region, one is required
 # A broker pod on an application node instead: placement = "shared", its
-# CPU as a percent of that node, and the [green.cloud.services] entries
-# reading that node. A shared declaration bills no host energy, the
-# messaging figure stays the estimated one.
-# # cpu_query = 'avg(rate(container_cpu_usage_seconds_total{container="kafka"}[5m])) * 100'
+# CPU as a percent of that node (filtered to it, divided by its vCPUs), and
+# the [green.cloud.services] entries reading that node. Its share is billed
+# and taken out of the node's reading, so the node counts once.
+# # cpu_query = '100 * sum(rate(container_cpu_usage_seconds_total{container="kafka",node="node-a"}[5m])) / 4'
 # # shared_with = ["orders"]
 
 # --- Carbon: per-service regions -------------------------------------------

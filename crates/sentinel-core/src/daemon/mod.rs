@@ -533,12 +533,14 @@ fn waste_sticky_ttl_ms(config: &Config, alumet_staleness_ms: u64, probe_stalenes
 }
 
 /// The host context of one subsystem, built only when it has a source the
-/// daemon bills: its Alumet workload, or a dedicated declaration with a
-/// `SPECpower` ceiling. A shared or ceiling-less declaration builds none,
-/// so the estimated figure stays. `model` is the base tag, which a
-/// declared tick replaces: the declared tag, or `cloud_specpower` when the
-/// declaration has a `cpu_query` (its live source). `region` is the
-/// subsystem's effective region.
+/// daemon bills: its Alumet workload, a dedicated declaration with a
+/// `SPECpower` ceiling, or a declaration with a `cpu_query` (every shared
+/// one, D5/B5). A ceiling-less declaration without one builds none, so the
+/// estimated figure stays. `model` is the base tag, which a declared tick
+/// replaces: `cloud_specpower` when the declaration has a `cpu_query` (its
+/// live source), else the declared tag. A shared declaration has no
+/// ceiling, so its tag never changes. `region` is the subsystem's
+/// effective region.
 fn host_energy_context(
     config: &Config,
     subsystem: Subsystem,
@@ -548,7 +550,7 @@ fn host_energy_context(
     let model = if green.alumet_host(subsystem).is_some() {
         crate::score::carbon::CO2_MODEL_ALUMET
     } else {
-        let cfg = declared.filter(|cfg| cfg.ceiling().is_some())?;
+        let cfg = declared.filter(|cfg| cfg.ceiling().is_some() || cfg.cpu_query.is_some())?;
         if cfg.cpu_query.is_some() {
             crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER
         } else {
@@ -722,6 +724,22 @@ mod tests {
         ));
         let ctx = host_energy_context(&probed, Subsystem::Database).expect("ceiling bills");
         assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+    }
+
+    #[test]
+    fn a_shared_host_builds_a_cloud_context_without_a_ceiling() {
+        let shared = crate::config::load_from_str(
+            "[green]\ndefault_region = \"eu-west-3\"\n[green.broker_static]\n\
+             placement = \"shared\"\ninstance_type = \"m5.large\"\ncpu_query = 'broker_cpu'\n\
+             [green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n",
+        )
+        .expect("config loads");
+        let ctx = host_energy_context(&shared, Subsystem::Broker).expect("its probe bills");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+        assert_eq!(ctx.placement, Some(HostPlacement::Shared));
+        assert_eq!(ctx.region.as_deref(), Some("eu-west-3"));
+        assert!(declared_ceiling(&shared, Subsystem::Broker).is_none());
+        assert!(host_energy_context(&shared, Subsystem::Database).is_none());
     }
 
     #[test]

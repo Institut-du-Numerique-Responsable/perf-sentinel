@@ -870,12 +870,14 @@ pub(super) struct HostCpuStates {
 }
 
 /// Spawn the cloud energy (`SPECpower`) scraper when `[green.cloud]` is
-/// configured, with a CPU probe for each dedicated host declaration that
-/// sets a `cpu_query`. Same staleness convention as Scaphandre.
+/// configured, with a CPU probe for each host declaration that sets a
+/// `cpu_query`, dedicated or shared. Same staleness convention as
+/// Scaphandre.
 pub(super) fn setup_cloud_scraper(
     config: &Config,
     metrics: &Arc<MetricsState>,
 ) -> (ScraperSetup<CloudEnergyState>, HostCpuStates) {
+    use score::cloud_energy::scraper::HostProbe;
     let Some(cloud_cfg) = config.green.cloud_energy.clone() else {
         let setup = ScraperSetup {
             state: None,
@@ -886,7 +888,8 @@ pub(super) fn setup_cloud_scraper(
     };
     let probe = |subsystem| {
         let cfg = config.green.static_hosts(subsystem)?;
-        score::cloud_energy::scraper::HostProbe::dedicated(subsystem, cfg)
+        HostProbe::dedicated(subsystem, cfg)
+            .or_else(|| HostProbe::shared(subsystem, cfg, &cloud_cfg))
     };
     let probes: Vec<_> = [probe(Subsystem::Database), probe(Subsystem::Broker)]
         .into_iter()

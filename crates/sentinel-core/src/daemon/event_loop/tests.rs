@@ -2119,6 +2119,27 @@ fn each_subsystem_is_gated_by_its_own_staleness() {
 }
 
 #[test]
+fn a_stale_shared_host_bills_nothing() {
+    // A shared host has its CPU probe and no ceiling to fall back on.
+    let probe = DbEnergyState::new();
+    let shared = SubsystemSources {
+        live: Some(&probe),
+        live_staleness_ms: 45_000,
+        declared: None,
+    };
+    assert_eq!(
+        take_host_energy(&shared, 1_000),
+        (None, None),
+        "never sampled"
+    );
+    probe.add_window_kwh(1e-6, 1_000);
+    let (live, declared) = take_host_energy(&shared, 2_000);
+    assert!(live.is_some_and(|kwh| (kwh - 1e-6).abs() < 1e-18));
+    assert_eq!(declared, None);
+    assert_eq!(take_host_energy(&shared, 200_000), (None, None), "stale");
+}
+
+#[test]
 fn a_ceiling_only_figure_survives_sub_second_batches_in_the_live_cell() {
     // A sub-second batch takes nothing from the ceiling, so the live cell
     // must bridge it with the batch-cadence TTL rather than blank.
