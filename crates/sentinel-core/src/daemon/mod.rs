@@ -366,9 +366,12 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             .alumet
             .as_ref()
             .and_then(|a| a.database.as_ref())
-            .map(|db| crate::score::carbon::DbEnergyContext {
+            .map(|_| crate::score::carbon::DbEnergyContext {
                 window_kwh: 0.0,
-                region: db.region.clone(),
+                region: config
+                    .green
+                    .host_region(Subsystem::Database)
+                    .map(str::to_string),
                 model: crate::score::carbon::CO2_MODEL_ALUMET,
             });
         ctx.broker_energy = config

@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::score::alumet::config::DEFAULT_ENERGY_INTERVAL_SECS;
 use crate::score::alumet::{AlumetBrokerConfig, AlumetConfig, AlumetDatabaseConfig};
 use crate::score::cloud_energy::config::{CloudEnergyConfig, ServiceCloudConfig};
-use crate::score::host_static::{HostPlacement, StaticHostsConfig};
+use crate::score::host_static::{HostPlacement, StaticHostsConfig, Subsystem};
 use crate::score::kepler::{KeplerConfig, KeplerMetricKind};
 use crate::score::redfish::{RedfishConfig, RedfishEndpoint};
 use crate::score::scaphandre::{ProcessMatcher, ScaphandreConfig};
@@ -104,6 +104,7 @@ pub(super) struct GreenSection {
     pub(super) alumet: AlumetSection,
     redfish: RedfishSection,
     cloud: CloudSection,
+    pub(super) database_static: StaticHostsSection,
     pub(super) broker_static: BrokerStaticSection,
     per_operation_coefficients: Option<bool>,
     include_network_transport: Option<bool>,
@@ -572,7 +573,8 @@ impl From<RawConfig> for Config {
                 alumet: convert_alumet_section(&raw.green.alumet),
                 redfish: convert_redfish_section(&raw.green.redfish),
                 cloud_energy: convert_cloud_section(&raw.green.cloud),
-                broker_static: convert_broker_static_section(&raw.green.broker_static),
+                database_static: convert_static_hosts_section(&raw.green.database_static),
+                broker_static: convert_static_hosts_section(&raw.green.broker_static.hosts()),
                 per_operation_coefficients: raw
                     .green
                     .per_operation_coefficients
@@ -1049,9 +1051,33 @@ pub(super) fn convert_kepler_section_with_env(
     })
 }
 
-/// Raw deserialization target for `[green.broker_static]`.
+/// Raw deserialization target for `[green.database_static]`, and the
+/// keys `[green.broker_static]` shares with it.
 ///
 /// `deny_unknown_fields`: a typo would silently disable the figure.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct StaticHostsSection {
+    pub(super) placement: Option<HostPlacement>,
+    pub(super) nodes: Option<u32>,
+    pub(super) instance_type: Option<String>,
+    pub(super) region: Option<String>,
+    pub(super) cpu_query: Option<String>,
+    pub(super) shared_with: Option<Vec<String>>,
+}
+
+impl StaticHostsSection {
+    fn any_key(&self) -> bool {
+        self.nodes.is_some()
+            || self.instance_type.is_some()
+            || self.region.is_some()
+            || self.cpu_query.is_some()
+            || self.shared_with.is_some()
+    }
+}
+
+/// Raw deserialization target for `[green.broker_static]`: the
+/// [`StaticHostsSection`] keys plus a deprecated `provider`.
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct BrokerStaticSection {
@@ -1064,10 +1090,24 @@ pub(super) struct BrokerStaticSection {
     pub(super) shared_with: Option<Vec<String>>,
 }
 
-/// Convert `[green.broker_static]` into a typed config, strings trimmed.
-/// `None` without a `placement`, which `validate_broker_static_raw` only
-/// allows for an empty section.
-fn convert_broker_static_section(raw: &BrokerStaticSection) -> Option<StaticHostsConfig> {
+impl BrokerStaticSection {
+    /// The keys shared with `[green.database_static]`.
+    fn hosts(&self) -> StaticHostsSection {
+        StaticHostsSection {
+            placement: self.placement,
+            nodes: self.nodes,
+            instance_type: self.instance_type.clone(),
+            region: self.region.clone(),
+            cpu_query: self.cpu_query.clone(),
+            shared_with: self.shared_with.clone(),
+        }
+    }
+}
+
+/// Convert a declared-hosts section into a typed config, strings trimmed.
+/// `None` without a `placement`, which [`require_placement`] only allows
+/// for an empty section.
+fn convert_static_hosts_section(raw: &StaticHostsSection) -> Option<StaticHostsConfig> {
     let trimmed = |value: &Option<String>| value.as_deref().map(|v| v.trim().to_string());
     Some(StaticHostsConfig {
         placement: raw.placement?,
@@ -1153,25 +1193,39 @@ fn reject_case_colliding_keys(section: &str, map: &HashMap<String, String>) -> R
     Ok(())
 }
 
-/// Rule B1: once any `[green.broker_static]` key is set, `placement` is
-/// required, so a section written for the old shape fails loudly rather
-/// than billing hosts it cannot place. Also keeps the `provider`
+/// Rules D1 and B1: once any key of a declared-hosts section is set,
+/// `placement` is required, so a section written without it fails loudly
+/// rather than billing hosts it cannot place.
+fn require_placement(
+    subsystem: Subsystem,
+    placement_set: bool,
+    any_key: bool,
+) -> Result<(), String> {
+    if placement_set || !any_key {
+        return Ok(());
+    }
+    Err(format!(
+        "{} placement is required: set placement = 'dedicated' when the {} runs on \
+         hosts of its own, or placement = 'shared' with cpu_query and shared_with when \
+         it runs on an application node",
+        subsystem.section(),
+        subsystem.noun()
+    ))
+}
+
+/// Rule D1 on `[green.database_static]`.
+pub(super) fn validate_database_static_raw(raw: &StaticHostsSection) -> Result<(), String> {
+    require_placement(Subsystem::Database, raw.placement.is_some(), raw.any_key())
+}
+
+/// Rule B1 on `[green.broker_static]`. Also keeps the `provider`
 /// allow-list, and warns that the key no longer prices anything.
 pub(super) fn validate_broker_static_raw(raw: &BrokerStaticSection) -> Result<(), String> {
-    let any_key = raw.nodes.is_some()
-        || raw.instance_type.is_some()
-        || raw.provider.is_some()
-        || raw.region.is_some()
-        || raw.cpu_query.is_some()
-        || raw.shared_with.is_some();
-    if raw.placement.is_none() && any_key {
-        return Err(
-            "[green.broker_static] placement is required: set placement = 'dedicated' \
-             when the broker runs on hosts of its own, or placement = 'shared' with \
-             cpu_query and shared_with when it runs on an application node"
-                .to_string(),
-        );
-    }
+    require_placement(
+        Subsystem::Broker,
+        raw.placement.is_some(),
+        raw.hosts().any_key() || raw.provider.is_some(),
+    )?;
     let Some(provider) = raw
         .provider
         .as_deref()

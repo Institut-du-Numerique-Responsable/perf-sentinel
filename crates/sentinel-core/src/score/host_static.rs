@@ -1,10 +1,12 @@
-//! Declared database and broker hosts, the typed `[green.broker_static]`
-//! section.
+//! Declared database and broker hosts, the typed `[green.database_static]`
+//! and `[green.broker_static]` sections.
 //!
 //! A section declares where the hosts run (`placement`): on hosts of their
 //! own, or on an application node a cloud CPU query already reads. Only a
-//! dedicated declaration with `nodes` and `instance_type` gives a ceiling,
-//! billed by [`crate::score::broker_static::StaticBrokerState`]. The model
+//! dedicated declaration with `nodes` and `instance_type` gives a ceiling.
+//! The daemon bills the broker one through
+//! [`crate::score::broker_static::StaticBrokerState`] and does not read
+//! the database section. The model
 //! and its bounds are in `docs/design/05-GREENOPS-AND-CARBON.md` and
 //! `docs/LIMITATIONS.md`.
 
@@ -171,6 +173,15 @@ mod tests {
         assert!(managed.is_some());
         assert_eq!(managed, dedicated(1, "m5.large").node_power());
         assert_eq!(dedicated(1, "kafka.zz9.large").node_power(), None);
+    }
+
+    #[test]
+    fn node_power_resolves_a_managed_database_class() {
+        assert!(dedicated(2, "db.r6i.large").node_power().is_some());
+        assert_eq!(
+            dedicated(2, "db.r6i.large").node_power(),
+            dedicated(2, "r6i.large").node_power()
+        );
     }
 
     #[test]

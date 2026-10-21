@@ -453,10 +453,10 @@ Declares one database workload measured by Alumet. A database emits no spans, so
 ```toml
 [green.alumet.database]
 label_value = "postgres-pod"   # value carried by label_key for the DB cgroup, verbatim
-region = "eu-west-3"           # optional, enables the gCO2 conversion (declared, not inferred)
+region = "eu-west-3"           # else [green] default_region, one of them is required
 ```
 
-`label_value` is required, matched exactly like a `service_mappings` value. `region` is optional and uses the same region ids as `[green.service_regions]`: without it the waste is reported in kWh only. One database per config, declare the cgroup that serves your SQL traffic.
+`label_value` is required, matched exactly like a `service_mappings` value. The database host energy needs a region to convert to gCO2, with the same region ids as `[green.service_regions]`: this `region`, the `[green.database_static]` one, or `[green] default_region`. With none of them the config fails to load, and when this section and `[green.database_static]` both set a region they must agree. One database per config, declare the cgroup that serves your SQL traffic.
 
 ##### `[green.alumet.broker]` (optional)
 

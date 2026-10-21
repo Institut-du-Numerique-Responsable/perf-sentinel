@@ -220,6 +220,9 @@ pub struct GreenConfig {
     pub redfish: Option<RedfishConfig>,
     /// Cloud CPU% + `SPECpower` config (daemon only).
     pub cloud_energy: Option<CloudEnergyConfig>,
+    /// Declared database hosts (`[green.database_static]`, daemon only).
+    /// Validated at load, the daemon does not read it yet.
+    pub database_static: Option<StaticHostsConfig>,
     /// Declared broker hosts (`[green.broker_static]`, daemon only).
     /// Needs no agent, so it covers managed brokers. Only a dedicated
     /// declaration with `nodes` and `instance_type` bills, see
@@ -579,6 +582,7 @@ impl Default for GreenConfig {
             alumet: None,
             redfish: None,
             cloud_energy: None,
+            database_static: None,
             broker_static: None,
             per_operation_coefficients: true,
             hourly_profiles_file: None,
@@ -607,7 +611,7 @@ impl GreenConfig {
     /// The subsystem's declared-hosts section.
     pub(crate) fn static_hosts(&self, subsystem: Subsystem) -> Option<&StaticHostsConfig> {
         match subsystem {
-            Subsystem::Database => None,
+            Subsystem::Database => self.database_static.as_ref(),
             Subsystem::Broker => self.broker_static.as_ref(),
         }
     }
@@ -795,7 +799,7 @@ mod validate;
 
 use raw::{
     RawConfig, parse_daemon_environment, parse_kepler_metric_kind, validate_alumet_raw,
-    validate_broker_static_raw, validate_region_keys_raw,
+    validate_broker_static_raw, validate_database_static_raw, validate_region_keys_raw,
 };
 use toml_paths::normalize_toml_path_strings;
 pub(crate) use validate::has_control_char;
@@ -1123,6 +1127,7 @@ fn validate_raw_config(raw: RawConfig) -> Result<Config, ConfigError> {
     // so a missing one must be a loud error rather than a silently
     // dropped section.
     validate_alumet_raw(&raw.green.alumet).map_err(ConfigError::Validation)?;
+    validate_database_static_raw(&raw.green.database_static).map_err(ConfigError::Validation)?;
     validate_broker_static_raw(&raw.green.broker_static).map_err(ConfigError::Validation)?;
     validate_region_keys_raw(&raw).map_err(ConfigError::Validation)?;
     let config = Config::from(raw);

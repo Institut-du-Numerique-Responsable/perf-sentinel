@@ -468,10 +468,10 @@ Déclare une charge de base de données mesurée par Alumet. Une base n'émet pa
 ```toml
 [green.alumet.database]
 label_value = "postgres-pod"   # valeur portée par label_key pour le cgroup de la base, telle quelle
-region = "eu-west-3"           # optionnel, active la conversion gCO2 (déclarée, pas inférée)
+region = "eu-west-3"           # sinon [green] default_region, l'un des deux est requis
 ```
 
-`label_value` est obligatoire, apparié exactement comme une valeur de `service_mappings`. `region` est optionnel et utilise les mêmes identifiants de région que `[green.service_regions]` : sans lui le gaspillage est publié en kWh seulement. Une base par configuration, déclarez le cgroup qui sert votre trafic SQL.
+`label_value` est obligatoire, apparié exactement comme une valeur de `service_mappings`. L'énergie de l'hôte de la base a besoin d'une région pour être convertie en gCO2, avec les mêmes identifiants de région que `[green.service_regions]` : ce `region`, celui de `[green.database_static]`, ou `[green] default_region`. Sans aucun d'eux, la config ne se charge pas, et quand cette section et `[green.database_static]` déclarent toutes deux une région, elles doivent concorder. Une base par configuration, déclarez le cgroup qui sert votre trafic SQL.
 
 ##### `[green.alumet.broker]` (optionnel)
 

@@ -1,7 +1,7 @@
 # Types d'instance avec un profil de puissance embarqué
 
-Tous les `instance_type` acceptés par `[green.cloud.services]` et par
-`[green.broker_static]`, avec les puissances au repos et maximale entre
+Tous les `instance_type` acceptés par `[green.cloud.services]`,
+`[green.database_static]` et `[green.broker_static]`, avec les puissances au repos et maximale entre
 lesquelles le modèle SPECpower interpole. 421 entrées, millésime
 de la table `2026-04-24 (CCF aligned)`. Les noms de classes managées de base de données,
 de cache, de broker et de recherche sont acceptés aussi : chacun se résout
@@ -13,9 +13,10 @@ Sentinel avertit une seule fois au démarrage en nommant le type, et la
 raison quand il s'agit d'une classe managée que le modèle laisse de côté,
 puis se rabat sur une moyenne du fournisseur, ce qui rend la valeur plus
 grossière. Cet avertissement est aussi la façon de vérifier votre propre
-type sans lire cette page. Dans `[green.broker_static]`, le même type est
-une erreur qui arrête le chargement, puisqu'un broker déclaré n'a aucune
-autre source sur laquelle se rabattre. Quand votre matériel est absent et
+type sans lire cette page. Dans `[green.database_static]` et
+`[green.broker_static]`, le même type est une erreur qui arrête le
+chargement, puisque des hôtes déclarés n'ont aucune autre source sur
+laquelle se rabattre. Quand votre matériel est absent et
 que vous connaissez sa consommation, déclarez-la directement, ce qui donne
 une valeur exacte plutôt qu'approchée :
 
@@ -101,8 +102,9 @@ fourchette 2x. Une classe dont la famille de base n'a pas de ligne reste
 inconnue.
 
 Non modélisées. L'avertissement de démarrage, ou l'erreur de chargement
-dans `[green.broker_static]`, donne la raison pour les trois premières
-lignes, les autres sont signalées comme types inconnus :
+dans `[green.database_static]` et `[green.broker_static]`, donne la raison
+pour les trois premières lignes, les autres sont signalées comme types
+inconnus :
 
 | Classe | Raison |
 |---|---|

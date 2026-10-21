@@ -493,7 +493,7 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # cgroup on your endpoint.
 # [green.alumet.database]
 # label_value = "postgres-pod"   # no default
-# region = "eu-west-3"           # no default, without a region the figure is in kWh only
+# region = "eu-west-3"           # else [green] default_region, one of them is required
 #
 # Same for the message broker, feeding messaging waste.
 # [green.alumet.broker]
@@ -575,6 +575,16 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # "analytics" = { provider = "azure", instance_type = "Standard_D8s_v3" }
 # "custom" = { idle_watts = 45.0, max_watts = 120.0, cpu_query = "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\",instance=\"custom:9100\"}[5m])) * 100)" }
 # "special" = { provider = "aws", instance_type = "c5.4xlarge", cpu_query = "avg(node_cpu{job=\"special\"})" }
+
+# --- Declared database hosts (opt-in, no agent needed) --------------------
+# The keys and rules of [green.broker_static] below, without provider. The
+# section is validated at load, the daemon does not read it: the database
+# figure stays the estimated or the [green.alumet.database] one.
+# [green.database_static]
+# placement = "dedicated"        # required once any key is set: "dedicated" or "shared"
+# nodes = 2                      # hosts, readers and standbys included
+# instance_type = "db.r6i.large" # an embedded row or a managed class, an unknown type fails the load
+# region = "eu-west-3"           # else [green.alumet.database] region, else [green] default_region, one is required
 
 # --- Declared broker cluster (opt-in, no agent needed) ---------------------
 # Messaging energy for a provisioned broker cluster with a typed instance

@@ -273,7 +273,8 @@ fn validate_shared_host(subsystem: Subsystem, cfg: &StaticHostsConfig) -> Result
 }
 
 impl Config {
-    /// Rules B2 to B5 and B8/B9 for one subsystem's declared hosts.
+    /// Rules D2 to D5 and D8/D9 (database), B2 to B5 and B8/B9 (broker)
+    /// for one subsystem's declared hosts.
     fn validate_static_hosts(&self, subsystem: Subsystem) -> Result<(), String> {
         let alumet = self.green.alumet_host(subsystem);
         if let Some(cfg) = self.green.static_hosts(subsystem) {
@@ -352,6 +353,7 @@ impl Config {
         if let Some(cfg) = &self.green.cloud_energy {
             Self::validate_cloud_energy(cfg)?;
         }
+        self.validate_static_hosts(Subsystem::Database)?;
         self.validate_static_hosts(Subsystem::Broker)?;
         self.validate_hourly_profiles_file()?;
         if let Some(cfg) = &self.green.electricity_maps {

@@ -4221,6 +4221,176 @@ fn broker_static_and_alumet_regions_must_agree() {
     load_from_str(&toml.replace("us-east-1", "eu-west-3")).expect("one region loads");
 }
 
+const ALUMET_DATABASE: &str = r#"
+[green.alumet]
+endpoint = "http://localhost:9091/metrics"
+metric_name = "attributed_energy_cpu_alumet"
+label_key = "name"
+
+[green.alumet.database]
+label_value = "postgres-pod"
+"#;
+
+fn database_static_error(toml: &str) -> String {
+    load_from_str(toml)
+        .expect_err("the database declaration must be rejected")
+        .to_string()
+}
+
+#[test]
+fn database_static_dedicated_managed_hosts_are_parsed() {
+    let toml = r#"
+[green.database_static]
+placement = "dedicated"
+nodes = 2
+instance_type = " db.r6i.large "
+region = "eu-west-3"
+"#;
+    let cfg = load_from_str(toml).expect("valid database_static section");
+    let db = cfg.green.database_static.as_ref().expect("declared");
+    assert_eq!(
+        db.placement,
+        crate::score::host_static::HostPlacement::Dedicated
+    );
+    assert_eq!(db.nodes, Some(2));
+    assert_eq!(db.instance_type.as_deref(), Some("db.r6i.large"), "trimmed");
+    assert_eq!(
+        cfg.green
+            .host_region(crate::score::host_static::Subsystem::Database),
+        Some("eu-west-3")
+    );
+}
+
+#[test]
+fn database_static_placement_alone_next_to_alumet_is_accepted() {
+    let toml = format!(
+        "[green]\ndefault_region = \"eu-west-3\"\n{ALUMET_DATABASE}\n\
+         [green.database_static]\nplacement = \"dedicated\"\n"
+    );
+    let cfg = load_from_str(&toml).expect("placement alone next to Alumet loads");
+    let db = cfg.green.database_static.as_ref().expect("declared");
+    assert_eq!(db.ceiling(), None, "no hosts declared, nothing to bill");
+}
+
+#[test]
+fn database_static_shared_with_cpu_query_is_accepted() {
+    let toml = r#"
+[green.database_static]
+placement = "shared"
+instance_type = "m5.large"
+cpu_query = " avg(postgres_cpu) "
+region = "eu-west-3"
+"#;
+    let cfg = load_from_str(toml).expect("a shared database loads");
+    let db = cfg.green.database_static.as_ref().expect("declared");
+    assert_eq!(db.cpu_query.as_deref(), Some("avg(postgres_cpu)"));
+    assert_eq!(db.ceiling(), None, "a shared host has no ceiling");
+}
+
+#[test]
+fn database_static_rejections_name_their_rule() {
+    let dedicated = "[green.database_static]\nplacement = \"dedicated\"\nregion = \"eu-west-3\"\n";
+    let shared = "[green.database_static]\nplacement = \"shared\"\nregion = \"eu-west-3\"\n";
+    let cases = [
+        (
+            "[green.database_static]\nnodes = 2\ninstance_type = \"db.r6i.large\"\n".to_string(),
+            "[green.database_static] placement is required",
+        ),
+        (
+            "[green.database_static]\nplacement = \"elsewhere\"\n".to_string(),
+            "elsewhere",
+        ),
+        (
+            format!("{dedicated}nodes = 0\ninstance_type = \"db.r6i.large\"\n"),
+            "must be 1 to 10000",
+        ),
+        (
+            format!("{dedicated}nodes = 10001\ninstance_type = \"db.r6i.large\"\n"),
+            "must be 1 to 10000",
+        ),
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db.zz9.large\"\n"),
+            "db.zz9.large",
+        ),
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db.serverless\"\n"),
+            "ACU",
+        ),
+        (
+            format!(
+                "{dedicated}nodes = 2\ninstance_type = \"db.r6i.large\"\nshared_with = [\"api\"]\n"
+            ),
+            "shared_with applies to placement = 'shared' only",
+        ),
+        (format!("{dedicated}nodes = 2\n"), "go together"),
+        (
+            format!("{dedicated}instance_type = \"db.r6i.large\"\n"),
+            "go together",
+        ),
+        (dedicated.to_string(), "needs nodes and instance_type"),
+        (
+            format!("{shared}instance_type = \"m5.large\"\n"),
+            "needs cpu_query",
+        ),
+        (
+            format!("{shared}nodes = 2\ninstance_type = \"m5.large\"\ncpu_query = \"q\"\n"),
+            "is one node",
+        ),
+        // The broker's deprecated key is not a database key.
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db.r6i.large\"\nprovider = \"aws\"\n"),
+            "provider",
+        ),
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db.r6i.large\"\nnode_count = 4\n"),
+            "node_count",
+        ),
+    ];
+    for (toml, expected) in cases {
+        let err = database_static_error(&toml);
+        assert!(err.contains(expected), "{toml}\n=> {err}");
+    }
+}
+
+#[test]
+fn database_static_without_any_region_is_rejected() {
+    let toml = r#"
+[green.database_static]
+placement = "dedicated"
+nodes = 2
+instance_type = "db.r6i.large"
+"#;
+    let err = database_static_error(toml);
+    assert!(err.contains("database host energy needs a region"), "{err}");
+}
+
+#[test]
+fn alumet_database_needs_an_effective_region() {
+    let err = database_static_error(ALUMET_DATABASE);
+    assert!(err.contains("needs a region"), "{err}");
+    let cfg = load_from_str(&format!(
+        "[green]\ndefault_region = \"eu-west-3\"\n{ALUMET_DATABASE}"
+    ))
+    .expect("the default region applies");
+    assert_eq!(
+        cfg.green
+            .host_region(crate::score::host_static::Subsystem::Database),
+        Some("eu-west-3")
+    );
+}
+
+#[test]
+fn database_static_and_alumet_regions_must_agree() {
+    let toml = format!(
+        "{ALUMET_DATABASE}region = \"eu-west-3\"\n\n[green.database_static]\n\
+         placement = \"dedicated\"\nnodes = 2\ninstance_type = \"db.r6i.large\"\n\
+         region = \"us-east-1\"\n"
+    );
+    let err = database_static_error(&toml);
+    assert!(err.contains("differ"), "{err}");
+    load_from_str(&toml.replace("us-east-1", "eu-west-3")).expect("one region loads");
+}
+
 #[test]
 fn alumet_broker_unknown_key_is_rejected() {
     let toml = r#"

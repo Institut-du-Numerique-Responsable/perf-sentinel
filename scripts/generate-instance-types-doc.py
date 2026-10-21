@@ -91,8 +91,8 @@ is a Skylake part while the `c5` rows are Cascade Lake, a gap inside the
 2x bracket. A class whose base family has no row stays unknown.
 
 Not modeled. The startup warning, or the load error in
-`[green.broker_static]`, names the reason for the first three rows, the
-others are reported as unknown types:
+`[green.database_static]` and `[green.broker_static]`, names the reason
+for the first three rows, the others are reported as unknown types:
 
 | Class | Reason |
 |---|---|
@@ -141,8 +141,9 @@ fourchette 2x. Une classe dont la famille de base n'a pas de ligne reste
 inconnue.
 
 Non modélisées. L'avertissement de démarrage, ou l'erreur de chargement
-dans `[green.broker_static]`, donne la raison pour les trois premières
-lignes, les autres sont signalées comme types inconnus :
+dans `[green.database_static]` et `[green.broker_static]`, donne la raison
+pour les trois premières lignes, les autres sont signalées comme types
+inconnus :
 
 | Classe | Raison |
 |---|---|
@@ -168,8 +169,8 @@ def render(rows, vintage, lang):
     if lang == "en":
         head = f"""# Instance types with an embedded power profile
 
-Every `instance_type` accepted by `[green.cloud.services]` and by
-`[green.broker_static]`, with the idle and maximum wattage the SPECpower
+Every `instance_type` accepted by `[green.cloud.services]`,
+`[green.database_static]` and `[green.broker_static]`, with the idle and maximum wattage the SPECpower
 model interpolates between. {len(rows)} entries, table vintage
 `{vintage}`. Managed database, cache, broker and search class names are
 accepted too: each resolves to the row of the VM family it runs on, see
@@ -180,8 +181,9 @@ Sentinel warns once at startup, naming the type, and the reason when it
 is a managed class the model leaves out, then falls back to a
 provider-level average, so the figure gets coarser. That warning is also
 how you check your own type without reading this page. In
-`[green.broker_static]` the same type is an error that stops the load,
-since a declared broker has no other source to fall back on. When your
+`[green.database_static]` and `[green.broker_static]` the same type is an
+error that stops the load, since declared hosts have no other source to
+fall back on. When your
 hardware is absent and you know its draw, declare it directly instead,
 which is exact rather than approximated:
 
@@ -241,8 +243,8 @@ the two disagree. Do not edit it by hand.
     else:
         head = f"""# Types d'instance avec un profil de puissance embarqué
 
-Tous les `instance_type` acceptés par `[green.cloud.services]` et par
-`[green.broker_static]`, avec les puissances au repos et maximale entre
+Tous les `instance_type` acceptés par `[green.cloud.services]`,
+`[green.database_static]` et `[green.broker_static]`, avec les puissances au repos et maximale entre
 lesquelles le modèle SPECpower interpole. {len(rows)} entrées, millésime
 de la table `{vintage}`. Les noms de classes managées de base de données,
 de cache, de broker et de recherche sont acceptés aussi : chacun se résout
@@ -254,9 +256,10 @@ Sentinel avertit une seule fois au démarrage en nommant le type, et la
 raison quand il s'agit d'une classe managée que le modèle laisse de côté,
 puis se rabat sur une moyenne du fournisseur, ce qui rend la valeur plus
 grossière. Cet avertissement est aussi la façon de vérifier votre propre
-type sans lire cette page. Dans `[green.broker_static]`, le même type est
-une erreur qui arrête le chargement, puisqu'un broker déclaré n'a aucune
-autre source sur laquelle se rabattre. Quand votre matériel est absent et
+type sans lire cette page. Dans `[green.database_static]` et
+`[green.broker_static]`, le même type est une erreur qui arrête le
+chargement, puisque des hôtes déclarés n'ont aucune autre source sur
+laquelle se rabattre. Quand votre matériel est absent et
 que vous connaissez sa consommation, déclarez-la directement, ce qui donne
 une valeur exacte plutôt qu'approchée :
 

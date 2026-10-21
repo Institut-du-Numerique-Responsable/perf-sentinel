@@ -1,7 +1,7 @@
 # Instance types with an embedded power profile
 
-Every `instance_type` accepted by `[green.cloud.services]` and by
-`[green.broker_static]`, with the idle and maximum wattage the SPECpower
+Every `instance_type` accepted by `[green.cloud.services]`,
+`[green.database_static]` and `[green.broker_static]`, with the idle and maximum wattage the SPECpower
 model interpolates between. 421 entries, table vintage
 `2026-04-24 (CCF aligned)`. Managed database, cache, broker and search class names are
 accepted too: each resolves to the row of the VM family it runs on, see
@@ -12,8 +12,9 @@ Sentinel warns once at startup, naming the type, and the reason when it
 is a managed class the model leaves out, then falls back to a
 provider-level average, so the figure gets coarser. That warning is also
 how you check your own type without reading this page. In
-`[green.broker_static]` the same type is an error that stops the load,
-since a declared broker has no other source to fall back on. When your
+`[green.database_static]` and `[green.broker_static]` the same type is an
+error that stops the load, since declared hosts have no other source to
+fall back on. When your
 hardware is absent and you know its draw, declare it directly instead,
 which is exact rather than approximated:
 
@@ -93,8 +94,8 @@ is a Skylake part while the `c5` rows are Cascade Lake, a gap inside the
 2x bracket. A class whose base family has no row stays unknown.
 
 Not modeled. The startup warning, or the load error in
-`[green.broker_static]`, names the reason for the first three rows, the
-others are reported as unknown types:
+`[green.database_static]` and `[green.broker_static]`, names the reason
+for the first three rows, the others are reported as unknown types:
 
 | Class | Reason |
 |---|---|
