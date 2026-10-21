@@ -22,13 +22,22 @@ pub(crate) use super::carbon_profiles::HourlyProfileRef;
 /// Estimated energy consumed per I/O operation in kWh.
 ///
 /// This is a rough order-of-magnitude approximation (~0.1 mWh per I/O op).
-/// It accounts for a typical database query or HTTP round-trip on cloud
-/// infrastructure, including CPU, memory, and network overhead.
+/// Every rung of the fidelity ladder (`docs/ENERGY.md`), the I/O proxy
+/// included, prices the emitting service's own host for each operation
+/// it issues: CPU, memory and network stack on that host. The callee
+/// (database server, broker, downstream service) is never in it.
+/// Database and broker host energy enters a report only through a
+/// declared or measured source:
+/// `[green.alumet.database]`, `[green.database_static]`,
+/// `[green.alumet.broker]` or `[green.broker_static]`.
 ///
 /// Not a measured value. See `docs/design/05-GREENOPS-AND-CARBON.md`.
 pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1;
 
 // Per-operation energy multipliers (proxy model only).
+// SQL verb weights and HTTP tiers are relative weights that rank operation
+// classes on the emitting service. Their ratios come from database-server
+// benchmarks, but they bill no database host.
 // See docs/design/05-GREENOPS-AND-CARBON.md for sources and rationale.
 
 const SQL_SELECT_COEFF: f64 = 0.5; // read-only index lookup
@@ -108,6 +117,13 @@ pub const CO2_MODEL_CLOUD_SPECPOWER: &str = "cloud_specpower";
 /// energy model tag which tracks Scaphandre/cloud/proxy).
 pub const CO2_MODEL_EMAPS: &str = "electricity_maps_api";
 
+/// Carbon intensity source: a grid operator's free real-time feed (RTE
+/// `éCO2mix`, NESO, Fingrid, Energinet, REE e·sios, Open Electricity,
+/// MAVIR, em6). Ranks right below
+/// [`CO2_MODEL_EMAPS`]; which operator served a region is on its
+/// `intensity_provider`.
+pub const CO2_MODEL_GRID_OPERATOR: &str = "grid_operator_api";
+
 /// Readable name of a model tag, for documents a person reads.
 #[must_use]
 pub fn co2_model_label(tag: &str) -> Option<&'static str> {
@@ -121,6 +137,11 @@ pub fn co2_model_label(tag: &str) -> Option<&'static str> {
         CO2_MODEL_REDFISH => "Redfish, BMC chassis power",
         CO2_MODEL_CLOUD_SPECPOWER => "Cloud SPECpower table",
         CO2_MODEL_EMAPS => "Electricity Maps, live grid intensity",
+        CO2_MODEL_GRID_OPERATOR => "Grid operator open data, live grid intensity",
+        // A declared host figure inside the totals lists its tag among
+        // the energy sources.
+        crate::report::DB_WASTE_MODEL_SPECPOWER => "Declared database hosts, SPECpower ceiling",
+        crate::report::BROKER_WASTE_MODEL_SPECPOWER => "Declared broker hosts, SPECpower ceiling",
         _ => return None,
     })
 }
@@ -145,6 +166,17 @@ pub const METHODOLOGY_SCI_NUMERATOR_TRANSPORT: &str = "sci_v1_numerator+transpor
 /// Methodology tag: avoidable CO2 via `operational * (avoidable_ops / accounted_ops)`.
 /// Region-blind, excludes embodied.
 pub const METHODOLOGY_OPERATIONAL_RATIO: &str = "sci_v1_operational_ratio";
+
+/// Methodology tag: [`METHODOLOGY_SCI_NUMERATOR_TRANSPORT`] with the
+/// database and broker host terms `G_db + G_msg` added. Applies on every
+/// window scored with a host source configured, zero included, like the
+/// transport tag.
+pub const METHODOLOGY_SCI_NUMERATOR_TRANSPORT_HOSTS: &str = "sci_v1_numerator+transport+hosts";
+
+/// Methodology tag: [`METHODOLOGY_OPERATIONAL_RATIO`] plus each in-total
+/// host term times its own subsystem waste ratio. Same scope as
+/// [`METHODOLOGY_SCI_NUMERATOR_TRANSPORT_HOSTS`].
+pub const METHODOLOGY_OPERATIONAL_RATIO_HOSTS: &str = "sci_v1_operational_ratio+hosts";
 
 /// Methodology tag: SCI v1.0 per-R intensity `((E x I) + M) / R`, R = 1 trace.
 /// The SCI score proper (an intensity), distinct from the numerator footprint.
@@ -268,6 +300,18 @@ impl CarbonEstimate {
         }
     }
 
+    /// Same model and methodology at a new midpoint, with the bracket
+    /// rebuilt from the same factors.
+    pub(crate) fn rescaled(&self, mid: f64) -> Self {
+        Self {
+            low: mid * CO2_LOW_FACTOR,
+            mid,
+            high: mid * CO2_HIGH_FACTOR,
+            model: self.model.clone(),
+            methodology: self.methodology.clone(),
+        }
+    }
+
     /// SCI v1.0 numerator estimate with default proxy v1 model.
     #[must_use]
     pub fn sci_numerator(mid: f64) -> Self {
@@ -301,7 +345,11 @@ impl CarbonEstimate {
 /// Each estimate carries a 2× multiplicative uncertainty bracket.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CarbonReport {
-    /// Total estimated CO₂ (operational + embodied) with confidence interval.
+    /// Total estimated CO₂ (operational + embodied + transport, plus the
+    /// in-total database and broker host terms) with confidence interval.
+    /// Its `model` is the energy model of the application part only: a host
+    /// term's model is on its waste block
+    /// ([`crate::report::GreenSummary::host_model_suffix`]).
     pub total: CarbonEstimate,
     /// Estimated CO₂ that could be saved by eliminating I/O waste.
     /// Excludes the embodied term (you can't optimize away manufactured
@@ -318,6 +366,16 @@ pub struct CarbonReport {
     /// `[green] include_network_transport` is deprecated and ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_gco2: Option<f64>,
+    /// Database host carbon (gCO₂eq) counted inside `total`, an SCI-style
+    /// host term next to `operational_gco2`. Present only when the
+    /// window's database figure is in the totals
+    /// (`DatabaseWaste.in_totals`), absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_gco2: Option<f64>,
+    /// Broker host carbon (gCO₂eq) counted inside `total`, the messaging
+    /// twin of `database_gco2` (`MessagingWaste.in_totals`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messaging_gco2: Option<f64>,
     /// SCI v1.0 per-functional-unit intensity: `total / R`, R = 1 trace.
     /// The SCI score proper (an intensity), distinct from `total` (the
     /// numerator footprint). Methodology tag `sci_v1_intensity`. Optional
@@ -340,8 +398,85 @@ pub enum IntensitySource {
     Annual,
     Hourly,
     MonthlyHourly,
-    /// Real-time data from Electricity Maps API (highest fidelity).
+    /// Real-time data from a live API (highest fidelity), see
+    /// [`RealTimeProvider`] for which one.
     RealTime,
+}
+
+/// Which live API produced a `RealTime` intensity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RealTimeProvider {
+    /// Electricity Maps: lifecycle or direct factors, consumption-based.
+    #[default]
+    ElectricityMaps,
+    /// RTE `éCO2mix` (France): direct emissions of production, imports excluded.
+    RteEco2mix,
+    /// NESO Carbon Intensity API (Great Britain): direct emissions of
+    /// generation plus imports.
+    Neso,
+    /// Fingrid (Finland): direct emissions of production or of consumption,
+    /// depending on `[green.fingrid] dataset`.
+    Fingrid,
+    /// Energinet (Denmark DK1, DK2): emissions of consumption.
+    Energinet,
+    /// REE e·sios (mainland Spain): direct emissions of peninsular generation.
+    ReeEsios,
+    /// Open Electricity (Australia, NEM regions and WEM): direct emissions
+    /// of regional generation, from per-technology emissions and energy.
+    OpenElectricity,
+    /// MAVIR (Hungary): direct emissions of domestic power plants per
+    /// gross domestic generation.
+    Mavir,
+    /// em6 (New Zealand): direct emissions of grid-connected generation.
+    Em6,
+}
+
+impl RealTimeProvider {
+    /// The grid operator feeds, in a fixed order (`/api/energy` rows,
+    /// display lists).
+    pub const GRID_OPERATORS: [Self; 8] = [
+        Self::RteEco2mix,
+        Self::Neso,
+        Self::Fingrid,
+        Self::Energinet,
+        Self::ReeEsios,
+        Self::OpenElectricity,
+        Self::Mavir,
+        Self::Em6,
+    ];
+
+    /// Wire name, as serialized.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ElectricityMaps => "electricity_maps",
+            Self::RteEco2mix => "rte_eco2mix",
+            Self::Neso => "neso",
+            Self::Fingrid => "fingrid",
+            Self::Energinet => "energinet",
+            Self::ReeEsios => "ree_esios",
+            Self::OpenElectricity => "open_electricity",
+            Self::Mavir => "mavir",
+            Self::Em6 => "em6",
+        }
+    }
+
+    /// Name for people.
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::ElectricityMaps => "Electricity Maps",
+            Self::RteEco2mix => "RTE éCO2mix",
+            Self::Neso => "NESO Carbon Intensity",
+            Self::Fingrid => "Fingrid",
+            Self::Energinet => "Energinet",
+            Self::ReeEsios => "REE e·sios",
+            Self::OpenElectricity => "Open Electricity",
+            Self::Mavir => "MAVIR",
+            Self::Em6 => "em6",
+        }
+    }
 }
 
 /// Per-region operational CO₂ breakdown row in `green_summary.regions[]`.
@@ -373,6 +508,11 @@ pub struct RegionBreakdown {
     /// Only present when `intensity_estimated == Some(true)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intensity_estimation_method: Option<String>,
+    /// Live API behind a `RealTime` row, present only when it is not
+    /// Electricity Maps so earlier reports keep their exact shape:
+    /// absent on a `RealTime` row means Electricity Maps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intensity_provider: Option<RealTimeProvider>,
 }
 
 /// Carbon scoring configuration. Built via [`Config::carbon_context()`].
@@ -411,7 +551,8 @@ pub struct CarbonContext {
     /// daemon can clone the context per tick without deep-copying profiles.
     pub custom_hourly_profiles: Option<Arc<HashMap<String, HourlyProfile>>>,
     /// Per-service calibration factors from `[green] calibration_file`.
-    /// Multiplied with the proxy model `ENERGY_PER_IO_OP_KWH` per service.
+    /// Multiplies the emitting service's proxy energy
+    /// (`ENERGY_PER_IO_OP_KWH`, with its weights) per service.
     pub calibration: Option<crate::calibrate::CalibrationData>,
     /// Real-time grid intensity from Electricity Maps (daemon only).
     /// Keys are lowercased cloud region names, values carry gCO2/kWh
@@ -424,14 +565,15 @@ pub struct CarbonContext {
     /// verify which carbon model produced the numbers without reading
     /// the operator's TOML. `None` when green scoring is disabled.
     pub scoring_config: Option<ScoringConfig>,
-    /// Declared database measured by Alumet (`[green.alumet.database]`).
+    /// Database host energy from `[green.alumet.database]` or
+    /// `[green.database_static]` (its ceiling or its `cpu_query`).
     /// Daemon-only: `Config::carbon_context` leaves this `None`, and only
     /// the daemon patches in a `Some` per tick with the energy accumulated
     /// since the previous scored batch. A batch run starts no scraper, so
     /// it emits no database figure and falls back to the estimated one.
     pub db_energy: Option<DbEnergyContext>,
-    /// Declared broker measured by Alumet (`[green.alumet.broker]`),
-    /// same lifecycle as [`Self::db_energy`].
+    /// Broker host energy from `[green.alumet.broker]` or
+    /// `[green.broker_static]`, same lifecycle as [`Self::db_energy`].
     pub broker_energy: Option<DbEnergyContext>,
 }
 
@@ -441,11 +583,15 @@ pub struct CarbonContext {
 pub struct DbEnergyContext {
     /// kWh since the previous scored batch, `0.0` = no reading.
     pub window_kwh: f64,
-    /// Operator-declared region, `None` skips the carbon conversion.
+    /// The subsystem's effective region (`GreenConfig::host_region`),
+    /// `None` skips the carbon conversion.
     pub region: Option<String>,
     /// Provenance of `window_kwh`, carried here because only the caller
     /// that fills it knows whether it was measured or declared.
     pub model: &'static str,
+    /// Placement from the subsystem's declared-hosts section, `None`
+    /// without one (an Alumet workload alone).
+    pub placement: Option<crate::score::host_static::HostPlacement>,
 }
 
 impl Default for DbEnergyContext {
@@ -456,6 +602,7 @@ impl Default for DbEnergyContext {
             // Weakest of the three tags: a caller that forgets to state its
             // provenance must not claim a measurement.
             model: crate::report::DB_WASTE_MODEL_ESTIMATED,
+            placement: None,
         }
     }
 }
@@ -477,6 +624,15 @@ pub struct ScoringConfig {
     /// present `scoring_config` did mean the API was configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub electricity_maps: Option<bool>,
+    /// Grid operator feeds configured (`[green.rte_eco2mix]`, `[green.em6]`...).
+    /// Absent when none is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grid_feeds: Vec<RealTimeProvider>,
+    /// Fingrid dataset scored when `[green.fingrid]` is configured: 266
+    /// (production) or 265 (consumption, imports included). The two bases
+    /// differ, the provider name alone does not tell them apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingrid_dataset: Option<u16>,
     /// Coefficients that scale the published figures. Absent on windows
     /// written before they were recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -534,16 +690,20 @@ pub struct RealTimeIntensityEntry {
     /// `"TIME_SLICER_AVERAGE"` or `"GENERAL_PURPOSE_ZONE_DEVELOPMENT"`.
     /// Typically `Some` only when `is_estimated == Some(true)`.
     pub estimation_method: Option<String>,
+    /// Live API the value came from.
+    pub provider: RealTimeProvider,
 }
 
 impl RealTimeIntensityEntry {
-    /// Build a measured entry with no estimation metadata. Convenience
-    /// constructor for tests and callers that only have a raw `f64`.
+    /// Build a measured Electricity Maps entry with no estimation
+    /// metadata. Convenience constructor for tests and callers that only
+    /// have a raw `f64`.
     pub fn measured(gco2_per_kwh: f64) -> Self {
         Self {
             gco2_per_kwh,
             is_estimated: None,
             estimation_method: None,
+            provider: RealTimeProvider::ElectricityMaps,
         }
     }
 }

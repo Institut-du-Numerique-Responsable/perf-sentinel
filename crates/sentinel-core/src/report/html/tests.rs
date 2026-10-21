@@ -191,20 +191,54 @@ fn no_js_notice_is_removed_by_a_script_that_follows_it() {
 fn green_panel_carries_database_waste_card() {
     let report = minimal_report(vec![]);
     let (html, _) = render(&report, &[], &opts("traces.json", None));
-    // Pins the Database waste card block and its exclusion label in the
-    // green panel JS, and the SQL-share subtitle on the ratio card.
+    // Pins the Database waste card block and its three scope labels in
+    // the green panel JS, and the SQL-share subtitle on the ratio card.
     assert!(
         html.contains("greenSummary.database_waste"),
         "green panel must read database_waste"
     );
+    for scope in [
+        "host energy, in the report totals",
+        "application-side share, within the report totals",
+        "outside these totals",
+    ] {
+        assert!(
+            html.contains(scope),
+            "the card must state its scope: {scope}"
+        );
+    }
     assert!(
-        html.contains("excluded from totals"),
-        "the card must state the exclusion from totals"
+        html.contains("wasteScope(dbw)") && html.contains("wasteScope(mw)"),
+        "both waste cards must take their scope from the shared helper"
     );
     assert!(
         html.contains("avoidable / total ops"),
         "waste ratio subtitle missing"
     );
+}
+
+#[test]
+fn green_panel_shows_the_application_and_host_split() {
+    let report = minimal_report(vec![]);
+    let (html, _) = render(&report, &[], &opts("traces.json", None));
+    for needle in [
+        "function energySplitLabel",
+        "\" · plus \" + h.noun",
+        "[\"database hosts\", gs.database_waste], [\"broker hosts\", gs.messaging_waste]",
+        "appendHostCarbonCard(metrics, \"Database CO2\", co2.database_gco2",
+        "appendHostCarbonCard(metrics, \"Broker CO2\", co2.messaging_gco2",
+        "[co2.database_gco2, co2.messaging_gco2].filter(Number.isFinite)",
+        "placementLabel(dbw)",
+        "placementLabel(mw)",
+        "a host figure needs `[green.database_static]` or `[green.alumet.database]`",
+        "a host figure needs `[green.broker_static]` or `[green.alumet.broker]`",
+        "plus the database and broker host terms when their host energy is in the totals",
+        "function co2TotalSub(total, gs)",
+        "sub += \" + \" + h.noun + \" \" + (energyDisplayTag(h.model) || \"unknown\")",
+        "co2TotalSub(co2.total, greenSummary)",
+    ] {
+        assert!(html.contains(needle), "missing: {needle}");
+    }
 }
 
 #[test]
@@ -214,12 +248,16 @@ fn green_panel_greys_out_absent_figures_instead_of_hiding_them() {
     // An absent figure renders as a muted card naming the cause, and the
     // Carbon tab is registered even when green scoring is disabled.
     assert!(
-        html.contains("a measured reading needs `[green.alumet.database]`"),
-        "absent database figure must say what produces one"
+        html.contains(
+            "no SQL activity this window, or no database reading yet, see `[green.database_static]` or `[green.alumet.database]`"
+        ),
+        "absent database figure must name both sources"
     );
     assert!(
-        html.contains("no broker publish spans, or no broker energy backend"),
-        "absent broker figure must name its causes"
+        html.contains(
+            "no broker publish spans this window, or no broker reading yet, see `[green.broker_static]` or `[green.alumet.broker]`"
+        ),
+        "absent broker figure must name both sources"
     );
     assert!(
         html.contains("GreenOps scoring is off ([green] enabled = false)"),
@@ -1011,6 +1049,16 @@ fn template_carries_scoring_config_bandeau_and_helpers() {
         "function buildApiVersionChip",
         "function buildEmissionFactorChip",
         "function buildTemporalGranularityChip",
+        "var GRID_FEEDS",
+        "function gridFeed",
+        "rte_eco2mix:",
+        "neso:",
+        "fingrid:",
+        "energinet:",
+        "ree_esios:",
+        "open_electricity:",
+        "mavir:",
+        "em6:",
     ] {
         assert!(
             TEMPLATE.contains(needle),

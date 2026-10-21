@@ -2,11 +2,12 @@
 
 use std::collections::HashMap;
 
-use super::apply::{apply_chassis_scrape, build_chassis_services};
+use super::apply::apply_chassis_scrape;
 use super::config::RedfishSchema;
 use super::parser::{ParseOutcome, parse_redfish_power};
 use super::scraper::{ScraperError, credentials_travel_cleartext, scraper_error_reason};
 use super::state::ServiceEnergy;
+use crate::score::energy_state::services_by_key;
 
 // --- cleartext credential detection ----------------------------------
 
@@ -171,13 +172,13 @@ fn empty_chassis_services_is_noop() {
 }
 
 #[test]
-fn build_chassis_services_groups_by_chassis() {
+fn services_by_key_groups_by_chassis() {
     let m = mappings(&[
         ("svc-a", "chassis-1"),
         ("svc-b", "chassis-1"),
         ("svc-c", "chassis-2"),
     ]);
-    let by_chassis = build_chassis_services(&m);
+    let by_chassis = services_by_key(&m);
     assert_eq!(by_chassis.len(), 2);
     let mut chassis1 = by_chassis.get("chassis-1").cloned().unwrap();
     chassis1.sort();

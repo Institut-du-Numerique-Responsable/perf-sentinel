@@ -201,14 +201,16 @@ pub(crate) fn cmd_disclose_tui(
     input: Vec<PathBuf>,
     org_config: &std::path::Path,
     strict_attribution: bool,
+    total_requests_in_period: Option<u64>,
 ) {
     use sentinel_core::report::periodic::aggregator::archive_time_range;
     use sentinel_core::report::periodic::org_config as org_config_loader;
 
     require_terminal_or_exit();
 
-    let org =
+    let mut org =
         org_config_loader::load_from_path(org_config).unwrap_or_else(|err| exit_with_error(&err));
+    disclose::apply_total_requests_override(&mut org, total_requests_in_period);
 
     let archive_range = archive_time_range(&input).unwrap_or_else(|err| exit_with_error(&err));
 
@@ -219,7 +221,8 @@ pub(crate) fn cmd_disclose_tui(
         strict_attribution,
         archive_range,
         chrono::Utc::now().date_naive(),
-    );
+    )
+    .with_total_requests_cli(total_requests_in_period);
 
     // The Disclose tab reads only `app.disclose`, so empty inputs suffice.
     let mut app = tui::App::new(Vec::new(), Vec::new())

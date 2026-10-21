@@ -1350,8 +1350,9 @@ prometheusRule:
   labels:
     # Match your Prometheus resource's ruleSelector.
     release: prometheus
-  # Add the per-backend energy-scraper staleness alerts only when an
-  # energy backend (Alumet, Scaphandre, Kepler, Redfish, cloud_energy) is configured.
+  # Add the per-backend energy-scraper staleness alerts, and the host CPU
+  # probe ones, only when an energy backend (Alumet, Scaphandre, Kepler,
+  # Redfish, cloud_energy) is configured.
   energyScrapers: false
   scraperStaleSeconds: 120
 ```

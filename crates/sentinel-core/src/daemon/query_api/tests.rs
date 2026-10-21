@@ -2172,7 +2172,7 @@ async fn energy_endpoint_reports_unconfigured_backends_without_metrics() {
     // age/counter fields (the pre-registered zero gauges must not
     // read as a misleading fresh scrape).
     let energy = fetch_energy(make_state()).await;
-    assert_eq!(energy.backends.len(), 6);
+    assert_eq!(energy.backends.len(), 16);
     for b in &energy.backends {
         assert!(!b.configured, "{} should be unconfigured", b.backend);
         assert!(b.last_scrape_age_seconds.is_none(), "{}", b.backend);
@@ -2190,7 +2190,17 @@ async fn energy_endpoint_reports_unconfigured_backends_without_metrics() {
             "kepler",
             "redfish",
             "cloud_energy",
-            "electricity_maps"
+            "database_cpu",
+            "broker_cpu",
+            "electricity_maps",
+            "rte_eco2mix",
+            "neso",
+            "fingrid",
+            "energinet",
+            "ree_esios",
+            "open_electricity",
+            "mavir",
+            "em6"
         ]
     );
 }
@@ -2221,6 +2231,46 @@ async fn energy_endpoint_reports_configured_backend_metrics() {
         .unwrap();
     assert!(!kepler.configured);
     assert!(kepler.scrapes_ok.is_none());
+}
+
+#[tokio::test]
+async fn energy_endpoint_reports_the_host_cpu_queries() {
+    use crate::score::host_static::{HostPlacement, StaticHostsConfig};
+    let hosts = |cpu_query: Option<&str>| StaticHostsConfig {
+        placement: HostPlacement::Dedicated,
+        nodes: Some(1),
+        instance_type: Some("m5.large".to_string()),
+        region: None,
+        cpu_query: cpu_query.map(str::to_string),
+        shared_with: Vec::new(),
+    };
+    let mut config = crate::config::Config::default();
+    config.green.database_static = Some(hosts(Some("db_cpu")));
+    config.green.broker_static = Some(hosts(None));
+    let backends = EnergyBackendsConfigured::from_green(&config.green);
+    let labelled = backends.as_labelled();
+    assert!(labelled.contains(&("database_cpu", true)));
+    assert!(labelled.contains(&("broker_cpu", false)));
+
+    let mut state = (*make_state()).clone_for_test();
+    state.energy_backends = backends;
+    state.metrics.database_cpu_last_scrape_age_seconds.set(4.0);
+    state.metrics.broker_cpu_last_scrape_age_seconds.set(9.0);
+    let energy = fetch_energy(Arc::new(state)).await;
+    let row = |name: &str| {
+        energy
+            .backends
+            .iter()
+            .find(|b| b.backend == name)
+            .unwrap_or_else(|| panic!("{name} row"))
+    };
+    let (db, broker) = (row("database_cpu"), row("broker_cpu"));
+    assert!(db.configured);
+    assert!((db.last_scrape_age_seconds.unwrap() - 4.0).abs() < f64::EPSILON);
+    // An interval evaluation, no scrape counters.
+    assert!(db.scrapes_ok.is_none() && db.scrapes_failed.is_none());
+    assert!(!broker.configured);
+    assert!(broker.last_scrape_age_seconds.is_none());
 }
 
 #[tokio::test]

@@ -4,8 +4,12 @@
 //! energy readings (e.g. from Scaphandre RAPL exports or cloud monitoring) and
 //! produces adjusted energy-per-op coefficients. These are written to a TOML
 //! file that can be loaded via `[green] calibration_file`.
+//!
+//! Readings must cover the service's own host share only. Database or
+//! broker power belongs to their `[green]` sections, and folding it into a
+//! service's reading counts it twice once a host source is declared.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -491,6 +495,39 @@ pub fn validate_results(results: &[CalibrationResult]) -> Vec<String> {
     warnings
 }
 
+/// One warning per set of services carrying an identical energy series
+/// (same timestamps and values, at least two rows each). Each factor
+/// prices the whole reading, so that host is counted once per service.
+#[must_use]
+pub fn shared_series_warnings(readings: &[EnergyReading]) -> Vec<String> {
+    let mut series: BTreeMap<&str, Vec<(u64, u64)>> = BTreeMap::new();
+    for r in readings {
+        series
+            .entry(&r.service)
+            .or_default()
+            .push((r.timestamp_ms, r.energy_kwh.to_bits()));
+    }
+    let mut services_by_series: BTreeMap<Vec<(u64, u64)>, Vec<&str>> = BTreeMap::new();
+    for (service, mut rows) in series {
+        if rows.len() >= 2 {
+            rows.sort_unstable();
+            services_by_series.entry(rows).or_default().push(service);
+        }
+    }
+    services_by_series
+        .into_values()
+        .filter(|services| services.len() > 1)
+        .map(|services| {
+            format!(
+                "{} carry an identical energy series: each factor prices the whole \
+                 reading, so that host is counted once per service. Keep the series on \
+                 one service or split it before calibrating",
+                services.join(", ")
+            )
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------
@@ -787,6 +824,42 @@ base_energy_per_io_op_kwh = 0.000_000_1
         assert_eq!(warnings.len(), 2);
         assert!(warnings[0].contains("too-high"));
         assert!(warnings[1].contains("too-low"));
+    }
+
+    fn reading(service: &str, timestamp_ms: u64, energy_kwh: f64) -> EnergyReading {
+        EnergyReading {
+            timestamp_ms,
+            service: service.to_string(),
+            energy_kwh,
+        }
+    }
+
+    #[test]
+    fn shared_series_flags_services_with_identical_rows() {
+        let readings = vec![
+            reading("b", 2000, 0.2),
+            reading("a", 1000, 0.1),
+            reading("a", 2000, 0.2),
+            reading("b", 1000, 0.1),
+            reading("c", 1000, 0.1),
+            reading("c", 2000, 0.3),
+        ];
+        let warnings = shared_series_warnings(&readings);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].starts_with("a, b carry"), "{}", warnings[0]);
+    }
+
+    #[test]
+    fn shared_series_ignores_a_one_row_coincidence_and_distinct_series() {
+        let one_row = vec![reading("a", 1000, 0.1), reading("b", 1000, 0.1)];
+        assert_eq!(shared_series_warnings(&one_row), Vec::<String>::new());
+        let distinct = vec![
+            reading("a", 1000, 0.1),
+            reading("a", 2000, 0.2),
+            reading("b", 1000, 0.1),
+            reading("b", 3000, 0.2),
+        ];
+        assert_eq!(shared_series_warnings(&distinct), Vec::<String>::new());
     }
 
     // --- parse_timestamp_ms error branches ---

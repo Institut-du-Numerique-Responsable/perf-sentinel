@@ -3,6 +3,11 @@
 //! See `docs/design/05-GREENOPS-AND-CARBON.md` § "Energy state cache
 //! coherency" for the read-heavy / write-rare design rationale and the
 //! ArcSwap-vs-RwLock tradeoff.
+//!
+//! It also holds the one-source split: a measured or interpolated
+//! source is counted once, and the services reading it share its
+//! energy in proportion to the ops each emitted this tick
+//! ([`services_by_key`], [`split_by_ops`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -94,14 +99,69 @@ impl AgedEnergyMap {
 
 /// Insert or overwrite one service's row without re-cloning the key in
 /// the steady state (the common case: the service already has an
-/// entry, only its coefficient moves). Shared by every scraper's
-/// `apply_scrape`.
+/// entry, only its coefficient moves). Used by [`split_by_ops`].
 pub(crate) fn upsert_row(map: &mut HashMap<String, EnergyRow>, service: &str, row: EnergyRow) {
     if let Some(slot) = map.get_mut(service) {
         *slot = row;
     } else {
         map.insert(service.to_owned(), row);
     }
+}
+
+/// Build the `source key -> Vec<service>` reverse index from a
+/// `service -> source key` mapping, so a tick does not walk the full
+/// mapping per source, an O(K x S) cost. Redfish builds it once at
+/// startup, Alumet and Kepler once per tick, one O(S) pass.
+#[must_use]
+#[allow(clippy::implicit_hasher)]
+pub(crate) fn services_by_key(map: &HashMap<String, String>) -> HashMap<String, Vec<String>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for (svc, key) in map {
+        out.entry(key.clone()).or_default().push(svc.clone());
+    }
+    out
+}
+
+/// Split one source's energy between the services reading it, by the
+/// ops each emitted this tick. Returns whether `next` was modified.
+///
+/// Contributors are the services with ops > 0. A zero sum leaves the
+/// table untouched, so a service with no ops keeps its previous row.
+/// Otherwise `energy_per_op` runs once with the summed ops, and a
+/// finite `Some(e)` is written for every contributor, so `e x ops`
+/// sums back to the source's energy. Each backend keeps its own guard
+/// (sign, zero) inside the closure.
+#[allow(clippy::implicit_hasher)]
+pub(crate) fn split_by_ops(
+    next: &mut HashMap<String, EnergyRow>,
+    services: &[String],
+    op_deltas: &HashMap<String, u64>,
+    now_ms: u64,
+    energy_per_op: impl FnOnce(u64) -> Option<f64>,
+) -> bool {
+    let mut contributors: Vec<&str> = Vec::with_capacity(services.len());
+    let mut total_ops: u64 = 0;
+    for svc in services {
+        let ops = op_deltas.get(svc.as_str()).copied().unwrap_or(0);
+        if ops > 0 {
+            contributors.push(svc.as_str());
+            total_ops = total_ops.saturating_add(ops);
+        }
+    }
+    if total_ops == 0 {
+        return false;
+    }
+    let Some(energy_per_op_kwh) = energy_per_op(total_ops).filter(|e| e.is_finite()) else {
+        return false;
+    };
+    let row = EnergyRow {
+        energy_per_op_kwh,
+        last_update_ms: now_ms,
+    };
+    for svc in contributors {
+        upsert_row(next, svc, row);
+    }
+    true
 }
 
 /// Generate a nominally distinct energy-state wrapper around
@@ -165,7 +225,7 @@ macro_rules! impl_energy_state {
 pub(crate) use impl_energy_state;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -210,6 +270,78 @@ mod tests {
         state.insert_for_test("svc".into(), 5e-7, 1000);
         let snap = state.snapshot(500, 200);
         assert_eq!(snap.len(), 1);
+    }
+
+    /// A `service -> ops` delta map for the split tests, here and in
+    /// the cloud scraper.
+    pub(crate) fn ops(pairs: &[(&str, u64)]) -> HashMap<String, u64> {
+        pairs.iter().map(|(s, n)| ((*s).to_string(), *n)).collect()
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn split_by_ops_sums_back_to_the_source_energy() {
+        let source_kwh = 1e-3;
+        let deltas = ops(&[("a", 1), ("b", 2), ("c", 7)]);
+        let mut next = HashMap::new();
+        let changed = split_by_ops(&mut next, &names(&["a", "b", "c"]), &deltas, 42, |total| {
+            Some(source_kwh / total as f64)
+        });
+        assert!(changed);
+        let summed: f64 = deltas
+            .iter()
+            .map(|(svc, n)| next[svc].energy_per_op_kwh * *n as f64)
+            .sum();
+        assert!((summed - source_kwh).abs() < 1e-15);
+        assert!(next.values().all(|row| row.last_update_ms == 42));
+    }
+
+    #[test]
+    fn split_by_ops_keeps_a_zero_ops_member_row() {
+        let old = EnergyRow {
+            energy_per_op_kwh: 9e-9,
+            last_update_ms: 5,
+        };
+        let mut next = HashMap::from([("idle".to_string(), old)]);
+        let deltas = ops(&[("busy", 4), ("idle", 0)]);
+        assert!(split_by_ops(
+            &mut next,
+            &names(&["busy", "idle"]),
+            &deltas,
+            100,
+            |total| { Some(1.0 / total as f64) }
+        ));
+        assert!((next["busy"].energy_per_op_kwh - 0.25).abs() < 1e-15);
+        assert_eq!(next["idle"].last_update_ms, 5);
+        assert!((next["idle"].energy_per_op_kwh - 9e-9).abs() < 1e-20);
+    }
+
+    #[test]
+    fn split_by_ops_all_zero_ops_leaves_the_table_unchanged() {
+        let mut next = HashMap::new();
+        let deltas = ops(&[("a", 0)]);
+        let mut called = false;
+        let changed = split_by_ops(&mut next, &names(&["a", "b"]), &deltas, 1, |_| {
+            called = true;
+            Some(1.0)
+        });
+        assert!(!changed);
+        assert!(!called);
+        assert!(next.is_empty());
+    }
+
+    #[test]
+    fn split_by_ops_rejects_none_and_nan() {
+        let deltas = ops(&[("a", 3)]);
+        let services = names(&["a"]);
+        for value in [None, Some(f64::NAN), Some(f64::INFINITY)] {
+            let mut next = HashMap::new();
+            assert!(!split_by_ops(&mut next, &services, &deltas, 1, |_| value));
+            assert!(next.is_empty());
+        }
     }
 
     #[test]

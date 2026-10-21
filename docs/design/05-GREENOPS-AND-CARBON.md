@@ -172,7 +172,7 @@ In Perf Sentinel:
 pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1; // 0.1 mWh per I/O op
 ```
 
-This is a rough order-of-magnitude approximation, not a measured value. It accounts for a typical database query or HTTP round-trip on cloud infrastructure. The [Cloud Carbon Footprint project](https://www.cloudcarbonfootprint.org/docs/methodology/) uses a similar approach of estimating energy from resource usage rather than direct measurement.
+This is a rough order-of-magnitude approximation, not a measured value. Every rung of the ladder, the I/O proxy included, prices the emitting service's own host for each operation it issues: CPU, memory and network stack on that host. The callee (database server, broker, downstream service) is never in it. Database and broker host energy enters a report only through a declared or measured source: `[green.alumet.database]`, `[green.database_static]`, `[green.alumet.broker]` or `[green.broker_static]`. SQL verb weights and HTTP tiers are relative weights that rank operation classes. Their ratios come from database-server benchmarks, but they bill no database host. The [Cloud Carbon Footprint project](https://www.cloudcarbonfootprint.org/docs/methodology/) uses a similar approach of estimating energy from resource usage rather than direct measurement.
 
 The value must be disclosed as methodology per SCI requirements. It is documented in the code, in [LIMITATIONS.md](../LIMITATIONS.md) and here.
 
@@ -209,9 +209,9 @@ Embodied:
 embodied_gco2 = traces.len() × embodied_per_request_gco2
 ```
 
-Total CO₂ midpoint:
+Total CO₂ midpoint, `transport_gco2` and the host terms counting zero when absent (see "Database and broker host terms" below):
 ```
-total.mid = operational_gco2 + embodied_gco2
+total.mid = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
 ```
 
 Avoidable CO₂ (via ratio, see "Avoidable via ratio" below):
@@ -249,11 +249,13 @@ co2.sci_per_trace.mid = co2.total.mid / traces_analyzed
 
 `co2.total` is a **footprint** (absolute gCO₂eq), `co2.sci_per_trace` is the **intensity** score per functional unit. The functional unit is declared on `co2.functional_unit` (`"trace"`, which maps to the SCI spec's Transaction / database read-or-write functional unit). The SCI spec permits average grid intensity for `I` (it requires location-based, not market-based, and explicitly allows the average), so the figure is SCI-conformant.
 
-To tag this semantic distinction at the data layer, `CarbonEstimate` carries a `methodology` field with three possible values:
+To tag this semantic distinction at the data layer, `CarbonEstimate` carries a `methodology` field with five possible values:
 
 - `"sci_v1_numerator+transport"`: used on `co2.total`. The `(E × I) + M + T` footprint summed over traces, including when `T` is zero.
+- `"sci_v1_numerator+transport+hosts"`: used on `co2.total` instead when a database or broker host source is configured. The same footprint plus the in-total host terms `G_db + G_msg`, zero included.
 - `"sci_v1_intensity"`: used on `co2.sci_per_trace`. The per-R intensity `((E × I) + M) / R`, R = 1 trace.
 - `"sci_v1_operational_ratio"`: used on `co2.avoidable`. The region-blind global ratio `operational × (avoidable/accounted)`, excluding embodied carbon.
+- `"sci_v1_operational_ratio+hosts"`: used on `co2.avoidable` on the same windows. The same ratio plus each in-total host term times its own SQL or messaging waste ratio.
 
 The distinct values on `total` and `avoidable` signal to downstream consumers that the two are computed differently and should not be compared as if they were homogeneous quantities.
 
@@ -269,7 +271,23 @@ avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops)
 
 This preserves the **relative scale** (a 50% waste reduction yields a 50% drop in avoidable CO₂) without requiring per-finding region attribution. The trade-off is that when avoidable ops are concentrated in a high-intensity region, this ratio slightly under-attributes the savings. The simplification is documented as a known limitation and tagged at the data layer via `methodology: "sci_v1_operational_ratio"`.
 
+**The ratio counts operations, not their energy.** The same op-count ratio scales `co2.avoidable` and both disclosure waste tiers (operational and canonical). An avoidable SELECT weighs one operation although its proxy verb weight is 0.5x, every operation of a service shares one energy per op on a measured backend, and a slow query weighs one operation because `duration_us` is never read. Avoidable carbon is therefore overstated when the avoidable operations are cheaper than the accounted mix, and understated when they are heavier.
+
 **Embodied carbon is excluded from avoidable.** You can't optimize away manufactured silicon by fixing N+1 queries: embodied emissions are fixed per request regardless of how efficient the application is. The avoidable estimate only considers the operational term.
+
+### Database and broker host terms
+
+A measured or declared database or broker figure (`[green.alumet.database]`, `[green.database_static]`, `[green.alumet.broker]`, `[green.broker_static]`) enters the numerator as host terms beside transport, `G_db` and `G_msg`, and its kWh joins `energy_kwh`. `fold_host_terms` in `score/mod.rs` runs once per window after the region loop. A figure enters when its model is not `estimated`, its `energy_gco2` converted and `co2` is `Some`, so the energy and carbon perimeters always agree. It then sets `in_totals` on the figure and writes `co2.database_gco2` or `co2.messaging_gco2`. `total`, `avoidable` and `sci_per_trace` are rescaled once, keeping the 2x bracket:
+
+```
+energy_kwh    = Σ per-service energy + D + B
+total.mid     = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
+avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops) + G_db × r_sql + G_msg × r_msg
+```
+
+`r_sql` and `r_msg` are the SQL and messaging waste ratios, so each host is priced at the ratio of the operations it serves, never at the all-operations ratio. `compute_disclosure_waste` follows the same split: the application pool takes the all-operations ratio, each in-total host block adds its own canonical and operational legs, and the canonical legs keep the binary-pinned threshold. `operational_gco2`, `regions[]` and the per-service maps stay application-only, since a host is never a service. A window scored with a host source configured carries `sci_v1_numerator+transport+hosts` on `total` and `sci_v1_operational_ratio+hosts` on `avoidable`, zero included, like the transport tag. The estimated figure is already a share of the services' energy and never enters a second time.
+
+The live cell (`publish_live_summary` in `daemon/event_loop.rs`) restores the last database and broker figures through `sticky_waste_figure` so `/api/export/report` does not flap between scrapes. A restored copy belongs to an earlier batch, whose totals the current cell does not hold, so it gets `in_totals = false`. `perf_sentinel_scored_carbon_gco2_total` and the `carbon_gco2` gauge add `GreenSummary::scored_carbon_gco2()`, the regions' operational carbon plus the in-total host carbon, embodied and transport out.
 
 ### Multi-region resolution
 
@@ -295,7 +313,7 @@ pub struct CarbonEstimate {
     pub mid: f64,           // best estimate
     pub high: f64,          // mid × 2.0
     pub model: &'static str,       // "io_proxy_v1"
-    pub methodology: &'static str, // "sci_v1_numerator+transport", "sci_v1_intensity" or "sci_v1_operational_ratio"
+    pub methodology: &'static str, // "sci_v1_numerator+transport[+hosts]", "sci_v1_intensity" or "sci_v1_operational_ratio[+hosts]"
 }
 ```
 
@@ -431,7 +449,7 @@ let (energy_kwh, measured_model) = match &ctx.energy_snapshot {
 let op_co2 = per_op_gco2(energy_kwh, intensity_used, pue);
 ```
 
-The scoring stage tracks per-region flags (`any_alumet`, `any_scaphandre`, `any_kepler_ebpf`, `any_redfish_bmc`, `any_cloud_specpower`, `any_realtime`) and the top-level `CarbonEstimate.model` reflects the most precise source used: `"electricity_maps_api"` > `"alumet_rapl"` > `"scaphandre_rapl"` > `"kepler_ebpf"` > `"redfish_bmc"` > `"cloud_specpower"` > `"io_proxy_v3"` > `"io_proxy_v2"` > `"io_proxy_v1"`. When calibration factors are active on proxy models, `+cal` is appended. All energy sources compose naturally with hourly profiles: a measured-energy op in eu-west-3 at 3am UTC uses the measured energy AND the hourly intensity simultaneously.
+The scoring stage tracks per-region flags (`any_alumet`, `any_scaphandre`, `any_kepler_ebpf`, `any_redfish_bmc`, `any_cloud_specpower`, `any_realtime`) and the top-level `CarbonEstimate.model` reflects the most precise source used: `"electricity_maps_api"` > `"grid_operator_api"` > `"alumet_rapl"` > `"scaphandre_rapl"` > `"kepler_ebpf"` > `"redfish_bmc"` > `"cloud_specpower"` > `"io_proxy_v3"` > `"io_proxy_v2"` > `"io_proxy_v1"`. When calibration factors are active on proxy models, `+cal` is appended. All energy sources compose naturally with hourly profiles: a measured-energy op in eu-west-3 at 3am UTC uses the measured energy AND the hourly intensity simultaneously.
 
 **Per-service op counter as single source of truth.** The scraper reads the per-service op counter from `MetricsState::service_io_ops_total` (a Prometheus `CounterVec` labeled with `service` and, since 0.19.0, `grouping`) via `snapshot_service_io_ops()`, which folds the grouping axis back to one total per service. The daemon's event intake path increments this counter on every normalized event. Using the Prometheus counter directly, instead of a parallel counter that would need resetting every scrape window, avoids reset races and gives Grafana users a per-service op rate graph for free.
 
@@ -445,23 +463,23 @@ For cloud VMs (AWS, GCP, Azure) that do not expose Intel RAPL to guests, Perf Se
 
 **Architecture.** The `cloud_energy/` directory contains:
 
-- `config/mod.rs`: `CloudEnergyConfig` and per-service `ServiceCloudConfig` (provider, region, instance_type, optional idle/max watts overrides).
-- `table.rs`: embedded lookup table with idle and max watt values for ~390 instance types after the 2026-04-24 CCF refresh. All entries follow a single homogeneous methodology: `idle_watts = vCPU * idle_per_vCPU` and `max_watts = vCPU * max_per_vCPU`, with coefficients sourced per provider from `ccf-coefficients` 2026-04-24 (`coefficients-{aws,gcp,azure}-use.csv`). No baseboard overhead is reconstructed: the AWS-specific baseboard column was dropped by CCF in 2026-04-24 and is not added back. The 5 percent rule splits modern entries into two groups. Entries are re-aligned to CCF when the SPECpower direct compute diverged (Sapphire Rapids on AWS `m7i`/`c7i`/`r7i` and GCP `c3`, EPYC Genoa on AWS `m7a`/`c7a` and GCP `c3d`/`n2d`, Graviton 2/3/3E/4 mapped to CCF EPYC 2nd Gen proxy, EPYC Turin on AWS `m8a`/`c8a`, Emerald Rapids on GCP `c4`). They stay on `SPECpower_ssj 2008` direct compute 2024 Q1 - 2026 Q2 when within 5 percent or absent from the provider CSV (AWS Milan `m6a`/`c6a`, GCP Turin `c4d`, GCP Ampere Altra `t2a`, Azure Sapphire Rapids, Azure Emerald Rapids, Azure Genoa, Azure Cobalt 100, Sierra Forest). New AWS families added by this refresh: `m8a` / `c8a` (Turin), `m8i` / `c8i` (Emerald Rapids), `r7a` (Genoa memory-optimized). New GCP family: `c4a` (Axion ARM Neoverse V2, proxied to AWS Graviton 4). See `docs/LIMITATIONS.md`.
-- `scraper.rs`: Prometheus JSON API scraper. Queries `avg(rate(cpu_metric[interval]))` per service, fetches JSON from the Prometheus endpoint.
+- `config.rs`: `CloudEnergyConfig` and per-service `ServiceCloudConfig` (provider, instance_type or idle/max watts overrides, optional `cpu_query`). `cpu_query_groups` groups the services by their trimmed resolved CPU query.
+- `table.rs`: embedded lookup table with idle and max watt values for every type listed in [`INSTANCE-TYPES.md`](../INSTANCE-TYPES.md), after the 2026-04-24 CCF refresh. All entries follow a single homogeneous methodology: `idle_watts = vCPU * idle_per_vCPU` and `max_watts = vCPU * max_per_vCPU`, with coefficients sourced per provider from `ccf-coefficients` 2026-04-24 (`coefficients-{aws,gcp,azure}-use.csv`). No baseboard overhead is reconstructed: the AWS-specific baseboard column was dropped by CCF in 2026-04-24 and is not added back. The 5 percent rule splits modern entries into two groups. Entries are re-aligned to CCF when the SPECpower direct compute diverged (Sapphire Rapids on AWS `m7i`/`c7i`/`r7i` and GCP `c3`, EPYC Genoa on AWS `m7a`/`c7a` and GCP `c3d`/`n2d`, Graviton 3 `m7g`/`c7g` and Graviton 4 `m8g`/`c8g` mapped to the CCF EPYC 2nd Gen proxy, EPYC Turin on AWS `m8a`/`c8a`, Emerald Rapids on GCP `c4`). They stay on `SPECpower_ssj 2008` direct compute 2024 Q1 - 2026 Q2 when within 5 percent or absent from the provider CSV (AWS Milan `m6a`/`c6a`, GCP Turin `c4d`, GCP Ampere Altra `t2a`, Azure Sapphire Rapids, Azure Emerald Rapids, Azure Genoa, Azure Cobalt 100, Sierra Forest). New AWS families added by this refresh: `m8a` / `c8a` (Turin), `m8i` / `c8i` (Emerald Rapids), `r7a` (Genoa memory-optimized). New GCP family: `c4a` (Axion ARM Neoverse V2, proxied to AWS Graviton 4). Later rows add Graviton 2 (`m6g`/`c6g`/`r6g`/`t4g`) and memory-optimized Graviton (`r7g`/`r8g`), and GCP `n1` and Azure `Standard_B*`, which run on several processor generations, take the one with the highest max W/vCPU the CCF CSV publishes (see `docs/LIMITATIONS.md`). `resolve_instance_class` maps managed database, cache, broker and search class names and AWS or Azure modifier names to the row of their base family, or to an `Unsupported` reason, and `lookup_instance_power` keeps the provider default for anything else. See `docs/LIMITATIONS.md`.
+- `scraper.rs`: Prometheus JSON API scraper. Sends each distinct resolved CPU query as written, with no templating, once per tick, and reads the value of the first series and the series count.
 - `state.rs`: `CloudEnergyState` backed by `ArcSwap` for lock-free reads from the scoring path.
 - `mod.rs`: re-exports and module documentation.
 
-**The formula.** For each service with a cloud config:
+**The formula.** For each distinct CPU query whose response holds one series, read by services that resolve one `(idle_watts, max_watts)` envelope:
 
 ```
-cpu_percent       = prometheus_query(cpu_metric, service_label)
+cpu_percent       = prometheus_query(cpu_query)
 watts             = idle_watts + (max_watts - idle_watts) * (cpu_percent / 100)
 joules            = watts * scrape_interval_secs
 kwh               = joules / 3_600_000
-energy_per_op_kwh = kwh / ops_in_window
+energy_per_op_kwh = kwh / sum(ops_in_window of the services reading the query)
 ```
 
-`idle_watts` and `max_watts` come from the SPECpower table lookup by instance type or from user-provided overrides in the config. The op count comes from the same `MetricsState::service_io_ops_total` counter used by Scaphandre.
+Every service of the group with ops in the window gets that `energy_per_op_kwh`, so the node is counted once. A response with several series, or a group whose services resolve different envelopes, keeps the per-service computation: each service applies its own envelope to the first series and divides by its own ops. The multi-series case warns once per query, the mixed envelopes warn at config load. `idle_watts` and `max_watts` come from the SPECpower table lookup by instance type or from user-provided overrides in the config. The op count comes from the same `MetricsState::service_io_ops_total` counter used by Scaphandre.
 
 **Config example.**
 
@@ -471,24 +489,23 @@ prometheus_endpoint = "http://prometheus:9090"
 scrape_interval_secs = 15
 default_provider = "aws"
 default_instance_type = "c5.xlarge"
-cpu_metric = "node_cpu_seconds_total"
 
 [green.cloud.services.api-us]
 provider = "aws"
-region = "us-east-1"
 instance_type = "m7i.4xlarge"  # Sapphire Rapids, modern entry
+cpu_query = 'aws_ec2_cpuutilization_average{instance_id="i-0123456789abcdef0"}'
 
 [green.cloud.services.api-eu]
 provider = "gcp"
-region = "europe-west1"
 instance_type = "c4d-standard-8"  # AMD Turin (Zen 5), modern entry
+cpu_query = '100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="api-eu:9100"}[5m])) * 100)'
 ```
 
-**Model tag and precedence.** The coefficient carries model tag `"cloud_specpower"`. In `build_tick_ctx`, higher-fidelity sources take precedence: Alumet overrides Scaphandre overrides Kepler overrides Redfish overrides cloud SPECpower for the same service. The top-level model tag reflects the most precise source: `electricity_maps_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`.
+**Model tag and precedence.** The coefficient carries model tag `"cloud_specpower"`. In `build_tick_ctx`, higher-fidelity sources take precedence: Alumet overrides Scaphandre overrides Kepler overrides Redfish overrides cloud SPECpower for the same service. The top-level model tag reflects the most precise source: `electricity_maps_api` > `grid_operator_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`.
 
 **Daemon only.** Like Scaphandre, cloud energy estimation is a daemon-only feature. The `analyze` batch command always uses the proxy model.
 
-**What cloud SPECpower does NOT do.** See `docs/LIMITATIONS.md` "Cloud SPECpower precision bounds" for the full discussion. The SPECpower model captures CPU-proportional power but not memory, I/O or network power. Shared tenancy is not corrected. Accuracy is approximately +/-30%.
+**What cloud SPECpower does NOT do.** See `docs/LIMITATIONS.md` "Cloud SPECpower precision bounds" for the full discussion. The SPECpower model captures CPU-proportional power but not memory, I/O or network power. Services on one node share its watts only when they read one single-series query, and untraced tenants are attributed to the traced services. Accuracy is approximately +/-30%.
 
 ## Alumet interval-energy attribution
 
@@ -516,13 +533,13 @@ Past the division this is Scaphandre's formula verbatim, and it inherits the sam
 
 ## Broker energy attribution
 
-A broker poses the database's problem twice over: it burns the energy of an N+1 publish loop, it emits no span of its own, and it is very often managed, so there is no host to run an agent on. Perf Sentinel reuses the `database_waste` shape with the messaging-only ratio, `broker energy × (avoidable publish ops / total publish ops)`, reported as `green_summary.messaging_waste`.
+A broker poses the database's problem twice over: it burns the energy of an N+1 publish loop, it emits no span of its own, and it is very often managed, so there is no host to run an agent on. Perf Sentinel reuses the `database_waste` shape with the messaging-only ratio, `broker energy × (avoidable publish ops / total publish ops)`, reported as `green_summary.messaging_waste`. A measured or declared figure is broker host energy, which enters the totals as the `G_msg` host term once its carbon converts (see "Database and broker host terms" above). With neither source, the figure is the estimated form: the application-side share of the publish spans, the energy span scoring gave the publishing services, already inside the totals and holding no broker host energy, so it never enters them a second time.
 
 **Why not a per-publish coefficient.** Covered below under "Why no per-publish coefficient can be a measurement". Broker power stops tracking throughput past roughly 20 % of capacity, so marginal energy is not a constant, and the three determinants (utilisation point, replication factor, topology) are invisible from a producer span. The figure is a workload-level measurement split by a count-based ratio, never a coefficient.
 
 **Why `cloud_energy` could not be reused.** The obvious idea is to feed the broker through the existing SPECpower CPU% path. The per-op path blocks it three times over: `ops_snapshot_diff` produces no op delta for a workload that emits no spans, `cloud_energy/table.rs` guards on `ops == 0`, and the region gate in `carbon_compute.rs` is never reached. Only the Alumet-database pattern, which bypasses the span loop entirely, applies. `lookup_instance_power` is reused directly, but the surrounding machinery is not.
 
-**Two sources, one accumulator.** `[green.alumet.broker]` measures the broker cgroup, a second `DbEnergyState` instance beside the database one. `[green.broker_static]` declares a provisioned cluster and needs no agent at all, which is the only path open on Confluent Cloud, MSK, SQS or a managed Pulsar. Its model is `E(n) = n × P_max`, resolved once at config load rather than per batch.
+**Two sources, one accumulator.** `[green.alumet.broker]` measures the broker cgroup, a second `DbEnergyState` instance beside the database one. `[green.broker_static]` declares a provisioned cluster and needs no agent at all, which suits a provisioned cluster with a typed instance class (a managed Kafka or MQ cluster, self-managed VMs). Serverless and capacity-unit brokers have no provisioned node and cannot be declared. Its model is `E(n) = n × P_max`, resolved once at config load rather than per batch.
 
 What that declared figure bounds is narrower than it reads. `SPECpower` covers CPU and baseboard, so it ceilings the declared vCPUs' compute and not the cluster's wall power, and a storage-bound broker can draw more. It also does not move when the application starts batching, which is a weakness for a figure meant to show remediation working. `MAX_BILLABLE_MS` truncates an idle stretch to one hour, so the declared figure under-counts there. All three are stated in `docs/LIMITATIONS.md`.
 
@@ -533,13 +550,33 @@ What that declared figure bounds is narrower than it reads. `SPECpower` covers C
 - *Banked energy is real.* When the series goes quiet, whatever it banked while live is delivered before the declaration takes the window. A label that was never seen has nothing banked, which lets a typo fall through to the fallback.
 - *The declaration owns the stretch it billed.* From the tick a fallback bills until the series recovers, any series delta covering that wall clock is dropped via `discard_pending`, gated on an outage marker carried by `StaticBrokerState`. The marker makes this safe to apply on a stale tick as well as on the recovery tick: it is only set once a declaration has billed, so the first stale tick still delivers whatever the series banked while it was live. Discarding on every fallback tick regardless of the marker would wipe those joules.
 
-**The figure carries its provenance.** `DbEnergyContext.model` is filled by whichever source populated the window, because nothing downstream can infer it. Its `Default` is the weakest of the three tags (`estimated`), so a caller that forgets to state provenance cannot claim a measurement. The periodic disclosure keeps three buckets rather than two: folding a declared cluster into `measured_energy_kwh` would publish an operator's statement about provisioned hardware as a reading of the broker.
+**The figure carries its provenance.** `DbEnergyContext.model` is filled by whichever source populated the window, because nothing downstream can infer it. Its `Default` is the weakest of the four tags (`estimated`), so a caller that forgets to state provenance cannot claim a measurement. The periodic disclosure keeps four buckets rather than two: folding a declared cluster into `measured_energy_kwh` would publish an operator's statement about provisioned hardware as a reading of the broker. A CPU-interpolated `cloud_specpower` figure stays out of `measured_energy_kwh` too, in `modeled_energy_kwh`.
+
+## Database energy attribution
+
+The database figure has the broker's shape with the SQL-only ratio, and the same two sources. `[green.alumet.database]` measures the database cgroup. `[green.database_static]` with `placement = "dedicated"`, `nodes` and `instance_type` declares a provisioned cluster, billed at `E(n) = n × P_max` by the same `StaticBrokerState` ceiling under the `database_specpower` tag. That suits a managed database with a typed instance class, whose managed name resolves to its VM family. The ceiling's bounds on a database (a lightly loaded host, readers and standbys counted by the operator, managed storage, IOPS and network left out) are in `docs/LIMITATIONS.md`.
+
+**The arbitration is reused, not copied.** `take_broker_energy` arbitrates both subsystems unchanged: a fresh live series owns the timeline and advances the ceiling marker without billing, a stale one lets the ceiling bill and set the outage marker, and the delta that lands on recovery is discarded once. `take_host_energy` calls it for one subsystem. Every property listed under "Arbitration is the subtle part" above holds for the database as for the broker.
+
+**One bundle per subsystem.** `EnergySources` carries `database` and `broker`, each a `SubsystemSources { live, live_staleness_ms, declared }`. The live state is the Alumet workload with the Alumet staleness, or the `DbEnergyState` the cloud scraper bills from the section's `cpu_query` with the cloud staleness (`3 × scrape_interval`). Load-time validation refuses a `cpu_query` next to the Alumet workload, so a subsystem has one live state at most. Each live state travels with its own staleness, so one subsystem's reading is never gated by the other's freshness window. With green scoring off, `host_sources` hands the loop two empty bundles, so nothing consumes banked energy that `score_green` would never read. The live cell keeps a host figure for twice the Alumet staleness or twice the cloud staleness when a CPU probe runs, whichever is longer, raised to `trace_ttl_ms` when either subsystem declares a ceiling, which has no scraper to bridge sub-second batches.
+
+**Base tags.** `host_energy_context` builds a context only for a subsystem with a source the daemon bills, and its `model` is the base tag: `alumet_rapl` with an Alumet workload, otherwise `cloud_specpower` for a section with a `cpu_query`, the live source that query names (every shared section has one, D5/B5), and the declared tag for a ceiling without one. `patch_host_energy` keeps the base tag when a live reading fills the window and writes the declared tag (`database_specpower`, `broker_specpower`) when the ceiling does, so a figure names the source of its kWh. A shared section has no ceiling, so its windows always carry `cloud_specpower` and a stale probe bills nothing. A ceiling-less declaration without a `cpu_query` builds no context, and the estimated figure stays.
+
+**The CPU probe.** `setup_cloud_scraper` builds one `HostProbe` per section with a `cpu_query`, database first. A dedicated one (`HostProbe::dedicated`) has the section's `nodes` and the `node_power()` envelope of its instance type, a shared one is described below, and `spawn_cloud_scraper` runs them on the cloud ticks after the service queries, whether or not a service reading succeeded. `fetch_host_cpu` runs one `fetch_cpu_percent`: a response with several series fails with `MultipleSeries`, and a failure or a non-finite value bills nothing, warns once until the next good reading and advances the subsystem's `*_cpu_last_scrape_age_seconds` gauge. `bill_host_probes` adds `nodes × interpolate_watts(idle, max, cpu) × elapsed / 3_600_000` kWh to the probe's state, `elapsed` being the seconds since the previous tick (the interval, longer when a slow tick delays the next one, the same span the service ops delta covers), with `add_window_kwh`, which also marks the sample, so `take_broker_energy` arbitrates the probe exactly like an Alumet series: after three intervals without a reading the ceiling bills the outage under the declared tag, and the first delta after recovery is dropped.
+
+**The shared subtraction.** A shared probe (`HostProbe::shared`) is one node. Its envelope is the one of the group `shared_with` lists, which D7/B7 hold to one envelope, else the `node_power()` of its instance type, and its `group_key` is that group's trimmed query, the key of the `CloudGroup` reading the node. It bills its dynamic share only, `(max - idle) × clamp(cpu)/100`, the node's idle being already paid by its services. With an empty `shared_with` that share is billed and nothing is deducted. With a listed group, it needs a reading of `group_key` holding one series, else it bills nothing that tick, and it is capped by a joint budget per group: `budget_g = (max - idle) × clamp(c_g)/100` minus what earlier probes took on that group this tick, in probe order, database first, so a database and a broker on one node never bill more than its dynamic watts together. `bill_host_probes` runs before `apply_cloud_scrape` and returns the watts per group query. For a split group, `apply_cloud_scrape` publishes `P' = max(interpolate_watts(idle, max, c_g) - deductions[g], idle)` and splits it by op count. The per-service fallback (several series, mixed envelopes) never receives a deduction, and a listed group without a one-series reading bills its host nothing, so a host is never billed without being taken out of its node.
+
+**Conservation.** The cap gives `P' >= idle` by construction, the `max` is a guard. On a tick where the group's services emitted ops, `Σ_services e × ops × 3.6e6 / interval + Σ_probes on g w = interpolate_watts(idle, max, c_g)`: the node is counted once, the hosts' share in the host terms and the rest in the services' coefficients. On a tick without ops, `w` is still billed and that tick's application remainder is unattributed, the services keeping their previous rows until they age out.
+
+**The region never switches.** A context's `region` is the subsystem's effective region, `GreenConfig::host_region`: the static section's, else the Alumet workload's, else `default_region`. Load-time validation refuses a static and an Alumet region that differ, so the live and declared sources of one subsystem share it, and `patch_host_energy` never touches it. One cluster sits on one grid whichever source billed the window, so its carbon intensity does not change with the source.
 
 ## Kepler and Redfish attribution notes
 
 The Kepler and Redfish integrations follow the same shared-state pattern as Scaphandre and cloud SPECpower (`ArcSwap`-backed `AgedEnergyMap`, `3 × scrape_interval` staleness gate, per-service `OpsSnapshotDiff`) but each carries its own methodology trade-offs that warrant a dedicated note.
 
-**Kepler counter-delta semantics.** Kepler exports a monotonic cumulative joule counter per container/process, unlike Scaphandre's instantaneous microwatt gauge. The scraper task holds a `HashMap<service, last_raw_joules>` and on every tick computes `delta = current - previous`, where `current` is the SUM of every counter sharing the mapped label value within one zone. Kepler emits one series per zone and the zones overlap (`package` contains `core`), so `parse_metric_samples_where` drops the rows whose `zone` label differs from `[green.kepler] zone` before the sum. Rows without a `zone` label pass through. A container name repeated across pods yields several series, and a last-write-wins read would flip between counters with exposition order. The entry is emitted only when `delta > 0.0 && delta.is_finite()`. The filter covers Kepler exporter restarts: the counter resets to zero, `current < previous` produces a negative delta, and the guard drops it. Non-finite readings (`NaN`, `±Inf`) are also dropped. The next scrape produces the next meaningful delta from the fresh baseline. The first observation per service (no `previous`) emits no delta. The raw counter is recorded for the next scrape.
+**One source, one count, on every backend.** Each backend hands a source to `energy_state::split_by_ops` with the services that read it. The ops of the services active this tick are summed, the source's energy is divided by that sum, and each active service gets the resulting `energy_per_op`, so `energy_per_op × ops` adds back up to the reading. The source is a Kepler or Alumet label value (grouped by `energy_state::services_by_key` over `service_mappings`), the one Scaphandre process a `process_map` matcher selects, a Redfish chassis, or a cloud CPU query returning a single series. A service with no ops this tick keeps its previous row. A source read by one service gives the same coefficient as before the split.
+
+**Kepler counter-delta semantics.** Kepler exports a monotonic cumulative joule counter per container/process, unlike Scaphandre's instantaneous microwatt gauge. The scraper task holds a `HashMap<label value, last_raw_joules>`, one counter per label however many services map to it, and on every tick computes `delta = current - previous`, where `current` is the SUM of every counter sharing the mapped label value within one zone. Kepler emits one series per zone and the zones overlap (`package` contains `core`), so `parse_metric_samples_where` drops the rows whose `zone` label differs from `[green.kepler] zone` before the sum. Rows without a `zone` label pass through. A container name repeated across pods yields several series, and a last-write-wins read would flip between counters with exposition order. The entry is emitted only when `delta > 0.0 && delta.is_finite()`. The filter covers Kepler exporter restarts: the counter resets to zero, `current < previous` produces a negative delta, and the guard drops it. Non-finite readings (`NaN`, `±Inf`) are also dropped. The next scrape produces the next meaningful delta from the fresh baseline. The first observation per label value (no `previous`) emits no delta. The raw counter is recorded for the next scrape.
 
 **Kepler scrape mode (direct vs Prometheus-mediated).** Kepler typically runs as a Kubernetes `DaemonSet` (one pod per node). The current `[green.kepler]` integration performs a direct GET and therefore needs an endpoint that exposes Kepler series themselves, either one node-local exporter per Perf Sentinel or a federation/proxy endpoint exposing aggregated series. A Prometheus server's own `/metrics` endpoint is not such an endpoint. A future `source = "prometheus"` mode will issue PromQL queries against an upstream Prometheus. The `metric_kind` enum already distinguishes the Kepler series to read.
 
@@ -569,7 +606,7 @@ Every service mapped to the chassis receives the **same** `energy_per_op` for th
 
 The `[green.electricity_maps]` block enables real-time grid carbon intensity polling. The daemon scraper periodically queries the Electricity Maps `/carbon-intensity/latest` endpoint per zone and feeds the result into the per-tick `CarbonContext`, where it overrides annual and hourly profiles for matched cloud regions. Documented at <https://app.electricitymaps.com/developer-hub/api/getting-started>.
 
-**Per-zone deduplication.** The scraper iterates over `region_map` (`cloud_region -> zone`) but a single zone is fetched at most once per tick, even when several `cloud_region` keys point to the same zone (typical multi-AZ setups, or `aws:eu-west-3` and `local-k3d` both pinned to `FR`). The reading is then dispatched to every matching `cloud_region`. This keeps the API call count proportional to the number of distinct zones, not to the size of `region_map`. This is critical on quota-constrained tiers. The free tier in particular is capped at one zone today, but quota math still benefits when the same zone-mapping appears across staging plus prod.
+**Per-zone deduplication.** The scraper iterates over `region_map` (`cloud_region -> zone`) but a single zone is fetched at most once per tick, even when several `cloud_region` keys point to the same zone (typical multi-AZ setups, or `aws:eu-west-3` and `local-k3d` both pinned to `FR`). The reading is then dispatched to every matching `cloud_region`. This keeps the API call count proportional to the number of distinct zones, not to the size of `region_map`. This is critical on quota-constrained tiers. Commercial plans are priced per zone, and the same zone mapped from staging and prod still costs one call per tick.
 
 **Estimation metadata.** The Electricity Maps API surfaces two optional fields alongside `carbonIntensity`:
 
@@ -646,7 +683,7 @@ The `green_summary.scoring_config` object exposes the runtime configuration of t
 
 ## Per-operation energy coefficients
 
-The proxy model uses a single `ENERGY_PER_IO_OP_KWH` constant (0.1 mWh) for every I/O operation. This treats a read-only `SELECT` hitting an index the same as a disk-heavy `INSERT` writing to WAL and data pages. The per-operation coefficient feature refines this by applying a multiplier based on the operation type.
+The proxy model uses a single `ENERGY_PER_IO_OP_KWH` constant (0.1 mWh) for every I/O operation the emitting service issues. This treats a read-only `SELECT` hitting an index the same as a disk-heavy `INSERT` writing to WAL and data pages. The per-operation coefficient feature refines this by applying a multiplier based on the operation type. The multipliers are relative weights on the emitting service's own cost: they rank operation classes and bill no database host.
 
 **SQL verb multipliers.** The verb is extracted from the first word of the `target` field (the raw SQL statement), not from the `operation` field. This is necessary because OTLP-ingested spans store `db.system` (e.g., "postgresql") in `operation`, not the SQL verb. The first whitespace-delimited token reliably gives the SQL verb across all ingestion formats (native JSON, OTLP, Jaeger, Zipkin).
 
@@ -675,7 +712,7 @@ Two Kafka defaults also break the naive "one publish equals one durable write" r
 
 **Standards footing.** The Green Software Foundation SCI specification (text v1.1.0, not the paid ISO/IEC 21031:2024 publication, which was not consulted) permits a modelled value: "In situations where there is a lack of access, capability, or rights to the necessary real-world data, the SCI allows for data generated through modeling, using best estimates instead." That is a conditional fallback tied to the data being inaccessible, not a free choice, and no GSF sub-specification covers broker or messaging workloads.
 
-**Sources.** The relative ratios are derived from academic DBMS energy benchmarks (Z. Xu, Y.-C. Tu, X. Wang, "Exploring Power-Performance Tradeoffs in Database Systems", IEEE ICDE 2010, pp. 485-496; Tsirogiannis, Harizopoulos, Shah, "Analyzing the Energy Efficiency of a Database Server", SIGMOD 2010, pp. 231-242; Lella et al., "DBJoules: An Energy Measurement Tool for Database Management Systems", arXiv:2311.08961, 2023) and the Cloud Carbon Footprint methodology. The absolute values are order-of-magnitude estimates. The relative ordering (SELECT < DELETE < INSERT/UPDATE) is more robust across hardware generations.
+**Sources.** The relative ratios are derived from academic DBMS energy benchmarks (Z. Xu, Y.-C. Tu, X. Wang, "Exploring Power-Performance Tradeoffs in Database Systems", IEEE ICDE 2010, pp. 485-496; Tsirogiannis, Harizopoulos, Shah, "Analyzing the Energy Efficiency of a Database Server", SIGMOD 2010, pp. 231-242; Lella et al., "DBJoules: An Energy Measurement Tool for Database Management Systems", arXiv:2311.08961, 2023) and the Cloud Carbon Footprint methodology, borrowed as relative weights only: those benchmarks measured database servers, while the weights scale the emitting service's own per-op cost and bill no database host. The absolute values are order-of-magnitude estimates. The relative ordering (SELECT < DELETE < INSERT/UPDATE) is more robust across hardware generations.
 
 **Where it plugs in.** In `compute_carbon_report`'s span loop, the proxy fallback path applies the coefficient:
 
@@ -687,7 +724,7 @@ let proxy_energy_kwh = if ctx.per_operation_coefficients {
 };
 ```
 
-When measured energy is available (Scaphandre or cloud SPECpower), the coefficient is NOT applied. Measured data is always more accurate than heuristic multipliers.
+When measured energy is available (any measured backend), the coefficient is NOT applied: the measured backend replaces the proxy on the same perimeter, the emitting service's host.
 
 **Hot path detail.** The `energy_coefficient()` function is `#[inline]` and avoids allocation: it uses `split_ascii_whitespace().next()` (lazy, stops at the first space) for verb extraction and `eq_ignore_ascii_case` for matching instead of lowercasing. The most common verb (SELECT) matches on the first comparison.
 
@@ -768,6 +805,8 @@ The planned consumer is perf-lint, a companion IDE integration (not yet publishe
 `calibrate.rs` backs the `calibrate` subcommand, which turns a measured power CSV into per-service multipliers for the I/O proxy. It closes the gap between "a directional coefficient" and "a directional coefficient anchored on your hardware" without requiring an agent at runtime.
 
 The arithmetic is plain: for each service present in **both** the traces and the readings, `energy_per_op = total_energy / total_ops`, and the emitted factor is that divided by the default proxy coefficient. A service with zero ops in the observation window is skipped rather than assigned a factor, since dividing by it would manufacture a number out of no evidence.
+
+Readings must cover the service's own host share only. Database or broker power belongs to `[green.alumet.database]`, `[green.database_static]`, `[green.alumet.broker]` or `[green.broker_static]`, and folding it into a service's reading counts it twice once a host source is declared.
 
 Two input shapes are accepted and auto-detected from the CSV header. `timestamp,service,power_watts` is integrated into energy using the interval between consecutive readings **per service**, so interleaved services do not corrupt each other's intervals. `timestamp,service,energy_kwh` is taken as-is. Comment lines starting with `#` are skipped, because wattmeter exports routinely carry a preamble.
 

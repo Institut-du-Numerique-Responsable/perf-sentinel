@@ -423,10 +423,12 @@ l'ensemble complet listé sous **Forme de réponse**.)
 
 ### GET /api/energy
 
-Santé live des six backends énergie/intensité (depuis 0.8.8) : les
+Santé live des seize backends énergie/intensité (depuis 0.8.8) : les
 cinq sources d'énergie mesurée scrappées (Alumet, Scaphandre, Kepler,
-Redfish, SPECpower cloud) et l'API d'intensité temps réel Electricity
-Maps. Alimente l'onglet Scrapers de `perf-sentinel query monitor`. Le
+Redfish, SPECpower cloud), les deux requêtes CPU d'hôte (`database_cpu`,
+`broker_cpu`) et les neuf API d'intensité temps réel,
+Electricity Maps et les flux des gestionnaires de réseau (RTE éCO2mix,
+NESO, Fingrid, Energinet, REE e·sios, Open Electricity, MAVIR, em6). Alimente l'onglet Scrapers de `perf-sentinel query monitor`. Le
 mix effectif lui-même (quelle source a gagné la chaîne de précédence
 par service, intensité de grille par région) vit sur
 `/api/export/report` sous `green_summary`. Cet endpoint répond
@@ -434,25 +436,32 @@ seulement "chaque backend est-il configuré, frais, et en succès".
 
 **Paramètres de requête :** aucun.
 
-**Forme de réponse :** un objet avec un tableau `backends` de six
+**Forme de réponse :** un objet avec un tableau `backends` de seize
 entrées dans un ordre fixe suivant la chaîne de précédence de l'énergie
 mesurée (`alumet`, `scaphandre`, `kepler`, `redfish`, `cloud_energy`,
-`electricity_maps`), chacune :
+`database_cpu`, `broker_cpu`, `electricity_maps`, `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
+`open_electricity`, `mavir`, `em6`), chacune :
 
 | Champ                     | Type    | Description                                                                                                                                                                                      |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `backend`                 | string  | Nom stable du backend                                                                                                                                                                            |
 | `configured`              | boolean | Si le backend est configuré, d'après la config `[green]` figée au démarrage du daemon                                                                                                            |
 | `last_scrape_age_seconds` | number  | Secondes depuis le dernier scrape réussi, à la date du dernier tick du scraper (mêmes sémantiques que la gauge `/metrics`). Omis si non configuré ou si le backend n'a pas de gauge de fraîcheur |
-| `scrapes_ok`              | number  | Scrapes réussis depuis le démarrage. Omis si non configuré ou non scrappé (`cloud_energy`, `electricity_maps`)                                                                                   |
+| `scrapes_ok`              | number  | Scrapes réussis depuis le démarrage. Omis si non configuré ou non scrappé (`cloud_energy`, `database_cpu`, `broker_cpu`, `electricity_maps`, flux réseau)                                         |
 | `scrapes_failed`          | number  | Scrapes échoués depuis le démarrage. Mêmes règles d'omission que `scrapes_ok`                                                                                                                    |
 
 Les champs optionnels sont omis plutôt que mis à zéro pour les backends
 non configurés : les gauges Prometheus sous-jacentes sont
 pré-enregistrées à 0, et un `0` littéral se lirait comme un scrape
-frais. `electricity_maps` n'a pas de gauge de fraîcheur. Sa vivacité se
-lit dans les entrées `intensity_source = "real_time"` de la ventilation
+frais. `electricity_maps` et les flux des gestionnaires de réseau n'ont
+pas de gauge de fraîcheur. Leur vivacité se lit dans les entrées `intensity_source = "real_time"` de la ventilation
 par région du rapport.
+
+`database_cpu` et `broker_cpu` sont les requêtes CPU des hôtes de
+`[green.database_static]` et `[green.broker_static]`. Chacune est
+configurée quand sa section renseigne `cpu_query`, et son âge est la
+gauge `perf_sentinel_database_cpu_last_scrape_age_seconds` ou
+`perf_sentinel_broker_cpu_last_scrape_age_seconds`.
 
 Deux précautions de lecture sur l'âge. Un backend configuré lit encore
 `last_scrape_age_seconds = 0.0` pendant son premier intervalle de
@@ -482,7 +491,17 @@ curl -sS http://127.0.0.1:4318/api/energy
     { "backend": "kepler", "configured": false },
     { "backend": "redfish", "configured": false },
     { "backend": "cloud_energy", "configured": false },
-    { "backend": "electricity_maps", "configured": true }
+    { "backend": "database_cpu", "configured": false },
+    { "backend": "broker_cpu", "configured": false },
+    { "backend": "electricity_maps", "configured": true },
+    { "backend": "rte_eco2mix", "configured": false },
+    { "backend": "neso", "configured": false },
+    { "backend": "fingrid", "configured": false },
+    { "backend": "energinet", "configured": false },
+    { "backend": "ree_esios", "configured": false },
+    { "backend": "open_electricity", "configured": false },
+    { "backend": "mavir", "configured": false },
+    { "backend": "em6", "configured": false }
   ]
 }
 ```

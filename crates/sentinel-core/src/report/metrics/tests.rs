@@ -1514,3 +1514,32 @@ fn correlation_export_series_are_registered_label_free() {
     assert!(text.contains("\nperf_sentinel_hub_export_correlations_pending 3\n"));
     assert!(text.contains("\nperf_sentinel_hub_export_correlations_dropped_total 2\n"));
 }
+
+#[test]
+fn host_cpu_age_gauges_render_from_startup() {
+    let state = MetricsState::new();
+    state.broker_cpu_last_scrape_age_seconds.set(12.5);
+    let output = state.render();
+    assert!(
+        output.contains("perf_sentinel_database_cpu_last_scrape_age_seconds 0"),
+        "an unconfigured probe reads 0, got:\n{output}"
+    );
+    assert!(
+        output.contains("perf_sentinel_broker_cpu_last_scrape_age_seconds 12.5"),
+        "each subsystem has its own gauge, got:\n{output}"
+    );
+}
+
+#[test]
+fn host_counters_render_without_labels() {
+    let output = MetricsState::new().render();
+    for name in [
+        "perf_sentinel_scored_database_energy_kwh_total",
+        "perf_sentinel_scored_database_carbon_gco2_total",
+        "perf_sentinel_scored_broker_energy_kwh_total",
+        "perf_sentinel_scored_broker_carbon_gco2_total",
+    ] {
+        let samples: Vec<&str> = output.lines().filter(|l| l.starts_with(name)).collect();
+        assert_eq!(samples, [format!("{name} 0")], "{name}");
+    }
+}

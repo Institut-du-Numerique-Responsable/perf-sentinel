@@ -38,15 +38,16 @@ use crate::detect::DetectConfig;
 use crate::event::SpanEvent;
 use crate::report::GreenSummary;
 use crate::report::metrics::MetricsState;
+use crate::score::host_static::Subsystem;
 
 use event_loop::{
     EnergyScraperHandles, EnergySources, EventLoopConfig, ListenerHandles, ShutdownTargets,
-    run_event_loop,
+    SubsystemSources, run_event_loop,
 };
 use listeners::{
     init_ack_resources, setup_alumet_scraper, setup_cloud_scraper, setup_correlator,
-    setup_emaps_scraper, setup_kepler_scraper, setup_redfish_scraper, setup_scaphandre_scraper,
-    spawn_ack_toml_reload, spawn_listeners,
+    setup_emaps_scraper, setup_grid_feed_scrapers, setup_kepler_scraper, setup_redfish_scraper,
+    setup_scaphandre_scraper, spawn_ack_toml_reload, spawn_listeners,
 };
 
 /// Bounded OTLP source context carried independently of normalized I/O events.
@@ -318,19 +319,14 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     .await?;
 
     let (alumet, alumet_db, alumet_broker) = setup_alumet_scraper(&config, &metrics);
-    // No scraper: the declared cluster only needs a start marker to bill
-    // elapsed time from.
-    let static_broker_state = config.green.broker_static.as_ref().map(|cfg| {
-        crate::score::broker_static::StaticBrokerState::new(
-            crate::score::scaphandre::monotonic_ms(),
-            cfg,
-        )
-    });
+    let database_ceiling = declared_ceiling(&config, Subsystem::Database);
+    let broker_ceiling = declared_ceiling(&config, Subsystem::Broker);
     let scaphandre = setup_scaphandre_scraper(&config, &metrics);
     let kepler = setup_kepler_scraper(&config, &metrics);
     let redfish = setup_redfish_scraper(&config, &metrics);
-    let cloud = setup_cloud_scraper(&config, &metrics);
+    let (cloud, host_cpu) = setup_cloud_scraper(&config, &metrics);
     let emaps = setup_emaps_scraper(&config);
+    let grid_feeds = setup_grid_feed_scrapers(&config);
 
     let archive_handle = match &config.daemon.archive {
         Some(cfg) => Some(archive::spawn(cfg, metrics.clone()).map_err(|source| {
@@ -342,63 +338,44 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         None => None,
     };
 
-    // Inject the database declaration here (not in `carbon_context()`):
-    // only the daemon can deliver measured window energy, batch keeps
-    // `db_energy: None` and falls back to the estimated figure.
+    // Inject the host contexts here (not in `carbon_context()`): only the
+    // daemon can deliver measured or declared window energy, batch keeps
+    // both `None` and falls back to the estimated figures.
     let base_carbon_ctx = Arc::new({
         let mut ctx = config.carbon_context();
-        ctx.db_energy = config
-            .green
-            .alumet
-            .as_ref()
-            .and_then(|a| a.database.as_ref())
-            .map(|db| crate::score::carbon::DbEnergyContext {
-                window_kwh: 0.0,
-                region: db.region.clone(),
-                model: crate::score::carbon::CO2_MODEL_ALUMET,
-            });
-        ctx.broker_energy =
-            config
-                .green
-                .alumet
-                .as_ref()
-                .and_then(|a| a.broker.as_ref())
-                .map(|b| crate::score::carbon::DbEnergyContext {
-                    window_kwh: 0.0,
-                    region: b.region.clone(),
-                    model: crate::score::carbon::CO2_MODEL_ALUMET,
-                })
-                .or_else(|| {
-                    config.green.broker_static.as_ref().map(|b| {
-                        crate::score::carbon::DbEnergyContext {
-                            window_kwh: 0.0,
-                            region: b.region.clone(),
-                            model: crate::report::BROKER_WASTE_MODEL_SPECPOWER,
-                        }
-                    })
-                });
+        ctx.db_energy = host_energy_context(&config, Subsystem::Database);
+        ctx.broker_energy = host_energy_context(&config, Subsystem::Broker);
         ctx
     });
     let detect_config = DetectConfig::from(&config);
-    // Green scoring off means score_green never runs: the loop must not
-    // consume (and thus destroy) the accumulated database energy. The
-    // three fields go through `then` rather than three `if`/`else` arms,
-    // so the gate adds no branch to this function.
     let green_on = config.green.enabled;
     let energy_sources = EnergySources {
         base_carbon_ctx,
         alumet_state: alumet.state.as_deref(),
-        alumet_db_state: green_on.then_some(alumet_db.as_deref()).flatten(),
-        alumet_broker_state: green_on.then_some(alumet_broker.as_deref()).flatten(),
-        static_broker: green_on
-            .then(|| {
-                config
-                    .green
-                    .broker_static
-                    .as_ref()
-                    .zip(static_broker_state.as_ref())
-            })
-            .flatten(),
+        // D6/B6 refuse a cpu_query next to the Alumet workload, so at
+        // most one live state exists per subsystem.
+        database: host_sources(
+            green_on,
+            alumet_db
+                .as_deref()
+                .map(|s| (s, alumet.staleness_ms))
+                .or(host_cpu
+                    .database
+                    .as_deref()
+                    .map(|s| (s, host_cpu.staleness_ms))),
+            database_ceiling.as_ref(),
+        ),
+        broker: host_sources(
+            green_on,
+            alumet_broker
+                .as_deref()
+                .map(|s| (s, alumet.staleness_ms))
+                .or(host_cpu
+                    .broker
+                    .as_deref()
+                    .map(|s| (s, host_cpu.staleness_ms))),
+            broker_ceiling.as_ref(),
+        ),
         alumet_staleness_ms: alumet.staleness_ms,
         scaphandre_state: scaphandre.state.as_deref(),
         scaphandre_staleness_ms: scaphandre.staleness_ms,
@@ -410,6 +387,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         cloud_staleness_ms: cloud.staleness_ms,
         emaps_state: emaps.state.as_deref(),
         emaps_staleness_ms: emaps.staleness_ms,
+        grid_feeds: &grid_feeds,
     };
     let shutdown = ShutdownTargets {
         energy: EnergyScraperHandles {
@@ -419,6 +397,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             redfish: redfish.handle.as_ref(),
             cloud: cloud.handle.as_ref(),
             emaps: emaps.handle.as_ref(),
+            grid_feeds: &grid_feeds,
         },
         listeners: ListenerHandles {
             grpc: &grpc_handle,
@@ -453,17 +432,10 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             analysis_queue_capacity: config.daemon.analysis_queue_capacity,
             per_service_labels: config.daemon.per_service_labels,
             per_grouping_labels: config.daemon.per_grouping_labels,
-            // 2x the scraper staleness window: flap-free between scrapes,
-            // aged out shortly after a dead scraper's last reading. A
-            // declared cluster has no scraper, so it falls back to the
-            // batch cadence: its figure is skipped on sub-second takes
-            // and would otherwise flap with nothing to bridge it.
-            waste_sticky_ttl_ms: alumet.staleness_ms.saturating_mul(2).max(
-                if config.green.broker_static.is_some() {
-                    config.daemon.trace_ttl_ms
-                } else {
-                    0
-                },
+            waste_sticky_ttl_ms: waste_sticky_ttl_ms(
+                &config,
+                alumet.staleness_ms,
+                host_cpu.staleness_ms,
             ),
         },
         green_summary_cell,
@@ -495,6 +467,101 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         let _ = tokio::fs::remove_file(&config.daemon.json_socket).await;
     }
     loop_result
+}
+
+/// The billing state of one subsystem's declared ceiling: a dedicated
+/// declaration with `nodes` and `instance_type`. No scraper, the state
+/// only needs a start marker to bill elapsed time from. Its region is
+/// the subsystem's effective one.
+fn declared_ceiling(
+    config: &Config,
+    subsystem: Subsystem,
+) -> Option<crate::score::broker_static::StaticBrokerState> {
+    let ceiling = config.green.static_hosts(subsystem)?.ceiling()?;
+    Some(crate::score::broker_static::StaticBrokerState::new(
+        crate::score::scaphandre::monotonic_ms(),
+        &ceiling,
+    ))
+}
+
+/// One subsystem's host sources, the live state (the Alumet workload or
+/// the CPU probe) with its own staleness. Green scoring off means
+/// `score_green` never runs: the loop must not consume (and thus destroy)
+/// the accumulated host energy, so the bundle is empty.
+fn host_sources<'a>(
+    green_on: bool,
+    live: Option<(&'a crate::score::alumet::DbEnergyState, u64)>,
+    declared: Option<&'a crate::score::broker_static::StaticBrokerState>,
+) -> SubsystemSources<'a> {
+    if !green_on {
+        return SubsystemSources::default();
+    }
+    SubsystemSources {
+        live: live.map(|(state, _)| state),
+        live_staleness_ms: live.map_or(0, |(_, staleness_ms)| staleness_ms),
+        declared,
+    }
+}
+
+/// Lifetime of the live cell's last host waste figure. 2x the staleness
+/// window of each live scraper (Alumet, and the cloud scraper when it runs
+/// a host CPU probe, `probe_staleness_ms`, 0 otherwise): flap-free between
+/// scrapes, aged out shortly after a dead scraper's last reading. A
+/// declared ceiling (database or broker) has no scraper, so it falls back
+/// to the batch cadence: its figure is skipped on sub-second takes and
+/// would otherwise flap with nothing to bridge it.
+fn waste_sticky_ttl_ms(config: &Config, alumet_staleness_ms: u64, probe_staleness_ms: u64) -> u64 {
+    let any_ceiling = [Subsystem::Database, Subsystem::Broker]
+        .into_iter()
+        .any(|s| {
+            config
+                .green
+                .static_hosts(s)
+                .and_then(crate::score::host_static::StaticHostsConfig::ceiling)
+                .is_some()
+        });
+    let ceiling_ttl = if any_ceiling {
+        config.daemon.trace_ttl_ms
+    } else {
+        0
+    };
+    alumet_staleness_ms
+        .max(probe_staleness_ms)
+        .saturating_mul(2)
+        .max(ceiling_ttl)
+}
+
+/// The host context of one subsystem, built only when it has a source the
+/// daemon bills: its Alumet workload, a dedicated declaration with a
+/// `SPECpower` ceiling, or a declaration with a `cpu_query` (every shared
+/// one, D5/B5). A ceiling-less declaration without one builds none, so the
+/// estimated figure stays. `model` is the base tag, which a declared tick
+/// replaces: `cloud_specpower` when the declaration has a `cpu_query` (its
+/// live source), else the declared tag. A shared declaration has no
+/// ceiling, so its tag never changes. `region` is the subsystem's
+/// effective region.
+fn host_energy_context(
+    config: &Config,
+    subsystem: Subsystem,
+) -> Option<crate::score::carbon::DbEnergyContext> {
+    let green = &config.green;
+    let declared = green.static_hosts(subsystem);
+    let model = if green.alumet_host(subsystem).is_some() {
+        crate::score::carbon::CO2_MODEL_ALUMET
+    } else {
+        let cfg = declared.filter(|cfg| cfg.ceiling().is_some() || cfg.cpu_query.is_some())?;
+        if cfg.cpu_query.is_some() {
+            crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER
+        } else {
+            subsystem.declared_tag()
+        }
+    };
+    Some(crate::score::carbon::DbEnergyContext {
+        window_kwh: 0.0,
+        region: green.host_region(subsystem).map(str::to_string),
+        model,
+        placement: declared.map(|cfg| cfg.placement),
+    })
 }
 
 /// The incident archive writer, when `[daemon.incidents]` is enabled and
@@ -604,7 +671,117 @@ fn validate_official_reporting(config: &Config) -> Result<(), DaemonError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::score::host_static::HostPlacement;
     use core::assert_matches;
+
+    #[test]
+    fn host_context_exists_only_for_a_billable_source() {
+        let load = |toml: &str| crate::config::load_from_str(toml).expect("config loads");
+        let ceiling = load(
+            "[green]\ndefault_region = \"eu-west-3\"\n[green.broker_static]\n\
+             placement = \"dedicated\"\nnodes = 3\ninstance_type = \"m5.large\"\n",
+        );
+        let ctx = host_energy_context(&ceiling, Subsystem::Broker).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::report::BROKER_WASTE_MODEL_SPECPOWER);
+        assert_eq!(ctx.placement, Some(HostPlacement::Dedicated));
+        assert_eq!(ctx.region.as_deref(), Some("eu-west-3"));
+        assert!(host_energy_context(&ceiling, Subsystem::Database).is_none());
+
+        let alumet = load(
+            "[green]\ndefault_region = \"eu-west-3\"\n[green.alumet]\n\
+             endpoint = \"http://localhost:9091/metrics\"\n\
+             metric_name = \"attributed_energy_cpu_alumet\"\nlabel_key = \"name\"\n\
+             [green.alumet.database]\nlabel_value = \"pg-pod\"\n",
+        );
+        let ctx = host_energy_context(&alumet, Subsystem::Database).expect("Alumet bills");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_ALUMET);
+        assert_eq!(ctx.placement, None, "no declared-hosts section");
+        assert!(host_energy_context(&alumet, Subsystem::Broker).is_none());
+        assert!(host_energy_context(&Config::default(), Subsystem::Broker).is_none());
+    }
+
+    const DATABASE_CEILING: &str = "[green]\ndefault_region = \"eu-west-3\"\n\
+        [green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+        instance_type = \"db.r6i.large\"\n";
+
+    #[test]
+    fn a_database_ceiling_builds_a_context_tagged_by_its_live_source() {
+        let load = |toml: &str| crate::config::load_from_str(toml).expect("config loads");
+        let ceiling = load(DATABASE_CEILING);
+        let ctx = host_energy_context(&ceiling, Subsystem::Database).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::report::DB_WASTE_MODEL_SPECPOWER);
+        assert_eq!(ctx.placement, Some(HostPlacement::Dedicated));
+        assert_eq!(ctx.region.as_deref(), Some("eu-west-3"));
+        assert!(declared_ceiling(&ceiling, Subsystem::Database).is_some());
+        assert!(declared_ceiling(&ceiling, Subsystem::Broker).is_none());
+
+        // A cpu_query is the live source: the base tag is its model, and
+        // only a declared tick takes the declared tag.
+        let probed = load(&format!(
+            "{DATABASE_CEILING}cpu_query = 'avg(db_cpu)'\n\
+             [green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n"
+        ));
+        let ctx = host_energy_context(&probed, Subsystem::Database).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+
+        // The broker twin: declared tag alone, the probe's tag with a cpu_query.
+        let broker = DATABASE_CEILING
+            .replace("database_static", "broker_static")
+            .replace("db.r6i.large", "m5.large");
+        let ctx = host_energy_context(&load(&broker), Subsystem::Broker).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::report::BROKER_WASTE_MODEL_SPECPOWER);
+        let probed = load(&format!(
+            "{broker}cpu_query = 'avg(broker_cpu)'\n\
+             [green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n"
+        ));
+        let ctx = host_energy_context(&probed, Subsystem::Broker).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+    }
+
+    #[test]
+    fn a_shared_host_builds_a_cloud_context_without_a_ceiling() {
+        let shared = crate::config::load_from_str(
+            "[green]\ndefault_region = \"eu-west-3\"\n[green.broker_static]\n\
+             placement = \"shared\"\ninstance_type = \"m5.large\"\ncpu_query = 'broker_cpu'\n\
+             [green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n",
+        )
+        .expect("config loads");
+        let ctx = host_energy_context(&shared, Subsystem::Broker).expect("its probe bills");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+        assert_eq!(ctx.placement, Some(HostPlacement::Shared));
+        assert_eq!(ctx.region.as_deref(), Some("eu-west-3"));
+        assert!(declared_ceiling(&shared, Subsystem::Broker).is_none());
+        assert!(host_energy_context(&shared, Subsystem::Database).is_none());
+    }
+
+    #[test]
+    fn a_database_ceiling_alone_keeps_the_live_cell_across_batches() {
+        let mut config = crate::config::load_from_str(DATABASE_CEILING).expect("config loads");
+        config.daemon.trace_ttl_ms = 30_000;
+        assert_eq!(waste_sticky_ttl_ms(&config, 0, 0), 30_000);
+        assert_eq!(waste_sticky_ttl_ms(&Config::default(), 0, 0), 0);
+        assert_eq!(waste_sticky_ttl_ms(&config, 20_000, 0), 40_000);
+        // A CPU probe bridges two of its own staleness windows.
+        assert_eq!(waste_sticky_ttl_ms(&config, 0, 45_000), 90_000);
+        assert_eq!(waste_sticky_ttl_ms(&config, 20_000, 45_000), 90_000);
+    }
+
+    #[test]
+    fn green_disabled_hands_the_loop_no_host_source() {
+        let live = crate::score::alumet::DbEnergyState::new();
+        let cfg = crate::score::broker_static::StaticBrokerConfig {
+            nodes: 1,
+            instance_type: "m5.large".to_string(),
+            provider: "generic".to_string(),
+            region: None,
+        };
+        let declared = crate::score::broker_static::StaticBrokerState::new(0, &cfg);
+        let off = host_sources(false, Some((&live, 60_000)), Some(&declared));
+        assert!(off.live.is_none() && off.declared.is_none());
+        let on = host_sources(true, Some((&live, 60_000)), Some(&declared));
+        assert!(on.live.is_some() && on.declared.is_some());
+        assert_eq!(on.live_staleness_ms, 60_000);
+    }
 
     #[tokio::test]
     async fn daemon_run_rejects_invalid_listen_address() {
@@ -622,15 +799,21 @@ mod tests {
         assert_matches!(err, DaemonError::InvalidAddr(_));
     }
 
-    #[tokio::test]
-    async fn daemon_run_refuses_official_without_org_config_path() {
-        let config = Config {
+    /// A default config whose `[reporting]` declares official intent.
+    fn official_config(org_config_path: Option<String>) -> Config {
+        Config {
             reporting: crate::config::ReportingConfig {
                 intent: Some("official".to_string()),
+                org_config_path,
                 ..Default::default()
             },
             ..Config::default()
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn daemon_run_refuses_official_without_org_config_path() {
+        let config = official_config(None);
         let err = run(config).await.expect_err("must refuse");
         match err {
             DaemonError::ReportingValidation { errors } => {
@@ -645,14 +828,7 @@ mod tests {
 
     #[tokio::test]
     async fn daemon_run_refuses_official_with_unreadable_org_config() {
-        let config = Config {
-            reporting: crate::config::ReportingConfig {
-                intent: Some("official".to_string()),
-                org_config_path: Some("/no/such/path/org.toml".to_string()),
-                ..Default::default()
-            },
-            ..Config::default()
-        };
+        let config = official_config(Some("/no/such/path/org.toml".to_string()));
         let err = run(config).await.expect_err("must refuse");
         assert_matches!(err, DaemonError::ReportingValidation { .. });
     }
@@ -685,20 +861,52 @@ total_applications_declared = 1
         )
         .unwrap();
 
-        let config = Config {
-            reporting: crate::config::ReportingConfig {
-                intent: Some("official".to_string()),
-                org_config_path: Some(file.path().display().to_string()),
-                ..Default::default()
-            },
-            ..Config::default()
-        };
+        let config = official_config(Some(file.path().display().to_string()));
         let err = run(config).await.expect_err("must refuse");
         match err {
             DaemonError::ReportingValidation { errors } => {
                 assert!(errors.iter().any(|e| e.contains("organisation.name")));
                 assert!(errors.iter().any(|e| e.contains("country")));
                 assert!(errors.iter().any(|e| e.contains("n_plus_one_sql")));
+            }
+            other => panic!("expected ReportingValidation, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn daemon_run_refuses_official_when_specpower_version_drifts() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        // Publishable except for a table date the binary does not embed.
+        writeln!(
+            file,
+            r#"
+[organisation]
+name = "Example SAS"
+country = "FR"
+
+[methodology]
+sci_specification = "ISO/IEC 21031:2024"
+enabled_patterns = ["n_plus_one_sql", "n_plus_one_http", "redundant_sql", "redundant_http"]
+conformance = "core-required"
+
+[methodology.calibration]
+carbon_intensity_source = "static_tables"
+specpower_table_version = "2023-05-01"
+
+[scope_manifest]
+total_applications_declared = 1
+"#
+        )
+        .unwrap();
+
+        let config = official_config(Some(file.path().display().to_string()));
+        let err = run(config).await.expect_err("must refuse");
+        match err {
+            DaemonError::ReportingValidation { errors } => {
+                assert_eq!(errors.len(), 1, "got {errors:?}");
+                assert!(errors[0].contains("specpower_table_version"));
+                assert!(errors[0].contains("does not match"));
             }
             other => panic!("expected ReportingValidation, got {other:?}"),
         }

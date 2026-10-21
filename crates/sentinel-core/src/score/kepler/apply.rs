@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use super::config::KeplerConfig;
-use super::state::{KeplerState, ServiceEnergy};
-use crate::score::energy_state::upsert_row;
+use super::state::KeplerState;
+use crate::score::energy_state::{services_by_key, split_by_ops};
 use crate::score::prom_parser::{PromSample, sum_by_label};
 
 /// Convert a joules delta + ops delta into a kWh-per-op coefficient.
@@ -24,19 +24,20 @@ pub fn compute_energy_per_op_kwh(joules_delta: f64, ops: u64) -> Option<f64> {
     Some(kwh / ops as f64)
 }
 
-/// Compute per-service joule deltas vs the previous scrape, advance
-/// the per-service `last_raw_joules` table in place, and return only
-/// services with a strictly positive delta, along with how many mapped
-/// services found their label on the wire (fed to the no-match warn).
-/// Counter-reset and first-observation semantics are documented in
-/// design doc 05.
+/// Compute per-label joule deltas vs the previous scrape, advance the
+/// per-label `last_raw_joules` table in place, and return only labels
+/// with a strictly positive delta, along with how many mapped services
+/// found their label on the wire (fed to the no-match warn). The
+/// counter is tracked once per label value, however many services map
+/// to it. Counter-reset and first-observation semantics are documented
+/// in design doc 05.
 #[allow(clippy::implicit_hasher)]
 pub fn joules_deltas(
     samples: &[PromSample],
-    service_mappings: &HashMap<String, String>,
+    label_services: &HashMap<String, Vec<String>>,
     last_raw_joules: &mut HashMap<String, f64>,
 ) -> (HashMap<String, f64>, usize) {
-    // O(N) index over samples so the service loop stays O(N + M)
+    // O(N) index over samples so the label loop stays O(N + M)
     // instead of O(N × M) on Kepler endpoints exposing hundreds of
     // containers per node. Summing and per-row validation semantics
     // live in [`sum_by_label`]. On cumulative counters the sum stays
@@ -45,58 +46,55 @@ pub fn joules_deltas(
     // re-baselines) and a newly discovered series joins with its
     // near-zero counter.
     let by_label = sum_by_label(samples);
-    let mut out = HashMap::with_capacity(service_mappings.len());
+    let mut out = HashMap::with_capacity(label_services.len());
     let mut matched = 0usize;
-    for (service, label_value) in service_mappings {
+    for (label_value, services) in label_services {
         let Some(&current) = by_label.get(label_value.as_str()) else {
             continue;
         };
-        matched += 1;
+        matched += services.len();
         // Update raw-counter table without cloning the key in the
         // steady state.
-        let previous = if let Some(slot) = last_raw_joules.get_mut(service) {
+        let previous = if let Some(slot) = last_raw_joules.get_mut(label_value) {
             let prev = *slot;
             *slot = current;
             Some(prev)
         } else {
-            last_raw_joules.insert(service.clone(), current);
+            last_raw_joules.insert(label_value.clone(), current);
             None
         };
         if let Some(prev) = previous {
             let delta = current - prev;
             // Counter resets and non-finite values are filtered here.
             if delta > 0.0 && delta.is_finite() {
-                out.insert(service.clone(), delta);
+                out.insert(label_value.clone(), delta);
             }
         }
     }
     (out, matched)
 }
 
-/// Apply a freshly-scraped Kepler batch to a [`KeplerState`]. Services
-/// with no ops or no joules delta this window keep their previous entry.
+/// Apply a freshly-scraped Kepler batch to a [`KeplerState`]. Each
+/// label's joules delta is split between the services mapped to it,
+/// by the ops each emitted this window. Services with no ops, or whose
+/// label has no delta this window, keep their previous entry.
 #[allow(clippy::implicit_hasher)]
 pub fn apply_scrape(
     state: &KeplerState,
-    joules_deltas_map: &HashMap<String, f64>,
+    label_deltas: &HashMap<String, f64>,
+    label_services: &HashMap<String, Vec<String>>,
     op_deltas: &HashMap<String, u64>,
     now_ms: u64,
 ) {
     let mut next = state.current_owned();
     let mut any_change = false;
-    for (service, &joules_delta) in joules_deltas_map {
-        let Some(ops) = op_deltas.get(service).copied() else {
+    for (label_value, &joules_delta) in label_deltas {
+        let Some(services) = label_services.get(label_value) else {
             continue;
         };
-        let Some(energy_per_op) = compute_energy_per_op_kwh(joules_delta, ops) else {
-            continue;
-        };
-        let row = ServiceEnergy {
-            energy_per_op_kwh: energy_per_op,
-            last_update_ms: now_ms,
-        };
-        upsert_row(&mut next, service, row);
-        any_change = true;
+        any_change |= split_by_ops(&mut next, services, op_deltas, now_ms, |ops| {
+            compute_energy_per_op_kwh(joules_delta, ops)
+        });
     }
     if any_change {
         state.publish(next);
@@ -115,8 +113,9 @@ pub fn process_scrape(
     last_raw_joules: &mut HashMap<String, f64>,
     now_ms: u64,
 ) -> usize {
-    let (joules_deltas_map, matched) =
-        joules_deltas(samples, &cfg.service_mappings, last_raw_joules);
-    apply_scrape(state, &joules_deltas_map, op_deltas, now_ms);
+    // Rebuilt per tick: `service_mappings` holds at most 1024 entries.
+    let label_services = services_by_key(&cfg.service_mappings);
+    let (label_deltas, matched) = joules_deltas(samples, &label_services, last_raw_joules);
+    apply_scrape(state, &label_deltas, &label_services, op_deltas, now_ms);
     matched
 }

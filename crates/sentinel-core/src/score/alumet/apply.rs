@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use super::config::AlumetConfig;
-use super::state::{AlumetState, DbEnergyState, ServiceEnergy};
-use crate::score::energy_state::upsert_row;
+use super::state::{AlumetState, DbEnergyState};
+use crate::score::energy_state::{services_by_key, split_by_ops};
 use crate::score::prom_parser::{PromSample, sum_by_label};
 
 /// Convert one Alumet energy reading + observed op count into an
@@ -86,8 +86,9 @@ pub fn compute_window_kwh(
     kwh.is_finite().then_some(kwh)
 }
 
-/// Apply a freshly-scraped Alumet batch to an [`AlumetState`]. Services
-/// with no ops this window keep their previous entry.
+/// Apply a freshly-scraped Alumet batch to an [`AlumetState`]. A label
+/// value mapped by several services is split between them by ops.
+/// Services with no ops this window keep their previous entry.
 ///
 /// Unlike Kepler, there is no delta bookkeeping: the reading already is
 /// an interval delta, so each scrape stands alone and an exporter
@@ -133,30 +134,34 @@ pub fn apply_scrape(
     {
         broker.add_window_kwh(kwh, now_ms);
     }
+    apply_service_split(state, &by_label, op_deltas, cfg, now_ms)
+}
+
+/// Split each mapped label's window energy between the services mapped
+/// to it, by the ops each emitted this window, so a label value shared
+/// by several services (a RAPL `domain` included) is counted once.
+/// Returns how many mapped services found their label on the wire.
+fn apply_service_split(
+    state: &AlumetState,
+    by_label: &HashMap<&str, f64>,
+    op_deltas: &HashMap<String, u64>,
+    cfg: &AlumetConfig,
+    now_ms: u64,
+) -> usize {
+    let scrape_interval_secs = cfg.scrape_interval.as_secs_f64();
     let mut next = state.current_owned();
     let mut any_change = false;
     let mut matched = 0usize;
-    for (service, label_value) in &cfg.service_mappings {
+    for (label_value, services) in services_by_key(&cfg.service_mappings) {
         let Some(&joules) = by_label.get(label_value.as_str()) else {
             continue;
         };
         // Counted before the ops gate: the label exists on the wire, so
-        // the mapping is right even if the service happens to be idle.
-        matched += 1;
-        let Some(ops) = op_deltas.get(service).copied() else {
-            continue;
-        };
-        let Some(energy_per_op) =
+        // the mappings are right even if the services happen to be idle.
+        matched += services.len();
+        any_change |= split_by_ops(&mut next, &services, op_deltas, now_ms, |ops| {
             compute_energy_per_op_kwh(joules, cfg.energy_interval_secs, scrape_interval_secs, ops)
-        else {
-            continue;
-        };
-        let row = ServiceEnergy {
-            energy_per_op_kwh: energy_per_op,
-            last_update_ms: now_ms,
-        };
-        upsert_row(&mut next, service, row);
-        any_change = true;
+        });
     }
     if any_change {
         state.publish(next);

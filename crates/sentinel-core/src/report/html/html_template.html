@@ -197,8 +197,8 @@
   .ps-search-box { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-2); background: var(--surface-2); border-radius: 999px; padding: 0 11px; height: 34px; width: 390px; max-width: 100%; min-width: 0; }
   /* Magnifier icon (CSS mask) instead of the text glyph. */
   .ps-search-box .ps-search-glyph { font-size: 0; flex: none; width: 14px; height: 14px; background-color: var(--text-3);
-    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>') center / contain no-repeat;
-    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>') center / contain no-repeat; }
+    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>') center / contain no-repeat;
+    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>') center / contain no-repeat; }
   /* 1px inset so the first letter is not clipped by the rounded box. */
   .ps-search-box .ps-search { display: flex; width: auto; flex: 1; min-width: 0; border: 0; background: transparent; padding: 0 0 0 1px; font-size: 12.5px; font-family: var(--font-ui); color: var(--text); outline: none; }
   .ps-search-box .ps-search-kbd { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); border: 1px solid var(--border-2); border-radius: 6px; padding: 1px 5px; }
@@ -568,14 +568,14 @@
   .ps-export-btn:hover, .ps-copy-link-btn:hover { border-color: var(--brand); color: var(--brand-2); background: var(--accent-bg); }
   /* Button icons as CSS masks: they persist across textContent swaps ("Copied"). */
   .ps-export-btn::before { content: ""; flex: none; width: 12px; height: 12px; background-color: currentColor;
-    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 13v4"/></svg>') center / contain no-repeat;
-    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 13v4"/></svg>') center / contain no-repeat; }
+    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 13v4"/></svg>') center / contain no-repeat;
+    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 13v4"/></svg>') center / contain no-repeat; }
   .ps-copy-link-btn::before { content: ""; flex: none; width: 12px; height: 12px; background-color: currentColor;
-    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>') center / contain no-repeat;
-    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>') center / contain no-repeat; }
+    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>') center / contain no-repeat;
+    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>') center / contain no-repeat; }
   .ps-copy-link-btn.ps-copied::before {
-    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>') center / contain no-repeat;
-    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>') center / contain no-repeat; }
+    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>') center / contain no-repeat;
+    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>') center / contain no-repeat; }
   .ps-corr-side { display: inline-flex; align-items: center; gap: 10px; padding: 5px 9px; margin: -5px -9px; border-radius: 9px; }
   .ps-corr-side-link { cursor: pointer; transition: background .12s, box-shadow .12s; }
   .ps-corr-side-link:hover { background: var(--accent-bg); box-shadow: 0 0 0 1.5px var(--btn-bd); }
@@ -1236,6 +1236,14 @@
     if (abs >= 0.001 || abs === 0) return kwh.toFixed(3) + " kWh";
     return kwh.toExponential(2) + " kWh";
   }
+  // Mirrors report::waste_scope_label: host energy counted in the totals,
+  // the estimated application-side share already within them, or a host
+  // figure left outside (no carbon conversion, or an older report).
+  function wasteScope(w) {
+    if (w.in_totals) return "host energy, in the report totals";
+    if (w.model === "estimated") return "application-side share, within the report totals";
+    return "outside these totals";
+  }
   // Thousands separators (comma, en-US) on the integer part, decimals kept:
   // 55500 -> "55,500", 1240.5 -> "1,240.5", 320 -> "320".
   function fmtNum(value) {
@@ -1651,7 +1659,7 @@
     ]},
     total_co2: { t: "Total CO2", u: METHO_URL + "#uncertainty-bracket", s: [
       ["What it measures", "Everything the analyzed traffic emitted, by the SCI v1.0 numerator: operational `(E x I)` plus embodied `M` plus network transport `T`, summed over traces and scored per region when spans carry `cloud.region`."],
-      ["How the bracket works", "low is half the mid value, high is double: a log-symmetric bracket that says the estimate is trusted to a factor of two, not to a percent. The model tag after it is the window's carbon model: an energy backend (`kepler_ebpf` is Kepler, RAPL, active power only, the name is historical), the I/O proxy with its grid intensity (`io_proxy_v3` monthly x hourly, `v2` hourly, `v1` annual) or `electricity_maps_api` for live grid intensity, `+cal` when calibration rescaled the I/O model. The Energy card says how the energy figure was obtained, by an energy backend or from I/O counts."],
+      ["How the bracket works", "low is half the mid value, high is double: a log-symmetric bracket that says the estimate is trusted to a factor of two, not to a percent. The model tag after it is the window's carbon model: an energy backend (`kepler_ebpf` is Kepler, RAPL, active power only, the name is historical), the I/O proxy with its grid intensity (`io_proxy_v3` monthly x hourly, `v2` hourly, `v1` annual) or `electricity_maps_api` (Electricity Maps) and `grid_operator_api` (a grid operator feed) for live grid intensity, `+cal` when calibration rescaled the I/O model. The Energy card says how the energy figure was obtained, by an energy backend or from I/O counts."],
       ["Limits", "A directional estimate for comparing runs and finding waste, not a wattmeter reading, and the project says so in its methodology."]
     ]},
     energy: { t: "Energy", u: METHO_URL + "#energy-per-operation", s: [
@@ -1685,14 +1693,14 @@
       ["Limits", "A relative ranking signal: it tells you where to look first, not how many joules the endpoint burns."]
     ]},
     db_waste: { t: "Database waste", u: ENERGY_URL, s: [
-      ["What it measures", "The avoidable share of the database's own energy, the side of an N+1 the application trace cannot see."],
-      ["How it is computed", "Measured mode: the declared database cgroup's energy (Alumet) times the SQL waste ratio, a CPU-only lower bound that is genuinely additional to the report totals. Estimated mode, on every run without a measured reading: the modeled energy of the window's SQL spans times the same ratio, a re-presented share of the totals, never additional. The model tag says which mode produced the figure."],
-      ["Limits", "Kept out of every total because the database is a different scope than the instrumented services, and the two modes err in different directions."]
+      ["What it measures", "The avoidable share of the energy of SQL work. Measured or declared mode covers the database host's own energy, the side of an N+1 the application trace cannot see. Estimated mode is the application-side share: the energy the services spent issuing the SQL spans."],
+      ["How it is computed", "Measured on the database cgroup (Alumet), a CPU-only lower bound, or declared from a provisioned cluster via the embedded SPECpower table, each times the SQL waste ratio. Estimated mode, when no database is declared: the energy the span scoring gave the window's SQL spans times the same ratio, a share the totals already count, never additional. The model tag says which mode produced the figure."],
+      ["Limits", "A declaration bounds compute at full load without storage or network. A measured or declared host figure is inside the totals as a host term next to the instrumented services, once its carbon converts in a known region, and stays outside them otherwise. An estimated one is already inside them and holds no database host energy. A measurement and an estimate err in different directions."]
     ]},
     broker_waste: { t: "Broker waste", u: ENERGY_URL, s: [
-      ["What it measures", "The avoidable share of the message broker's energy, the twin of database waste for publishes."],
-      ["How it is computed", "Measured on the broker cgroup (Alumet), declared from a provisioned cluster via the embedded SPECpower table, or estimated from the modeled publish energy times the messaging waste ratio. The model tag says which."],
-      ["Limits", "A measurement under-counts (CPU only), a declaration bounds compute at full load without storage or network: the error direction depends on the source, and the figure stays out of every total."]
+      ["What it measures", "The avoidable share of the energy of publish work, the twin of database waste. Measured or declared mode covers the broker host, estimated mode the application-side share of the publish spans."],
+      ["How it is computed", "Measured on the broker cgroup (Alumet), declared from a provisioned cluster via the embedded SPECpower table, or estimated from the energy the span scoring gave the publish spans, each times the messaging waste ratio. The model tag says which."],
+      ["Limits", "A measurement under-counts (CPU only), a declaration bounds compute at full load without storage or network, an estimate holds no broker host energy. A measured or declared host figure is inside the totals once its carbon converts in a known region, outside them otherwise."]
     ]},
     green_tab: { t: "GreenOps methodology", u: METHO_URL + "#pipeline-at-a-glance", s: [
       ["The pipeline in one breath", "Count the I/O operations each endpoint performs, turn them into energy (measured by a backend when configured, a per-operation model otherwise), multiply by the grid carbon intensity of each region, then assemble the SCI v1.0 terms: operational plus embodied plus transport."],
@@ -2165,7 +2173,7 @@
     if (hasGreen) {
       var co2 = greenSummary.co2;
       root.appendChild(wireKpiCard(tonedValue(
-        metricCard("Total CO2", formatGco2(co2.total.mid), co2TotalSub(co2.total)),
+        metricCard("Total CO2", formatGco2(co2.total.mid), co2TotalSub(co2.total, greenSummary)),
         "brand"
       ), "green"));
     } else {
@@ -3711,13 +3719,50 @@
   // The bracket plus co2.total.model, as the CLI's Est. CO2 line prints
   // it: an energy backend, the I/O proxy's intensity tier or
   // electricity_maps_api, +cal kept. A tag failing the gate is dropped.
-  function co2TotalSub(total) {
+  // total.model names the application part, so each in-total host term
+  // follows with its own model (GreenSummary::host_model_suffix).
+  function co2TotalSub(total, gs) {
     var sub = "low " + formatGco2(total.low) + " · high " + formatGco2(total.high);
     var m = total.model;
     // No-break space: a wrap never strands "model" away from its tag.
-    return typeof m === "string" && ENERGY_TAG_RE.test(m) ? sub + " · model\u00a0" + m : sub;
+    if (typeof m !== "string" || !ENERGY_TAG_RE.test(m)) return sub;
+    sub += " · model\u00a0" + m;
+    hostsInTotals(gs).forEach(function (h) {
+      sub += " + " + h.noun + " " + (energyDisplayTag(h.model) || "unknown");
+    });
+    return sub;
   }
+  // Host figures inside energy_kwh, database first, as
+  // GreenSummary::hosts_in_totals returns them.
+  function hostsInTotals(gs) {
+    var out = [];
+    [["database hosts", gs.database_waste], ["broker hosts", gs.messaging_waste]].forEach(function (h) {
+      var w = h[1];
+      if (w && w.in_totals === true && Number.isFinite(w.energy_kwh)) {
+        out.push({ noun: h[0], model: w.model, kwh: w.energy_kwh });
+      }
+    });
+    return out;
+  }
+  // One " · plus <noun>, <tag>" suffix per subsystem in the totals.
   function energySourceLabel(gs) {
+    var label = applicationSourceLabel(gs);
+    hostsInTotals(gs).forEach(function (h) {
+      label += " · plus " + h.noun + ", " + (energyDisplayTag(h.model) || "unknown");
+    });
+    return label;
+  }
+  // GreenSummary::energy_split_label: the applications' share plus each
+  // in-total host term, null when no host energy is in the totals.
+  function energySplitLabel(gs) {
+    var hosts = hostsInTotals(gs);
+    if (hosts.length === 0) return null;
+    var hostKwh = hosts.reduce(function (sum, h) { return sum + h.kwh; }, 0);
+    var label = "applications " + formatKwh(Math.max(0, gs.energy_kwh - hostKwh));
+    hosts.forEach(function (h) { label += " + " + h.noun + " " + formatKwh(h.kwh); });
+    return label;
+  }
+  function applicationSourceLabel(gs) {
     var ratios = gs.per_service_measured_ratio || {};
     var models = gs.per_service_energy_model || {};
     var services = Object.keys(ratios);
@@ -3742,11 +3787,32 @@
   // Plain text sub, not a code chip: the chip highlighter paints
   // underscored identifiers in the warning color.
   function buildEnergyCard(gs) {
-    var help = "Energy used by the analyzed traffic, the `E` of `E x I`. The sub names its source: an energy backend for the services it covered, per-operation I/O counts otherwise.";
+    var help = "Energy used by the analyzed traffic, the `E` of `E x I`. The sub names its source: an energy backend for the services it covered, per-operation I/O counts otherwise, plus the database and broker hosts counted in the totals, then the split between applications and hosts.";
     if (!(gs.energy_kwh > 0)) {
       return greenCard("Energy", "-", "not computed · no span resolved to a region", "muted", help, "energy");
     }
-    return greenCard("Energy", formatKwh(gs.energy_kwh), energySourceLabel(gs), null, help, "energy");
+    var split = energySplitLabel(gs);
+    var sub = energySourceLabel(gs) + (split ? " = " + split : "");
+    return greenCard("Energy", formatKwh(gs.energy_kwh), sub, null, help, "energy");
+  }
+  // Operational plus the in-total host terms, the base the avoidable
+  // share is taken from.
+  function scoredCarbon(co2) {
+    var hosts = [co2.database_gco2, co2.messaging_gco2].filter(Number.isFinite);
+    return hosts.reduce(function (sum, g) { return sum + g; }, co2.operational_gco2 || 0);
+  }
+  // Card of a host carbon term inside co2.total, only when it is a number.
+  function appendHostCarbonCard(metrics, label, gco2, waste) {
+    if (!Number.isFinite(gco2)) return;
+    var tag = waste && energyDisplayTag(waste.model);
+    metrics.appendChild(greenCard(label, formatGco2(gco2), "host energy" + (tag ? " · model\u00a0" + tag : ""), null,
+      "Carbon of the hosts behind this subsystem, counted inside Total CO2 as its own term next to operational. No application's figures hold it."));
+  }
+  // "dedicated hosts" or "shared host" when the operator declared one.
+  function placementLabel(w) {
+    if (w.placement === "dedicated") return " · dedicated hosts";
+    if (w.placement === "shared") return " · shared host";
+    return "";
   }
   function renderGreenPanel() {
     if (!hasGreen) {
@@ -3766,9 +3832,9 @@
     metrics.appendChild(greenCard(
       "Total CO2",
       formatGco2(co2.total.mid),
-      co2TotalSub(co2.total),
+      co2TotalSub(co2.total, greenSummary),
       null,
-      "The SCI v1.0 numerator summed over analyzed traces: operational `(E x I)` + embodied `M` + network transport `T`. The low/high bracket is log-symmetric (half, double): a directional estimate, not a wattmeter reading.",
+      "The SCI v1.0 numerator summed over analyzed traces: operational `(E x I)` + embodied `M` + network transport `T`, plus the database and broker host terms when their host energy is in the totals. The low/high bracket is log-symmetric (half, double): a directional estimate, not a wattmeter reading.",
       "total_co2"
     ));
     metrics.appendChild(buildEnergyCard(greenSummary));
@@ -3776,14 +3842,17 @@
       "Carbon from actually running the workload: energy used times the grid carbon intensity of the resolved region. The only term a code fix can reduce.", "operational_co2"));
     metrics.appendChild(greenCard("Embodied CO2", formatGco2(co2.embodied_gco2), "SCI v1.0 · M term", null,
       "Hardware manufacturing carbon amortized over traffic: `[green] embodied_carbon_per_request_gco2` per request. Real, but irreducible by fixing an anti-pattern.", "embodied_co2"));
+    appendHostCarbonCard(metrics, "Database CO2", co2.database_gco2, greenSummary.database_waste);
+    appendHostCarbonCard(metrics, "Broker CO2", co2.messaging_gco2, greenSummary.messaging_waste);
     var avoidMid = co2.avoidable.mid;
+    var avoidBase = scoredCarbon(co2);
     // Accent marks actionable savings. A zero amount has nothing to act on.
     metrics.appendChild(greenCard(
       "Avoidable",
       formatGco2(avoidMid),
-      percent(avoidMid, co2.operational_gco2) + " of operational",
+      percent(avoidMid, avoidBase) + ([co2.database_gco2, co2.messaging_gco2].some(Number.isFinite) ? " of operational and host" : " of operational"),
       avoidMid > 0 ? "accent" : "neutral",
-      "The operational share attributable to avoidable I/O: operational carbon times avoidable ops over accounted ops. This is the number an anti-pattern fix shrinks.",
+      "The operational share attributable to avoidable I/O: operational carbon times avoidable ops over accounted ops, plus the waste share of the database and broker host terms counted in the totals. This is the number an anti-pattern fix shrinks.",
       "avoidable_co2"
     ));
     metrics.appendChild(greenCard(
@@ -3805,26 +3874,24 @@
       "I/O Intensity Score of the worst endpoint: its I/O operations (SQL, outbound HTTP, publishes) per call. Bands at 2, 5 and 10.",
       "iis"
     ));
-    // Measured on the declared Alumet database cgroup, or estimated
-    // from the modeled SQL energy. The model tag says which. Excluded
-    // from every total, hence its own card.
+    // Measured on the Alumet database cgroup or declared cluster (host
+    // energy, inside the totals once its carbon converts), or the
+    // application-side share of the SQL spans (already inside them). The
+    // model tag and the scope say which.
     var dbw = greenSummary.database_waste;
     if (dbw) {
       var dbValue = Number.isFinite(dbw.waste_gco2) ? formatGco2(dbw.waste_gco2) : formatKwh(dbw.waste_kwh);
-      // The estimated figure is a re-presented share of the totals,
-      // only the measured cgroup reading is additional energy.
-      var dbScope = dbw.model === "estimated" ? "within the report totals" : "excluded from totals";
       var dbSub = formatKwh(dbw.waste_kwh) + " of " + formatKwh(dbw.energy_kwh) + " · " +
         Math.round((dbw.sql_waste_ratio || 0) * 100) + "% SQL · " +
-        (dbw.model || "-") + (dbw.region ? " · " + dbw.region : "") +
-        " · " + dbScope +
-        (dbw.model === "estimated" ? " · measured needs `[green.alumet.database]`" : "");
+        (dbw.model || "-") + (dbw.region ? " · " + dbw.region : "") + placementLabel(dbw) +
+        " · " + wasteScope(dbw) +
+        (dbw.model === "estimated" ? " · a host figure needs `[green.database_static]` or `[green.alumet.database]`" : "");
       metrics.appendChild(greenCard(
         "Database waste",
         dbValue,
         dbSub,
         dbw.waste_kwh > 0 ? "accent" : "neutral",
-        "Avoidable database-side energy: measured on the declared database cgroup (Alumet) or estimated from the modeled SQL energy times the SQL waste ratio, the model tag says which. Estimated re-presents a share of the report totals, measured is an additional, separate scope.",
+        "Avoidable energy of SQL work: database host energy from a measured cgroup (Alumet) or a declared cluster (SPECpower), counted in the report totals, or estimated as the application-side share of the SQL spans, already inside the totals, each times the SQL waste ratio. The model tag says which.",
         "db_waste"
       ));
     } else {
@@ -3832,45 +3899,44 @@
       metrics.appendChild(greenCard(
         "Database waste",
         "-",
-        "not measured · no SQL activity, a measured reading needs `[green.alumet.database]`",
+        "not available · no SQL activity this window, or no database reading yet, see `[green.database_static]` or `[green.alumet.database]`",
         "muted",
-        "Avoidable database-side energy: measured on the declared database cgroup (Alumet) or estimated from the modeled SQL energy times the SQL waste ratio, the model tag says which. Estimated re-presents a share of the report totals, measured is an additional, separate scope.",
+        "Avoidable energy of SQL work: database host energy from a measured cgroup (Alumet) or a declared cluster (SPECpower), counted in the report totals, or estimated as the application-side share of the SQL spans, already inside the totals, each times the SQL waste ratio. The model tag says which.",
         "db_waste"
       ));
     }
 
-    // Broker twin of the card above: measured cgroup, declared cluster,
-    // or estimated from the modeled publish energy.
+    // Broker twin of the card above: measured cgroup or declared cluster
+    // (host energy), or the application-side share of the publish spans.
     var mw = greenSummary.messaging_waste;
     if (mw) {
       var mwValue = Number.isFinite(mw.waste_gco2) ? formatGco2(mw.waste_gco2) : formatKwh(mw.waste_kwh);
-      var mwScope = mw.model === "estimated" ? "within the report totals" : "excluded from totals";
       var mwSub = formatKwh(mw.waste_kwh) + " of " + formatKwh(mw.energy_kwh) + " · " +
         Math.round((mw.messaging_waste_ratio || 0) * 100) + "% messaging · " +
-        (mw.model || "-") + (mw.region ? " · " + mw.region : "") +
-        " · " + mwScope +
-        (mw.model === "estimated" ? " · measured needs `[green.alumet.broker]`" : "");
+        (mw.model || "-") + (mw.region ? " · " + mw.region : "") + placementLabel(mw) +
+        " · " + wasteScope(mw) +
+        (mw.model === "estimated" ? " · a host figure needs `[green.broker_static]` or `[green.alumet.broker]`" : "");
       metrics.appendChild(greenCard(
         "Broker waste",
         mwValue,
         mwSub,
         mw.waste_kwh > 0 ? "accent" : "neutral",
-        "Same as database waste, for the message broker: measured cgroup (Alumet), declared cluster (SPECpower) or estimated from the modeled publish energy. Kept out of every total.",
+        "Same as database waste, for publish work: broker host energy from a measured cgroup (Alumet) or a declared cluster (SPECpower), counted in the report totals, or the application-side share of the publish spans, already inside them.",
         "broker_waste"
       ));
     } else {
       metrics.appendChild(greenCard(
         "Broker waste",
         "-",
-        "not measured · no broker publish spans, or no broker energy backend",
+        "not available · no broker publish spans this window, or no broker reading yet, see `[green.broker_static]` or `[green.alumet.broker]`",
         "muted",
-        "Same as database waste, for the message broker: measured cgroup (Alumet), declared cluster (SPECpower) or estimated from the modeled publish energy. Kept out of every total.",
+        "Same as database waste, for publish work: broker host energy from a measured cgroup (Alumet) or a declared cluster (SPECpower), counted in the report totals, or the application-side share of the publish spans, already inside them.",
         "broker_waste"
       ));
     }
 
     renderCarbonFormula();
-    renderScoringConfigBandeau(greenSummary.scoring_config);
+    renderScoringConfigBandeau(greenSummary.scoring_config, greenSummary.regions);
 
     var regions = greenSummary.regions || [];
     var header = document.getElementById("green-regions-header");
@@ -3899,20 +3965,99 @@
   // run to carry the applied coefficients, so its presence alone means
   // nothing here. The 3 fields are bounded enums on the Rust side, no
   // escaping needed.
-  function renderScoringConfigBandeau(cfg) {
+  function renderScoringConfigBandeau(cfg, regions) {
     var bandeau = document.getElementById("green-scoring-config");
     if (!bandeau) return;
-    if (!cfg || cfg.electricity_maps === false) {
+    var chips = [];
+    if (cfg && cfg.electricity_maps !== false) {
+      chips.push(
+        buildApiVersionChip(cfg.api_version),
+        buildEmissionFactorChip(cfg.emission_factor_type),
+        buildTemporalGranularityChip(cfg.temporal_granularity)
+      );
+    }
+    // Grid operator feeds have no knobs: one chip per feed a region drew
+    // on, as the CLI does (a configured section proves nothing in batch runs).
+    Object.keys(GRID_FEEDS).forEach(function (key) {
+      if ((regions || []).some(function (r) { return r && r.intensity_provider === key; })) {
+        var label = GRID_FEEDS[key].name;
+        // Fingrid's two datasets differ in basis: name the one scored.
+        if (key === "fingrid" && cfg && cfg.fingrid_dataset === 265) label += " consumption";
+        else if (key === "fingrid" && cfg && cfg.fingrid_dataset === 266) label += " production";
+        chips.push(buildScoringChip(label, "neutral", GRID_FEEDS[key].tip));
+      }
+    });
+    if (!chips.length) {
       bandeau.style.display = "none";
       return;
     }
-    bandeau.replaceChildren(
-      el("span", "ps-scoring-label", "Carbon scoring:"),
-      buildApiVersionChip(cfg.api_version),
-      buildEmissionFactorChip(cfg.emission_factor_type),
-      buildTemporalGranularityChip(cfg.temporal_granularity)
+    bandeau.replaceChildren.apply(
+      bandeau,
+      [el("span", "ps-scoring-label", "Carbon scoring:")].concat(chips)
     );
     bandeau.style.display = "";
+  }
+
+  // Grid operator feeds, keyed by `intensity_provider`. The tooltips carry
+  // the credits each operator's terms ask for.
+  var GRID_FEEDS = {
+    rte_eco2mix: {
+      name: "RTE \u00e9CO2mix",
+      url: "https://www.rte-france.com/eco2mix",
+      tip: "France, RTE \u00e9CO2mix on ODR\u00c9 (Licence Ouverte v2.0): direct emissions of " +
+        "French production, imports and lifecycle excluded, so lower than an Electricity Maps lifecycle figure."
+    },
+    neso: {
+      name: "NESO",
+      url: "https://carbonintensity.org.uk/",
+      tip: "Great Britain, NESO Carbon Intensity API (CC BY 4.0): direct CO2 of generation " +
+        "plus imports per kWh consumed, lifecycle excluded."
+    },
+    fingrid: {
+      name: "Fingrid",
+      url: "https://data.fingrid.fi/en/",
+      tip: "Finland, Fingrid open data (CC BY 4.0): direct emissions of production (dataset 266) " +
+        "or of consumption (265), lifecycle excluded."
+    },
+    energinet: {
+      name: "Energinet",
+      url: "https://www.energidataservice.dk/",
+      tip: "Denmark DK1 and DK2, Energinet Energi Data Service (CC BY 4.0): direct CO2 per kWh " +
+        "consumed, lifecycle excluded."
+    },
+    ree_esios: {
+      name: "REE e\u00b7sios",
+      url: "https://www.esios.ree.es/",
+      tip: "Mainland Spain. Source: Red El\u00e9ctrica (REE), e\u00b7sios indicator 10355, read live over " +
+        "the report's window; REE does not sponsor or endorse this use. Direct CO2 of peninsular " +
+        "generation, imports and lifecycle excluded."
+    },
+    open_electricity: {
+      name: "Open Electricity",
+      url: "https://openelectricity.org.au/",
+      tip: "Australia, NEM regions and WEM. Data sourced from Open Electricity (The Superpower " +
+        "Institute), licensed under CC BY-NC 4.0. Direct emissions over regional generation " +
+        "including rooftop solar, imports and lifecycle excluded."
+    },
+    mavir: {
+      name: "MAVIR",
+      url: "https://www.mavir.hu/web/mavir/co2-kibocsatas-reszaranya-a-brutto-hazai-termelesben",
+      tip: "Hungary, MAVIR ZRt. real-time data: direct CO2 of domestic power plants per gross " +
+        "domestic generation, imports and lifecycle excluded."
+    },
+    em6: {
+      name: "em6",
+      url: "https://www.em6.co.nz/",
+      tip: "New Zealand, em6 by Energy Market Services (Transpower New Zealand Limited): direct " +
+        "CO2 of grid-connected generation, lifecycle excluded."
+    }
+  };
+
+  // Own keys only: the provider string comes from the report JSON.
+  function gridFeed(provider) {
+    return typeof provider === "string" && Object.prototype.hasOwnProperty.call(GRID_FEEDS, provider)
+      ? GRID_FEEDS[provider]
+      : null;
   }
 
   function buildScoringChip(label, modifier, tooltip) {
@@ -4024,16 +4169,23 @@
   function buildSourceCell(r) {
     var td = document.createElement("td");
     if (r.intensity_source === "real_time") {
+      // An absent provider means Electricity Maps (rows written before the
+      // grid operator feeds).
+      var feed = gridFeed(r.intensity_provider);
+      var name = feed ? feed.name : "Electricity Maps";
       td.appendChild(document.createTextNode("real time ("));
-      var href = safeHttpsHref("https://app.electricitymaps.com/map/live/fifteen_minutes");
+      var href = safeHttpsHref(feed
+        ? feed.url
+        : "https://app.electricitymaps.com/map/live/fifteen_minutes");
       if (href) {
-        var a = el("a", "ps-source-link", "Electricity Maps");
+        var a = el("a", "ps-source-link", name);
+        if (feed) setAttr(a, "title", feed.tip);
         setAttr(a, "href", href);
         setAttr(a, "target", "_blank");
         setAttr(a, "rel", "noopener noreferrer");
         td.appendChild(a);
       } else {
-        td.appendChild(document.createTextNode("Electricity Maps"));
+        td.appendChild(document.createTextNode(name));
       }
       td.appendChild(document.createTextNode(")"));
     } else {

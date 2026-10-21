@@ -82,7 +82,7 @@ port above 65535, exits with code 2 before any file is read.
 | `report`       | Single-file HTML dashboard for post-mortem exploration in any browser. Accepts a trace file, a pre-computed Report JSON, or stdin via `--input -` (auto-detects array-of-events vs Report object, BOM-tolerant) |
 | `tempo`        | Fetch traces from a Grafana Tempo HTTP API (single trace by ID or search-then-fetch by service) and pipe them through the analysis pipeline. Gated behind the `tempo` feature                                   |
 | `jaeger-query` | Fetch traces from any Jaeger query API backend (Jaeger, Victoria Traces) and pipe them through the analysis pipeline. Gated behind the `jaeger-query` feature                                                   |
-| `calibrate`    | Correlate a trace file with measured energy readings (Scaphandre, cloud monitoring CSV) and emit a TOML of I/O-to-energy coefficients to load via `[green] calibration_file`                                    |
+| `calibrate`    | Correlate a trace file with energy readings measured on each service's own host (Scaphandre, cloud monitoring CSV) and emit a TOML of I/O-to-energy coefficients to load via `[green] calibration_file`. A series shared by several services (same timestamps and values) is reported, since each factor would price the whole reading: keep it on one service or split it first |
 
 ## Sections
 
@@ -218,7 +218,7 @@ GreenOps scoring configuration aligned with [SCI v1.0](https://github.com/Green-
 | `embodied_carbon_per_request_gco2` | float   | `0.001`  | SCI v1.0 `M` term: hardware manufacturing emissions amortized per request (per trace), in gCO₂eq. Region-independent. A zero is deprecated since 0.9.25 and falls back to this default with a warning: no hardware has zero embodied carbon, and a zeroed coefficient erased the M term from the disclosure. The applied value is published in `calibration_inputs`                                                                                                                    |
 | `use_hourly_profiles`              | boolean | `true`   | When `true`, the scoring stage uses time-of-day-specific grid intensities for the 30+ regions with embedded hourly profiles. Regions with monthly x hourly profiles (FR, DE, GB, US-East) also account for seasonal variation. Reports are tagged `model = "io_proxy_v3"` (monthly x hourly) or `"io_proxy_v2"` (flat-year hourly). Set to `false` to pin reports to the flat-annual model                                                                                             |
 | `hourly_profiles_file`             | string  | *(none)* | Path to a JSON file with user-supplied hourly profiles. Can be absolute or relative to the config file. Profiles in this file take precedence over embedded profiles for the same region key. See "User-supplied profiles" below                                                                                                                                                                                                                                                       |
-| `per_operation_coefficients`       | boolean | `true`   | When `true`, the proxy model weights energy per I/O op by operation type: SQL SELECT (0.5x), INSERT/UPDATE (1.5x), DELETE (1.2x) and HTTP payload size tiers (small <10 KB: 0.8x, medium 10 KB-1 MB: 1.2x, large >1 MB: 2.0x). Does not apply when Scaphandre or cloud SPECpower measured energy is available. Set to `false` to use the flat `ENERGY_PER_IO_OP_KWH` for all operations                                                                                                |
+| `per_operation_coefficients`       | boolean | `true`   | When `true`, the proxy model weights energy per I/O op by operation type: SQL SELECT (0.5x), INSERT/UPDATE (1.5x), DELETE (1.2x) and HTTP payload size tiers (small <10 KB: 0.8x, medium 10 KB-1 MB: 1.2x, large >1 MB: 2.0x). Does not apply when any measured backend provides the service's energy. Set to `false` to use the flat `ENERGY_PER_IO_OP_KWH` for all operations                                                                                                        |
 | `include_network_transport`        | boolean | ignored  | Deprecated and ignored since 0.9.25: the transport term is always computed, always displayed and always disclosed, a display toggle on a published figure had no remaining justification. The key still parses, with a warning. The term needs `response_size_bytes` on HTTP spans (OTel `http.response.body.size` attribute) and the callee region mapped via `[green.service_regions]`. Same-region calls are excluded. Transport CO₂ appears as `transport_gco2` in the JSON report |
 | `network_energy_per_byte_kwh`      | float   | ignored  | Deprecated and ignored since 0.9.25. The coefficient is fixed at 0.04 kWh/GB so every disclosure scales transport identically, and the disclosure publishes the sourced 0.001-0.059 kWh/GB bracket beside it (see LIMITATIONS.md, network transport). The key still parses, with a warning                                                                                                                                                                                             |
 
@@ -250,7 +250,7 @@ I/O ops with no resolvable region land in a synthetic `"unknown"` bucket with ze
 
 When green scoring is enabled and at least one event is analyzed, the JSON report's `green_summary` includes:
 
-- **`co2`**: structured `{ total, avoidable, operational_gco2, embodied_gco2 }` object. Both `total` and `avoidable` are `{ low, mid, high, model, methodology }` with **2× multiplicative uncertainty** (`low = mid/2`, `high = mid×2`). The `methodology` tag distinguishes `total` (`"sci_v1_numerator+transport"`: `(E × I) + M + T` summed over traces, including when `T` is zero) from `avoidable` (`"sci_v1_operational_ratio"`: region-blind global ratio, excludes embodied and transport). Legacy reports can carry `"sci_v1_numerator"`. `model` values, most precise wins: `"electricity_maps_api"` > `"alumet_rapl"` > `"scaphandre_rapl"` > `"kepler_ebpf"` > `"redfish_bmc"` > `"cloud_specpower"` > `"io_proxy_v3"` > `"io_proxy_v2"` > `"io_proxy_v1"`. When calibration factors are active on proxy models, `+cal` is appended (e.g. `"io_proxy_v2+cal"`). The `+cal` suffix never applies to a measured tag.
+- **`co2`**: structured `{ total, avoidable, operational_gco2, embodied_gco2 }` object, plus `transport_gco2`, `database_gco2` and `messaging_gco2` when present (the last two are the database and broker host carbon a daemon window counted inside `total`). Both `total` and `avoidable` are `{ low, mid, high, model, methodology }` with **2× multiplicative uncertainty** (`low = mid/2`, `high = mid×2`). The `methodology` tag distinguishes `total` (`"sci_v1_numerator+transport"`: `(E × I) + M + T` summed over traces, including when `T` is zero) from `avoidable` (`"sci_v1_operational_ratio"`: region-blind global ratio, excludes embodied and transport). A daemon window scored with a database or broker host source configured carries `"sci_v1_numerator+transport+hosts"` and `"sci_v1_operational_ratio+hosts"` instead, zero host energy included. Legacy reports can carry `"sci_v1_numerator"`. `model` values, most precise wins: `"electricity_maps_api"` > `"grid_operator_api"` > `"alumet_rapl"` > `"scaphandre_rapl"` > `"kepler_ebpf"` > `"redfish_bmc"` > `"cloud_specpower"` > `"io_proxy_v3"` > `"io_proxy_v2"` > `"io_proxy_v1"`. When calibration factors are active on proxy models, `+cal` is appended (e.g. `"io_proxy_v2+cal"`). The `+cal` suffix never applies to a measured tag.
 - **`regions[]`**: per-region breakdown with `{ region, grid_intensity_gco2_kwh, pue, io_ops, co2_gco2, intensity_source }`, **sorted by `co2_gco2` descending** (highest-impact regions first) with alphabetical tiebreak. `intensity_source` is `"annual"`, `"hourly"`, `"monthly_hourly"` or `"real_time"` (Electricity Maps API) depending on which carbon intensity source was used for the region.
 
 Carbon intensity data is embedded in the binary (no network egress). See `docs/design/05-GREENOPS-AND-CARBON.md` for the complete formula and methodology and [docs/LIMITATIONS.md](LIMITATIONS.md#carbon-estimates-accuracy) for the directional / non-regulatory disclaimer.
@@ -296,7 +296,7 @@ Country-code aliases and cloud-provider synonyms are resolved to the same hourly
 
 The full alias table is in `score/carbon_profiles.rs`. If your region key is not aliased, the flat annual value from the primary carbon table is used.
 
-**Every energy and grid-intensity backend is daemon-only.** `[green.alumet]`, `[green.scaphandre]`, `[green.kepler]`, `[green.redfish]`, `[green.cloud]`, `[green.broker_static]` and `[green.electricity_maps]` are scraped by the `watch` daemon and by nothing else. A batch `analyze` or `report` run starts no scraper, so it scores with the I/O proxy estimate over embedded intensity data whatever these sections say, and it emits a warning naming the sections it had to ignore. Batch does not scrape because attributing power measured now to traces recorded earlier would produce a wrong figure rather than a missing one.
+**Every energy and grid-intensity backend is daemon-only.** `[green.alumet]`, `[green.scaphandre]`, `[green.kepler]`, `[green.redfish]`, `[green.cloud]`, `[green.database_static]`, `[green.broker_static]` and `[green.electricity_maps]` are scraped by the `watch` daemon and by nothing else. A batch `analyze` or `report` run starts no scraper, so it scores with the I/O proxy estimate over embedded intensity data whatever these sections say, and it emits a warning naming the sections it had to ignore. Batch does not scrape because attributing power measured now to traces recorded earlier would produce a wrong figure rather than a missing one.
 
 #### `[green.scaphandre]` (optional, opt-in)
 
@@ -310,7 +310,7 @@ Opt-in integration with [Scaphandre](https://github.com/hubblo-org/scaphandre) f
 | `scrape_interval_secs` | integer | `5`      | How often to scrape, in seconds. Valid range: 1-3600                                                                                                                      |
 | `process_map`          | table   | `{}`     | Maps Perf Sentinel service names (from span `service.name`) to a per-service `ProcessMatcher` (see below)                                                                 |
 
-Each `process_map` entry is a table with two fields: `exe_contains` (required, substring matched against the Scaphandre `exe` label) and `cmdline_contains` (optional, substring matched against the `cmdline` label). The matcher requires both substrings to be present when `cmdline_contains` is set. Exactly one Scaphandre process must match per entry, otherwise the scoring stage skips that service for the tick and emits a `warn` log naming the ambiguity.
+Each `process_map` entry is a table with two fields: `exe_contains` (required, substring matched against the Scaphandre `exe` label) and `cmdline_contains` (optional, substring matched against the `cmdline` label). The matcher requires both substrings to be present when `cmdline_contains` is set. Exactly one Scaphandre process must match per entry, otherwise the scoring stage skips that service for the tick and emits a `warn` log naming the ambiguity. Entries whose matchers select the same process split its power by the operations each service emitted in the scrape window.
 
 ```toml
 [green.scaphandre]
@@ -347,7 +347,7 @@ Opt-in integration with [Kepler](https://github.com/sustainable-computing-io/kep
 | `scrape_interval_secs` | int    | `5`           | How often to scrape, in seconds. Valid range: 1-3600                                                                                                                                |
 | `metric_kind`          | string | `"container"` | Which Kepler v2 counter to read: `"container"` (`kepler_container_cpu_joules_total`, keyed by `container_name`) or `"process"` (`kepler_process_cpu_joules_total`, keyed by `comm`) |
 | `zone`                 | string | `"package"`   | Value of the `zone` label to read. Kepler emits one series per zone and the zones overlap, so only one counts. Rows without a `zone` label are kept                                 |
-| `service_mappings`     | table  | `{}`          | Maps Perf Sentinel service names to the Kepler label value identifying the same workload (container name for `container`, process command name for `process`)                       |
+| `service_mappings`     | table  | `{}`          | Maps Perf Sentinel service names to the Kepler label value identifying the same workload (container name for `container`, process command name for `process`). Services mapped to one value split its joules by ops |
 | `auth_header`          | string | *(none)*      | Optional `"Name: Value"` header. Prefer `PERF_SENTINEL_KEPLER_AUTH_HEADER` env var                                                                                                  |
 
 ```toml
@@ -363,7 +363,7 @@ metric_kind = "container"
 
 **Ignored in `analyze` batch mode.** Like Scaphandre, only `watch` spawns the scraper.
 
-**Counters sharing a label value are summed, zones are not.** One container name repeated across pods (or one `comm` shared by several processes) yields several cumulative series under one mapping value. Their counters are summed before the per-window delta is computed, so the coefficient covers all of them together. Kepler also emits one series per zone, and the zones overlap: `package` already contains `core` and `uncore`. Only the rows whose `zone` label equals `zone` are read, as [Kepler's metrics documentation](https://github.com/sustainable-computing-io/kepler/blob/v0.12.0/docs/user/metrics.md#energy-zones) advises. Rows without a `zone` label are kept. Where Kepler reads hwmon, zones are named after the sensors, so set `zone` to one of the values on the wire, otherwise the zero-sample warning fires.
+**Counters sharing a label value are summed, zones are not.** One container name repeated across pods (or one `comm` shared by several processes) yields several cumulative series under one mapping value. Their counters are summed before the per-window delta is computed, so the coefficient covers all of them together. Several services mapped to one value read that one sum: its delta is counted once and split between them by the ops each emitted in the window. Kepler also emits one series per zone, and the zones overlap: `package` already contains `core` and `uncore`. Only the rows whose `zone` label equals `zone` are read, as [Kepler's metrics documentation](https://github.com/sustainable-computing-io/kepler/blob/v0.12.0/docs/user/metrics.md#energy-zones) advises. Rows without a `zone` label are kept. Where Kepler reads hwmon, zones are named after the sensors, so set `zone` to one of the values on the wire, otherwise the zero-sample warning fires.
 
 **Precedence vs Alumet and Scaphandre.** Both outrank `kepler_ebpf` for the same service. All three read RAPL. Kepler gives each workload a share of the active power only, in proportion to its CPU time. Kepler is most useful on Kubernetes, where it runs as a `DaemonSet` and labels its series by container. No arm64 Kepler image is published as of v0.12.0, and a VM without RAPL gets no Kepler reading. See [docs/LIMITATIONS.md](LIMITATIONS.md#kepler-precision-bounds) for the platform requirements and precision caveats.
 
@@ -380,7 +380,7 @@ Opt-in integration with [Alumet](https://github.com/alumet-dev/alumet) (INRIA/LI
 | `metric_name`          | string | *(none)* | Prometheus metric name **exactly as it appears on the wire**, including the exporter's `prefix`/`suffix`. Required, no default (see below)    |
 | `label_key`            | string | *(none)* | Prometheus label carrying the workload identity. Required, no default. `name` for the `k8s` source (pod name), `domain` for a raw RAPL series |
 | `energy_interval_secs` | float  | `1.0`    | Wall-clock seconds the scraped joules value covers. **Must match the `poll_interval` of the Alumet source feeding the metric** (see below)    |
-| `service_mappings`     | table  | `{}`     | Maps Perf Sentinel service names to the Alumet label value identifying the same workload                                                      |
+| `service_mappings`     | table  | `{}`     | Maps Perf Sentinel service names to the Alumet label value identifying the same workload. Services mapped to one value split its energy by ops |
 | `auth_header`          | string | *(none)* | Optional `"Name: Value"` header. Prefer `PERF_SENTINEL_ALUMET_AUTH_HEADER` env var                                                            |
 
 **Why `metric_name` and `label_key` have no default.** Alumet's exporter prepends `prefix` and appends `suffix` (default `_alumet`) to every metric name, and the per-service series is produced by an `energy-attribution` formula whose name *you* choose. No default could be right for every deployment, and a wrong guess would scrape nothing. Read the names off your own endpoint:
@@ -391,7 +391,7 @@ curl -s http://localhost:9091/metrics | grep -i energy
 
 **`metric_name` must name a RAPL series in joules.** The scraper reads every value as the joules consumed during one `energy_interval_secs` and tags it `alumet_rapl`. Point it at `rapl_consumed_energy` itself, or at an `energy-attribution` formula fed by `rapl`, as in the example below. Alumet's other energy sources are not supported. The `nvidia-nvml`, `amd-gpu` and `grace-hopper` energy series are in millijoules and the `nvidia-jetson` `input_power` gauge is a power in milliwatts, so they would land in the wrong unit, 1000x too high for millijoules. `energy-estimation-tdp` publishes joules, but it is an estimate from the CPU's TDP, not a measurement. Scraped here, every one of these series would be published as measured RAPL under `alumet_rapl`. At start, the scraper logs a warning when `metric_name` looks like one of these series or ends in a unit other than joules.
 
-**Several rows per service are summed.** Alumet's `label_key` is routinely shared: one pod carries a row per RAPL domain (`package` + `dram`), and `label_key = "domain"` on a dual-socket host carries one `domain="package"` row per socket. Every row sharing a label value is summed, which is the physically correct read since energy is additive (NaN and negative rows are skipped). Two consequences to configure for. Pick `label_key` so that the rows sharing a value are the ones you want added together. And make sure those rows do not overlap: RAPL domains nest (`psys` contains `package`, `package` contains `pp0`/`pp1`), so a formula that emits both a parent and its child domain for one label double-counts the shared share. `package` plus `dram` sums correctly, `psys` plus `package` does not.
+**Several rows per service are summed.** Alumet's `label_key` is routinely shared: one pod carries a row per RAPL domain (`package` + `dram`), and `label_key = "domain"` on a dual-socket host carries one `domain="package"` row per socket. Every row sharing a label value is summed, which is the physically correct read since energy is additive (NaN and negative rows are skipped). Two consequences to configure for. Pick `label_key` so that the rows sharing a value are the ones you want added together. And make sure those rows do not overlap: RAPL domains nest (`psys` contains `package`, `package` contains `pp0`/`pp1`), so a formula that emits both a parent and its child domain for one label double-counts the shared share. `package` plus `dram` sums correctly, `psys` plus `package` does not. Several services mapped to one value, such as every service mapped to `package` under `label_key = "domain"`, read that one sum and split it by the ops each emitted in the window, so the reading is counted once.
 
 **Why `energy_interval_secs` exists.** This is the one field to get right. Alumet's exporter publishes every measurement as a Prometheus **gauge holding the last flushed value**, and `rapl_consumed_energy` is a `CounterDiff`: the joules burned during one source `poll_interval`, not a cumulative counter and not a power reading. Perf Sentinel divides by this interval to recover watts. The interval appears nowhere on the wire, so it must be declared here, and it must match the Alumet side. **A mismatch rescales energy and carbon linearly and silently**: declaring `1.0` while Alumet polls at `5s` overstates energy 5x, with no warning. See [docs/LIMITATIONS.md](LIMITATIONS.md#alumet-precision-bounds). The daemon echoes the value it is using in the `Alumet scraper started` log line.
 
@@ -448,39 +448,102 @@ energy_interval_secs = 1.0
 
 ##### `[green.alumet.database]` (optional)
 
-Declares one database workload measured by Alumet. A database emits no spans, so it can never appear in `service_mappings` (zero ops, the per-op coefficient path skips it). Instead, its energy over each scoring window is multiplied by the SQL-only waste ratio (`avoidable_sql_io_ops / total_sql_io_ops`) and reported as `green_summary.database_waste`, a standalone figure excluded from `energy_kwh`, `co2` and the public disclosure. See `docs/METHODOLOGY.md` for the formula and [docs/LIMITATIONS.md](LIMITATIONS.md#alumet-precision-bounds) for why it is a lower bound.
+Declares one database workload measured by Alumet. A database emits no spans, so it can never appear in `service_mappings` (zero ops, the per-op coefficient path skips it). Instead, its energy over each scoring window is multiplied by the SQL-only waste ratio (`avoidable_sql_io_ops / total_sql_io_ops`) and reported as `green_summary.database_waste`. That host energy is counted inside `energy_kwh` and `co2.total` (as `co2.database_gco2`) once its carbon converts at the region below, and the figure then carries `in_totals = true`. The services' own figures never include it. The disclosure publishes it as the separate `aggregate.database_waste` block, a breakdown of what the totals already hold. Without this section the block carries the estimated form, the application-side share of the SQL spans, already inside the totals. See `docs/METHODOLOGY.md` for the formula and [docs/LIMITATIONS.md](LIMITATIONS.md#alumet-precision-bounds) for why it is a lower bound.
 
 ```toml
 [green.alumet.database]
 label_value = "postgres-pod"   # value carried by label_key for the DB cgroup, verbatim
-region = "eu-west-3"           # optional, enables the gCO2 conversion (declared, not inferred)
+region = "eu-west-3"           # else [green] default_region, one of them is required
 ```
 
-`label_value` is required, matched exactly like a `service_mappings` value. `region` is optional and uses the same region ids as `[green.service_regions]`: without it the waste is reported in kWh only. One database per config, declare the cgroup that serves your SQL traffic.
+`label_value` is required, matched exactly like a `service_mappings` value. The database host energy needs a region to convert to gCO2, with the same region ids as `[green.service_regions]`: this `region`, the `[green.database_static]` one, or `[green] default_region`. With none of them the config fails to load, and when this section and `[green.database_static]` both set a region they must agree. The region is what lets the energy enter the totals: a figure whose carbon does not convert stays outside them. One database per config, declare the cgroup that serves your SQL traffic. Requires an agent on the database host, so it does not apply to a managed database. For a provisioned cluster, see `[green.database_static]`.
+
+**Scope.** The workload must run on hosts that no node-level application reading covers. Under `label_key = "domain"` with non-empty `service_mappings` the section is refused: a RAPL domain covers a whole node, so the database and the services on it would count the same joules. Measure per cgroup with another `label_key`, or drop one of the two. Next to non-empty `[green.cloud.services]` or `[green.redfish] service_mappings`, the section also needs `[green.database_static]`. If the database runs on hosts those backends read, remove this section, its energy is already in their readings. If it runs on separate hosts, add `[green.database_static]` with `placement = "dedicated"`. A cloud service left on its provider's default CPU query warns at load, since that query returns the first series of the fleet, which may be the database host.
 
 ##### `[green.alumet.broker]` (optional)
 
-The messaging twin of the section above. Declares one message broker measured by Alumet: a broker emits no spans of its own either, so its window energy is multiplied by the messaging-only waste ratio (`avoidable_messaging_io_ops / total_messaging_io_ops`) and reported as `green_summary.messaging_waste`.
+The messaging twin of the section above. Declares one message broker measured by Alumet: a broker emits no spans of its own either, so its window energy is multiplied by the messaging-only waste ratio (`avoidable_messaging_io_ops / total_messaging_io_ops`) and reported as `green_summary.messaging_waste`, host energy counted inside the totals (as `co2.messaging_gco2`) under the same rule and published in the disclosure as `aggregate.messaging_waste`.
 
 ```toml
 [green.alumet.broker]
 label_value = "kafka-pod"      # value carried by label_key for the broker cgroup, verbatim
-region = "eu-west-3"           # optional, enables the gCO2 conversion
+region = "eu-west-3"           # else [green] default_region, one of them is required
 ```
 
-The same cgroup cannot feed two figures: a `label_value` that also appears in `service_mappings`, or that matches the database declaration, is rejected at config load. Requires an agent on the broker host, so it does not apply to a managed broker. For those, see `[green.broker_static]`.
+The broker host energy needs a region to convert to gCO2: this `region`, the `[green.broker_static]` one, or `[green] default_region`. With none of them the config fails to load, and when this section and `[green.broker_static]` both set a region they must agree. The scope rules of `[green.alumet.database]` apply too, with `[green.broker_static]` as the section that places the broker on separate hosts.
+
+The same cgroup cannot feed two figures: a `label_value` that also appears in `service_mappings`, or that matches the database declaration, is rejected at config load. Requires an agent on the broker host, so it does not apply to a managed broker. For a provisioned cluster, see `[green.broker_static]`.
+
+#### `[green.database_static]` (optional, opt-in)
+
+Declares the hosts of the database the traced services query, with no agent and no metric. This is the path for a provisioned database with a typed instance class and no host to instrument, such as an RDS or Aurora provisioned cluster or an Azure flexible server, or self-managed VMs without an agent. Serverless and capacity-unit databases have no provisioned node and cannot be declared.
+
+```toml
+[green.database_static]
+placement = "dedicated"        # required once any key is set: "dedicated" or "shared"
+nodes = 2                      # database hosts, readers and provisioned standbys included, 1 to 10000
+instance_type = "db.r6i.large" # an embedded row or a managed class that resolves to one
+region = "eu-west-3"           # else [green.alumet.database] region, else [green] default_region
+```
+
+`placement` says where the database runs, and every other key is checked against it at load, for every subcommand, `analyze` included. A section left without `placement` fails with a message naming both placements. The section takes no `provider`, the instance type alone prices the hosts.
+
+- **`dedicated`**: hosts of its own, which no traced service runs on. `nodes` and `instance_type` go together. Both may be left out only next to `[green.alumet.database]` and without `cpu_query`, the shape for an Alumet-measured database that declares its placement. `shared_with` is refused.
+- **`shared`**: a database pod on one application node. `cpu_query` is required (the pod's CPU as a percent of that node), `nodes` is absent or 1, and `instance_type` is required when `shared_with` (the `[green.cloud.services]` entries reading that node) is empty. A shared declaration has no ceiling: its CPU query bills the pod's share of the node, see **A database on an application node** below. A database spread over several application nodes cannot be declared shared, and a shared declaration is refused next to `[green.alumet.database]`.
+
+`nodes` counts every provisioned host of the cluster: the writer, each reader and each standby, a Multi-AZ standby included. A standby serves no query but draws power, so leaving it out under-counts the cluster. `instance_type` is 1 to 256 characters without control characters, and accepts the embedded rows and the managed class names listed in [Managed service classes](./INSTANCE-TYPES.md#managed-service-classes): `db.r6i.large` prices as `r6i.large`, `db.m5d.large` as `m5.large` and an Azure `Standard_D4ds_v5` as `Standard_D4s_v5`. Cloud SQL `db-n1-standard-N` and `db-n1-highmem-N` price as their `n1` row, Enterprise Plus `db-perf-optimized-N-V` as `n2-highmem-V`, and the Azure SQL standard-series vCore objectives (`GP_Gen5_N`, `BC_Gen5_N`, `HS_Gen5_N`, serverless `GP_S_Gen5_N` and `HS_S_Gen5_N` at their max vCores) at N vCores of the Skylake reference row. Names match case exactly. A type that resolves to no row fails the load, naming the type, the spelling that resolves when only the case differs, and the reason when it is a class left out on purpose (`db.serverless`, the Cloud SQL shared-core and dedicated-core custom tiers, the retired Azure SQL Fsv2 objectives). The database host energy needs a region: this section's, else `[green.alumet.database]`'s, else `[green] default_region`. Without one the load fails, and two declared regions that differ are refused.
+
+A dedicated declaration with `nodes` and `instance_type` has a ceiling. Without `cpu_query`, the energy is `nodes × max_watts × window duration`, the `E(n) = n × P_max` ceiling of `[green.broker_static]` below, with the same three properties: it bounds compute and not wall power, it counts provisioned hosts and not their load, and it does not move when the application fixes an N+1. It is reported as `green_summary.database_waste` with `model = "database_specpower"` and enters the totals like a measured figure, as `co2.database_gco2`, converted at the region above. The disclosure counts its windows as declared, never as measured. What the ceiling leaves out on a database is in [docs/LIMITATIONS.md](LIMITATIONS.md#declared-database-precision-bounds).
+
+**Hosts priced from their CPU.** A dedicated declaration can also set `cpu_query`, a PromQL query returning the average CPU of the declared hosts as a percent, in one series. It needs `[green.cloud]`: the cloud scraper runs it against `prometheus_endpoint`, with the same auth header and interval, and bills `nodes × (idle_watts + (max_watts - idle_watts) × cpu / 100)` over each interval, tagged `cloud_specpower`. For a managed database read through cloudwatch_exporter:
+
+```toml
+[green.database_static]
+placement = "dedicated"
+nodes = 2
+instance_type = "db.r6i.large"
+cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier=~"orders-db-.*"})'
+```
+
+A response with several series, an empty or non-finite result, or a failed fetch bills nothing that tick, warns once until the next good reading, and lets `perf_sentinel_database_cpu_last_scrape_age_seconds` grow. Once no reading has landed for three scrape intervals, the ceiling above bills the stretch under `database_specpower`, and the first reading after recovery, which reaches back over that stretch, is dropped. The query cannot be a provider default CPU query, `[green.cloud] cpu_metric` or the query of a `[green.cloud.services]` entry, which read application nodes, and it cannot sit next to `[green.alumet.database]`. Managed CPU metrics lag the hosts, see [docs/LIMITATIONS.md](LIMITATIONS.md#declared-database-precision-bounds).
+
+**A database on an application node.** With `placement = "shared"`, the database runs on a node that a `[green.cloud.services]` query group already reads, so its energy is inside that node's reading. `cpu_query` returns the pod's CPU as a percent of that node, in one series: filtered to the node the group's query reads, and normalized to one node by dividing a container's CPU rate by the node's vCPU count. `shared_with` lists that group exactly: every listed service resolves the same CPU query, every service resolving it is listed, and they share one power envelope, equal to `instance_type`'s when it is set (`instance_type` may then be left out, the group's envelope prices the host). Each tick the probe bills the pod's dynamic share, `(max_watts - idle_watts) × cpu / 100`, capped at the node's own dynamic watts, and takes the same watts out of the node before its services split it. The node is counted once, and its idle stays with the services. When the database and the broker are both declared on one node, the database is billed first and the broker at most what is left. A tick without a one-series reading of the group's query bills the host nothing, and a shared host has no ceiling to fall back on, so a stale probe bills nothing either. The windows it bills carry `model = "cloud_specpower"`. For a Postgres pod on the 4-vCPU node the `orders` and `billing` services read:
+
+```toml
+[green.cloud.services]
+orders = { instance_type = "m6i.xlarge", cpu_query = '100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="node-a:9100"}[5m])) * 100)' }
+billing = { instance_type = "m6i.xlarge", cpu_query = '100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="node-a:9100"}[5m])) * 100)' }
+
+[green.database_static]
+placement = "shared"
+cpu_query = '100 * sum(rate(container_cpu_usage_seconds_total{container="postgres",node="node-a"}[5m])) / 4'
+shared_with = ["orders", "billing"]
+```
+
+The load refuses a `shared_with` with more than 256 entries, a duplicate, a name that is not a `[green.cloud.services]` key, services spread over several CPU queries, a group missing one of its services, services with different envelopes or an envelope different from `instance_type`'s, and a service mapped in `[green.redfish]` or in `[green.alumet]` under `label_key = "domain"`: those backends read the node whole, so the host is already inside their reading and must not be declared. A shared host with an empty `shared_with` next to `[green.cloud.services]`, Redfish or Alumet domain mappings loads with a warning, since its share is billed on top of every reading: that is right only when no application reading holds its node, a node whose services Kepler reads per container for instance. A database spread over several application nodes cannot be declared shared, one node is one reading. Measure it per container (Kepler, an Alumet cgroup), or declare it dedicated only when its nodes host no traced cloud service.
+
+Daemon only. When this section and `[green.alumet.database]` are both configured, **the measurement wins**: the ceiling bills only the stretches where the database's Alumet series is stale, under the arbitration `[green.broker_static]` describes below. One daemon declares the database: each daemon that declares it bills the whole cluster, so sharded daemons that each carry the section count the database once per daemon.
 
 #### `[green.broker_static]` (optional, opt-in)
 
-Declares a **provisioned** broker cluster, with no agent and no metric. This is the only path that works for a managed broker (Confluent Cloud, MSK, SQS, managed Pulsar), where there is no host to instrument.
+Declares a **provisioned** broker cluster, with no agent and no metric. This is the path for a provisioned broker cluster with a typed instance class and no host to instrument, such as a managed Kafka or MQ cluster, or self-managed VMs without an agent. Serverless and capacity-unit brokers have no provisioned node and cannot be declared.
 
 ```toml
 [green.broker_static]
-nodes = 3                      # provisioned broker nodes, required
-instance_type = "m5.2xlarge"   # looked up in the embedded SPECpower table, required
-provider = "aws"               # optional: aws, gcp, azure, scaleway or generic (default)
-region = "eu-west-3"           # optional, enables the gCO2 conversion
+placement = "dedicated"        # required once any key is set: "dedicated" or "shared"
+nodes = 3                      # provisioned broker nodes, 1 to 10000
+instance_type = "kafka.m5.large"  # an embedded row or a managed class that resolves to one
+region = "eu-west-3"           # else [green.alumet.broker] region, else [green] default_region
 ```
+
+`placement` says where the brokers run, and every other key is checked against it at load, for every subcommand, `analyze` included:
+
+- **`dedicated`**: hosts of their own. `nodes` and `instance_type` go together. Both may be left out only next to `[green.alumet.broker]` and without `cpu_query`, the shape for an Alumet-measured broker that declares its placement. `shared_with` is refused.
+- **`shared`**: a broker pod on one application node. `cpu_query` is required (the pod's CPU as a percent of that node), `nodes` is absent or 1, and `instance_type` is required when `shared_with` (the `[green.cloud.services]` entries reading that node) is empty. A shared declaration has no ceiling: its CPU query bills the pod's share of the node and takes it out of the node's reading, under the rules `[green.database_static]` gives for a database on an application node. A broker spread over several application nodes cannot be declared shared, and a shared declaration is refused next to `[green.alumet.broker]`.
+
+`instance_type` accepts the embedded rows and the managed class names listed in [Managed service classes](./INSTANCE-TYPES.md#managed-service-classes) (`kafka.m5.large`, `mq.m5.large`). Names match case exactly. A type that resolves to no row fails the load, naming the type, the spelling that resolves when only the case differs, and the reason when it is a class left out on purpose. The broker host energy needs a region: this section's, else `[green.alumet.broker]`'s, else `[green] default_region`. Without one the load fails, and two declared regions that differ are refused. `provider` is accepted (`aws`, `gcp`, `azure`, `scaleway` or `generic`, anything else is refused) but prices nothing, the instance type alone prices the hosts, so setting it warns at load. A section left without `placement` fails with a message naming both placements.
+
+A dedicated declaration with `nodes` and `instance_type` bills energy, and so does a shared one through its `cpu_query`. That energy enters the totals like a measured figure, as `co2.messaging_gco2`, converted at the region above. A `cpu_query` on a dedicated declaration prices the brokers from their CPU, tagged `cloud_specpower` with the ceiling below as its `broker_specpower` fallback, as `[green.database_static]` above describes, and `perf_sentinel_broker_cpu_last_scrape_age_seconds` tracks its scrapes.
 
 The energy is `nodes × max_watts × window duration`, following `E(n) = n × P_max`: provisioned nodes times their power ceiling. Three properties to accept before relying on it:
 
@@ -488,7 +551,7 @@ The energy is `nodes × max_watts × window duration`, following `E(n) = n × P_
 - **It counts provisioned infrastructure, not consumed.** A three-node cluster is immobilized whether it runs at 10 % or 60 %. In the other direction, a stretch with no traffic bills at most one hour, so a mostly-idle cluster is under-counted.
 - **It does not react to application changes.** Batching your publishes will not move this number, because nothing about it depends on traffic. If you want a figure that responds to remediation, you need the measured path.
 
-An unknown `instance_type` warns and falls back to a provider default rather than failing: the figure stays coarser, and the warning says so. An unrecognised `provider` is rejected outright, because it would silently resolve to the generic on-prem watts. Daemon only, like every measured path, since a window duration is needed. When both this section and `[green.alumet.broker]` are configured, **the measurement wins**. Precedence follows the broker's own Alumet series, not the scrape endpoint: a scrape that answers without carrying the declared `label_value` measures nothing, so the declaration takes over rather than being suppressed by a working endpoint. Energy the series already banked is delivered first, and the delta that lands when it recovers is dropped once, since it reaches back over wall clock the declaration billed.
+Daemon only, like every measured path, since a window duration is needed. When both this section and `[green.alumet.broker]` are configured, **the measurement wins**. Precedence follows the broker's own Alumet series, not the scrape endpoint: a scrape that answers without carrying the declared `label_value` measures nothing, so the declaration takes over rather than being suppressed by a working endpoint. Energy the series already banked is delivered first, and the delta that lands when it recovers is dropped once, since it reaches back over wall clock the declaration billed.
 
 #### `[green.redfish]` (optional, opt-in)
 
@@ -496,9 +559,9 @@ Opt-in integration with the [Redfish](https://www.dmtf.org/standards/redfish) BM
 
 | Field                  | Type   | Default   | Description                                                                                                                                                                                                                                                                                                                                                 |
 |------------------------|--------|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `endpoints`            | table  | *(empty)* | Map of `chassis_id` → endpoint table with `url` + `schema`. Required to activate the scraper                                                                                                                                                                                                                                                                |
+| `endpoints`            | table  | *(empty)* | Map of `chassis_id` → endpoint table with `url` + `schema`. Required to activate the scraper. Two ids that resolve one chassis are rejected at load: same scheme, host (case ignored), port (the scheme default when absent) and `/redfish/v1/Chassis/<id>` path, so `/Power` and `/EnvironmentMetrics` of one chassis collide |
 | `scrape_interval_secs` | int    | `60`      | How often to scrape each chassis. Valid range: 15-3600 (BMC rate-limit defense)                                                                                                                                                                                                                                                                             |
-| `service_mappings`     | table  | `{}`      | Maps Perf Sentinel service names to the chassis hosting them. Every service mapped to the same chassis receives the same chassis-level coefficient                                                                                                                                                                                                          |
+| `service_mappings`     | table  | `{}`      | Maps Perf Sentinel service names to the chassis hosting them. Every service mapped to the same chassis receives the same chassis-level coefficient. A load-time warning names a cloud CPU query that shares some services with a chassis but reads others it does not list: those keep a share of the node the chassis bills again |
 | `ca_bundle_path`       | string | *(none)*  | **Reserved for a later release.** Setting this field today causes the scraper to refuse to start with a clear error. A BMC certificate issued by a private CA, or a self-signed one that is not a CA certificate and whose subject alternative names cover the endpoint host, is trusted once it is in `SSL_CERT_FILE` (see [Outbound proxy and private CA](#outbound-proxy-and-private-ca)) |
 | `auth_header`          | string | *(none)*  | Curl-style Basic auth header. Prefer `PERF_SENTINEL_REDFISH_AUTH_HEADER` env var. Session-token auth (POST `/SessionService/Sessions`) is not yet supported                                                                                                                                                                                                 |
 
@@ -556,7 +619,7 @@ Cloud-native energy estimation via CPU utilization + SPECpower interpolation. Wh
 | `scrape_interval_secs`  | integer | `15`     | Polling interval in seconds (range: 1-3600).                                                                                                                                 |
 | `default_provider`      | string  | *(none)* | Default cloud provider: `"aws"`, `"gcp"`, `"azure"`, `"scaleway"`. Scaleway instance types are derived from its Product Catalog, see [INSTANCE-TYPES.md](INSTANCE-TYPES.md). |
 | `default_instance_type` | string  | *(none)* | Fallback instance type for unmapped services.                                                                                                                                |
-| `cpu_metric`            | string  | *(none)* | Default PromQL metric/query for CPU utilization.                                                                                                                             |
+| `cpu_metric`            | string  | *(none)* | Default PromQL query for CPU utilization, shared by every service without its own `cpu_query`. Those services read one node when it returns one series.                      |
 
 Per-service entries in `[green.cloud.services]` support two forms:
 
@@ -569,13 +632,17 @@ scrape_interval_secs = 15
 default_provider = "aws"
 
 [green.cloud.services]
-"account-svc" = { provider = "aws", instance_type = "m7i.4xlarge" }       # Sapphire Rapids
+"account-svc" = { provider = "aws", instance_type = "m7i.4xlarge", cpu_query = "aws_ec2_cpuutilization_average{instance_id=\"i-0123456789abcdef0\"}" }   # Sapphire Rapids
 "api-asia" = { provider = "gcp", instance_type = "c4d-standard-8" }       # AMD Turin
 "analytics" = { provider = "azure", instance_type = "Standard_D8s_v6" }   # Emerald Rapids
-"ml-bench" = { provider = "aws", instance_type = "m8g.4xlarge" }          # Graviton 4
+"ml-bench" = { provider = "aws", instance_type = "m8g.4xlarge", cpu_query = "aws_ec2_cpuutilization_average{instance_id=\"i-0fedcba9876543210\"}" }      # Graviton 4
 ```
 
-The full list of covered types, with their idle and max wattage, is [`INSTANCE-TYPES.md`](./INSTANCE-TYPES.md). Modern instance families covered include AWS m7i/c7i/r7i, m7a/c7a, m6a/c6a, m7g/c7g and m8g/c8g, GCP c3, c3d, c4, c4d, n2d and t2a, and Azure Standard_Dv6, Standard_Dadsv6, Standard_Dpsv6 (Cobalt 100) and Standard_Ev6. One CPU-named bare-metal entry covers Sierra Forest (`xeon-6780e`, system-level watts assuming full chip ownership).
+The full list of covered types, with their idle and max wattage, is [`INSTANCE-TYPES.md`](./INSTANCE-TYPES.md). Modern instance families covered include AWS m7i/c7i/r7i, m7a/c7a/r7a, m6a/c6a, Graviton 2 m6g/c6g/r6g/t4g, Graviton 3 m7g/c7g/r7g and Graviton 4 m8g/c8g/r8g, GCP n1, c3, c3d, c4, c4d, n2d and t2a, and Azure Standard_Easv5, Standard_B (burstable, at full vCPU), Standard_Dv6, Standard_Dadsv6, Standard_Dpsv6 (Cobalt 100) and Standard_Ev6. One CPU-named bare-metal entry covers Sierra Forest (`xeon-6780e`, system-level watts assuming full chip ownership).
+
+**Managed classes.** `instance_type` also accepts the names of managed database, cache, broker and search classes (`db.r6i.large`, `cache.r5.large`, `kafka.m5.large`, `mq.t3.micro`, `r5.large.search`) and AWS or Azure names carrying a storage or network modifier (`db.m5d.large`, `c7gn.large`, `Standard_D4ds_v5`). Each resolves to the row of the VM family it runs on, here, in `[green.database_static]` and in `[green.broker_static]`. The rules, and the classes left out with their reason, are in [Managed service classes](./INSTANCE-TYPES.md#managed-service-classes).
+
+**Services on one node.** The services that resolve to one CPU query (their `cpu_query`, else `cpu_metric`, else their provider default, compared after trimming) are read as one node. When the response holds a single series and every one of those services resolves to the same idle and max watts, the node's watts are split between them by the operations each emitted in the interval, so the node is counted once. Services that read one query with different watt figures load with a warning naming both and keep a figure per service, each priced as if it owned the node. A query that returns several series also keeps a figure per service, each reading the first series, and the daemon warns once with the series count and the services. An aggregate query over a fleet (`avg` or `sum` without `by`) returns one series and is read as one node. Pricing each node therefore takes a query filtered to it, such as a node_exporter query filtered by `instance` (`100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="node-a:9100"}[5m])) * 100)`) or a cloud monitoring metric filtered on the label the exporter puts the instance id in (`aws_ec2_cpuutilization_average{instance_id="i-0123456789abcdef0"}` with cloudwatch_exporter). In the example above, `account-svc` and `ml-bench` would otherwise both read the AWS default query. Two different query strings are two nodes, even when they read the same machine.
 
 **Manual watts (on-premise or custom hardware):**
 
@@ -598,7 +665,7 @@ Real-time carbon intensity from the Electricity Maps API. Daemon-only.
 |------------------------|---------|--------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `api_key`              | string  | none                                 | API auth token. Prefer `PERF_SENTINEL_EMAPS_TOKEN` env var for security                                                                                                                                     |
 | `endpoint`             | string  | `https://api.electricitymaps.com/v4` | API base URL (`http://` or `https://`). v3 still works but emits a deprecation warning at startup                                                                                                           |
-| `poll_interval_secs`   | integer | `300`                                | Poll interval in seconds (range: 60-86400). Free tier: use 3600+                                                                                                                                            |
+| `poll_interval_secs`   | integer | `300`                                | Poll interval in seconds (range: 60-86400). Size it to your plan's quota                                                                                                                                            |
 | `emission_factor_type` | string  | `lifecycle`                          | Emission factor model. `lifecycle` (default) includes upstream emissions (manufacturing, transport). `direct` includes only combustion. Some Scope 2 frameworks prefer `direct` for stricter accountability |
 | `temporal_granularity` | string  | `hourly`                             | API response aggregation. `hourly` (default), `5_minutes`, or `15_minutes`. Sub-hour values require a paid plan that exposes them, otherwise the API silently coarsens to hourly                            |
 
@@ -618,7 +685,7 @@ poll_interval_secs = 300
 **Staleness:** if the last successful poll is older than 3x `poll_interval_secs`, the scraper falls back to embedded hourly profiles.
 
 
-**Rate limits:** the Electricity Maps free tier allows approximately 30 requests per month per zone. For free tier users, set `poll_interval_secs = 3600` or higher. The default of 300s is intended for paid plans.
+**Plans and rate limits:** the Electricity Maps free tier is for non-commercial use only, and its terms count any production system as commercial use. Commercial access is sold per signal and per zone, the real-time carbon intensity signal listing at €6,000 per zone per year in October 2026. Size `poll_interval_secs` to the quota of your plan: one zone polled every 3600 s spends about 720 requests a month. For French regions, `[green.rte_eco2mix]` below is a free alternative.
 
 **API version:** the default endpoint targets v4 since Perf Sentinel 0.5.11. v3 remains accepted (the response schema is identical on `carbon-intensity/latest`), but a deprecation warning is logged once at daemon startup. To silence the warning, set `endpoint = "https://api.electricitymaps.com/v4"` explicitly. To keep v3 (for example to A/B-validate against v4), leave `endpoint = "https://api.electricitymaps.com/v3"` and acknowledge the warning.
 
@@ -630,11 +697,88 @@ poll_interval_secs = 300
 - The HTML dashboard renders a chip bandeau above the green-regions table. Default values (`v4`, `lifecycle`, `hourly`) are neutral chips, opt-in values (`direct`, `5_minutes`, `15_minutes`) are accent chips, the legacy `v3` endpoint shows as a warning chip mirroring the deprecation warning. Native browser tooltips explain each value.
 - The terminal `print_green_summary` output prepends a one-liner `Carbon scoring: Electricity Maps v4, lifecycle, hourly` before the per-region breakdown.
 
-The bandeau and the terminal line are hidden when `[green.electricity_maps]` is not configured.
+The Electricity Maps chips and terminal line are hidden when `[green.electricity_maps]` is not configured.
+
+#### Grid operator feeds: `[green.rte_eco2mix]`, `[green.neso]`, `[green.fingrid]`, `[green.energinet]`, `[green.ree_esios]`, `[green.open_electricity]`, `[green.mavir]`, `[green.em6]` (optional, opt-in)
+
+Real-time carbon intensity published for free by grid operators themselves, for the cloud regions on their grid. Daemon mode only. A section being present enables its feed. All of them count direct emissions, lifecycle excluded, so they read lower than an Electricity Maps `lifecycle` figure for the same hour, and they do not measure exactly the same thing:
+
+| Section | Operator, zone | What the number is | Step | Key | Licence |
+|---|---|---|---|---|---|
+| `[green.rte_eco2mix]` | RTE (`éCO2mix` on ODRÉ), France | Direct emissions of French production, imports excluded | 15 min | none | Licence Ouverte v2.0 |
+| `[green.neso]` | NESO Carbon Intensity API, Great Britain (not Northern Ireland) | Direct CO2 of generation plus imports, per kWh consumed | 30 min | none | CC BY 4.0 and the API terms of use |
+| `[green.fingrid]` | Fingrid, Finland | Direct emissions of production (dataset 266, the RTE basis) or of consumption (265, imports at fixed yearly factors) | 3 min | free | CC BY 4.0 |
+| `[green.energinet]` | Energinet Energi Data Service, Denmark `DK1` and `DK2` | Direct CO2 per kWh consumed, imports included | 5 min | none | CC BY 4.0 |
+| `[green.ree_esios]` | REE e·sios, mainland Spain (not the Balearic or Canary Islands) | Direct CO2 of peninsular generation, imports excluded | 5 min | free token | e·sios legal notice: no commercial use, credit to Red Eléctrica |
+| `[green.open_electricity]` | Open Electricity (The Superpower Institute), Australia: NEM regions `AU-NSW`, `AU-QLD`, `AU-SA`, `AU-TAS`, `AU-VIC` and the WEM `AU-WA` | Direct emissions over regional generation, rooftop solar included, imports excluded | 5 min | optional, free | CC BY-NC 4.0 |
+| `[green.mavir]` | MAVIR, Hungary | Direct CO2 of domestic power plants per gross domestic generation, imports excluded | 15 min | none | no open licence |
+| `[green.em6]` | em6 (Energy Market Services, Transpower), New Zealand | Direct CO2 of grid-connected generation | 30 min | none | all rights reserved |
+
+Shared fields:
+
+| Field                | Type    | Default | Description                                                                                       |
+|----------------------|---------|---------|---------------------------------------------------------------------------------------------------|
+| `regions`            | list    | none    | Cloud regions served by the grid, for every feed but `energinet` and `open_electricity`. Each gets the national value |
+| `region_map`         | table   | none    | Cloud region to zone. `[green.energinet]`: `DK1` (west) or `DK2` (east). `[green.open_electricity]`: `AU-NSW`, `AU-QLD`, `AU-SA`, `AU-TAS`, `AU-VIC` or `AU-WA` |
+| `endpoint`           | string  | per feed | API base URL, `http://` or `https://`                                                            |
+| `poll_interval_secs` | integer | 900 (RTE), 600 (Open Electricity), 300 (NESO, Energinet, e·sios, MAVIR, em6), 180 (Fingrid) | Poll interval (range: 60-86400), about each operator's refresh step |
+| `dataset`            | string  | `"production"` | `[green.fingrid]` only: `"production"` (266) or `"consumption"` (265)                  |
+| `api_key`            | string  | none    | Required by `[green.fingrid]` and `[green.ree_esios]`, optional for `[green.open_electricity]`. Prefer the `PERF_SENTINEL_FINGRID_API_KEY`, `PERF_SENTINEL_REE_ESIOS_API_KEY` and `PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY` environment variables |
+
+```toml
+[green.rte_eco2mix]
+regions = ["eu-west-3"]
+
+[green.neso]
+regions = ["eu-west-2", "uksouth"]
+
+[green.fingrid]                  # key in PERF_SENTINEL_FINGRID_API_KEY
+regions = ["europe-north1"]
+
+[green.energinet]
+region_map = { "dk-west" = "DK1", "dk-east" = "DK2" }
+
+[green.ree_esios]                # token in PERF_SENTINEL_REE_ESIOS_API_KEY
+regions = ["eu-south-2"]
+
+[green.open_electricity]
+region_map = { "ap-southeast-2" = "AU-NSW", "ap-southeast-4" = "AU-VIC" }
+
+[green.mavir]
+regions = ["hu-central"]
+
+[green.em6]
+regions = ["ap-southeast-6"]
+```
+
+**Precedence.** Electricity Maps wins for any region it also covers. A cloud region may appear in one grid feed only, the load fails otherwise. A real-time row from a grid feed carries `intensity_provider` (`rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`, `open_electricity`, `mavir`, `em6`) in `green_summary.regions[]`, absent for Electricity Maps so earlier reports keep their shape. The model tag is `grid_operator_api` when no region used Electricity Maps. The HTML dashboard adds one chip per feed to the carbon scoring bandeau, and the terminal a `Carbon scoring: grid operator open data (...)` line, as soon as one region drew on it: a configured section alone proves nothing, since batch runs start no scraper.
+
+**Freshness.** Each operator has its own lag. The scraper rejects a latest record older than 3 hours (RTE, Open Electricity), 2 hours (NESO, em6) or 1 hour (Fingrid, Energinet, e·sios, MAVIR) as a stalled feed, and one dated more than 15 minutes ahead as not yet measured. After 3x `poll_interval_secs` without a fresh value, scoring falls back to the embedded profiles, as with Electricity Maps. Failures are counted per zone, so a dead `DK2` is reported even while `DK1` answers: a warning names the feed and the zone after 3 consecutive failures.
+
+**Disclosures.** Declare the feed in the org config, `carbon_intensity_source = "rte_eco2mix"`, `"neso"`, `"fingrid"`, `"energinet"`, `"ree_esios"`, `"open_electricity"`, `"mavir"` or `"em6"` (or `"mixed"` across several), so a reader does not mix their basis with an Electricity Maps lifecycle figure. CC BY 4.0, CC BY-NC 4.0, Licence Ouverte and the e·sios notice ask for attribution where the figures are published: the HTML report names and links the operator on each row with the credit its terms ask for, a published disclosure should credit it too.
+
+**Restrictive terms.** e·sios, Open Electricity, MAVIR and em6 publish free of charge but grant no open licence for every use, so their sections stay opt-in like the others and are documented with their terms:
+
+- **REE e·sios:** the e·sios legal notice, which covers `api.esios.ree.es`, states "Se prohíbe expresamente la utilización de estos datos y servicios con fines comerciales". Reuse follows the standard licence of article 4.2 b of Spanish law 37/2007: credit Red Eléctrica as the source, keep the meaning, give the date of the last update, never suggest that REE endorses the reuse, and use no REE or e·sios logo.
+- **Open Electricity:** data on the Community, Academic and Pro plans is under CC BY-NC 4.0, to be credited as "Data sourced from Open Electricity (The Superpower Institute), licensed under CC BY-NC 4.0." Commercial use needs the Enterprise plan, and the licence page lists internal use by a for-profit organisation in the course of its business among the uses the standard licence does not cover. Keys must stay secret.
+- **MAVIR:** no open licence. The legal notice ("Jogi nyilatkozat") lets the news and information of the site be used within the applicable law, and reserves the public or commercial use of other content to MAVIR's permission.
+- **em6:** the free current-intensity endpoint comes with no licence: Transpower New Zealand Limited reserves all rights, and its terms neither grant nor forbid reuse.
+
+Perf Sentinel is AGPL-3.0 software, and the disclosures it produces are public, declarative and unpaid, published to reduce the carbon footprint of web applications: the project reads that use as non-commercial. Each operator still applies its own terms and its own definition of commercial use: read them against your deployment before enabling a feed.
+
+**Per feed:**
+- **RTE `éCO2mix`:** 50,000 calls per user per month on ODRÉ, the default 900 s spends about 2,900. `taux_co2` is an estimate that RTE later replaces with consolidated figures.
+- **NESO:** the terms forbid selling, leasing or re-hosting access to the API, and the NESO logo needs prior approval: each daemon calls it for its own use. Each poll reads the last 3 hours of half-hour windows and takes the newest estimate (`actual`), dated by its own window. NESO sometimes stops updating `actual` and copies it onto each new window: when it stays identical on 4 consecutive windows while the forecast moves, or when no window has one, the newest window's forecast is used instead.
+- **Fingrid:** a free key from data.fingrid.fi (developer portal, "Open Data starter"), sent in the `x-api-key` header, never in the URL, and trimmed of surrounding whitespace. Without a key the section is disabled with a warning, like Electricity Maps without a token; a key that is not printable ASCII fails the load, and an `http://` endpoint with a key logs a cleartext warning. The dataset scored is recorded as `scoring_config.fingrid_dataset` (266 or 265) and named on the HTML chip and the terminal line, since the two bases differ. Limits: 10,000 calls a day and one every 2 seconds per key.
+- **Energinet:** values are initial estimates that Energinet says it will generally not correct. Its API guide asks vendors not to poll from every unit of an application: keep one daemon per site rather than one per host.
+- **REE e·sios:** a free personal token, requested from the "Solicitud de Token" icon of the e·sios site, sent in the `x-api-key` header with the `Accept` header of the official request example (`application/json; application/vnd.esios-api-v1+json`). Without a token the section is disabled with a warning. Only indicator 10355, the peninsula, is read: the islands publish on another indicator, so map mainland regions only. The value comes in tCO2 per MWh and is multiplied by 1000, and a 0 counts as a missing point. Each poll asks for the last 3 hours, which also misses the CDN cache that answers known URLs without checking the token. No rate limit is published: the default 300 s makes one call per 5-minute point.
+- **Open Electricity:** the API publishes emissions (tCO2e) and energy (MWh) per region and technology, no intensity: Perf Sentinel divides the emissions by the generation, leaving out the net battery series, battery charging and pumped storage, which would count the same energy twice. Rooftop solar lands 30 to 100 minutes behind the rest, so each region is read at the newest interval rooftop solar covers, up to an hour and a half old on the WEM. A timestamp marks the end of its 5-minute interval, the AEMO convention. One call per network mapped (NEM, WEM): the default 600 s makes 288 calls a day with both, under the 500 of the free plan, and the key, when set, goes in an `Authorization: Bearer` header.
+- **MAVIR:** the data only exists as the XLSX export of chart 1000687, read by a minimal ZIP reader. The column is found by words of its Hungarian header (`aránya`, `tény`, `nélkül`: the measured ratio without household and self-consumption solar, which MAVIR fills 25 to 40 minutes late). A reworded header is still found, and a header that no longer matches exactly one column fails the feed instead of reading another column. The unit is printed nowhere, neither in the export nor on the chart axes: tCO2 per MWh follows from MAVIR's own emissions and generation series, and a ratio outside 0.01 to 1.5 is rejected as a unit change. The quarter in progress is read, dated by its start, and MAVIR revises it by a few g/kWh once it closes. `www.mavir.hu` disallows robots and is never called. The data host `rtdwweb.mavir.hu` publishes no robots file, and the daemon calls it once per poll under a User-Agent naming the project.
+- **em6:** one free endpoint returns the last three trading periods. The newest is read, dated by the start of its half hour and published a few minutes after it ends. The figure covers grid-connected generation only, without embedded generation or batteries.
 
 #### `[green] calibration_file` (optional)
 
-Path to a calibration TOML file generated by `perf-sentinel calibrate`. When present, per-service calibration factors are loaded at config time and multiply the proxy model energy per op. Does not affect Scaphandre or cloud SPECpower measured energy.
+Path to a calibration TOML file generated by `perf-sentinel calibrate`. When present, per-service calibration factors are loaded at config time and multiply the proxy model energy per op. Does not affect energy from any measured backend. Next to a database or broker source (`[green.database_static]`, `[green.broker_static]`, `[green.alumet.database]` or `[green.alumet.broker]`), the load warns: the readings fed to `calibrate` must exclude those hosts, whose energy already enters the totals as a host term, or it counts twice.
 
 ```toml
 [green]
@@ -1113,6 +1257,9 @@ Configuration files must never contain secrets. For sensitive values (API keys, 
 | Variable                          | Overrides                                                     | Read by                              |
 |-----------------------------------|---------------------------------------------------------------|--------------------------------------|
 | `PERF_SENTINEL_EMAPS_TOKEN`       | the Electricity Maps `api_key`                                | daemon and batch                     |
+| `PERF_SENTINEL_FINGRID_API_KEY`   | `[green.fingrid] api_key`                                     | daemon and batch                     |
+| `PERF_SENTINEL_REE_ESIOS_API_KEY` | `[green.ree_esios] api_key`                                   | daemon and batch                     |
+| `PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY` | `[green.open_electricity] api_key`                     | daemon and batch                     |
 | `PERF_SENTINEL_ACK_API_KEY`       | `[daemon.ack] api_key`                                        | daemon and batch                     |
 | `PERF_SENTINEL_INCIDENTS_API_KEY` | `[daemon.incidents] api_key`                                  | daemon and batch                     |
 | `PERF_SENTINEL_READ_API_KEY`      | `[daemon] read_api_key`                                       | daemon and batch                     |
@@ -1121,7 +1268,7 @@ Configuration files must never contain secrets. For sensitive values (API keys, 
 | `PERF_SENTINEL_HUB_TOKEN`         | the token `login` stored, for `hub`                           | CLI, sent as `Authorization: Bearer` |
 | `PERF_SENTINEL_HUB_URL`           | the `--hub` URL of `login` and `hub`                          | CLI                                  |
 
-The overrides apply on every run, batch commands and a run without any config file included, so a job that inherits the daemon's Secret must carry valid values too (the incidents key only counts once `[daemon.incidents] enabled` is set). A variable set to an empty string counts as set: an empty key is rejected at config load rather than silently ignored, so a Secret mounted empty fails every command that loads it, the daemon included, instead of opening the route.
+The overrides apply on every run, batch commands and a run without any config file included, so a job that inherits the daemon's Secret must carry valid values too (the incidents key only counts once `[daemon.incidents] enabled` is set). A variable set to an empty string counts as set: an empty key is rejected at config load rather than silently ignored, so a Secret mounted empty fails every command that loads it, the daemon included, instead of opening the route. The data-source keys are the exception: an empty or blank `PERF_SENTINEL_EMAPS_TOKEN`, `PERF_SENTINEL_FINGRID_API_KEY`, `PERF_SENTINEL_REE_ESIOS_API_KEY` or `PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY` counts as unset, since a missing key only disables its source (with a warning for Fingrid and e·sios, Open Electricity then calling anonymously) and opens nothing.
 
 ### Outbound proxy and private CA
 

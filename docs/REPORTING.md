@@ -20,7 +20,7 @@ For `official` intent, the validator also rejects reports below 75% runtime-cali
 
 `disclose` reports `aggregate.temporal_coverage`: the fraction of the declared period's calendar days that carried measurements (`observed_days / days_in_period`). When it falls below an informational threshold the CLI prints a stderr warning and appends a disclaimer to the report, but it never blocks an `official` report. Archiving is traffic-gated (a window with no traffic writes nothing), so a low figure can be a legitimately quiet period rather than a measurement gap. Treat it as a lower bound on activity, not a daemon-uptime guarantee. It exists so a reader can distinguish a continuously-measured quarter from one where the daemon ran only a handful of days, the in-binary signal closest to "the operator stopped measuring for part of the period". Total non-participation (never running the tool) leaves no report at all and is out of scope for any in-binary check, see [docs/design/08-PERIODIC-DISCLOSURE.md](design/08-PERIODIC-DISCLOSURE.md).
 
-Two further checks tighten consistency. The validator hard-rejects a `days_covered` that does not equal `(to_date - from_date) + 1` (a disclose-produced report always satisfies this, so only a hand-edited file trips it) and a `requests_measured` that exceeds an operator-declared `total_requests_in_period`. For `official` intent, omitting `total_requests_in_period` in the org config emits a warning, since `coverage_percentage` is then absent from the report.
+Two further checks tighten consistency. The validator hard-rejects a `days_covered` that does not equal `(to_date - from_date) + 1` (a disclose-produced report always satisfies this, so only a hand-edited file trips it) and a `requests_measured` that exceeds an operator-declared `total_requests_in_period`. For `official` intent, omitting `total_requests_in_period` from both the org config and `--total-requests-in-period` emits a warning, since `coverage_percentage` is then absent from the report.
 
 ### The archive must reach the period start (0.28.0)
 
@@ -67,6 +67,7 @@ Perf Sentinel publishes reports at two granularity levels, controlled by `--conf
 - `--org-config <PATH>` (required for `intent = "official"`). The static organisation / methodology / scope TOML described in the org-config TOML section below.
 - `--emit-attestation <PATH>` (optional). When set, also writes the in-toto v1 statement sidecar at this path. Needed for the signing workflow.
 - `--strict-attribution` (optional). By default, Perf Sentinel buckets spans without a `service.name` attribution into a synthetic `_unattributed` service. This bucket contributes to aggregate totals but is excluded from per-service breakdowns. With `--strict-attribution`, the disclose call refuses to produce a report if any window carries unattributed spans, listing the offending timestamps in the error message. Use for an official disclosure when you want to assert that 100% of measured operations were properly attributed.
+- `--total-requests-in-period <N>` (optional). Total requests across the in-scope applications over the period, the denominator of `coverage_percentage`. Takes precedence over `scope_manifest.total_requests_in_period` in the org config. The total is only known once the period closes, so passing it per run keeps the org config static. The `--tui` preview applies it too and repeats it in the command it prints.
 - `--tui` (optional, needs the `tui` build feature). Opens a read-only preview instead of writing a report, see below. It relaxes `--intent`, `--confidentiality`, `--period-type`, `--from`, `--to`, and `--output` to optional, since you dial them in the interface. Conflicts with `--emit-attestation`.
 
 ## Interactive preview (`--tui`)
@@ -87,6 +88,7 @@ Only `--input` and `--org-config` stay required. The period, intent, and confide
 - `←` / `→` (or `h` / `l`) step the period one unit at a time. In `custom` they move the active edge by a day, `[` and `]` move it by a month, and `Tab` switches between the `from` and `to` edge.
 - `i` toggles the intent (internal or official), `c` toggles the confidentiality (G1 internal or G2 public).
 - The summary reports the window count, period coverage against the official threshold, measured and excluded services, totals (requests, carbon, energy, waste ratio), and the official-validator verdict when the intent is official.
+- Under Totals, a `Database:` and a `Broker:` line give each host perimeter: the in-total host kWh and how many of the windows with a figure counted it (`1.2500 kWh in the totals (3 of 5 windows)`), or `outside the totals`. See [Host perimeter](#host-perimeter-v18).
 - The footer prints the exact `disclose` command for the current settings. Copy it to produce the hashed report.
 
 The preview needs an interactive terminal. Piping its output (no TTY) exits with a clear error rather than rendering.
@@ -106,12 +108,24 @@ Publishing both lets a reader compare the two and see how much avoidable waste a
 
 ![disclose preview, official intent: the validator reports why the report is not yet publishable](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/official.png)
 
+## Host perimeter (v1.8)
+
+`total_energy_kwh` and `total_carbon_kgco2eq` cover the application services, plus the database and broker hosts in the windows that counted them. A window counts a host when a measured (`alumet_rapl`), modeled (`cloud_specpower`) or declared (`database_specpower`, `broker_specpower`) figure carried a carbon conversion. The estimated figure is the application-side share of the SQL or publish spans and stays inside the application figures. A host figure archived before host energy entered the totals, or without carbon, stays beside them under `carbon_breakdown.*_kgco2eq_out_of_total`.
+
+Every report states this perimeter three times:
+
+- `notes.disclaimers` ends with one line per subsystem, database then broker, appended after the custom or default disclaimers. It says the hosts are inside the totals in all N windows that carried a figure or in K of N windows (naming the estimated windows and the ones kept beside the totals), with the models and placements seen over the period, or that the totals hold none of that subsystem's host energy. When a host is inside, the line adds that its carbon is in `total_carbon_kgco2eq` and in no application's figures.
+- The PDF at-a-glance page names the database and broker hosts whose `in_totals_windows` is non-zero, the test `notes.disclaimers` uses, with their `in_totals_energy_kwh` (and `in K of N windows` when only some windows counted them), and says the others are outside the totals. The applications table adds a `Database hosts` and a `Broker hosts` row for the same hosts, so its rows add up to the Total row.
+- `carbon_breakdown.database_kgco2eq` and `messaging_kgco2eq` carry the in-total host carbon, and `database_waste.in_totals_energy_kwh` and `messaging_waste.in_totals_energy_kwh` the in-total host energy.
+
+For `intent = official`, the validator checks the perimeter: the two host carbon terms are finite and >= 0, the five breakdown terms add up to `total_carbon_kgco2eq` within 1e-6 relative (skipped when `carbon_methodologies` holds the legacy `sci_v1_numerator` tag), and the applications' `energy_kwh` plus both in-total host shares fit in `total_energy_kwh`.
+
 ## ESRS E1 crosswalk (v1.3)
 
 Every report carries `methodology.standard_crosswalk`, an interpretive map from its figures to the EU climate-reporting standard ESRS E1 (Delegated Regulation (EU) 2023/5303):
 
-- `aggregate.total_energy_kwh` feeds **E1-5** (energy consumption and mix), to be converted to MWh. Perf Sentinel does not split the figure by fossil, nuclear or renewable source.
-- the operational carbon term feeds **E1-6 Scope 2** on a location-based basis. ESRS also requires a market-based Scope 2 figure, which SCI excludes, so this is a partial input.
+- `aggregate.total_energy_kwh` feeds **E1-5** (energy consumption and mix), to be converted to MWh. Perf Sentinel does not split the figure by fossil, nuclear or renewable source. It includes database and broker host energy when the matching `in_totals_windows` is non-zero.
+- the operational, database and broker carbon terms feed **E1-6 Scope 2** on a location-based basis. ESRS also requires a market-based Scope 2 figure, which SCI excludes, so this is a partial input.
 - embodied carbon (the SCI `M` term, aggregate only) feeds **E1-6 Scope 3** (categories 1 and 2). ESRS admits estimates and proxy data for Scope 3.
 
 This is a **mapping aid, not a certification**. It does not make a report a CSRD submission: the figures keep their 2x directional uncertainty bracket, the scope is IT compute only, and an audited inventory by a qualified body is still required. The same caveats ship in-band under `standard_crosswalk.caveats` and in `notes.disclaimers`.
@@ -146,6 +160,8 @@ Operators that already collect daemon stdout via a sidecar can pass the resultin
 ## org-config TOML
 
 The static organisation/methodology/scope fields live in a TOML file you check into your infrastructure repository alongside the rest of the Perf Sentinel config. A complete example sits in `docs/examples/perf-sentinel-org.toml`. The same file is referenced by `[reporting] org_config_path` when the daemon is asked to validate publishable disclosures at startup.
+
+`methodology.calibration.specpower_table_version` is optional. Left out, `disclose` fills it with the date of the SPECpower table the running binary embeds, the only table it can use, so an upgrade that changes the table needs no edit. Declared, it must equal that date: `disclose --intent official` rejects a mismatch, and so does the daemon startup gate below, so the drift surfaces at deploy time rather than when the report is produced.
 
 ## Example: internal draft (G1)
 

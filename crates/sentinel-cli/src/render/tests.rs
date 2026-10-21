@@ -983,13 +983,25 @@ fn broker_waste_line_sanitizes_and_labels_its_source() {
         region: Some("eu\u{1b}[2Jwest".to_string()),
         messaging_waste_ratio: 0.4,
         model: "broker_specpower".to_string(),
+        in_totals: false,
+        placement: None,
     };
     let line = format_messaging_waste_line(&declared);
     assert!(!line.contains('\u{1b}'), "escape reached the sink: {line}");
     assert!(line.contains("Broker waste"), "{line}");
     assert!(line.contains("40% messaging ratio"), "{line}");
     assert!(line.contains("model broker_specpower"), "{line}");
-    assert!(line.contains("excluded from totals"), "{line}");
+    assert!(line.contains("[outside these totals]"), "{line}");
+
+    let in_totals = MessagingWaste {
+        in_totals: true,
+        ..declared.clone()
+    };
+    let line = format_messaging_waste_line(&in_totals);
+    assert!(
+        line.contains("[host energy, in the report totals]"),
+        "{line}"
+    );
 
     let estimated = MessagingWaste {
         model: sentinel_core::report::DB_WASTE_MODEL_ESTIMATED.to_string(),
@@ -998,7 +1010,10 @@ fn broker_waste_line_sanitizes_and_labels_its_source() {
         ..declared
     };
     let line = format_messaging_waste_line(&estimated);
-    assert!(line.contains("within the report totals"), "{line}");
+    assert!(
+        line.contains("[application-side share, within the report totals]"),
+        "{line}"
+    );
     assert!(
         !line.contains("region"),
         "absent region must drop out: {line}"
@@ -1017,12 +1032,19 @@ fn green_summary_prints_sql_share_and_database_waste() {
         region: Some("eu\u{1b}[2Jwest".to_string()),
         sql_waste_ratio: 5.0 / 6.0,
         model: "alumet_rapl".to_string(),
+        in_totals: false,
+        placement: None,
     };
     let line = format_database_waste_line(&measured);
     assert!(!line.contains('\u{1b}'), "escape reached the sink: {line}");
     assert!(line.contains("model alumet_rapl"), "{line}");
-    assert!(line.contains("excluded from totals"), "{line}");
+    assert!(line.contains("outside these totals"), "{line}");
     assert!(line.contains("4.000e-7 gCO"), "{line}");
+    let line = format_database_waste_line(&DatabaseWaste {
+        in_totals: true,
+        ..measured.clone()
+    });
+    assert!(line.contains("host energy, in the report totals"), "{line}");
     // Estimated path: within-totals label, optional suffixes drop out.
     let estimated = DatabaseWaste {
         energy_kwh: 5.5e-7,
@@ -1032,20 +1054,22 @@ fn green_summary_prints_sql_share_and_database_waste() {
         region: None,
         sql_waste_ratio: 0.0,
         model: "estimated".to_string(),
+        in_totals: false,
+        placement: None,
     };
     let line = format_database_waste_line(&estimated);
     assert!(line.contains("within the report totals"), "{line}");
     assert!(line.contains("5.500e-7 kWh"), "{line}");
     assert!(!line.contains("region"), "{line}");
     // Empty model (a legacy baseline) renders the dash placeholder and
-    // the non-estimated "excluded" scope.
+    // the non-estimated "outside" scope.
     let legacy = DatabaseWaste {
         model: String::new(),
         ..estimated.clone()
     };
     let line = format_database_waste_line(&legacy);
     assert!(line.contains("model -"), "{line}");
-    assert!(line.contains("excluded from totals"), "{line}");
+    assert!(line.contains("outside these totals"), "{line}");
     // Smoke the full print path with the SQL share visible.
     let mut summary = GreenSummary::disabled(10);
     summary.total_sql_io_ops = 6;
@@ -1071,6 +1095,83 @@ fn energy_line_names_the_energy_source() {
         format_energy_line(&gs, "<d>", "</d>"),
         "  Energy:            0.500000 kWh (modeled from I/O counts)"
     );
+}
+
+/// A summary with a declared database figure and a measured broker one,
+/// each in the totals or not.
+fn host_summary(db_in: bool, mw_in: bool) -> GreenSummary {
+    let db_gco2 = db_in.then_some(0.25);
+    let mw_gco2 = mw_in.then_some(0.125);
+    let gs: GreenSummary = serde_json::from_value(serde_json::json!({
+        "total_io_ops": 10, "avoidable_io_ops": 0, "io_waste_ratio": 0.0,
+        "io_waste_ratio_band": "healthy", "top_offenders": [],
+        "energy_kwh": 0.5, "per_service_measured_ratio": {"a": 0.0},
+        "co2": {
+            "total": {"low": 0.5, "mid": 1.0, "high": 2.0, "model": "io_proxy_v3", "methodology": "sci_v1"},
+            "avoidable": {"low": 0.0, "mid": 0.0, "high": 0.0, "model": "io_proxy_v3", "methodology": "sci_v1"},
+            "operational_gco2": 0.5, "embodied_gco2": 0.0,
+            "database_gco2": db_gco2,
+            "messaging_gco2": mw_gco2
+        },
+        "database_waste": {"energy_kwh": 0.1, "waste_kwh": 0.0, "sql_waste_ratio": 0.0,
+            "model": "database_specpower", "in_totals": db_in},
+        "messaging_waste": {"energy_kwh": 0.05, "waste_kwh": 0.0, "messaging_waste_ratio": 0.0,
+            "model": "alumet\u{1b}[2J", "in_totals": mw_in}
+    }))
+    .expect("summary");
+    gs
+}
+
+#[test]
+fn energy_line_splits_only_in_total_hosts() {
+    let outside = host_summary(false, false);
+    assert_eq!(
+        format_energy_line(&outside, "", ""),
+        "  Energy:            0.500000 kWh (modeled from I/O counts)"
+    );
+    assert_eq!(
+        host_carbon_terms(outside.co2.as_ref().unwrap(), &outside),
+        Vec::new()
+    );
+
+    let db = host_summary(true, false);
+    assert_eq!(
+        format_energy_line(&db, "", ""),
+        "  Energy:            0.500000 kWh (modeled from I/O counts \u{b7} plus database hosts, database_specpower) = applications 0.400000 kWh + database hosts 0.100000 kWh"
+    );
+    // The database line is in, the broker figure stays outside.
+    assert!(
+        format_messaging_waste_line(db.messaging_waste.as_ref().unwrap())
+            .contains("[outside these totals]")
+    );
+}
+
+#[test]
+fn host_carbon_lines_name_their_model_sanitized() {
+    let both = host_summary(true, true);
+    let terms = host_carbon_terms(both.co2.as_ref().unwrap(), &both);
+    assert_eq!(terms.len(), 2);
+    assert_eq!(
+        (terms[0].0, terms[0].1, terms[0].2.as_str()),
+        ("Database:", 0.25, "host energy, model database_specpower")
+    );
+    assert_eq!(terms[1].0, "Broker:");
+    // A hostile tag drops to the bare scope, as in the HTML card.
+    assert_eq!(terms[1].2, "host energy");
+    // A carbon term without its figure keeps the bare scope.
+    let mut bare = host_summary(true, false);
+    bare.database_waste = None;
+    let terms = host_carbon_terms(bare.co2.as_ref().unwrap(), &bare);
+    assert_eq!(terms[0].2, "host energy");
+    print_green_summary(&both, 1, false);
+}
+
+#[test]
+fn absent_waste_messages_name_both_sources() {
+    use sentinel_core::report::{DATABASE_WASTE_ABSENT, MESSAGING_WASTE_ABSENT};
+    assert!(DATABASE_WASTE_ABSENT.contains("[green.database_static] or [green.alumet.database]"));
+    assert!(MESSAGING_WASTE_ABSENT.contains("[green.broker_static] or [green.alumet.broker]"));
+    print_green_summary(&sentinel_core::report::GreenSummary::disabled(0), 1, false);
 }
 
 #[test]
@@ -1349,4 +1450,33 @@ fn report_with_co2_data() {
         disclosure_waste: None,
     };
     format_colored_report(&report, "report", false);
+}
+
+#[test]
+fn grid_feed_regions_are_labelled_and_announced() {
+    let row = |provider: &str| -> sentinel_core::score::carbon::RegionBreakdown {
+        serde_json::from_str(&format!(
+            r#"{{"status":"known","region":"eu-west-3","grid_intensity_gco2_kwh":21.0,"pue":1.135,"io_ops":4,"co2_gco2":0.001,"intensity_source":"real_time"{provider}}}"#
+        ))
+        .unwrap()
+    };
+    let rte = row(r#","intensity_provider":"rte_eco2mix""#);
+    let emaps = row("");
+    assert!(format_region_line(&rte).contains("source: real_time, rte_eco2mix"));
+    assert!(!format_region_line(&emaps).contains("rte_eco2mix"));
+
+    let mut gs = GreenSummary::disabled(10);
+    gs.regions = vec![emaps];
+    assert_eq!(grid_scoring_line(&gs), None);
+    gs.regions.push(rte);
+    let mut neso = row(r#","intensity_provider":"neso""#);
+    neso.region = "eu-west-2".to_string();
+    assert!(format_region_line(&neso).contains("source: real_time, neso"));
+    gs.regions.push(neso);
+    assert_eq!(
+        grid_scoring_line(&gs).as_deref(),
+        Some(
+            "  Carbon scoring: grid operator open data (RTE éCO2mix, NESO Carbon Intensity), direct emissions"
+        )
+    );
 }

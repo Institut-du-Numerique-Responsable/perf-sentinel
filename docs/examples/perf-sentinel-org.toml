@@ -63,12 +63,18 @@ conformance = "core-required"
 # consumer interpret operational CO2 even though region-specific
 # grid-intensity data is sourced from the binary or the API.
 cloud_regions = ["eu-west-3"]
-# `electricity_maps` (real-time API), `static_tables` (embedded
-# annual averages), or `mixed`.
+# `electricity_maps` (real-time API), `rte_eco2mix`, `neso`, `fingrid`,
+# `energinet`, `ree_esios`, `open_electricity`, `mavir` or `em6` (free
+# real-time feeds of the French, British, Finnish, Danish, Spanish,
+# Australian, Hungarian and New Zealand grid operators, direct emissions),
+# `static_tables` (embedded annual averages), or `mixed`.
 carbon_intensity_source = "electricity_maps"
 # Version of the embedded SPECpower table that produced the cloud CPU%
-# energy proxy. perf-sentinel ships the only authoritative copy.
-specpower_table_version = "2026-04-24"
+# energy proxy. perf-sentinel ships the only authoritative copy, so leave
+# it out and `disclose` fills in the running binary's table date. When
+# declared, it must equal that date or the official validator and the
+# daemon startup gate reject it.
+# specpower_table_version = "2026-04-24"
 # True when the operator's deployment is wired to Scaphandre RAPL.
 scaphandre_used = false
 
@@ -78,7 +84,9 @@ scaphandre_used = false
 total_applications_declared = 4
 # Optional operator estimate of total requests across all in-scope
 # applications during the period. Drives the `coverage_percentage`
-# field of the disclosure.
+# field of the disclosure. Known only once the period closes, it can also
+# be passed per run with `disclose --total-requests-in-period`, which
+# takes precedence over this field.
 # total_requests_in_period = 4200000
 # Environments observed by the daemon and rolled into the disclosure.
 environments_measured = ["prod"]

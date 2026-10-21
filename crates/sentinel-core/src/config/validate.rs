@@ -2,7 +2,7 @@
 //! and control-character rejection for every TOML section.
 
 mod daemon;
-mod green;
+pub(super) mod green;
 
 use super::Config;
 

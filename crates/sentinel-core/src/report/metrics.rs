@@ -130,8 +130,10 @@ pub struct MetricsState {
     /// pre-registered at zero whether or not the backend exists, so
     /// "not configured" and "configured and perfectly healthy" are
     /// indistinguishable without this: `last_scrape_age_seconds` is set
-    /// to 0 on every successful scrape. The label set is the five
-    /// compile-time backend names, so cardinality stays bounded.
+    /// to 0 on every successful scrape. The label set is the seven
+    /// compile-time backend names (`alumet`, `scaphandre`, `kepler`,
+    /// `redfish`, `cloud_energy`, `database_cpu`, `broker_cpu`), so
+    /// cardinality stays bounded.
     pub energy_backend_configured: GaugeVec,
     /// Unix timestamp of the last span received for a service, a traffic
     /// signal rather than a liveness one. Cardinality is bounded by the
@@ -142,14 +144,33 @@ pub struct MetricsState {
     /// Use Prometheus `rate()` on `total_io_ops` and `avoidable_io_ops` for windowed ratios.
     pub io_waste_ratio: Gauge,
     /// Energy attributed to the workload in the most recent scoring
-    /// window, kWh. Scalar (no per-service/region labels, which stay
+    /// window, kWh, the report's `energy_kwh`: the services' energy plus
+    /// the in-total database and broker host energy when a host source
+    /// is configured. Scalar (no per-service/region labels, which stay
     /// off `/metrics` for cardinality), the Grafana counterpart of the
     /// monitor's Energy/Trends total.
     pub energy_kwh: Gauge,
-    /// Operational carbon of the most recent scoring window, grams
-    /// `CO2e`, summed across regions. Scalar, same rationale as
-    /// `energy_kwh`.
+    /// Scored carbon of the most recent scoring window, grams `CO2e`:
+    /// operational carbon summed across regions, plus the in-total
+    /// database and broker host carbon when a host source is configured
+    /// ([`crate::report::GreenSummary::scored_carbon_gco2`]). Embodied and
+    /// transport excluded. Scalar, same rationale as `energy_kwh`.
     pub carbon_gco2: Gauge,
+    /// Running sum of `energy_kwh` over every scoring window since
+    /// start. `increase()` over it gives the energy of any time range,
+    /// which summing the per-window gauge cannot.
+    pub energy_kwh_total: Counter,
+    /// Running sum of `carbon_gco2`, same use as `energy_kwh_total`.
+    pub carbon_gco2_total: Counter,
+    /// The database host part of `energy_kwh_total`: the in-total
+    /// database host kWh of every scoring window, a subset of it.
+    pub scored_database_energy_kwh_total: Counter,
+    /// The database host part of `carbon_gco2_total`, grams `CO2e`.
+    pub scored_database_carbon_gco2_total: Counter,
+    /// The broker twin of `scored_database_energy_kwh_total`.
+    pub scored_broker_energy_kwh_total: Counter,
+    /// The broker twin of `scored_database_carbon_gco2_total`.
+    pub scored_broker_carbon_gco2_total: Counter,
     /// Configured cap of the correlation window (`[daemon]
     /// max_active_traces`), set once at startup. Pairs with
     /// `active_traces` for a headroom panel.
@@ -284,6 +305,14 @@ pub struct MetricsState {
     /// Same pattern as [`Self::scaphandre_last_scrape_age_seconds`].
     /// Stays at 0 when cloud energy is not configured.
     pub cloud_energy_last_scrape_age_seconds: Gauge,
+    /// Age in seconds since the last successful `[green.database_static]`
+    /// `cpu_query` scrape. Same pattern as
+    /// [`Self::cloud_energy_last_scrape_age_seconds`], stays at 0 when no
+    /// database CPU query is configured.
+    pub database_cpu_last_scrape_age_seconds: Gauge,
+    /// The `[green.broker_static]` twin of
+    /// [`Self::database_cpu_last_scrape_age_seconds`].
+    pub broker_cpu_last_scrape_age_seconds: Gauge,
     /// Duration histogram for spans exceeding the slow threshold, labeled
     /// by event type (`sql`, `http_out` or `messaging`), service and
     /// grouping. Enables accurate global
@@ -510,15 +539,47 @@ impl MetricsState {
 
         let energy_kwh = Gauge::new(
             "perf_sentinel_energy_kwh",
-            "Workload energy of the most recent scoring window, kWh",
+            "Workload energy of the most recent scoring window, kWh (includes database and broker host energy when a host source is configured)",
         )
         .expect("metric creation should not fail");
 
         let carbon_gco2 = Gauge::new(
             "perf_sentinel_carbon_gco2",
-            "Operational carbon of the most recent scoring window, grams CO2e (excludes embodied and network transport)",
+            "Operational carbon of the most recent scoring window, grams CO2e (includes database and broker host carbon when a host source is configured, excludes embodied and network transport)",
         )
         .expect("metric creation should not fail");
+
+        let energy_kwh_total = Counter::new(
+            "perf_sentinel_scored_energy_kwh_total",
+            "Workload energy summed over every scoring window since start, kWh (includes database and broker host energy when a host source is configured)",
+        )
+        .expect("metric creation should not fail");
+
+        let carbon_gco2_total = Counter::new(
+            "perf_sentinel_scored_carbon_gco2_total",
+            "Operational carbon summed over every scoring window since start, grams CO2e (includes database and broker host carbon when a host source is configured, excludes embodied and network transport)",
+        )
+        .expect("metric creation should not fail");
+
+        let host_counter = |name: &str, help: &str| {
+            Counter::new(name, help).expect("metric creation should not fail")
+        };
+        let scored_database_energy_kwh_total = host_counter(
+            "perf_sentinel_scored_database_energy_kwh_total",
+            "Database host energy inside perf_sentinel_scored_energy_kwh_total, kWh",
+        );
+        let scored_database_carbon_gco2_total = host_counter(
+            "perf_sentinel_scored_database_carbon_gco2_total",
+            "Database host carbon inside perf_sentinel_scored_carbon_gco2_total, grams CO2e",
+        );
+        let scored_broker_energy_kwh_total = host_counter(
+            "perf_sentinel_scored_broker_energy_kwh_total",
+            "Broker host energy inside perf_sentinel_scored_energy_kwh_total, kWh",
+        );
+        let scored_broker_carbon_gco2_total = host_counter(
+            "perf_sentinel_scored_broker_carbon_gco2_total",
+            "Broker host carbon inside perf_sentinel_scored_carbon_gco2_total, grams CO2e",
+        );
 
         let max_active_traces = Gauge::new(
             "perf_sentinel_max_active_traces",
@@ -740,6 +801,22 @@ impl MetricsState {
             .register(Box::new(carbon_gco2.clone()))
             .expect("registration should not fail");
         registry
+            .register(Box::new(energy_kwh_total.clone()))
+            .expect("registration should not fail");
+        registry
+            .register(Box::new(carbon_gco2_total.clone()))
+            .expect("registration should not fail");
+        for counter in [
+            &scored_database_energy_kwh_total,
+            &scored_database_carbon_gco2_total,
+            &scored_broker_energy_kwh_total,
+            &scored_broker_carbon_gco2_total,
+        ] {
+            registry
+                .register(Box::new(counter.clone()))
+                .expect("registration should not fail");
+        }
+        registry
             .register(Box::new(max_active_traces.clone()))
             .expect("registration should not fail");
         registry
@@ -872,6 +949,24 @@ impl MetricsState {
         .expect("metric creation should not fail");
         registry
             .register(Box::new(cloud_energy_last_scrape_age_seconds.clone()))
+            .expect("registration should not fail");
+
+        let database_cpu_last_scrape_age_seconds = Gauge::new(
+            "perf_sentinel_database_cpu_last_scrape_age_seconds",
+            "Age in seconds since the last successful database host CPU scrape",
+        )
+        .expect("metric creation should not fail");
+        registry
+            .register(Box::new(database_cpu_last_scrape_age_seconds.clone()))
+            .expect("registration should not fail");
+
+        let broker_cpu_last_scrape_age_seconds = Gauge::new(
+            "perf_sentinel_broker_cpu_last_scrape_age_seconds",
+            "Age in seconds since the last successful broker host CPU scrape",
+        )
+        .expect("metric creation should not fail");
+        registry
+            .register(Box::new(broker_cpu_last_scrape_age_seconds.clone()))
             .expect("registration should not fail");
 
         let kepler_last_scrape_age_seconds = Gauge::new(
@@ -1198,6 +1293,12 @@ impl MetricsState {
             io_waste_ratio,
             energy_kwh,
             carbon_gco2,
+            energy_kwh_total,
+            carbon_gco2_total,
+            scored_database_energy_kwh_total,
+            scored_database_carbon_gco2_total,
+            scored_broker_energy_kwh_total,
+            scored_broker_carbon_gco2_total,
             max_active_traces,
             analysis_queue_capacity,
             max_retained_findings,
@@ -1227,6 +1328,8 @@ impl MetricsState {
             service_io_ops_grouping_overflow_total,
             scaphandre_last_scrape_age_seconds,
             cloud_energy_last_scrape_age_seconds,
+            database_cpu_last_scrape_age_seconds,
+            broker_cpu_last_scrape_age_seconds,
             slow_duration_seconds,
             slow_duration_service_overflow_total,
             slow_duration_grouping_overflow_total,

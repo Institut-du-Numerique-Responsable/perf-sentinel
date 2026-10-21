@@ -23,6 +23,8 @@ use crate::score;
 use crate::score::alumet::AlumetState;
 use crate::score::cloud_energy::CloudEnergyState;
 use crate::score::electricity_maps::ElectricityMapsState;
+use crate::score::grid_feed::GridFeedState;
+use crate::score::host_static::Subsystem;
 use crate::score::kepler::KeplerState;
 use crate::score::redfish::RedfishState;
 use crate::score::scaphandre::ScaphandreState;
@@ -431,13 +433,8 @@ fn build_http_router(
         // energy gauge is pre-registered at zero and a successful scrape
         // sets the staleness gauge to zero too, which makes the two
         // states identical on the wire without this.
-        let energy_backends_configured = query_api::EnergyBackendsConfigured {
-            alumet: config.green.alumet.is_some(),
-            scaphandre: config.green.scaphandre.is_some(),
-            kepler: config.green.kepler.is_some(),
-            redfish: config.green.redfish.is_some(),
-            cloud_energy: config.green.cloud_energy.is_some(),
-        };
+        let energy_backends_configured =
+            query_api::EnergyBackendsConfigured::from_green(&config.green);
         for (backend, configured) in energy_backends_configured.as_labelled() {
             metrics
                 .energy_backend_configured
@@ -458,8 +455,10 @@ fn build_http_router(
             // only the Electricity Maps dimensions. Ungated when the EM
             // backend is configured: the scraper polls regardless of
             // `green.enabled`, and the API must not report it as absent.
-            scoring_config: (config.green.enabled || config.green.electricity_maps.is_some())
-                .then(|| config.scoring_config()),
+            scoring_config: (config.green.enabled
+                || config.green.electricity_maps.is_some()
+                || !config.green.grid_feeds.is_empty())
+            .then(|| config.scoring_config()),
             green_summary,
             // Opt-in: no section, no ring, and both routes answer 503.
             incident_store,
@@ -856,28 +855,88 @@ pub(super) fn setup_redfish_scraper(
     }
 }
 
+/// The live states the cloud scraper bills from the host CPU queries.
+/// `staleness_ms` is the cloud staleness when a probe runs, 0 otherwise.
+#[derive(Default)]
+pub(super) struct HostCpuStates {
+    pub(super) database: Option<Arc<score::alumet::DbEnergyState>>,
+    pub(super) broker: Option<Arc<score::alumet::DbEnergyState>>,
+    pub(super) staleness_ms: u64,
+}
+
 /// Spawn the cloud energy (`SPECpower`) scraper when `[green.cloud]` is
-/// configured. Same staleness convention as Scaphandre.
+/// configured, with a CPU probe for each host declaration that sets a
+/// `cpu_query`, dedicated or shared. Same staleness convention as
+/// Scaphandre.
 pub(super) fn setup_cloud_scraper(
     config: &Config,
     metrics: &Arc<MetricsState>,
-) -> ScraperSetup<CloudEnergyState> {
+) -> (ScraperSetup<CloudEnergyState>, HostCpuStates) {
+    use score::cloud_energy::scraper::HostProbe;
     let Some(cloud_cfg) = config.green.cloud_energy.clone() else {
-        return ScraperSetup {
+        let setup = ScraperSetup {
             state: None,
             handle: None,
             staleness_ms: 0,
         };
+        return (setup, HostCpuStates::default());
+    };
+    let probe = |subsystem| {
+        let cfg = config.green.static_hosts(subsystem)?;
+        HostProbe::dedicated(subsystem, cfg)
+            .or_else(|| HostProbe::shared(subsystem, cfg, &cloud_cfg))
+    };
+    let probes: Vec<_> = [probe(Subsystem::Database), probe(Subsystem::Broker)]
+        .into_iter()
+        .flatten()
+        .collect();
+    let state_of = |subsystem| {
+        probes
+            .iter()
+            .find(|p| p.subsystem == subsystem)
+            .map(|p| p.state.clone())
     };
     let staleness_ms = cloud_cfg.scrape_interval.as_millis() as u64 * 3;
+    let host_cpu = HostCpuStates {
+        database: state_of(Subsystem::Database),
+        broker: state_of(Subsystem::Broker),
+        staleness_ms: if probes.is_empty() { 0 } else { staleness_ms },
+    };
     let state = CloudEnergyState::new();
     let handle =
-        score::cloud_energy::spawn_cloud_scraper(cloud_cfg, state.clone(), metrics.clone());
-    ScraperSetup {
+        score::cloud_energy::spawn_cloud_scraper(cloud_cfg, state.clone(), probes, metrics.clone());
+    let setup = ScraperSetup {
         state: Some(state),
         handle: Some(handle),
         staleness_ms,
-    }
+    };
+    (setup, host_cpu)
+}
+
+/// One running grid operator feed.
+pub(super) struct GridFeedSetup {
+    pub(super) state: Arc<GridFeedState>,
+    pub(super) handle: tokio::task::JoinHandle<()>,
+    pub(super) staleness_ms: u64,
+}
+
+/// Spawn one scraper per configured grid operator feed
+/// (`[green.rte_eco2mix]`, `[green.em6]`...). Same staleness convention as
+/// Electricity Maps.
+pub(super) fn setup_grid_feed_scrapers(config: &Config) -> Vec<GridFeedSetup> {
+    config
+        .green
+        .grid_feeds
+        .iter()
+        .map(|feed| {
+            let state = GridFeedState::new(feed.kind.provider(), feed.regions.clone());
+            GridFeedSetup {
+                handle: score::grid_feed::spawn_grid_feed_scraper(feed.clone(), state.clone()),
+                state,
+                staleness_ms: feed.poll_interval.as_millis() as u64 * 3,
+            }
+        })
+        .collect()
 }
 
 /// Spawn the Electricity Maps real-time intensity scraper when
@@ -897,6 +956,55 @@ pub(super) fn setup_emaps_scraper(config: &Config) -> ScraperSetup<ElectricityMa
         state: Some(state),
         handle: Some(handle),
         staleness_ms,
+    }
+}
+
+#[cfg(test)]
+mod cloud_scraper_tests {
+    use super::*;
+
+    const CLOUD: &str = r#"
+[green]
+default_region = "eu-west-3"
+
+[green.cloud]
+prometheus_endpoint = "http://127.0.0.1:9"
+scrape_interval_secs = 10
+
+[green.cloud.services]
+orders = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-a"})' }
+"#;
+
+    fn setup(hosts: &str) -> (ScraperSetup<CloudEnergyState>, HostCpuStates) {
+        let config = crate::config::load_from_str(&format!("{CLOUD}\n{hosts}")).expect("loads");
+        setup_cloud_scraper(&config, &Arc::new(MetricsState::new()))
+    }
+
+    #[tokio::test]
+    async fn host_cpu_queries_hand_their_states_to_the_event_loop() {
+        let (cloud, host_cpu) = setup(
+            "[green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+             instance_type = \"m5.large\"\ncpu_query = 'avg(db_cpu)'\n\n\
+             [green.broker_static]\nplacement = \"shared\"\ninstance_type = \"m5.large\"\n\
+             cpu_query = 'avg(broker_cpu)'\n",
+        );
+        assert!(host_cpu.database.is_some());
+        assert!(host_cpu.broker.is_some());
+        assert_eq!(host_cpu.staleness_ms, 30_000);
+        cloud.handle.expect("scraper spawned").abort();
+    }
+
+    #[tokio::test]
+    async fn no_cpu_query_runs_no_probe() {
+        let (cloud, host_cpu) = setup(
+            "[green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+             instance_type = \"m5.large\"\n",
+        );
+        assert!(host_cpu.database.is_none());
+        assert!(host_cpu.broker.is_none());
+        assert_eq!(host_cpu.staleness_ms, 0);
+        assert_eq!(cloud.staleness_ms, 30_000);
+        cloud.handle.expect("scraper spawned").abort();
     }
 }
 

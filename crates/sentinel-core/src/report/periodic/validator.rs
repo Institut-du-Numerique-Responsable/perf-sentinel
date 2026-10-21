@@ -4,12 +4,13 @@
 //! the rationale for collecting every error in one pass.
 
 use crate::detect::DISCLOSURE_N_PLUS_ONE_THRESHOLD;
+use crate::score::carbon::METHODOLOGY_SCI_NUMERATOR;
 
 use super::errors::ValidationError;
 use super::hasher::compute_content_hash;
 use super::schema::{
-    Aggregate, Application, ApplicationG1, ApplicationG2, Confidentiality, Conformance,
-    Methodology, Organisation, Period, PeriodicReport, ReportIntent, ScopeManifest,
+    Aggregate, Application, ApplicationG1, ApplicationG2, CarbonBreakdown, Confidentiality,
+    Conformance, Methodology, Organisation, Period, PeriodicReport, ReportIntent, ScopeManifest,
     TemporalCoverage, WasteTier,
 };
 
@@ -32,7 +33,19 @@ const KNOWN_PATTERNS: &[&str] = &[
 ];
 
 /// Values accepted for `methodology.calibration_inputs.carbon_intensity_source`.
-const CARBON_SOURCE_VALUES: &[&str] = &["electricity_maps", "static_tables", "mixed"];
+pub(crate) const CARBON_SOURCE_VALUES: &[&str] = &[
+    "electricity_maps",
+    "rte_eco2mix",
+    "neso",
+    "fingrid",
+    "energinet",
+    "ree_esios",
+    "open_electricity",
+    "mavir",
+    "em6",
+    "static_tables",
+    "mixed",
+];
 
 /// Minimum runtime-calibration ratio for an `official` intent report.
 /// Reports below this threshold are likely produced during a daemon
@@ -71,6 +84,7 @@ pub fn validate_official(report: &PeriodicReport) -> Result<(), Vec<ValidationEr
     validate_scope_manifest(&report.scope_manifest, &mut errors);
     validate_methodology(&report.methodology, &mut errors);
     validate_aggregate(&report.aggregate, &mut errors);
+    validate_host_perimeter(report, &mut errors);
     validate_temporal_coverage(
         &report.aggregate.temporal_coverage,
         &report.period,
@@ -412,6 +426,8 @@ struct WasteBlockFields {
     energy_kwh: &'static str,
     measured_energy_kwh: &'static str,
     declared_energy_kwh: &'static str,
+    modeled_energy_kwh: &'static str,
+    in_totals_energy_kwh: &'static str,
     operational_waste_kwh: &'static str,
     operational_waste_kgco2eq: &'static str,
     canonical_waste_kwh: &'static str,
@@ -419,6 +435,8 @@ struct WasteBlockFields {
     models: &'static str,
     windows_with_figure: &'static str,
     measured_windows: &'static str,
+    in_totals_windows: &'static str,
+    placements: &'static str,
     windows_with_carbon: &'static str,
 }
 
@@ -426,6 +444,8 @@ const DB_WASTE_FIELDS: WasteBlockFields = WasteBlockFields {
     energy_kwh: "database_waste.energy_kwh",
     measured_energy_kwh: "database_waste.measured_energy_kwh",
     declared_energy_kwh: "database_waste.declared_energy_kwh",
+    modeled_energy_kwh: "database_waste.modeled_energy_kwh",
+    in_totals_energy_kwh: "database_waste.in_totals_energy_kwh",
     operational_waste_kwh: "database_waste.operational_waste_kwh",
     operational_waste_kgco2eq: "database_waste.operational_waste_kgco2eq",
     canonical_waste_kwh: "database_waste.canonical_waste_kwh",
@@ -433,6 +453,8 @@ const DB_WASTE_FIELDS: WasteBlockFields = WasteBlockFields {
     models: "database_waste.models",
     windows_with_figure: "database_waste.windows_with_figure",
     measured_windows: "database_waste.measured_windows",
+    in_totals_windows: "database_waste.in_totals_windows",
+    placements: "database_waste.placements",
     windows_with_carbon: "database_waste.windows_with_carbon",
 };
 
@@ -440,6 +462,8 @@ const MSG_WASTE_FIELDS: WasteBlockFields = WasteBlockFields {
     energy_kwh: "messaging_waste.energy_kwh",
     measured_energy_kwh: "messaging_waste.measured_energy_kwh",
     declared_energy_kwh: "messaging_waste.declared_energy_kwh",
+    modeled_energy_kwh: "messaging_waste.modeled_energy_kwh",
+    in_totals_energy_kwh: "messaging_waste.in_totals_energy_kwh",
     operational_waste_kwh: "messaging_waste.operational_waste_kwh",
     operational_waste_kgco2eq: "messaging_waste.operational_waste_kgco2eq",
     canonical_waste_kwh: "messaging_waste.canonical_waste_kwh",
@@ -447,6 +471,8 @@ const MSG_WASTE_FIELDS: WasteBlockFields = WasteBlockFields {
     models: "messaging_waste.models",
     windows_with_figure: "messaging_waste.windows_with_figure",
     measured_windows: "messaging_waste.measured_windows",
+    in_totals_windows: "messaging_waste.in_totals_windows",
+    placements: "messaging_waste.placements",
     windows_with_carbon: "messaging_waste.windows_with_carbon",
 };
 
@@ -463,18 +489,31 @@ fn validate_messaging_waste(agg: &Aggregate, errors: &mut Vec<ValidationError>) 
 }
 
 /// One waste block, either twin: finite non-negative figures, bounded
-/// charset-clean model tags, and the provenance-split invariants. The
-/// zero split is accepted as-is because it marks a report predating the
-/// fields.
+/// charset-clean model tags and placements, the provenance-split
+/// invariants and the in-total share. The zero split is accepted as-is
+/// because it marks a report predating the fields.
 fn validate_waste_block(
     block: &super::schema::DatabaseWasteAggregate,
     f: &WasteBlockFields,
     errors: &mut Vec<ValidationError>,
 ) {
-    let figures: [(&'static str, f64); 7] = [
+    validate_waste_figures(block, f, errors);
+    validate_waste_labels(block, f, errors);
+    validate_waste_windows(block, f, errors);
+    validate_waste_in_totals(block, f, errors);
+}
+
+fn validate_waste_figures(
+    block: &super::schema::DatabaseWasteAggregate,
+    f: &WasteBlockFields,
+    errors: &mut Vec<ValidationError>,
+) {
+    let figures: [(&'static str, f64); 9] = [
         (f.energy_kwh, block.energy_kwh),
         (f.measured_energy_kwh, block.measured_energy_kwh),
+        (f.modeled_energy_kwh, block.modeled_energy_kwh),
         (f.declared_energy_kwh, block.declared_energy_kwh),
+        (f.in_totals_energy_kwh, block.in_totals_energy_kwh),
         (f.operational_waste_kwh, block.operational_waste_kwh),
         (
             f.operational_waste_kgco2eq,
@@ -499,6 +538,13 @@ fn validate_waste_block(
             });
         }
     }
+}
+
+fn validate_waste_labels(
+    block: &super::schema::DatabaseWasteAggregate,
+    f: &WasteBlockFields,
+    errors: &mut Vec<ValidationError>,
+) {
     for model in &block.models {
         if !super::schema::is_valid_model_tag(model) {
             errors.push(ValidationError::Aggregate {
@@ -511,21 +557,35 @@ fn validate_waste_block(
             });
         }
     }
+    if block
+        .placements
+        .iter()
+        .any(|p| !super::schema::is_known_placement(p))
+    {
+        errors.push(ValidationError::Aggregate {
+            field: f.placements,
+            reason: "placements must be 'dedicated' or 'shared'".to_string(),
+        });
+    }
+}
+
+fn validate_waste_windows(
+    block: &super::schema::DatabaseWasteAggregate,
+    f: &WasteBlockFields,
+    errors: &mut Vec<ValidationError>,
+) {
     if block.windows_with_figure == 0 {
         errors.push(ValidationError::Aggregate {
             field: f.windows_with_figure,
             reason: "block present with zero windows".to_string(),
         });
     }
-    let split = block
-        .measured_windows
-        .saturating_add(block.declared_windows)
-        .saturating_add(block.estimated_windows);
+    let split = host_windows(block).saturating_add(block.estimated_windows);
     if split > 0 && split != block.windows_with_figure {
         errors.push(ValidationError::Aggregate {
             field: f.measured_windows,
             reason: format!(
-                "measured + declared + estimated windows ({split}) != \
+                "measured + modeled + declared + estimated windows ({split}) != \
                  windows_with_figure ({})",
                 block.windows_with_figure
             ),
@@ -537,6 +597,189 @@ fn validate_waste_block(
             reason: format!(
                 "exceeds windows_with_figure ({} > {})",
                 block.windows_with_carbon, block.windows_with_figure
+            ),
+        });
+    }
+}
+
+/// Windows whose figure a host source billed: measured, modeled or
+/// declared.
+fn host_windows(block: &super::schema::DatabaseWasteAggregate) -> u64 {
+    block
+        .measured_windows
+        .saturating_add(block.modeled_windows)
+        .saturating_add(block.declared_windows)
+}
+
+/// The in-total share is part of the block: no more energy than the block
+/// covers, no more windows than carried a host figure.
+fn validate_waste_in_totals(
+    block: &super::schema::DatabaseWasteAggregate,
+    f: &WasteBlockFields,
+    errors: &mut Vec<ValidationError>,
+) {
+    // Relative slack for the summation order, absolute for near-zero sums.
+    if block.in_totals_energy_kwh > block.energy_kwh * (1.0 + 1e-9) + 1e-12 {
+        errors.push(ValidationError::Aggregate {
+            field: f.in_totals_energy_kwh,
+            reason: format!(
+                "exceeds energy_kwh ({} > {})",
+                block.in_totals_energy_kwh, block.energy_kwh
+            ),
+        });
+    }
+    // An in-total window may bill zero, but in-total energy needs a window.
+    if block.in_totals_energy_kwh > 0.0 && block.in_totals_windows == 0 {
+        errors.push(ValidationError::Aggregate {
+            field: f.in_totals_windows,
+            reason: format!(
+                "is 0 while in_totals_energy_kwh is {}",
+                block.in_totals_energy_kwh
+            ),
+        });
+    }
+    let bound = block.windows_with_figure.min(host_windows(block));
+    if block.in_totals_windows > bound {
+        errors.push(ValidationError::Aggregate {
+            field: f.in_totals_windows,
+            reason: format!(
+                "exceeds windows_with_figure or measured + modeled + declared windows \
+                 ({} > {bound})",
+                block.in_totals_windows
+            ),
+        });
+    }
+}
+
+/// The v1.8 host perimeter: the database and broker carbon terms are
+/// sane, each one has an in-total block behind it, the five breakdown
+/// terms add up to the published total, and the in-total host energy
+/// leaves room for the applications inside `total_energy_kwh`. Only a
+/// hand-edited or forged report trips these.
+fn validate_host_perimeter(report: &PeriodicReport, errors: &mut Vec<ValidationError>) {
+    let agg = &report.aggregate;
+    if let Some(breakdown) = &agg.carbon_breakdown {
+        let legacy = report
+            .methodology
+            .calibration_inputs
+            .carbon_methodologies
+            .contains(METHODOLOGY_SCI_NUMERATOR);
+        validate_host_carbon_terms(breakdown, agg.total_carbon_kgco2eq, legacy, errors);
+        validate_host_carbon_blocks(agg, breakdown, errors);
+    }
+    validate_host_energy_room(agg, &report.applications, errors);
+}
+
+/// A host carbon term is the carbon of in-total host windows: no such
+/// window in the matching waste block, no carbon in the term.
+fn validate_host_carbon_blocks(
+    agg: &Aggregate,
+    b: &CarbonBreakdown,
+    errors: &mut Vec<ValidationError>,
+) {
+    let terms = [
+        (
+            "carbon_breakdown.database_kgco2eq",
+            b.database_kgco2eq,
+            &agg.database_waste,
+            "database_waste",
+        ),
+        (
+            "carbon_breakdown.messaging_kgco2eq",
+            b.messaging_kgco2eq,
+            &agg.messaging_waste,
+            "messaging_waste",
+        ),
+    ];
+    for (field, value, block, name) in terms {
+        let in_totals = block.as_ref().is_some_and(|b| b.in_totals_windows > 0);
+        if value.is_some_and(|v| v > 0.0) && !in_totals {
+            errors.push(ValidationError::Aggregate {
+                field,
+                reason: format!("is non-zero while {name} has no in-total window"),
+            });
+        }
+    }
+}
+
+fn validate_host_carbon_terms(
+    b: &CarbonBreakdown,
+    total: f64,
+    legacy: bool,
+    errors: &mut Vec<ValidationError>,
+) {
+    let hosts = [
+        ("carbon_breakdown.database_kgco2eq", b.database_kgco2eq),
+        ("carbon_breakdown.messaging_kgco2eq", b.messaging_kgco2eq),
+    ];
+    let mut sane = true;
+    for (field, value) in hosts {
+        let Some(value) = value else { continue };
+        if !value.is_finite() || value < 0.0 {
+            sane = false;
+            errors.push(ValidationError::Aggregate {
+                field,
+                reason: format!("must be a finite number >= 0, got {value}"),
+            });
+        }
+    }
+    // A legacy window may carry transport outside its total, so the
+    // terms of a period holding one need not add up.
+    let present = hosts.iter().any(|(_, v)| v.is_some());
+    if !present || !sane || legacy || !total.is_finite() {
+        return;
+    }
+    let sum: f64 = [
+        b.operational_kgco2eq,
+        b.embodied_kgco2eq,
+        b.transport_kgco2eq,
+        b.database_kgco2eq,
+        b.messaging_kgco2eq,
+    ]
+    .into_iter()
+    .map(|v| v.unwrap_or(0.0))
+    .sum();
+    if (sum - total).abs() > 1e-6 * total.abs().max(sum.abs()) + 1e-12 {
+        errors.push(ValidationError::Aggregate {
+            field: "carbon_breakdown",
+            reason: format!(
+                "operational + embodied + transport + database + messaging ({sum}) != \
+                 total_carbon_kgco2eq ({total})"
+            ),
+        });
+    }
+}
+
+/// Host energy inside the totals is never an application's: the
+/// applications plus both in-total shares fit in `total_energy_kwh`.
+fn validate_host_energy_room(
+    agg: &Aggregate,
+    apps: &[Application],
+    errors: &mut Vec<ValidationError>,
+) {
+    let in_totals = [&agg.database_waste, &agg.messaging_waste]
+        .into_iter()
+        .flatten()
+        .map(|block| block.in_totals_energy_kwh)
+        .sum::<f64>();
+    if in_totals <= 0.0 {
+        return;
+    }
+    let applications: f64 = apps
+        .iter()
+        .map(|app| match app {
+            Application::G1(g1) => g1.energy_kwh,
+            Application::G2(g2) => g2.energy_kwh,
+        })
+        .sum();
+    let used = applications + in_totals;
+    if used > agg.total_energy_kwh * (1.0 + 1e-6) + 1e-12 {
+        errors.push(ValidationError::Aggregate {
+            field: "total_energy_kwh",
+            reason: format!(
+                "applications energy plus in-total database and broker host energy \
+                 ({used}) exceeds total_energy_kwh ({})",
+                agg.total_energy_kwh
             ),
         });
     }
@@ -1250,6 +1493,7 @@ mod tests {
             operational_waste_kgco2eq: Some(0.05),
             canonical_waste_kwh: 0.8,
             canonical_waste_kgco2eq: Some(0.08),
+            ..Default::default()
         }
     }
 
@@ -1391,5 +1635,232 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    /// One measured, one modeled and one declared window, all in the
+    /// totals, the shape a period with three host sources produces.
+    fn in_total_db_waste() -> crate::report::periodic::schema::DatabaseWasteAggregate {
+        crate::report::periodic::schema::DatabaseWasteAggregate {
+            measured_energy_kwh: 0.2,
+            modeled_energy_kwh: 0.3,
+            declared_energy_kwh: 0.5,
+            in_totals_energy_kwh: 1.0,
+            models: ["alumet_rapl", "cloud_specpower", "database_specpower"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            placements: ["dedicated", "shared"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            windows_with_figure: 3,
+            measured_windows: 1,
+            modeled_windows: 1,
+            declared_windows: 1,
+            estimated_windows: 0,
+            in_totals_windows: 3,
+            ..valid_db_waste()
+        }
+    }
+
+    fn rejects(db: crate::report::periodic::schema::DatabaseWasteAggregate, at: &str) -> bool {
+        db_errors(db)
+            .iter()
+            .any(|e| matches!(e, ValidationError::Aggregate { field, .. } if *field == at))
+    }
+
+    #[test]
+    fn an_in_total_block_with_four_buckets_passes() {
+        let errors = db_errors(in_total_db_waste());
+        assert!(errors.is_empty(), "got: {errors:?}");
+    }
+
+    #[test]
+    fn in_total_and_modeled_energy_must_be_finite_and_non_negative() {
+        for (at, value) in [
+            ("database_waste.in_totals_energy_kwh", f64::INFINITY),
+            ("database_waste.in_totals_energy_kwh", -0.1),
+            ("database_waste.modeled_energy_kwh", f64::NAN),
+            ("database_waste.modeled_energy_kwh", -0.1),
+        ] {
+            let mut db = in_total_db_waste();
+            if at.ends_with("in_totals_energy_kwh") {
+                db.in_totals_energy_kwh = value;
+            } else {
+                db.modeled_energy_kwh = value;
+            }
+            assert!(rejects(db, at), "{at} = {value}");
+        }
+    }
+
+    #[test]
+    fn in_total_energy_cannot_exceed_the_block_energy() {
+        let mut db = in_total_db_waste();
+        // Summation-order noise stays inside the tolerance.
+        db.in_totals_energy_kwh = db.energy_kwh * (1.0 + 1e-12);
+        assert!(!rejects(db.clone(), "database_waste.in_totals_energy_kwh"));
+        db.in_totals_energy_kwh = db.energy_kwh * 1.01;
+        assert!(rejects(db, "database_waste.in_totals_energy_kwh"));
+    }
+
+    #[test]
+    fn in_total_windows_are_bounded_by_the_host_windows() {
+        let mut db = in_total_db_waste();
+        db.in_totals_windows = 4;
+        assert!(rejects(db, "database_waste.in_totals_windows"));
+        // An estimated window is the application-side share, never in the
+        // totals as a host term.
+        let mut db = in_total_db_waste();
+        db.declared_windows = 0;
+        db.estimated_windows = 1;
+        assert!(rejects(db.clone(), "database_waste.in_totals_windows"));
+        db.in_totals_windows = 2;
+        assert!(!rejects(db, "database_waste.in_totals_windows"));
+    }
+
+    #[test]
+    fn placements_are_dedicated_or_shared() {
+        let mut db = in_total_db_waste();
+        db.placements.insert("colocated".to_string());
+        assert!(rejects(db, "database_waste.placements"));
+    }
+
+    #[test]
+    fn the_four_bucket_split_must_match_the_windows() {
+        let mut db = in_total_db_waste();
+        db.modeled_windows = 2;
+        assert!(rejects(db, "database_waste.measured_windows"));
+    }
+
+    /// An official report whose carbon total is operational 0.03 +
+    /// embodied 0.005 + transport 0.001 + database 0.01 + broker 0.004.
+    fn host_perimeter_report() -> PeriodicReport {
+        let mut r = good_report(ReportIntent::Official, Confidentiality::Public);
+        r.aggregate.total_carbon_kgco2eq = 0.05;
+        r.aggregate.carbon_breakdown = Some(CarbonBreakdown {
+            operational_kgco2eq: Some(0.03),
+            embodied_kgco2eq: Some(0.005),
+            transport_kgco2eq: Some(0.001),
+            database_kgco2eq: Some(0.01),
+            messaging_kgco2eq: Some(0.004),
+            ..Default::default()
+        });
+        r.methodology.calibration_inputs.carbon_methodologies =
+            ["sci_v1_numerator+transport".to_string()].into();
+        // The G2 application holds 0.5 kWh, each host block 1.0 kWh.
+        r.aggregate.database_waste = Some(in_total_db_waste());
+        r.aggregate.messaging_waste = Some(in_total_db_waste());
+        r.aggregate.total_energy_kwh = 2.5;
+        r
+    }
+
+    fn perimeter_errors(report: &PeriodicReport) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        validate_host_perimeter(report, &mut errors);
+        errors
+    }
+
+    fn rejects_at(report: &PeriodicReport, at: &str) -> bool {
+        perimeter_errors(report)
+            .iter()
+            .any(|e| matches!(e, ValidationError::Aggregate { field, .. } if *field == at))
+    }
+
+    #[test]
+    fn a_consistent_host_breakdown_passes() {
+        let report = host_perimeter_report();
+        assert!(perimeter_errors(&report).is_empty());
+        assert!(validate_official(&report).is_ok());
+    }
+
+    #[test]
+    fn a_forged_host_breakdown_is_rejected() {
+        let mut report = host_perimeter_report();
+        if let Some(b) = report.aggregate.carbon_breakdown.as_mut() {
+            b.database_kgco2eq = Some(0.02);
+        }
+        assert!(rejects_at(&report, "carbon_breakdown"));
+        for bad in [f64::NAN, -0.01] {
+            let mut report = host_perimeter_report();
+            if let Some(b) = report.aggregate.carbon_breakdown.as_mut() {
+                b.messaging_kgco2eq = Some(bad);
+            }
+            assert!(rejects_at(&report, "carbon_breakdown.messaging_kgco2eq"));
+            assert!(!rejects_at(&report, "carbon_breakdown"));
+        }
+    }
+
+    #[test]
+    fn the_sum_check_is_skipped_on_a_legacy_period_or_without_host_terms() {
+        let mut report = host_perimeter_report();
+        report.aggregate.total_carbon_kgco2eq = 0.06;
+        assert!(rejects_at(&report, "carbon_breakdown"));
+        report
+            .methodology
+            .calibration_inputs
+            .carbon_methodologies
+            .insert(METHODOLOGY_SCI_NUMERATOR.to_string());
+        assert!(perimeter_errors(&report).is_empty());
+        let mut report = host_perimeter_report();
+        report.aggregate.total_carbon_kgco2eq = 0.06;
+        if let Some(b) = report.aggregate.carbon_breakdown.as_mut() {
+            b.database_kgco2eq = None;
+            b.messaging_kgco2eq = None;
+        }
+        assert!(perimeter_errors(&report).is_empty());
+    }
+
+    #[test]
+    fn a_host_carbon_term_needs_an_in_total_block() {
+        // Carbon moved from operational into the database term keeps the
+        // sum, but no in-total database window stands behind it.
+        let mut report = host_perimeter_report();
+        report.aggregate.database_waste = None;
+        report.aggregate.total_energy_kwh = 1.5;
+        assert!(rejects_at(&report, "carbon_breakdown.database_kgco2eq"));
+        if let Some(db) = report.aggregate.messaging_waste.as_mut() {
+            db.in_totals_windows = 0;
+            db.in_totals_energy_kwh = 0.0;
+        }
+        assert!(rejects_at(&report, "carbon_breakdown.messaging_kgco2eq"));
+        assert!(validate_official(&report).is_err());
+    }
+
+    #[test]
+    fn in_total_energy_needs_an_in_total_window() {
+        let mut db = in_total_db_waste();
+        db.in_totals_windows = 0;
+        assert!(rejects(db.clone(), "database_waste.in_totals_windows"));
+        // An in-total window that billed nothing is legitimate.
+        db.in_totals_windows = 1;
+        db.in_totals_energy_kwh = 0.0;
+        assert!(!rejects(db, "database_waste.in_totals_windows"));
+    }
+
+    #[test]
+    fn in_total_host_energy_leaves_room_for_the_applications() {
+        // The G2 application holds 0.5 kWh, the database block 0.3 kWh.
+        let mut report = host_perimeter_report();
+        report.aggregate.messaging_waste = None;
+        if let Some(b) = report.aggregate.carbon_breakdown.as_mut() {
+            b.messaging_kgco2eq = None;
+            b.operational_kgco2eq = Some(0.034);
+        }
+        report.aggregate.database_waste =
+            Some(crate::report::periodic::schema::DatabaseWasteAggregate {
+                energy_kwh: 0.3,
+                in_totals_energy_kwh: 0.3,
+                ..in_total_db_waste()
+            });
+        report.aggregate.total_energy_kwh = 0.8;
+        assert!(!rejects_at(&report, "total_energy_kwh"));
+        report.aggregate.total_energy_kwh = 0.7;
+        assert!(rejects_at(&report, "total_energy_kwh"));
+        // Without an in-total share the bound is not checked.
+        if let Some(db) = report.aggregate.database_waste.as_mut() {
+            db.in_totals_energy_kwh = 0.0;
+        }
+        report.aggregate.total_energy_kwh = 0.1;
+        assert!(!rejects_at(&report, "total_energy_kwh"));
     }
 }

@@ -27,6 +27,18 @@ pub fn embedded_specpower_vintage() -> &'static str {
     table::SPECPOWER_VINTAGE
 }
 
+/// Bare date of [`embedded_specpower_vintage`], without its annotation
+/// (`"2026-04-24"` for `"2026-04-24 (CCF aligned)"`). This is the form an
+/// org config declares as `specpower_table_version`, and the value
+/// `disclose` fills in when the org config omits it.
+#[must_use]
+pub fn embedded_specpower_date() -> &'static str {
+    table::SPECPOWER_VINTAGE
+        .split_whitespace()
+        .next()
+        .unwrap_or(table::SPECPOWER_VINTAGE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,5 +50,15 @@ mod tests {
         // `table::SPECPOWER_VINTAGE`, which is the canonical source for
         // the release procedure step 2.5 `grep VINTAGE` audit.
         assert_eq!(embedded_specpower_vintage(), table::SPECPOWER_VINTAGE);
+    }
+
+    #[test]
+    fn embedded_date_is_the_bare_iso_date() {
+        let date = embedded_specpower_date();
+        assert!(
+            chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok(),
+            "got {date:?}"
+        );
+        assert!(embedded_specpower_vintage().starts_with(date));
     }
 }

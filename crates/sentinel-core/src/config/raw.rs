@@ -2,7 +2,7 @@
 //! `*Section` structs, the `RawConfig -> Config` conversion, and the
 //! per-section conversion helpers.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::score::alumet::config::DEFAULT_ENERGY_INTERVAL_SECS;
 use crate::score::alumet::{AlumetBrokerConfig, AlumetConfig, AlumetDatabaseConfig};
 use crate::score::cloud_energy::config::{CloudEnergyConfig, ServiceCloudConfig};
+use crate::score::host_static::{HostPlacement, StaticHostsConfig, Subsystem};
 use crate::score::kepler::{KeplerConfig, KeplerMetricKind};
 use crate::score::redfish::{RedfishConfig, RedfishEndpoint};
 use crate::score::scaphandre::{ProcessMatcher, ScaphandreConfig};
@@ -103,6 +104,7 @@ pub(super) struct GreenSection {
     pub(super) alumet: AlumetSection,
     redfish: RedfishSection,
     cloud: CloudSection,
+    pub(super) database_static: StaticHostsSection,
     pub(super) broker_static: BrokerStaticSection,
     per_operation_coefficients: Option<bool>,
     include_network_transport: Option<bool>,
@@ -110,6 +112,14 @@ pub(super) struct GreenSection {
     hourly_profiles_file: Option<String>,
     calibration_file: Option<String>,
     electricity_maps: ElectricityMapsSection,
+    rte_eco2mix: Option<NationalGridFeedSection>,
+    neso: Option<NationalGridFeedSection>,
+    fingrid: Option<FingridSection>,
+    energinet: Option<EnerginetSection>,
+    ree_esios: Option<KeyedGridFeedSection>,
+    open_electricity: Option<OpenElectricitySection>,
+    mavir: Option<NationalGridFeedSection>,
+    em6: Option<NationalGridFeedSection>,
 }
 
 /// Raw deserialization target for `[green.scaphandre]`.
@@ -232,6 +242,68 @@ pub(super) struct CloudServiceRaw {
     cpu_query: Option<String>,
 }
 
+/// Raw deserialization target for `[green.rte_eco2mix]`, `[green.neso]`,
+/// `[green.mavir]` and `[green.em6]`, the national feeds without key: every listed region gets the national
+/// value. The section being present is what enables the source.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct NationalGridFeedSection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) regions: Vec<String>,
+}
+
+/// Raw deserialization target for `[green.fingrid]`.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct FingridSection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) regions: Vec<String>,
+    pub(super) dataset: Option<FingridDatasetRaw>,
+    pub(super) api_key: Option<String>,
+}
+
+/// An unknown `dataset` fails the load with serde's variant list.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum FingridDatasetRaw {
+    Production,
+    Consumption,
+}
+
+/// Raw deserialization target for `[green.energinet]`: Denmark has two
+/// zones, so each region names its own (`DK1` or `DK2`).
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct EnerginetSection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) region_map: BTreeMap<String, String>,
+}
+
+/// Raw deserialization target for `[green.ree_esios]`: a national feed
+/// behind a key.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct KeyedGridFeedSection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) regions: Vec<String>,
+    pub(super) api_key: Option<String>,
+}
+
+/// Raw deserialization target for `[green.open_electricity]`: each region
+/// names its Australian zone, and the key is optional.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct OpenElectricitySection {
+    pub(super) endpoint: Option<String>,
+    pub(super) poll_interval_secs: Option<u64>,
+    pub(super) region_map: BTreeMap<String, String>,
+    pub(super) api_key: Option<String>,
+}
+
 /// Raw deserialization target for `[green.electricity_maps]`.
 ///
 /// Converted to an `ElectricityMapsConfig` during `RawConfig -> Config`
@@ -348,6 +420,8 @@ impl From<RawConfig> for Config {
         let detection_defaults = DetectionConfig::default();
         let green_defaults = GreenConfig::default();
         let daemon_defaults = DaemonConfig::default();
+        // Read before the field moves below take `raw.green` apart.
+        let grid_feeds = convert_grid_feed_sections(&raw.green, |name| std::env::var(name).ok());
         let correlation_defaults = crate::detect::correlate_cross::CorrelationConfig::default();
         let ack_defaults = DaemonAckConfig::default();
 
@@ -499,7 +573,8 @@ impl From<RawConfig> for Config {
                 alumet: convert_alumet_section(&raw.green.alumet),
                 redfish: convert_redfish_section(&raw.green.redfish),
                 cloud_energy: convert_cloud_section(&raw.green.cloud),
-                broker_static: convert_broker_static_section(&raw.green.broker_static),
+                database_static: convert_static_hosts_section(&raw.green.database_static),
+                broker_static: convert_static_hosts_section(&raw.green.broker_static.hosts()),
                 per_operation_coefficients: raw
                     .green
                     .per_operation_coefficients
@@ -546,6 +621,7 @@ impl From<RawConfig> for Config {
                     }
                 }),
                 electricity_maps: convert_electricity_maps_section(&raw.green.electricity_maps),
+                grid_feeds,
                 }
             },
             daemon: DaemonConfig {
@@ -975,38 +1051,76 @@ pub(super) fn convert_kepler_section_with_env(
     })
 }
 
-/// Raw deserialization target for `[green.broker_static]`.
+/// Raw deserialization target for `[green.database_static]`, and the
+/// keys `[green.broker_static]` shares with it.
 ///
 /// `deny_unknown_fields`: a typo would silently disable the figure.
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
+pub(super) struct StaticHostsSection {
+    pub(super) placement: Option<HostPlacement>,
+    pub(super) nodes: Option<u32>,
+    pub(super) instance_type: Option<String>,
+    pub(super) region: Option<String>,
+    pub(super) cpu_query: Option<String>,
+    pub(super) shared_with: Option<Vec<String>>,
+}
+
+impl StaticHostsSection {
+    fn any_key(&self) -> bool {
+        self.nodes.is_some()
+            || self.instance_type.is_some()
+            || self.region.is_some()
+            || self.cpu_query.is_some()
+            || self.shared_with.is_some()
+    }
+}
+
+/// Raw deserialization target for `[green.broker_static]`: the
+/// [`StaticHostsSection`] keys plus a deprecated `provider`.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 pub(super) struct BrokerStaticSection {
+    pub(super) placement: Option<HostPlacement>,
     pub(super) nodes: Option<u32>,
     pub(super) instance_type: Option<String>,
     pub(super) provider: Option<String>,
     pub(super) region: Option<String>,
+    pub(super) cpu_query: Option<String>,
+    pub(super) shared_with: Option<Vec<String>>,
 }
 
-/// Convert `[green.broker_static]` into a typed config. `None` unless
-/// both `nodes` and `instance_type` are set, the two fields with no
-/// defensible default.
-fn convert_broker_static_section(
-    raw: &BrokerStaticSection,
-) -> Option<crate::score::broker_static::StaticBrokerConfig> {
-    let nodes = raw.nodes?;
-    let instance_type = raw.instance_type.as_ref()?.trim().to_string();
-    Some(crate::score::broker_static::StaticBrokerConfig {
-        nodes,
-        instance_type,
-        // An explicitly empty value reads as "unset", the same as an
-        // absent key, rather than failing the provider allow-list.
-        provider: raw
-            .provider
-            .as_deref()
-            .map(|p| p.trim().to_ascii_lowercase())
-            .filter(|p| !p.is_empty())
-            .unwrap_or_else(|| "generic".to_string()),
-        region: raw.region.clone(),
+impl BrokerStaticSection {
+    /// The keys shared with `[green.database_static]`.
+    fn hosts(&self) -> StaticHostsSection {
+        StaticHostsSection {
+            placement: self.placement,
+            nodes: self.nodes,
+            instance_type: self.instance_type.clone(),
+            region: self.region.clone(),
+            cpu_query: self.cpu_query.clone(),
+            shared_with: self.shared_with.clone(),
+        }
+    }
+}
+
+/// Convert a declared-hosts section into a typed config, strings trimmed.
+/// `None` without a `placement`, which [`require_placement`] only allows
+/// for an empty section.
+fn convert_static_hosts_section(raw: &StaticHostsSection) -> Option<StaticHostsConfig> {
+    let trimmed = |value: &Option<String>| value.as_deref().map(|v| v.trim().to_string());
+    Some(StaticHostsConfig {
+        placement: raw.placement?,
+        nodes: raw.nodes,
+        instance_type: trimmed(&raw.instance_type),
+        region: trimmed(&raw.region),
+        cpu_query: trimmed(&raw.cpu_query),
+        shared_with: raw
+            .shared_with
+            .iter()
+            .flatten()
+            .map(|name| name.trim().to_string())
+            .collect(),
     })
 }
 
@@ -1035,6 +1149,25 @@ pub(super) fn validate_region_keys_raw_with_env(
     env_lookup: impl FnOnce() -> Option<String>,
 ) -> Result<(), String> {
     reject_case_colliding_keys("[green.service_regions]", &raw.green.service_regions)?;
+    let zone_maps = [
+        (
+            "[green.energinet] region_map",
+            raw.green.energinet.as_ref().map(|s| &s.region_map),
+        ),
+        (
+            "[green.open_electricity] region_map",
+            raw.green.open_electricity.as_ref().map(|s| &s.region_map),
+        ),
+    ];
+    for (name, map) in zone_maps {
+        let Some(map) = map else { continue };
+        // Zones compare normalized: `dk1` and `DK1` name the same zone.
+        let zones: HashMap<String, String> = map
+            .iter()
+            .map(|(region, zone)| (region.trim().to_string(), zone.trim().to_ascii_uppercase()))
+            .collect();
+        reject_case_colliding_keys(name, &zones)?;
+    }
     let maps = &raw.green.electricity_maps;
     if electricity_maps_token(maps, env_lookup()).is_none() {
         return Ok(());
@@ -1060,26 +1193,63 @@ fn reject_case_colliding_keys(section: &str, map: &HashMap<String, String>) -> R
     Ok(())
 }
 
-/// Reject a half-declared `[green.broker_static]`: `nodes` and
-/// `instance_type` are both required and have no defensible default, so
-/// one without the other must be a loud error, not a silently inert
-/// section.
-pub(super) fn validate_broker_static_raw(raw: &BrokerStaticSection) -> Result<(), String> {
-    match (raw.nodes.is_some(), raw.instance_type.is_some()) {
-        (true, false) => Err(
-            "[green.broker_static] instance_type is required when nodes is set; \
-             without it the section is silently inert and the messaging waste \
-             figure never appears"
-                .to_string(),
-        ),
-        (false, true) => Err(
-            "[green.broker_static] nodes is required when instance_type is set; \
-             without it the section is silently inert and the messaging waste \
-             figure never appears"
-                .to_string(),
-        ),
-        _ => Ok(()),
+/// Rules D1 and B1: once any key of a declared-hosts section is set,
+/// `placement` is required, so a section written without it fails loudly
+/// rather than billing hosts it cannot place.
+fn require_placement(
+    subsystem: Subsystem,
+    placement_set: bool,
+    any_key: bool,
+) -> Result<(), String> {
+    if placement_set || !any_key {
+        return Ok(());
     }
+    Err(format!(
+        "{} placement is required: set placement = 'dedicated' when the {} runs on \
+         hosts of its own, or placement = 'shared' with cpu_query and shared_with when \
+         it runs on an application node",
+        subsystem.section(),
+        subsystem.noun()
+    ))
+}
+
+/// Rule D1 on `[green.database_static]`.
+pub(super) fn validate_database_static_raw(raw: &StaticHostsSection) -> Result<(), String> {
+    require_placement(Subsystem::Database, raw.placement.is_some(), raw.any_key())
+}
+
+/// Rule B1 on `[green.broker_static]`. Also keeps the `provider`
+/// allow-list, and warns that the key no longer prices anything.
+pub(super) fn validate_broker_static_raw(raw: &BrokerStaticSection) -> Result<(), String> {
+    require_placement(
+        Subsystem::Broker,
+        raw.placement.is_some(),
+        raw.hosts().any_key() || raw.provider.is_some(),
+    )?;
+    let Some(provider) = raw
+        .provider
+        .as_deref()
+        .map(|p| p.trim().to_ascii_lowercase())
+        .filter(|p| !p.is_empty())
+    else {
+        return Ok(());
+    };
+    // A typo still fails, as it did while the key priced unknown types.
+    if !matches!(
+        provider.as_str(),
+        "aws" | "gcp" | "azure" | "scaleway" | "generic"
+    ) {
+        return Err(format!(
+            "[green.broker_static] provider must be 'aws', 'gcp', 'azure', \
+             'scaleway' or 'generic', got '{provider}'"
+        ));
+    }
+    tracing::warn!(
+        "[green.broker_static] provider no longer prices anything: an instance_type \
+         the embedded table does not resolve is refused, so no provider default is \
+         ever read. Remove the key"
+    );
+    Ok(())
 }
 
 /// Validate the raw `[green.alumet]` section before the lossy
@@ -1335,6 +1505,175 @@ pub(super) fn convert_electricity_maps_section_with_env(
         emission_factor_type,
         temporal_granularity,
     })
+}
+
+/// Convert the grid operator feed sections, in a fixed order: defaults
+/// filled, endpoint trailing slashes trimmed, regions trimmed and lowercased
+/// so they match span regions. A Fingrid or e·sios section without a key is
+/// dropped with a warning, like Electricity Maps without a token: the API
+/// refuses keyless calls. The env lookup is a closure so tests avoid the
+/// process env.
+pub(super) fn convert_grid_feed_sections(
+    green: &GreenSection,
+    env: impl Fn(&str) -> Option<String>,
+) -> Vec<crate::score::grid_feed::GridFeedConfig> {
+    use crate::score::grid_feed::{FingridDataset, GridFeedConfig, GridFeedKind};
+    let national = |kind: GridFeedKind, zone: &str, raw: &NationalGridFeedSection| {
+        (
+            kind,
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            region_map(&raw.regions, zone),
+            None::<String>,
+        )
+    };
+    let mut feeds = Vec::new();
+    if let Some(raw) = &green.rte_eco2mix {
+        feeds.push(national(GridFeedKind::RteEco2mix, "FR", raw));
+    }
+    if let Some(raw) = &green.neso {
+        feeds.push(national(GridFeedKind::Neso, "GB", raw));
+    }
+    if let Some(raw) = &green.fingrid
+        && let Some(key) = required_key(
+            "[green.fingrid]",
+            "PERF_SENTINEL_FINGRID_API_KEY",
+            &env,
+            raw.api_key.as_deref(),
+        )
+    {
+        let dataset = match raw.dataset {
+            Some(FingridDatasetRaw::Consumption) => FingridDataset::Consumption,
+            _ => FingridDataset::Production,
+        };
+        feeds.push((
+            GridFeedKind::Fingrid(dataset),
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            region_map(&raw.regions, "FI"),
+            Some(key),
+        ));
+    }
+    if let Some(raw) = &green.energinet {
+        feeds.push((
+            GridFeedKind::Energinet,
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            zone_map(&raw.region_map),
+            None,
+        ));
+    }
+    if let Some(raw) = &green.ree_esios
+        && let Some(key) = required_key(
+            "[green.ree_esios]",
+            "PERF_SENTINEL_REE_ESIOS_API_KEY",
+            &env,
+            raw.api_key.as_deref(),
+        )
+    {
+        feeds.push((
+            GridFeedKind::ReeEsios,
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            region_map(&raw.regions, "ES"),
+            Some(key),
+        ));
+    }
+    if let Some(raw) = &green.open_electricity {
+        feeds.push((
+            GridFeedKind::OpenElectricity,
+            raw.endpoint.clone(),
+            raw.poll_interval_secs,
+            zone_map(&raw.region_map),
+            feed_key(
+                "[green.open_electricity]",
+                "PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY",
+                &env,
+                raw.api_key.as_deref(),
+            ),
+        ));
+    }
+    if let Some(raw) = &green.mavir {
+        feeds.push(national(GridFeedKind::Mavir, "HU", raw));
+    }
+    if let Some(raw) = &green.em6 {
+        feeds.push(national(GridFeedKind::Em6, "NZ", raw));
+    }
+    feeds
+        .into_iter()
+        .map(
+            |(kind, endpoint, poll_secs, regions, api_key)| GridFeedConfig {
+                kind,
+                endpoint: endpoint
+                    .as_deref()
+                    .unwrap_or(kind.default_endpoint())
+                    .trim_end_matches('/')
+                    .to_string(),
+                poll_interval: Duration::from_secs(poll_secs.unwrap_or(kind.default_poll_secs())),
+                regions,
+                api_key,
+            },
+        )
+        .collect()
+}
+
+/// A feed key from its env var or the file, the env var winning. Trimmed
+/// like the daemon API keys, so a Secret with a final newline works, and
+/// blank counts as unset.
+fn feed_key(
+    section: &str,
+    env_var: &str,
+    env: &impl Fn(&str) -> Option<String>,
+    file: Option<&str>,
+) -> Option<String> {
+    let clean = |key: &str| {
+        let key = key.trim();
+        (!key.is_empty()).then(|| key.to_string())
+    };
+    let from_env = env(env_var).as_deref().and_then(clean);
+    let from_file = file.and_then(clean);
+    if from_env.is_none() && from_file.is_some() {
+        tracing::warn!(
+            "{section} api_key is set in the config file. Prefer the {env_var} \
+             environment variable to avoid committing secrets to version control."
+        );
+    }
+    from_env.or(from_file)
+}
+
+/// [`feed_key`] for an API that refuses keyless calls: without one the feed
+/// is dropped with a warning.
+fn required_key(
+    section: &str,
+    env_var: &str,
+    env: &impl Fn(&str) -> Option<String>,
+    file: Option<&str>,
+) -> Option<String> {
+    let key = feed_key(section, env_var, env, file);
+    if key.is_none() {
+        tracing::warn!("{section} has no API key ({env_var} or api_key), the feed is disabled");
+    }
+    key
+}
+
+/// Regions trimmed and lowercased, zones trimmed and uppercased.
+fn zone_map(map: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    map.iter()
+        .map(|(region, zone)| {
+            (
+                region.trim().to_ascii_lowercase(),
+                zone.trim().to_ascii_uppercase(),
+            )
+        })
+        .collect()
+}
+
+/// Map every listed region (trimmed, lowercased) to the feed's single zone.
+fn region_map(regions: &[String], zone: &str) -> BTreeMap<String, String> {
+    regions
+        .iter()
+        .map(|region| (region.trim().to_ascii_lowercase(), zone.to_string()))
+        .collect()
 }
 
 /// Resolve one of the daemon API keys (`[daemon.ack] api_key`,

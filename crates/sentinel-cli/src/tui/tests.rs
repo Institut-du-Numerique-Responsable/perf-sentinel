@@ -525,6 +525,88 @@ fn analyze_view_energy_line_names_the_energy_source() {
     assert!(!text.contains("electricity_maps_api"), "got: {text}");
 }
 
+/// Analyze view over a summary holding a database figure in the totals
+/// and a broker figure outside them, or no figure at all.
+fn host_split_view_text(with_figures: bool) -> String {
+    let figures = if with_figures {
+        r#","database_waste":{"energy_kwh":0.05,"waste_kwh":0.01,"sql_waste_ratio":0.2,"model":"database_specpower","in_totals":true},"messaging_waste":{"energy_kwh":0.02,"waste_kwh":0.004,"messaging_waste_ratio":0.2,"model":"alumet_rapl"}"#
+    } else {
+        ""
+    };
+    let db_gco2 = if with_figures {
+        r#","database_gco2":0.3"#
+    } else {
+        ""
+    };
+    let green_summary: GreenSummary = serde_json::from_str(&format!(
+        r#"{{"total_io_ops":10,"avoidable_io_ops":0,"io_waste_ratio":0.0,"io_waste_ratio_band":"healthy","top_offenders":[],"energy_kwh":0.25,"per_service_measured_ratio":{{"a":0.0}},"co2":{{"total":{{"low":0.5,"mid":1.0,"high":2.0,"model":"io_proxy_v3","methodology":"sci_v1"}},"avoidable":{{"low":0.0,"mid":0.0,"high":0.0,"model":"io_proxy_v3","methodology":"sci_v1"}},"operational_gco2":0.7,"embodied_gco2":0.0{db_gco2}}}{figures}}}"#
+    ))
+    .unwrap();
+    let quality_gate: QualityGate = serde_json::from_str(r#"{"passed":true,"rules":[]}"#).unwrap();
+    let analysis: Analysis =
+        serde_json::from_str(r#"{"duration_ms":1,"events_processed":1,"traces_analyzed":1}"#)
+            .unwrap();
+    let app = make_test_app().with_summary(AnalyzeSummary {
+        green_summary,
+        quality_gate,
+        analysis,
+    });
+    line_text(&app.build_analyze_lines())
+}
+
+#[test]
+fn analyze_view_splits_energy_and_carbon_for_in_total_hosts() {
+    let text = host_split_view_text(true);
+    assert!(
+        text.contains(
+            "(modeled from I/O counts \u{b7} plus database hosts, database_specpower) = applications 0.200000 kWh + database hosts 0.050000 kWh"
+        ),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("high 2.000000, model io_proxy_v3 + database hosts database_specpower)"),
+        "the total names the in-total host model after the application one: {text}"
+    );
+    assert!(
+        text.contains("Database: 0.300000 g (host energy, model database_specpower)"),
+        "got: {text}"
+    );
+    assert!(
+        !text.contains("Broker:"),
+        "outside broker has no carbon line: {text}"
+    );
+    assert!(
+        text.contains("(model database_specpower) [host energy, in the report totals]"),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("(model alumet_rapl) [outside these totals]"),
+        "got: {text}"
+    );
+}
+
+#[test]
+fn analyze_view_absent_waste_names_both_sources() {
+    let text = host_split_view_text(false);
+    assert!(!text.contains("applications"), "no host, no split: {text}");
+    assert!(!text.contains("Database:"), "got: {text}");
+    assert!(
+        text.contains(&format!(
+            "Database waste: {}",
+            sentinel_core::report::DATABASE_WASTE_ABSENT
+        )),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("[green.database_static] or [green.alumet.database]"),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("Broker waste: not available: no broker publish spans this window, or no broker reading yet, see [green.broker_static] or [green.alumet.broker]"),
+        "got: {text}"
+    );
+}
+
 #[test]
 fn interpret_band_color_matches_cli_palette() {
     // Must mirror render.rs `interpret_color`: Critical red, High yellow,

@@ -16,15 +16,16 @@ use sentinel_core::report::periodic::aggregator::{
 use sentinel_core::report::periodic::org_config::{self, OrgConfig};
 use sentinel_core::report::periodic::schema::{
     AntiPatternDetail, Application, ApplicationG1, ApplicationG2, CalibrationInputs,
-    Confidentiality, CoverageBasis, DisabledPattern, ExcludedApp, ExcludedEnv, Integrity,
-    IntegrityLevel, Methodology, Notes, OrgIdentifiers, Organisation, Period, PeriodType,
-    PeriodicReport, ReportIntent, ReportMetadata, SCHEMA_VERSION, ScopeManifest, SourceChain,
-    StandardCrosswalk, TemporalCoverage, core_patterns_required,
+    Confidentiality, CoverageBasis, DatabaseWasteAggregate, DisabledPattern, ExcludedApp,
+    ExcludedEnv, Integrity, IntegrityLevel, Methodology, Notes, OrgIdentifiers, Organisation,
+    Period, PeriodType, PeriodicReport, ReportIntent, ReportMetadata, SCHEMA_VERSION,
+    ScopeManifest, SourceChain, StandardCrosswalk, TemporalCoverage, core_patterns_required,
 };
 use sentinel_core::report::periodic::{
     LOW_TEMPORAL_COVERAGE_WARN_THRESHOLD, MIN_PERIOD_COVERAGE_FOR_OFFICIAL, binary_hash,
     compute_content_hash, validate_official,
 };
+use sentinel_core::score::host_static::Subsystem;
 use sentinel_core::text_safety::sanitize_for_terminal;
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -95,6 +96,15 @@ pub(crate) mod preview;
 #[cfg(feature = "tui")]
 pub(crate) use preview::{CustomField, DiscloseState, Granularity, Tone};
 
+/// `--total-requests-in-period` takes precedence over the org config's
+/// `scope_manifest.total_requests_in_period`: the total is only known once
+/// the period closes, so passing it per run keeps the org config static.
+pub(crate) fn apply_total_requests_override(org: &mut OrgConfig, cli_total: Option<u64>) {
+    if cli_total.is_some() {
+        org.scope_manifest.total_requests_in_period = cli_total;
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn cmd_disclose(
     intent: ReportIntentCli,
@@ -107,6 +117,7 @@ pub fn cmd_disclose(
     org_config_path: &Path,
     strict_attribution: bool,
     emit_attestation: Option<&Path>,
+    total_requests_in_period: Option<u64>,
 ) -> i32 {
     if matches!(intent, ReportIntentCli::Audited) {
         eprintln!(
@@ -115,13 +126,14 @@ pub fn cmd_disclose(
         return 2;
     }
 
-    let org = match org_config::load_from_path(org_config_path) {
+    let mut org = match org_config::load_from_path(org_config_path) {
         Ok(c) => c,
         Err(err) => {
             eprintln!("Error: {}", sanitize_for_terminal(&err.to_string()));
             return 1;
         }
     };
+    apply_total_requests_override(&mut org, total_requests_in_period);
 
     let days_covered = match (to - from).num_days() {
         n if n < 0 => {
@@ -315,8 +327,9 @@ fn non_fatal_warnings(
     }
     if matches!(intent, ReportIntent::Official) && !total_requests_declared {
         warnings.push(
-            "Warning: total_requests_in_period is not declared in the org config; \
-             coverage_percentage will be absent from this official report."
+            "Warning: total_requests_in_period is not declared in the org config \
+             nor passed with --total-requests-in-period; coverage_percentage will \
+             be absent from this official report."
                 .to_string(),
         );
     }
@@ -412,7 +425,10 @@ pub(crate) fn build_report(
         calibration_inputs: CalibrationInputs {
             cloud_regions: org.methodology.calibration.cloud_regions.clone(),
             carbon_intensity_source: org.methodology.calibration.carbon_intensity_source.clone(),
-            specpower_table_version: org.methodology.calibration.specpower_table_version.clone(),
+            specpower_table_version: org
+                .methodology
+                .calibration
+                .resolved_specpower_table_version(),
             binary_specpower_vintage: Some(
                 sentinel_core::score::cloud_energy::embedded_specpower_vintage().to_string(),
             ),
@@ -490,6 +506,16 @@ pub(crate) fn build_report(
     let disclaimers = augment_disclaimers_for_temporal_coverage(
         disclaimers,
         &aggregate.aggregate.temporal_coverage,
+    );
+    let disclaimers = augment_disclaimers_for_host_perimeter(
+        disclaimers,
+        aggregate.aggregate.database_waste.as_ref(),
+        Subsystem::Database,
+    );
+    let disclaimers = augment_disclaimers_for_host_perimeter(
+        disclaimers,
+        aggregate.aggregate.messaging_waste.as_ref(),
+        Subsystem::Broker,
     );
 
     PeriodicReport {
@@ -626,6 +652,115 @@ fn augment_disclaimers_for_temporal_coverage(
     disclaimers
 }
 
+/// Append where the period totals stop for one host subsystem. Always
+/// appended, so a reader never has to guess whether database or broker
+/// servers are in `total_energy_kwh` and `total_carbon_kgco2eq`.
+fn augment_disclaimers_for_host_perimeter(
+    mut disclaimers: Vec<String>,
+    block: Option<&DatabaseWasteAggregate>,
+    subsystem: Subsystem,
+) -> Vec<String> {
+    disclaimers.push(host_perimeter_disclaimer(block, subsystem));
+    disclaimers
+}
+
+fn host_perimeter_disclaimer(
+    block: Option<&DatabaseWasteAggregate>,
+    subsystem: Subsystem,
+) -> String {
+    let noun = subsystem.noun();
+    let Some(block) = block.filter(|b| b.in_totals_windows > 0) else {
+        return format!(
+            "{} hosts are outside the period totals: total_energy_kwh and \
+             total_carbon_kgco2eq hold no {noun} host energy.{}",
+            sentence_noun(subsystem),
+            host_windows_outside(block, subsystem)
+        );
+    };
+    let windows = if block.in_totals_windows == block.windows_with_figure {
+        format!("all {} windows", block.windows_with_figure)
+    } else {
+        format!(
+            "{} of {} windows",
+            block.in_totals_windows, block.windows_with_figure
+        )
+    };
+    format!(
+        "{} host energy is inside the period totals in {windows} that carried a {noun} \
+         figure{}. Its carbon is in total_carbon_kgco2eq and in no application's \
+         figures.{}",
+        sentence_noun(subsystem),
+        host_labels(block),
+        host_windows_outside(Some(block), subsystem)
+    )
+}
+
+/// The host models and placements of the whole block, windows beside the
+/// totals included (the aggregate keeps no per-window split), as a
+/// parenthetical, empty when none.
+fn host_labels(block: &DatabaseWasteAggregate) -> String {
+    let models: Vec<&str> = block
+        .models
+        .iter()
+        .map(String::as_str)
+        .filter(|m| *m != sentinel_core::report::DB_WASTE_MODEL_ESTIMATED)
+        .collect();
+    let placements: Vec<&str> = block.placements.iter().map(String::as_str).collect();
+    let parts: Vec<String> = [("models", models), ("placements", placements)]
+        .into_iter()
+        .filter(|(_, values)| !values.is_empty())
+        .map(|(label, values)| format!("{label} {}", values.join(", ")))
+        .collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" (over the period, {})", parts.join(", "))
+    }
+}
+
+/// The windows whose figure stayed out of the totals, named by kind.
+fn host_windows_outside(block: Option<&DatabaseWasteAggregate>, subsystem: Subsystem) -> String {
+    let Some(block) = block else {
+        return format!(" No window carried a {} figure.", subsystem.noun());
+    };
+    let spans = match subsystem {
+        Subsystem::Database => "SQL",
+        Subsystem::Broker => "publish",
+    };
+    let estimated = (block.estimated_windows > 0).then(|| {
+        format!(
+            " {} {} carried the estimated figure, the application-side share of \
+             the {spans} spans, already inside the application figures.",
+            block.estimated_windows,
+            window_or_windows(block.estimated_windows)
+        )
+    });
+    let host = block
+        .measured_windows
+        .saturating_add(block.modeled_windows)
+        .saturating_add(block.declared_windows);
+    let beside = host.saturating_sub(block.in_totals_windows);
+    let beside = (beside > 0).then(|| {
+        format!(
+            " {beside} {} carried a host figure kept beside the totals, archived \
+             before host energy entered them or without a carbon conversion.",
+            window_or_windows(beside)
+        )
+    });
+    [estimated, beside].into_iter().flatten().collect()
+}
+
+fn window_or_windows(n: u64) -> &'static str {
+    if n == 1 { "window" } else { "windows" }
+}
+
+const fn sentence_noun(subsystem: Subsystem) -> &'static str {
+    match subsystem {
+        Subsystem::Database => "Database",
+        Subsystem::Broker => "Broker",
+    }
+}
+
 fn build_applications(
     per_service: &BTreeMap<String, ServiceAccumulator>,
     first_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
@@ -668,6 +803,7 @@ fn build_applications(
                     &accum.anti_patterns,
                     first_seen,
                     last_seen,
+                    service_energy_per_op(accum),
                     service_carbon_ratio(accum),
                 ),
             })),
@@ -698,24 +834,32 @@ fn service_carbon_ratio(accum: &ServiceAccumulator) -> f64 {
     }
 }
 
+/// The service's own period-average energy per I/O operation, on the
+/// boundary of its `energy_kwh` (emitting side, no database or broker
+/// host). Zero without operations, never NaN.
+fn service_energy_per_op(accum: &ServiceAccumulator) -> f64 {
+    if accum.total_io_ops > 0 {
+        accum.energy_kwh / accum.total_io_ops as f64
+    } else {
+        0.0
+    }
+}
+
 fn build_anti_pattern_details(
     service: &str,
     anti_patterns: &BTreeMap<String, AntiPatternAccumulator>,
     first_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
     last_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
+    per_op_kwh: f64,
     service_carbon_kwh_ratio: f64,
 ) -> Vec<AntiPatternDetail> {
-    // Proxy coefficient lifted from the carbon module so the per-pattern
-    // waste lines up with the aggregate proxy energy. Region-blind, see
-    // design doc 08.
-    const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1;
     let now = Utc::now();
     let mut out = Vec::with_capacity(anti_patterns.len());
     for (pattern, accum) in anti_patterns {
         let key = (service.to_string(), pattern.clone());
         let first = first_seen.get(&key).copied().unwrap_or(now);
         let last = last_seen.get(&key).copied().unwrap_or(now);
-        let waste_kwh = (accum.avoidable_io_ops as f64) * ENERGY_PER_IO_OP_KWH;
+        let waste_kwh = (accum.avoidable_io_ops as f64) * per_op_kwh;
         let waste_kgco2eq = waste_kwh * service_carbon_kwh_ratio;
         let rgesn_criteria = FindingType::from_kind_str(pattern)
             .map(|t| {
@@ -847,6 +991,47 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!(out[1].contains("Calibration applied"));
         assert!(out[1].contains("calibration_inputs.calibration_applied"));
+    }
+
+    fn single_pattern_waste(energy_kwh: f64, carbon_kgco2eq: f64, total_io_ops: u64) -> (f64, f64) {
+        let mut accum = ServiceAccumulator {
+            total_io_ops,
+            energy_kwh,
+            carbon_kgco2eq,
+            ..ServiceAccumulator::default()
+        };
+        accum.anti_patterns.insert(
+            "n_plus_one_sql".to_string(),
+            AntiPatternAccumulator {
+                occurrences: 3,
+                avoidable_io_ops: 100,
+            },
+        );
+        let per_service = BTreeMap::from([("svc".to_string(), accum)]);
+        let apps = build_applications(
+            &per_service,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Confidentiality::Internal,
+        );
+        let Application::G1(app) = &apps[0] else {
+            panic!("internal confidentiality builds G1 rows");
+        };
+        let ap = &app.anti_patterns[0];
+        (ap.estimated_waste_kwh, ap.estimated_waste_kgco2eq)
+    }
+
+    #[test]
+    fn per_pattern_waste_prices_at_the_service_energy_per_op() {
+        let (kwh, kg) = single_pattern_waste(2.0, 0.5, 1000);
+        assert!((kwh - 0.2).abs() < 1e-12, "got {kwh}");
+        assert!((kg - 0.2 * (0.5 / 2.0)).abs() < 1e-12, "got {kg}");
+    }
+
+    #[test]
+    fn per_pattern_waste_is_zero_without_io_ops() {
+        let (kwh, kg) = single_pattern_waste(2.0, 0.5, 0);
+        assert!(kwh == 0.0 && kg == 0.0, "got {kwh} kWh, {kg} kg");
     }
 
     #[test]
@@ -998,6 +1183,205 @@ mod tests {
         );
     }
 
+    fn example_org() -> OrgConfig {
+        let org_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/examples/perf-sentinel-org.toml");
+        org_config::load_from_path(org_path).unwrap()
+    }
+
+    fn one_day_report(org: &OrgConfig, requests: u64) -> PeriodicReport {
+        let mut aggregate = AggregateInputs::default();
+        aggregate.aggregate.total_requests = requests;
+        let day = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let period = Period {
+            from_date: day,
+            to_date: day,
+            period_type: PeriodType::Custom,
+            days_covered: 1,
+        };
+        build_report(
+            org,
+            period,
+            ReportIntent::Internal,
+            Confidentiality::Internal,
+            "test".to_string(),
+            aggregate,
+        )
+    }
+
+    #[test]
+    fn omitted_specpower_version_is_filled_from_binary() {
+        let mut org = example_org();
+        org.methodology.calibration.specpower_table_version = None;
+        let report = one_day_report(&org, 1);
+        assert_eq!(
+            report
+                .methodology
+                .calibration_inputs
+                .specpower_table_version,
+            sentinel_core::score::cloud_energy::embedded_specpower_date()
+        );
+    }
+
+    #[test]
+    fn cli_total_requests_overrides_org_config() {
+        let mut org = example_org();
+        org.scope_manifest.total_requests_in_period = Some(10);
+        apply_total_requests_override(&mut org, Some(400));
+        let report = one_day_report(&org, 100);
+        assert_eq!(report.scope_manifest.total_requests_in_period, Some(400));
+        assert_eq!(report.scope_manifest.coverage_percentage, Some(25.0));
+    }
+
+    #[test]
+    fn absent_cli_total_keeps_org_config_value() {
+        let mut org = example_org();
+        org.scope_manifest.total_requests_in_period = Some(10);
+        apply_total_requests_override(&mut org, None);
+        assert_eq!(org.scope_manifest.total_requests_in_period, Some(10));
+    }
+
+    /// Two in-total windows (declared dedicated, modeled shared), one
+    /// estimated and one legacy measured window kept beside the totals.
+    fn partial_host_block() -> DatabaseWasteAggregate {
+        DatabaseWasteAggregate {
+            energy_kwh: 2.0,
+            in_totals_energy_kwh: 1.2,
+            models: [
+                "alumet_rapl",
+                "cloud_specpower",
+                "database_specpower",
+                "estimated",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+            placements: ["dedicated", "shared"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            windows_with_figure: 4,
+            measured_windows: 1,
+            modeled_windows: 1,
+            declared_windows: 1,
+            estimated_windows: 1,
+            in_totals_windows: 2,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn host_perimeter_disclaimer_names_every_window_in_the_totals() {
+        for (subsystem, noun) in [
+            (Subsystem::Database, "Database"),
+            (Subsystem::Broker, "Broker"),
+        ] {
+            let block = DatabaseWasteAggregate {
+                models: ["database_specpower".to_string()].into(),
+                placements: ["dedicated".to_string()].into(),
+                windows_with_figure: 3,
+                declared_windows: 3,
+                in_totals_windows: 3,
+                ..Default::default()
+            };
+            let text = host_perimeter_disclaimer(Some(&block), subsystem);
+            assert!(
+                text.starts_with(&format!(
+                    "{noun} host energy is inside the period totals in all 3 windows"
+                )),
+                "{text}"
+            );
+            assert!(
+                text.contains("(over the period, models database_specpower, placements dedicated)"),
+                "{text}"
+            );
+            assert!(text.contains("in no application's figures"), "{text}");
+            assert!(!text.contains("beside"), "{text}");
+        }
+    }
+
+    #[test]
+    fn host_perimeter_disclaimer_names_the_windows_outside_the_totals() {
+        for (subsystem, spans) in [(Subsystem::Database, "SQL"), (Subsystem::Broker, "publish")] {
+            let text = host_perimeter_disclaimer(Some(&partial_host_block()), subsystem);
+            assert!(text.contains("in 2 of 4 windows"), "{text}");
+            assert!(
+                text.contains("models alumet_rapl, cloud_specpower, database_specpower,"),
+                "{text}"
+            );
+            assert!(!text.contains("estimated,"), "{text}");
+            assert!(
+                text.contains(&format!("1 window carried the estimated figure, the application-side share of the {spans} spans")),
+                "{text}"
+            );
+            assert!(
+                text.contains("1 window carried a host figure kept beside the totals"),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn host_perimeter_disclaimer_scopes_the_outside_clause_to_its_subsystem() {
+        let estimated = DatabaseWasteAggregate {
+            models: ["estimated".to_string()].into(),
+            windows_with_figure: 2,
+            estimated_windows: 2,
+            ..Default::default()
+        };
+        let text = host_perimeter_disclaimer(Some(&estimated), Subsystem::Database);
+        assert!(
+            text.starts_with("Database hosts are outside the period totals"),
+            "{text}"
+        );
+        assert!(text.contains("hold no database host energy"), "{text}");
+        assert!(
+            text.contains("2 windows carried the estimated figure"),
+            "{text}"
+        );
+        let text = host_perimeter_disclaimer(None, Subsystem::Broker);
+        assert!(
+            text.starts_with("Broker hosts are outside the period totals"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with("No window carried a broker figure."),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn host_perimeter_disclaimers_survive_custom_org_disclaimers() {
+        let mut org = example_org();
+        org.notes.disclaimers = vec!["Our own wording.".to_string()];
+        let mut aggregate = AggregateInputs::default();
+        aggregate.aggregate.database_waste = Some(partial_host_block());
+        let day = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let report = build_report(
+            &org,
+            Period {
+                from_date: day,
+                to_date: day,
+                period_type: PeriodType::Custom,
+                days_covered: 1,
+            },
+            ReportIntent::Internal,
+            Confidentiality::Internal,
+            "test".to_string(),
+            aggregate,
+        );
+        let notes = &report.notes.disclaimers;
+        assert_eq!(notes[0], "Our own wording.");
+        let tail = &notes[notes.len() - 2..];
+        assert!(
+            tail[0].starts_with("Database host energy is inside"),
+            "{tail:?}"
+        );
+        assert!(tail[1].starts_with("Broker hosts are outside"), "{tail:?}");
+        assert!(tail[1].contains("hold no broker host energy"), "{tail:?}");
+        assert!(!tail[1].contains("application services only"), "{tail:?}");
+    }
+
     #[test]
     fn embodied_calibration_keeps_sub_milligram_values() {
         let org_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1009,6 +1393,8 @@ mod tests {
             Some(sentinel_core::report::periodic::schema::CarbonBreakdown {
                 operational_kgco2eq: None,
                 embodied_kgco2eq: Some(0.000_000_1),
+                database_kgco2eq: None,
+                messaging_kgco2eq: None,
                 database_kgco2eq_out_of_total: None,
                 messaging_kgco2eq_out_of_total: None,
                 transport_kgco2eq: None,

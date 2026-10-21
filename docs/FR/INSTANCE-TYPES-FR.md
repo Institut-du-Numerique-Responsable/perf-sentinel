@@ -1,17 +1,24 @@
 # Types d'instance avec un profil de puissance embarqué
 
-Tous les `instance_type` acceptés par `[green.cloud.services]` et par
-`[green.broker_static]`, avec les puissances au repos et maximale entre
-lesquelles le modèle SPECpower interpole. 421 entrées, millésime
-de la table `2026-04-24 (CCF aligned)`.
+Tous les `instance_type` acceptés par `[green.cloud.services]`,
+`[green.database_static]` et `[green.broker_static]`, avec les puissances au repos et maximale entre
+lesquelles le modèle SPECpower interpole. 548 entrées, millésime
+de la table `2026-04-24 (CCF aligned)`. Les noms de classes managées de base de données,
+de cache, de broker et de recherche sont acceptés aussi : chacun se résout
+sur la ligne de la famille de VM qui l'héberge, voir
+[Classes de services managés](#classes-de-services-managés).
 
-**Un type absent n'est pas une erreur.** Perf Sentinel avertit une seule
-fois au démarrage en nommant le type, puis se rabat sur une moyenne du
-fournisseur, ce qui rend la valeur plus grossière. Cet
-avertissement est aussi la façon de vérifier votre propre type sans lire
-cette page. Quand votre matériel est absent et que vous connaissez sa
-consommation, déclarez-la directement, ce qui donne une valeur exacte
-plutôt qu'approchée :
+**Un type absent n'est pas une erreur dans `[green.cloud.services]`.** Perf
+Sentinel avertit une seule fois au démarrage en nommant le type, et la
+raison quand il s'agit d'une classe managée que le modèle laisse de côté,
+puis se rabat sur une moyenne du fournisseur, ce qui rend la valeur plus
+grossière. Cet avertissement est aussi la façon de vérifier votre propre
+type sans lire cette page. Dans `[green.database_static]` et
+`[green.broker_static]`, le même type est une erreur qui arrête le
+chargement, puisque des hôtes déclarés n'ont aucune autre source sur
+laquelle se rabattre. Quand votre matériel est absent et
+que vous connaissez sa consommation, déclarez-la directement, ce qui donne
+une valeur exacte plutôt qu'approchée :
 
 ```toml
 [green.cloud.services]
@@ -66,7 +73,86 @@ Cette page est générée depuis la table embarquée par
 `scripts/generate-instance-types-doc.py`, et un test casse le build si les
 deux divergent. Ne la modifiez pas à la main.
 
-## AWS (184 entrées)
+## Classes de services managés
+
+Une classe managée de base de données, de cache, de broker ou de
+recherche tourne sur une famille de VM que la table valorise, donc son
+nom se résout sur la ligne de cette famille. Les règles s'appliquent dans
+l'ordre et s'arrêtent à la première ligne trouvée. Une ligne exacte n'est
+jamais réécrite, et seule la règle vCore Azure SQL calcule une
+puissance, en mettant une ligne à l'échelle par vCore.
+
+| Forme du nom | Se résout sur |
+|---|---|
+| `db.<type>` (RDS, Aurora provisionné) | `<type>` |
+| `cache.<type>` (ElastiCache) | `<type>` |
+| `kafka.<type>`, `express.<type>` (MSK provisionné, brokers MSK Express) | `<type>` |
+| `mq.<type>` (Amazon MQ) | `<type>` |
+| `<type>.search`, `<type>.elasticsearch` (OpenSearch) | `<type>` |
+| AWS `<famille>.<taille>`, famille finissant par au plus deux lettres parmi `d`, `n`, `b` | la famille sans elles : `db.r6idn.large` vers `r6i.large`, `c7gn.large` vers `c7g.large` |
+| Azure `Standard_<série><taille><options>_v<k>`, options contenant `d` | le même nom sans le `d` : `Standard_D4ds_v5` vers `Standard_D4s_v5`, `Standard_D4ads_v5` vers `Standard_D4as_v5` |
+| `db-n1-standard-N`, `db-n1-highmem-N` (Cloud SQL) | `n1-standard-N`, `n1-highmem-N` |
+| `db-perf-optimized-N-V` (Cloud SQL Enterprise Plus, série N2) | `n2-highmem-V` |
+| `GP_Gen5_N`, `BC_Gen5_N`, `HS_Gen5_N`, serverless `GP_S_Gen5_N` et `HS_S_Gen5_N` (Azure SQL vCore, série standard) | N fois le taux par vCPU de `Standard_D64s_v3`, N de 1 à 1024 |
+
+Les lettres AWS `d` (stockage d'instance local), `n` (réseau) et `b`
+(stockage bloc), et le `d` Azure (disque temporaire local), ne changent
+pas le processeur. Les lettres de processeur `a`, `g`, `i` et les
+modificateurs AWS `z` et `e` ne sont jamais retirés, donc `m5zn` et
+`x2iedn` restent inconnus. Le retrait est approximatif quand un
+modificateur change la génération de CPU : `c5n` est une puce Skylake
+alors que les lignes `c5` sont Cascade Lake, un écart qui reste dans la
+fourchette 2x. Une classe dont la famille de base n'a pas de ligne reste
+inconnue.
+
+Graviton 2 (`m6g`, `c6g`, `r6g`, `t4g`) et les Graviton optimisés mémoire
+(`r6g`, `r7g`, `r8g`) ont des lignes, donc `db.r6g.large`,
+`cache.t4g.micro` ou `db.m6gd.large` se résolvent. Les classes Burstable
+des serveurs flexibles Azure sont les lignes `Standard_B*` elles-mêmes,
+valorisées à leurs vCPU complets puisque le crédit de rafale n'est pas
+modélisé.
+
+Enterprise Plus tourne sur la série N2 à 8 Go par vCPU, la forme de
+`n2-highmem`. La série standard (Gen5) d'Azure SQL tourne sur plusieurs
+processeurs (Broadwell, Skylake, Cascade Lake, Ice Lake, Milan, Genoa,
+Emerald Rapids). Parmi ceux que le CSV Azure publie, Skylake a le plus
+haut max W/vCPU, donc la référence est la plus grande ligne Skylake,
+`Standard_D64s_v3` : `GP_Gen5_64` lui est égal et un objectif plus petit
+la met à l'échelle par vCore, sans arrondi. Gen5 porte 5,1 Go par vCore,
+sous le seuil de la prime DRAM. Un objectif serverless est valorisé à
+son maximum de vCores, un plafond. Les réplicas sont des nœuds : les
+standbys Multi-AZ, les lecteurs Aurora et les réplicas Business Critical
+comptent dans `nodes`.
+
+Non modélisées. L'avertissement de démarrage, ou l'erreur de chargement
+dans `[green.database_static]` et `[green.broker_static]`, donne la raison
+pour les cinq premières lignes, les autres sont signalées comme types
+inconnus :
+
+| Classe | Raison |
+|---|---|
+| `db.serverless` (Aurora Serverless v2) | dimensionnée en ACU, chacune d'environ 2 Gio de mémoire avec le CPU et le réseau correspondants, sans équivalence vCPU publiée |
+| `db-f1-micro`, `db-g1-small` (Cloud SQL à cœur partagé) | un vCPU partagé, exclu comme toute offre à vCPU partagés |
+| `redis-*` (types de nœud Memorystore) | le nombre de vCPU est publié, la série de machine ne l'est pas |
+| `db-custom-V-MiB` (Cloud SQL à cœur dédié) | Cloud SQL ne nomme ni la série de machine ni le processeur |
+| `GP_Fsv2_N` et les autres objectifs Azure SQL Fsv2 | le matériel a été retiré le 1er octobre 2026 |
+| Objectifs Azure SQL DTU (`S0`, `P1`), série premium (`HS_PRMS_N`), série DC (`GP_DC_N`) | aucune correspondance de processeur publiée pour l'objectif |
+| Familles AWS `x`, `z`, `i` et `im`, OpenSearch `or1` | aucune ligne pour la famille : 16 à 32 Gio par vCPU au-delà de la règle binaire de prime DRAM, une plateforme non publiée, ou une famille optimisée stockage ou haute fréquence que la table ne porte pas |
+| ElastiCache, MSK et OpenSearch Serverless, Azure Cache for Redis, Event Hubs, Service Bus | facturés en unités de capacité, aucune instance à déclarer |
+
+Sources des règles : les [conventions de nommage des types
+d'instance](https://docs.aws.amazon.com/ec2/latest/instancetypes/instance-type-names.html)
+AWS, les [conventions de nommage des
+VM](https://learn.microsoft.com/fr-fr/azure/virtual-machines/vm-naming-conventions)
+Azure, la définition de la [capacité Aurora Serverless
+v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.how-it-works.html),
+les [séries de machine](https://docs.cloud.google.com/sql/docs/mysql/machine-series-overview)
+Cloud SQL, les [configurations matérielles
+vCore](https://learn.microsoft.com/fr-fr/azure/azure-sql/database/service-tiers-sql-database-vcore)
+Azure SQL, et l'exclusion des vCPU partagés de
+`scripts/refresh-instance-power.py`.
+
+## AWS (276 entrées)
 
 | Type d'instance | Repos (W) | Max (W) |
 |---|---:|---:|
@@ -92,6 +178,14 @@ deux divergent. Ne la modifiez pas à la main.
 | `c6a.8xlarge` | 14.6 | 62.6 |
 | `c6a.large` | 0.9 | 3.9 |
 | `c6a.xlarge` | 1.8 | 7.8 |
+| `c6g.12xlarge` | 22.8 | 81.3 |
+| `c6g.16xlarge` | 30.4 | 108.3 |
+| `c6g.2xlarge` | 3.8 | 13.5 |
+| `c6g.4xlarge` | 7.6 | 27.1 |
+| `c6g.8xlarge` | 15.2 | 54.2 |
+| `c6g.large` | 0.9 | 3.4 |
+| `c6g.medium` | 0.5 | 1.7 |
+| `c6g.xlarge` | 1.9 | 6.8 |
 | `c6i.12xlarge` | 36.8 | 180.4 |
 | `c6i.16xlarge` | 49.1 | 240.5 |
 | `c6i.24xlarge` | 73.6 | 360.8 |
@@ -101,38 +195,56 @@ deux divergent. Ne la modifiez pas à la main.
 | `c6i.8xlarge` | 24.5 | 120.3 |
 | `c6i.large` | 1.5 | 7.5 |
 | `c6i.xlarge` | 3.1 | 15 |
+| `c7a.12xlarge` | 35.5 | 109.5 |
 | `c7a.16xlarge` | 47.3 | 146.1 |
+| `c7a.24xlarge` | 71 | 219.1 |
 | `c7a.2xlarge` | 5.9 | 18.3 |
+| `c7a.48xlarge` | 141.9 | 438.2 |
 | `c7a.4xlarge` | 11.8 | 36.5 |
 | `c7a.8xlarge` | 23.7 | 73 |
 | `c7a.large` | 1.5 | 4.6 |
 | `c7a.xlarge` | 3 | 9.1 |
+| `c7g.12xlarge` | 22.8 | 81.3 |
 | `c7g.16xlarge` | 30.4 | 108.3 |
 | `c7g.2xlarge` | 3.8 | 13.5 |
 | `c7g.4xlarge` | 7.6 | 27.1 |
 | `c7g.8xlarge` | 15.2 | 54.2 |
 | `c7g.large` | 0.9 | 3.4 |
+| `c7g.medium` | 0.5 | 1.7 |
 | `c7g.xlarge` | 1.9 | 6.8 |
+| `c7i.12xlarge` | 49.7 | 199.7 |
 | `c7i.16xlarge` | 66.3 | 266.3 |
+| `c7i.24xlarge` | 99.5 | 399.4 |
 | `c7i.2xlarge` | 8.3 | 33.3 |
+| `c7i.48xlarge` | 199 | 798.8 |
 | `c7i.4xlarge` | 16.6 | 66.6 |
 | `c7i.8xlarge` | 33.2 | 133.1 |
 | `c7i.large` | 2.1 | 8.3 |
 | `c7i.xlarge` | 4.1 | 16.6 |
+| `c8a.12xlarge` | 35.5 | 109.5 |
 | `c8a.16xlarge` | 47.3 | 146.1 |
+| `c8a.24xlarge` | 71 | 219.1 |
 | `c8a.2xlarge` | 5.9 | 18.3 |
+| `c8a.48xlarge` | 141.9 | 438.2 |
 | `c8a.4xlarge` | 11.8 | 36.5 |
 | `c8a.8xlarge` | 23.7 | 73 |
 | `c8a.large` | 1.5 | 4.6 |
 | `c8a.xlarge` | 3 | 9.1 |
+| `c8g.12xlarge` | 22.8 | 81.3 |
 | `c8g.16xlarge` | 30.4 | 108.3 |
+| `c8g.24xlarge` | 45.5 | 162.5 |
 | `c8g.2xlarge` | 3.8 | 13.5 |
+| `c8g.48xlarge` | 91.1 | 325 |
 | `c8g.4xlarge` | 7.6 | 27.1 |
 | `c8g.8xlarge` | 15.2 | 54.2 |
 | `c8g.large` | 0.9 | 3.4 |
+| `c8g.medium` | 0.5 | 1.7 |
 | `c8g.xlarge` | 1.9 | 6.8 |
+| `c8i.12xlarge` | 39.1 | 215.1 |
 | `c8i.16xlarge` | 52.1 | 286.9 |
+| `c8i.24xlarge` | 78.1 | 430.3 |
 | `c8i.2xlarge` | 6.5 | 35.9 |
+| `c8i.48xlarge` | 156.3 | 860.6 |
 | `c8i.4xlarge` | 13 | 71.7 |
 | `c8i.8xlarge` | 26 | 143.4 |
 | `c8i.large` | 1.6 | 9 |
@@ -159,6 +271,14 @@ deux divergent. Ne la modifiez pas à la main.
 | `m6a.8xlarge` | 14.6 | 62.6 |
 | `m6a.large` | 0.9 | 3.9 |
 | `m6a.xlarge` | 1.8 | 7.8 |
+| `m6g.12xlarge` | 22.8 | 81.3 |
+| `m6g.16xlarge` | 30.4 | 108.3 |
+| `m6g.2xlarge` | 3.8 | 13.5 |
+| `m6g.4xlarge` | 7.6 | 27.1 |
+| `m6g.8xlarge` | 15.2 | 54.2 |
+| `m6g.large` | 0.9 | 3.4 |
+| `m6g.medium` | 0.5 | 1.7 |
+| `m6g.xlarge` | 1.9 | 6.8 |
 | `m6i.12xlarge` | 36.8 | 180.4 |
 | `m6i.16xlarge` | 49.1 | 240.5 |
 | `m6i.24xlarge` | 73.6 | 360.8 |
@@ -168,38 +288,56 @@ deux divergent. Ne la modifiez pas à la main.
 | `m6i.8xlarge` | 24.5 | 120.3 |
 | `m6i.large` | 1.5 | 7.5 |
 | `m6i.xlarge` | 3.1 | 15 |
+| `m7a.12xlarge` | 35.5 | 109.5 |
 | `m7a.16xlarge` | 47.3 | 146.1 |
+| `m7a.24xlarge` | 71 | 219.1 |
 | `m7a.2xlarge` | 5.9 | 18.3 |
+| `m7a.48xlarge` | 141.9 | 438.2 |
 | `m7a.4xlarge` | 11.8 | 36.5 |
 | `m7a.8xlarge` | 23.7 | 73 |
 | `m7a.large` | 1.5 | 4.6 |
 | `m7a.xlarge` | 3 | 9.1 |
+| `m7g.12xlarge` | 22.8 | 81.3 |
 | `m7g.16xlarge` | 30.4 | 108.3 |
 | `m7g.2xlarge` | 3.8 | 13.5 |
 | `m7g.4xlarge` | 7.6 | 27.1 |
 | `m7g.8xlarge` | 15.2 | 54.2 |
 | `m7g.large` | 0.9 | 3.4 |
+| `m7g.medium` | 0.5 | 1.7 |
 | `m7g.xlarge` | 1.9 | 6.8 |
+| `m7i.12xlarge` | 49.7 | 199.7 |
 | `m7i.16xlarge` | 66.3 | 266.3 |
+| `m7i.24xlarge` | 99.5 | 399.4 |
 | `m7i.2xlarge` | 8.3 | 33.3 |
+| `m7i.48xlarge` | 199 | 798.8 |
 | `m7i.4xlarge` | 16.6 | 66.6 |
 | `m7i.8xlarge` | 33.2 | 133.1 |
 | `m7i.large` | 2.1 | 8.3 |
 | `m7i.xlarge` | 4.1 | 16.6 |
+| `m8a.12xlarge` | 35.5 | 109.5 |
 | `m8a.16xlarge` | 47.3 | 146.1 |
+| `m8a.24xlarge` | 71 | 219.1 |
 | `m8a.2xlarge` | 5.9 | 18.3 |
+| `m8a.48xlarge` | 141.9 | 438.2 |
 | `m8a.4xlarge` | 11.8 | 36.5 |
 | `m8a.8xlarge` | 23.7 | 73 |
 | `m8a.large` | 1.5 | 4.6 |
 | `m8a.xlarge` | 3 | 9.1 |
+| `m8g.12xlarge` | 22.8 | 81.3 |
 | `m8g.16xlarge` | 30.4 | 108.3 |
+| `m8g.24xlarge` | 45.5 | 162.5 |
 | `m8g.2xlarge` | 3.8 | 13.5 |
+| `m8g.48xlarge` | 91.1 | 325 |
 | `m8g.4xlarge` | 7.6 | 27.1 |
 | `m8g.8xlarge` | 15.2 | 54.2 |
 | `m8g.large` | 0.9 | 3.4 |
+| `m8g.medium` | 0.5 | 1.7 |
 | `m8g.xlarge` | 1.9 | 6.8 |
+| `m8i.12xlarge` | 39.1 | 215.1 |
 | `m8i.16xlarge` | 52.1 | 286.9 |
+| `m8i.24xlarge` | 78.1 | 430.3 |
 | `m8i.2xlarge` | 6.5 | 35.9 |
+| `m8i.48xlarge` | 156.3 | 860.6 |
 | `m8i.4xlarge` | 13 | 71.7 |
 | `m8i.8xlarge` | 26 | 143.4 |
 | `m8i.large` | 1.6 | 9 |
@@ -220,26 +358,59 @@ deux divergent. Ne la modifiez pas à la main.
 | `r5a.8xlarge` | 32.2 | 96.1 |
 | `r5a.large` | 2 | 6 |
 | `r5a.xlarge` | 4 | 12 |
+| `r6g.12xlarge` | 30.4 | 100.5 |
+| `r6g.16xlarge` | 40.6 | 133.9 |
+| `r6g.2xlarge` | 5.1 | 16.7 |
+| `r6g.4xlarge` | 10.1 | 33.5 |
+| `r6g.8xlarge` | 20.3 | 67 |
+| `r6g.large` | 1.3 | 4.2 |
+| `r6g.medium` | 0.6 | 2.1 |
+| `r6g.xlarge` | 2.5 | 8.4 |
 | `r6i.12xlarge` | 44.5 | 199.6 |
 | `r6i.16xlarge` | 59.3 | 266.1 |
 | `r6i.24xlarge` | 89 | 399.2 |
 | `r6i.2xlarge` | 7.4 | 33.3 |
+| `r6i.32xlarge` | 118.6 | 532.2 |
 | `r6i.4xlarge` | 14.8 | 66.5 |
 | `r6i.8xlarge` | 29.7 | 133.1 |
 | `r6i.large` | 1.9 | 8.3 |
 | `r6i.xlarge` | 3.7 | 16.6 |
+| `r7a.12xlarge` | 43.2 | 128.7 |
 | `r7a.16xlarge` | 57.5 | 171.7 |
+| `r7a.24xlarge` | 86.3 | 257.5 |
 | `r7a.2xlarge` | 7.2 | 21.5 |
+| `r7a.48xlarge` | 172.6 | 515 |
 | `r7a.4xlarge` | 14.4 | 42.9 |
 | `r7a.8xlarge` | 28.8 | 85.8 |
 | `r7a.large` | 1.8 | 5.4 |
 | `r7a.xlarge` | 3.6 | 10.7 |
+| `r7g.12xlarge` | 30.4 | 100.5 |
+| `r7g.16xlarge` | 40.6 | 133.9 |
+| `r7g.2xlarge` | 5.1 | 16.7 |
+| `r7g.4xlarge` | 10.1 | 33.5 |
+| `r7g.8xlarge` | 20.3 | 67 |
+| `r7g.large` | 1.3 | 4.2 |
+| `r7g.medium` | 0.6 | 2.1 |
+| `r7g.xlarge` | 2.5 | 8.4 |
+| `r7i.12xlarge` | 57.4 | 218.9 |
 | `r7i.16xlarge` | 76.6 | 291.9 |
+| `r7i.24xlarge` | 114.8 | 437.8 |
 | `r7i.2xlarge` | 9.6 | 36.5 |
+| `r7i.48xlarge` | 229.7 | 875.6 |
 | `r7i.4xlarge` | 19.1 | 73 |
 | `r7i.8xlarge` | 38.3 | 145.9 |
 | `r7i.large` | 2.4 | 9.1 |
 | `r7i.xlarge` | 4.8 | 18.2 |
+| `r8g.12xlarge` | 30.4 | 100.5 |
+| `r8g.16xlarge` | 40.6 | 133.9 |
+| `r8g.24xlarge` | 60.9 | 200.9 |
+| `r8g.2xlarge` | 5.1 | 16.7 |
+| `r8g.48xlarge` | 121.8 | 401.8 |
+| `r8g.4xlarge` | 10.1 | 33.5 |
+| `r8g.8xlarge` | 20.3 | 67 |
+| `r8g.large` | 1.3 | 4.2 |
+| `r8g.medium` | 0.6 | 2.1 |
+| `r8g.xlarge` | 2.5 | 8.4 |
 | `t3.2xlarge` | 5.5 | 32.5 |
 | `t3.large` | 1.4 | 8.1 |
 | `t3.medium` | 1.4 | 8.1 |
@@ -254,8 +425,15 @@ deux divergent. Ne la modifiez pas à la main.
 | `t3a.nano` | 1.7 | 5.2 |
 | `t3a.small` | 1.7 | 5.2 |
 | `t3a.xlarge` | 3.4 | 10.4 |
+| `t4g.2xlarge` | 3.8 | 13.5 |
+| `t4g.large` | 0.9 | 3.4 |
+| `t4g.medium` | 0.9 | 3.4 |
+| `t4g.micro` | 0.9 | 3.4 |
+| `t4g.nano` | 0.9 | 3.4 |
+| `t4g.small` | 0.9 | 3.4 |
+| `t4g.xlarge` | 1.9 | 6.8 |
 
-## GCP (83 entrées)
+## GCP (98 entrées)
 
 | Type d'instance | Repos (W) | Max (W) |
 |---|---:|---:|
@@ -301,6 +479,21 @@ deux divergent. Ne la modifiez pas à la main.
 | `e2-standard-32` | 15.2 | 50.4 |
 | `e2-standard-4` | 1.9 | 6.3 |
 | `e2-standard-8` | 3.8 | 12.6 |
+| `n1-highmem-16` | 9.8 | 61.9 |
+| `n1-highmem-2` | 1.2 | 7.7 |
+| `n1-highmem-32` | 19.6 | 123.8 |
+| `n1-highmem-4` | 2.5 | 15.5 |
+| `n1-highmem-64` | 39.2 | 247.5 |
+| `n1-highmem-8` | 4.9 | 30.9 |
+| `n1-highmem-96` | 58.8 | 371.3 |
+| `n1-standard-1` | 0.6 | 3.9 |
+| `n1-standard-16` | 9.8 | 61.9 |
+| `n1-standard-2` | 1.2 | 7.7 |
+| `n1-standard-32` | 19.6 | 123.8 |
+| `n1-standard-4` | 2.5 | 15.5 |
+| `n1-standard-64` | 39.2 | 247.5 |
+| `n1-standard-8` | 4.9 | 30.9 |
+| `n1-standard-96` | 58.8 | 371.3 |
 | `n2-highcpu-16` | 11 | 60.1 |
 | `n2-highcpu-2` | 1.4 | 7.5 |
 | `n2-highcpu-32` | 22.1 | 120.2 |
@@ -343,10 +536,19 @@ deux divergent. Ne la modifiez pas à la main.
 | `t2a-standard-4` | 2.7 | 7 |
 | `t2a-standard-8` | 5.4 | 14 |
 
-## Azure (88 entrées)
+## Azure (108 entrées)
 
 | Type d'instance | Repos (W) | Max (W) |
 |---|---:|---:|
+| `Standard_B12ms` | 22.8 | 72.2 |
+| `Standard_B16ms` | 30.4 | 96.2 |
+| `Standard_B1ms` | 1.9 | 6 |
+| `Standard_B1s` | 1.9 | 6 |
+| `Standard_B20ms` | 38 | 120.3 |
+| `Standard_B2ms` | 3.8 | 12 |
+| `Standard_B2s` | 3.8 | 12 |
+| `Standard_B4ms` | 7.6 | 24.1 |
+| `Standard_B8ms` | 15.2 | 48.1 |
 | `Standard_D16ads_v6` | 6.4 | 32.8 |
 | `Standard_D16as_v5` | 7.1 | 32.3 |
 | `Standard_D16ps_v6` | 9.6 | 35.2 |
@@ -398,33 +600,44 @@ deux divergent. Ne la modifiez pas à la main.
 | `Standard_D96ps_v6` | 57.6 | 211.2 |
 | `Standard_D96s_v5` | 61.3 | 380.9 |
 | `Standard_D96s_v6` | 52.8 | 307.2 |
+| `Standard_E16as_v5` | 9.7 | 38.7 |
 | `Standard_E16s_v3` | 12.9 | 73.5 |
 | `Standard_E16s_v4` | 12.8 | 69.9 |
 | `Standard_E16s_v5` | 12.8 | 69.9 |
 | `Standard_E16s_v6` | 11.4 | 57.6 |
+| `Standard_E20as_v5` | 12.1 | 48.4 |
+| `Standard_E20s_v4` | 16 | 87.3 |
+| `Standard_E20s_v5` | 16 | 87.3 |
+| `Standard_E2as_v5` | 1.2 | 4.8 |
 | `Standard_E2s_v3` | 1.6 | 9.2 |
 | `Standard_E2s_v4` | 1.6 | 8.7 |
 | `Standard_E2s_v5` | 1.6 | 8.7 |
 | `Standard_E2s_v6` | 1.4 | 7.2 |
+| `Standard_E32as_v5` | 19.4 | 77.4 |
 | `Standard_E32s_v3` | 25.7 | 147 |
 | `Standard_E32s_v4` | 25.6 | 139.8 |
 | `Standard_E32s_v5` | 25.6 | 139.8 |
 | `Standard_E32s_v6` | 22.7 | 115.2 |
+| `Standard_E48as_v5` | 29.1 | 116.1 |
 | `Standard_E48s_v3` | 38.6 | 220.5 |
 | `Standard_E48s_v4` | 38.3 | 209.6 |
 | `Standard_E48s_v5` | 38.3 | 209.6 |
+| `Standard_E4as_v5` | 2.4 | 9.7 |
 | `Standard_E4s_v3` | 3.2 | 18.4 |
 | `Standard_E4s_v4` | 3.2 | 17.5 |
 | `Standard_E4s_v5` | 3.2 | 17.5 |
 | `Standard_E4s_v6` | 2.8 | 14.4 |
+| `Standard_E64as_v5` | 38.7 | 154.8 |
 | `Standard_E64s_v3` | 51.5 | 294 |
 | `Standard_E64s_v4` | 51.1 | 279.5 |
 | `Standard_E64s_v5` | 51.1 | 279.5 |
 | `Standard_E64s_v6` | 45.4 | 230.4 |
+| `Standard_E8as_v5` | 4.8 | 19.4 |
 | `Standard_E8s_v3` | 6.4 | 36.7 |
 | `Standard_E8s_v4` | 6.4 | 34.9 |
 | `Standard_E8s_v5` | 6.4 | 34.9 |
 | `Standard_E8s_v6` | 5.7 | 28.8 |
+| `Standard_E96as_v5` | 58.1 | 232.3 |
 | `Standard_E96s_v5` | 76.7 | 419.3 |
 | `Standard_E96s_v6` | 68.2 | 345.6 |
 | `Standard_F16s_v2` | 10.2 | 63.5 |

@@ -10,7 +10,7 @@
 //!
 //! Unlike Scaphandre (microwatt gauge), Kepler exports a monotonically
 //! increasing joules counter, so the scraper holds the previous raw
-//! value per service and computes a joules-delta each tick.
+//! value per label value and computes a joules-delta each tick.
 //!
 //! See `docs/design/05-GREENOPS-AND-CARBON.md` for architecture details
 //! and `docs/LIMITATIONS.md` for the precision-bounds discussion.

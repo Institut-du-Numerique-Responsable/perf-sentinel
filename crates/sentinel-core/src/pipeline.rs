@@ -161,6 +161,7 @@ fn daemon_only_green_backend_warning(
         ("`[green.kepler]`", green.kepler.is_some()),
         ("`[green.redfish]`", green.redfish.is_some()),
         ("`[green.cloud]`", green.cloud_energy.is_some()),
+        ("`[green.database_static]`", green.database_static.is_some()),
         ("`[green.broker_static]`", green.broker_static.is_some()),
         (
             "`[green.electricity_maps]`",
@@ -169,6 +170,7 @@ fn daemon_only_green_backend_warning(
     ]
     .into_iter()
     .filter_map(|(name, set)| set.then_some(name))
+    .chain(green.grid_feeds.iter().map(|feed| feed.kind.section()))
     .collect();
     if configured.is_empty() {
         return None;
@@ -562,6 +564,20 @@ mod tests {
         assert!(message.contains("[green.cloud]"), "{message}");
         // The section name must round-trip through the parser.
         assert!(crate::config::load_from_str(toml).is_ok());
+    }
+
+    #[test]
+    fn declared_database_hosts_are_named_as_daemon_only() {
+        let config = crate::config::load_from_str(
+            "[green]\nenabled = true\n\n\
+             [green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+             instance_type = \"db.r6i.large\"\nregion = \"eu-west-3\"\n",
+        )
+        .unwrap();
+
+        let message = &analyze(vec![], &config).warning_details[0].message;
+
+        assert!(message.contains("`[green.database_static]`"), "{message}");
     }
 
     /// Backticks live in the data, like `suggested_fix.recommendation`:

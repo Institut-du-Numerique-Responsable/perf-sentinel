@@ -28,7 +28,8 @@
         "perf-sentinel-report/v1.4",
         "perf-sentinel-report/v1.5",
         "perf-sentinel-report/v1.6",
-        "perf-sentinel-report/v1.7"
+        "perf-sentinel-report/v1.7",
+        "perf-sentinel-report/v1.8"
       ]
     },
     "report_metadata": { "$ref": "#/$defs/ReportMetadata" },
@@ -108,7 +109,7 @@
     },
     "CarbonIntensitySource": {
       "type": "string",
-      "enum": ["electricity_maps", "static_tables", "mixed"]
+      "enum": ["electricity_maps", "rte_eco2mix", "neso", "fingrid", "energinet", "ree_esios", "open_electricity", "mavir", "em6", "static_tables", "mixed"]
     },
     "ReportMetadata": {
       "type": "object",
@@ -273,7 +274,7 @@
         "calibration_inputs": { "$ref": "#/$defs/CalibrationInputs" },
         "standard_crosswalk": {
           "$ref": "#/$defs/StandardCrosswalk",
-          "description": "Since v1.3. Interpretive crosswalk from this report's figures to a recognized reporting standard (ESRS E1). Constant per schema version, NOT a certification. Absent on pre-v1.3 reports."
+          "description": "Since v1.3. Interpretive crosswalk from this report's figures to a recognized reporting standard (ESRS E1). Constant per schema version, NOT a certification. Since v1.8 the energy mapping includes database and broker host energy when the matching in_totals_windows is non-zero, and the Scope 2 mapping reads the operational, database and broker terms of total_carbon_kgco2eq. Absent on pre-v1.3 reports."
         }
       }
     },
@@ -351,7 +352,7 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1, "maxLength": 64 },
           "uniqueItems": true,
-          "description": "SCI methodology tags observed across the period's windows. Current windows use sci_v1_numerator+transport because network transport is part of the numerator, including when its value is zero. The legacy sci_v1_numerator tag can appear when a period spans older windows (v1.6+)."
+          "description": "SCI methodology tags observed across the period's windows. Current windows use sci_v1_numerator+transport because network transport is part of the numerator, including when its value is zero. A daemon window scored with a database or broker host source configured carries sci_v1_numerator+transport+hosts instead, its in-total host carbon joining the numerator, zero included. Its avoidable figure is tagged sci_v1_operational_ratio+hosts on the window, a tag this field does not collect. The legacy sci_v1_numerator tag can appear when a period spans older windows (v1.6+)."
         },
         "embodied_gco2_total": {
           "type": "number",
@@ -396,18 +397,28 @@
       "additionalProperties": false,
       "properties": {
         "energy_kwh": { "type": "number", "minimum": 0 },
-        "measured_energy_kwh": { "type": "number", "minimum": 0, "description": "Share of energy_kwh from windows with a genuinely measured figure (an agent reading the workload's own power)." },
-        "declared_energy_kwh": { "type": "number", "minimum": 0, "description": "Share of energy_kwh from windows whose figure was declared rather than measured. Absent when no declared source fed the figure." },
+        "measured_energy_kwh": { "type": "number", "minimum": 0, "description": "Share of energy_kwh from windows with a genuinely measured figure (an agent reading the database or broker host's own power), host energy inside the totals when the window counted it (see in_totals_energy_kwh), beside them otherwise." },
+        "modeled_energy_kwh": { "type": "number", "minimum": 0, "description": "Since v1.8. Share of energy_kwh from windows whose figure was modeled (cloud_specpower): a SPECpower envelope interpolated at the host's CPU reading, neither measured nor declared. Absent when no modeled source fed the figure." },
+        "declared_energy_kwh": { "type": "number", "minimum": 0, "description": "Share of energy_kwh from windows whose figure was declared rather than measured (database_specpower, broker_specpower). Absent when no declared source fed the figure." },
+        "in_totals_energy_kwh": { "type": "number", "minimum": 0, "description": "Since v1.8. Share of energy_kwh the windows counted inside their totals: host energy already part of total_energy_kwh, never to be added to it. At most energy_kwh. Absent when no window counted its figure." },
         "models": {
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_+]+$" },
-          "description": "Distinct provenance tags observed over the period: alumet_rapl = measured on the workload cgroup, broker_specpower = declared provisioned cluster (messaging block only), estimated = built from the modeled energy of the spans themselves."
+          "description": "Distinct provenance tags observed over the period: alumet_rapl = measured on the workload cgroup, database_specpower = declared provisioned database cluster (database block only), broker_specpower = declared provisioned broker cluster (messaging block only), cloud_specpower = the declared hosts priced from their cpu_query on their SPECpower envelope, on hosts of their own or as a pod's share of an application node (either block), estimated = the application-side share of the SQL or publish spans, the energy the span scoring gave the emitting services, already inside the totals."
+        },
+        "placements": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["dedicated", "shared"] },
+          "description": "Since v1.8. Host placements the operator declared in [green.database_static] or [green.broker_static]: dedicated = hosts of their own, shared = a pod on one application node. An operator declaration, not a measurement. Absent when no window carried one."
         },
         "windows_with_figure": { "type": "integer", "minimum": 1 },
         "measured_windows": { "type": "integer", "minimum": 0, "description": "Windows whose figure came from a measured source." },
-        "declared_windows": { "type": "integer", "minimum": 0, "description": "Windows whose figure was declared, not measured: an operator statement of provisioned infrastructure, which bounds compute rather than reporting it. measured_windows + declared_windows + estimated_windows equals windows_with_figure." },
-        "estimated_windows": { "type": "integer", "minimum": 0, "description": "Windows whose figure was the estimated fallback." },
+        "modeled_windows": { "type": "integer", "minimum": 0, "description": "Since v1.8. Windows whose figure was modeled from a CPU reading (cloud_specpower)." },
+        "declared_windows": { "type": "integer", "minimum": 0, "description": "Windows whose figure was declared, not measured: an operator statement of provisioned infrastructure, which bounds compute rather than reporting it. Four buckets: measured_windows + modeled_windows + declared_windows + estimated_windows equals windows_with_figure." },
+        "estimated_windows": { "type": "integer", "minimum": 0, "description": "Windows whose figure was the estimated fallback, the application-side share already inside the totals." },
+        "in_totals_windows": { "type": "integer", "minimum": 0, "description": "Since v1.8. Windows that counted their host figure inside their totals. At most windows_with_figure and at most measured_windows + modeled_windows + declared_windows." },
         "windows_with_carbon": { "type": "integer", "minimum": 0, "description": "Windows whose figure carried a carbon conversion. Fewer than windows_with_figure means the kgCO2eq sums cover a partial carbon picture." },
         "operational_waste_kwh": { "type": "number", "minimum": 0 },
         "operational_waste_kgco2eq": { "type": "number", "minimum": 0, "description": "Absent when no window carried a carbon conversion." },
@@ -431,14 +442,24 @@
         "total_energy_kwh": { "type": "number", "minimum": 0 },
         "carbon_breakdown": {
           "type": "object",
-          "description": "The three SCI terms total_carbon_kgco2eq is made of, which differ in what an operator can act on (v1.6+). operational carries the avoidable share the waste tiers quantify; embodied amortises manufactured hardware and transport covers cross-region network energy, both irreducible by fixing an anti-pattern. The three sum to the total, up to rounding, an absent term counting as zero. Omitted entirely when no window carried a carbon figure, and each term is omitted rather than zeroed when nothing measured it, so an unmeasured term never reads as measured at zero.",
+          "description": "The five terms total_carbon_kgco2eq is made of, which differ in what an operator can act on (v1.6+, the two host terms v1.8+). operational carries the avoidable share the waste tiers quantify; embodied amortises manufactured hardware and transport covers cross-region network energy, both irreducible by fixing an anti-pattern; database and messaging are the measured or declared database and broker host carbon the windows counted inside their totals. On windows tagged +transport the five sum to the total, up to rounding, an absent term counting as zero. Omitted entirely when no window carried a carbon figure, and each term is omitted rather than zeroed when nothing measured it, so an unmeasured term never reads as measured at zero.",
           "properties": {
             "operational_kgco2eq": { "type": "number", "minimum": 0 },
             "embodied_kgco2eq": { "type": "number", "minimum": 0 },
+            "database_kgco2eq": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Database host carbon the windows counted inside their totals: a measured, modeled or declared figure whose carbon converted. Part of the five-term sum and of total_carbon_kgco2eq, omitted when zero (v1.8+)."
+            },
+            "messaging_kgco2eq": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Same as database_kgco2eq, for the message broker hosts (v1.8+)."
+            },
             "database_kgco2eq_out_of_total": {
               "type": "number",
               "minimum": 0,
-              "description": "Total carbon of the database over the period when measured or declared as an external scope. Estimated fallback carbon is already included in the service total and is excluded here. This field sits outside the three-term sum and total_carbon_kgco2eq (v1.6+)."
+              "description": "Carbon of the measured or declared database figures that stayed beside the window totals: windows archived before host energy entered the totals, or whose figure carried no carbon. Estimated fallback carbon is already included in the service total and is excluded here, and an in-total figure sits in database_kgco2eq. This field sits outside the five-term sum and total_carbon_kgco2eq (v1.6+)."
             },
             "messaging_kgco2eq_out_of_total": {
               "type": "number",
@@ -517,11 +538,11 @@
         },
         "database_waste": {
           "$ref": "#/$defs/DatabaseWasteAggregate",
-          "description": "Since v1.4. Database-side avoidable energy and carbon over the period at both thresholds, with provenance models. Informational lower bound, never folded into total_energy_kwh/total_carbon_kgco2eq. Absent on pre-v1.4 reports and when no window carried the figure."
+          "description": "Since v1.4. Avoidable energy and carbon of SQL work over the period at both thresholds, with provenance models. A measured, modeled or declared figure is database host energy (a measured one is a CPU-only lower bound), inside the totals and both waste tiers when the window counted it, beside them under carbon_breakdown.database_kgco2eq_out_of_total otherwise. An estimated figure is the application-side share of the SQL spans, already inside them. An informational breakdown, never added on top of total_energy_kwh, total_carbon_kgco2eq, canonical_waste or operational_waste. Absent on pre-v1.4 reports and when no window carried the figure."
         },
         "messaging_waste": {
           "$ref": "#/$defs/DatabaseWasteAggregate",
-          "description": "Since v1.5. Broker-side avoidable energy and carbon over the period at both thresholds, the messaging twin of database_waste. Same informational status, never folded into the totals. Absent on pre-v1.5 reports and when no window carried the figure."
+          "description": "Since v1.5. Avoidable energy and carbon of publish work over the period at both thresholds, the messaging twin of database_waste. A measured, modeled or declared figure is broker host energy, inside the totals when the window counted it, beside them under carbon_breakdown.messaging_kgco2eq_out_of_total otherwise. An estimated figure is the application-side share of the publish spans, already inside them. Same informational status, never added on top of the totals. Absent on pre-v1.5 reports and when no window carried the figure."
         },
         "per_service_energy_models": {
           "type": "object",

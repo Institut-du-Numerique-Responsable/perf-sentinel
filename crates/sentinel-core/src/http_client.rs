@@ -363,34 +363,52 @@ pub async fn fetch_get_limited(
     auth: Option<&crate::ingest::auth_header::AuthHeader>,
     max_bytes: usize,
 ) -> Result<bytes::Bytes, FetchError> {
+    let headers = auth.map_or(&[][..], std::slice::from_ref);
+    fetch_get_with_headers(client, uri, user_agent, timeout, headers, max_bytes).await
+}
+
+/// [`fetch_get_limited`] with any number of headers.
+///
+/// # Errors
+///
+/// Same as [`fetch_get_limited`].
+pub async fn fetch_get_with_headers(
+    client: &HttpClient,
+    uri: &Uri,
+    user_agent: &str,
+    timeout: std::time::Duration,
+    headers: &[crate::ingest::auth_header::AuthHeader],
+    max_bytes: usize,
+) -> Result<bytes::Bytes, FetchError> {
     use http_body_util::{BodyExt, Empty, Limited};
 
     let mut builder = hyper::Request::builder()
         .method(hyper::Method::GET)
         .uri(uri.clone())
         .header(hyper::header::USER_AGENT, user_agent);
-    if let Some(auth) = auth {
-        builder = builder.header(&auth.name, &auth.value);
+    for header in headers {
+        builder = builder.header(&header.name, &header.value);
     }
     let req = builder
         .body(Empty::<bytes::Bytes>::new())
         .map_err(FetchError::RequestBuild)?;
 
-    let response = tokio::time::timeout(timeout, client.request(req))
+    // One deadline for the headers and the body: a peer that stalls
+    // mid-body must not hang the caller's polling loop.
+    let exchange = async {
+        let response = client.request(req).await.map_err(FetchError::Transport)?;
+        if !response.status().is_success() {
+            return Err(FetchError::HttpStatus(response.status().as_u16()));
+        }
+        Limited::new(response.into_body(), max_bytes)
+            .collect()
+            .await
+            .map(http_body_util::Collected::to_bytes)
+            .map_err(|e| classify_body_error(e.as_ref(), max_bytes))
+    };
+    tokio::time::timeout(timeout, exchange)
         .await
         .map_err(|_| FetchError::Timeout)?
-        .map_err(FetchError::Transport)?;
-
-    if !response.status().is_success() {
-        return Err(FetchError::HttpStatus(response.status().as_u16()));
-    }
-
-    let limited = Limited::new(response.into_body(), max_bytes);
-    let collected = limited
-        .collect()
-        .await
-        .map_err(|e| classify_body_error(e.as_ref(), max_bytes))?;
-    Ok(collected.to_bytes())
 }
 
 /// Perform a request that carries a body (typically POST or DELETE)
@@ -478,23 +496,57 @@ pub async fn send(
         .body(Full::new(body))
         .map_err(FetchError::RequestBuild)?;
 
-    let response = tokio::time::timeout(timeout, client.request(req))
+    // One deadline for the headers and the body, as in `fetch_get_limited`.
+    let exchange = async {
+        let response = client.request(req).await.map_err(FetchError::Transport)?;
+        let status = response.status();
+        Limited::new(response.into_body(), max_bytes)
+            .collect()
+            .await
+            .map(|collected| (status, collected.to_bytes()))
+            .map_err(|e| classify_body_error(e.as_ref(), max_bytes))
+    };
+    tokio::time::timeout(timeout, exchange)
         .await
         .map_err(|_| FetchError::Timeout)?
-        .map_err(FetchError::Transport)?;
-
-    let status = response.status();
-    let limited = Limited::new(response.into_body(), max_bytes);
-    let collected = limited
-        .collect()
-        .await
-        .map_err(|e| classify_body_error(e.as_ref(), max_bytes))?;
-    Ok((status, collected.to_bytes()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_body_that_stalls_hits_the_deadline() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let uri: Uri = format!("http://{}/", listener.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = socket.read(&mut buf).await;
+            // Headers promise 100 bytes, the body stops after 2.
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{}")
+                .await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        });
+        let started = std::time::Instant::now();
+        let err = fetch_get_limited(
+            &build_client(),
+            &uri,
+            "test",
+            std::time::Duration::from_millis(200),
+            None,
+            1024,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, FetchError::Timeout), "got {err:?}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        server.abort();
+    }
 
     #[test]
     fn build_client_constructs_without_panic() {

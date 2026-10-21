@@ -12,6 +12,7 @@
 use crate::correlate::Trace;
 use crate::detect::{DISCLOSURE_N_PLUS_ONE_THRESHOLD, DetectConfig, n_plus_one, redundant};
 use crate::report::{AvoidableTier, DisclosureDbWaste, DisclosureWaste, GreenSummary};
+use crate::score::host_static::HostPlacement;
 
 use super::AvoidableIoOps;
 use super::dedup_avoidable_io_ops_by_service;
@@ -46,6 +47,12 @@ pub(crate) fn compute_canonical_avoidable(
 /// plus a canonical detection pass. Operational carbon reuses the summary's
 /// `co2.avoidable`. Canonical carbon is rescaled from `operational_gco2` via
 /// [`avoidable_share`] (same denominator). No second carbon pass.
+///
+/// The application pool and the in-total host pools are disjoint. The
+/// application energy is priced at the all-operations ratio, and each
+/// database or broker host at its own subsystem ratio (SQL or messaging),
+/// the canonical legs at the canonical threshold, so a host is never
+/// priced at the ratio of operations it does not serve.
 #[must_use]
 pub(crate) fn compute_disclosure_waste(
     traces: &[Trace],
@@ -53,38 +60,69 @@ pub(crate) fn compute_disclosure_waste(
     detect_config: &DetectConfig,
 ) -> DisclosureWaste {
     let accounted = operational.accounted_io_ops;
-    let energy_kwh = operational.energy_kwh;
+    let app_energy = operational.application_energy_kwh();
     let operational_gco2 = operational.co2.as_ref().map_or(0.0, |r| r.operational_gco2);
     let operational_avoidable_gco2 = operational.co2.as_ref().map_or(0.0, |r| r.avoidable.mid);
 
     let canonical = compute_canonical_avoidable(traces, detect_config);
     let canonical_io = canonical.total;
+    let database = build_db_waste_tiers(operational, canonical.sql);
+    let messaging = build_msg_waste_tiers(operational, canonical.messaging);
+    let hosts = HostLegs::of([database.as_ref(), messaging.as_ref()]);
 
     DisclosureWaste {
         canonical: AvoidableTier {
             n_plus_one_threshold: DISCLOSURE_N_PLUS_ONE_THRESHOLD,
             avoidable_io_ops: canonical_io,
-            avoidable_kwh: avoidable_share(energy_kwh, canonical_io, accounted),
-            avoidable_gco2: avoidable_share(operational_gco2, canonical_io, accounted),
+            avoidable_kwh: avoidable_share(app_energy, canonical_io, accounted)
+                + hosts.canonical_kwh,
+            avoidable_gco2: avoidable_share(operational_gco2, canonical_io, accounted)
+                + hosts.canonical_gco2,
         },
         operational: AvoidableTier {
             n_plus_one_threshold: detect_config.n_plus_one_threshold,
             avoidable_io_ops: operational.avoidable_io_ops,
-            avoidable_kwh: avoidable_share(energy_kwh, operational.avoidable_io_ops, accounted),
+            avoidable_kwh: avoidable_share(app_energy, operational.avoidable_io_ops, accounted)
+                + hosts.operational_kwh,
             avoidable_gco2: operational_avoidable_gco2,
         },
-        database: build_db_waste_tiers(operational, canonical.sql),
-        messaging: build_msg_waste_tiers(operational, canonical.messaging),
+        database,
+        messaging,
     }
 }
 
-/// The five figure fields both waste twins share, borrowed from either.
+/// Sum of the waste legs of the host blocks inside the totals. The
+/// operational gCO₂ leg is already in `co2.avoidable`.
+#[derive(Default)]
+struct HostLegs {
+    canonical_kwh: f64,
+    canonical_gco2: f64,
+    operational_kwh: f64,
+}
+
+impl HostLegs {
+    fn of(blocks: [Option<&DisclosureDbWaste>; 2]) -> Self {
+        blocks
+            .into_iter()
+            .flatten()
+            .filter(|b| b.in_totals)
+            .fold(Self::default(), |acc, b| Self {
+                canonical_kwh: acc.canonical_kwh + b.canonical_waste_kwh,
+                canonical_gco2: acc.canonical_gco2 + b.canonical_waste_gco2.unwrap_or(0.0),
+                operational_kwh: acc.operational_kwh + b.operational_waste_kwh,
+            })
+    }
+}
+
+/// The figure fields both waste twins share, borrowed from either.
 struct WasteTierInput<'a> {
     energy_kwh: f64,
     model: &'a str,
     waste_kwh: f64,
     waste_gco2: Option<f64>,
     energy_gco2: Option<f64>,
+    in_totals: bool,
+    placement: Option<HostPlacement>,
 }
 
 /// Both tiers from one window figure. The canonical tier reuses the same
@@ -111,6 +149,8 @@ fn build_waste_tiers(
         canonical_waste_kwh: figure.energy_kwh * canonical_ratio,
         energy_gco2: figure.energy_gco2,
         canonical_waste_gco2: figure.energy_gco2.map(|g| g * canonical_ratio),
+        in_totals: figure.in_totals,
+        placement: figure.placement,
     }
 }
 
@@ -126,6 +166,8 @@ fn build_db_waste_tiers(
             waste_kwh: db.waste_kwh,
             waste_gco2: db.waste_gco2,
             energy_gco2: db.energy_gco2,
+            in_totals: db.in_totals,
+            placement: db.placement,
         },
         canonical_sql_avoidable,
         operational.total_sql_io_ops,
@@ -144,6 +186,8 @@ fn build_msg_waste_tiers(
             waste_kwh: mw.waste_kwh,
             waste_gco2: mw.waste_gco2,
             energy_gco2: mw.energy_gco2,
+            in_totals: mw.in_totals,
+            placement: mw.placement,
         },
         canonical_messaging_avoidable,
         operational.total_messaging_io_ops,
@@ -199,6 +243,8 @@ mod tests {
                 operational_gco2: 12.0,
                 embodied_gco2: 0.0,
                 transport_gco2: None,
+                database_gco2: None,
+                messaging_gco2: None,
                 sci_per_trace: None,
                 functional_unit: String::new(),
             }),
@@ -241,12 +287,17 @@ mod tests {
             region: None,
             sql_waste_ratio: 0.0,
             model: "alumet_rapl".to_string(),
+            in_totals: true,
+            placement: Some(HostPlacement::Dedicated),
         });
 
         let waste = compute_disclosure_waste(&traces, &operational, &detect_config(50));
 
         let db = waste.database.expect("database tiers");
         assert_eq!(db.model, "alumet_rapl");
+        // The host flags ride along unchanged.
+        assert!(db.in_totals);
+        assert_eq!(db.placement, Some(HostPlacement::Dedicated));
         assert!((db.energy_kwh - 1.2).abs() < 1e-12);
         // Operator threshold 50 finds nothing: operational waste is zero.
         assert!(db.operational_waste_kwh.abs() < 1e-12);
@@ -255,6 +306,88 @@ mod tests {
         // The canonical carbon leg is unaffected by the zeroed operator ratio:
         // 6.0 gCO2 of energy × the canonical 5/6 ratio.
         assert!((db.canonical_waste_gco2.expect("carbon leg") - 5.0).abs() < 1e-9);
+    }
+
+    /// In-total hosts are priced at their own subsystem ratio, never at the
+    /// all-operations ratio of the application pool, and the canonical
+    /// legs do not move with the operator threshold.
+    #[test]
+    fn in_total_hosts_add_their_own_legs_to_both_tiers() {
+        let traces = vec![make_trace(make_n_plus_one_events())];
+        let host = |energy_kwh: f64, waste_kwh: f64, energy_gco2: f64, waste_gco2: f64| {
+            crate::report::DatabaseWaste {
+                energy_kwh,
+                waste_kwh,
+                waste_gco2: Some(waste_gco2),
+                energy_gco2: Some(energy_gco2),
+                region: Some("eu-west-3".to_string()),
+                sql_waste_ratio: 0.0,
+                model: "alumet_rapl".to_string(),
+                in_totals: true,
+                placement: Some(HostPlacement::Dedicated),
+            }
+        };
+        let db = host(1.2, 1.0, 6.0, 5.0);
+        let broker = host(0.6, 0.15, 3.0, 0.75);
+        let operational = GreenSummary {
+            total_io_ops: 10,
+            avoidable_io_ops: 6,
+            accounted_io_ops: 10,
+            total_sql_io_ops: 6,
+            total_messaging_io_ops: 4,
+            // 2.0 kWh of services plus both hosts.
+            energy_kwh: 3.8,
+            co2: Some(CarbonReport {
+                total: CarbonEstimate::sci_numerator(21.0),
+                avoidable: CarbonEstimate::operational_ratio(12.95),
+                operational_gco2: 12.0,
+                embodied_gco2: 0.0,
+                transport_gco2: None,
+                database_gco2: Some(6.0),
+                messaging_gco2: Some(3.0),
+                sci_per_trace: None,
+                functional_unit: String::new(),
+            }),
+            database_waste: Some(db.clone()),
+            messaging_waste: Some(crate::report::MessagingWaste {
+                energy_kwh: broker.energy_kwh,
+                waste_kwh: broker.waste_kwh,
+                waste_gco2: broker.waste_gco2,
+                energy_gco2: broker.energy_gco2,
+                region: broker.region,
+                messaging_waste_ratio: 0.25,
+                model: broker.model,
+                in_totals: true,
+                placement: broker.placement,
+            }),
+            ..GreenSummary::disabled(0)
+        };
+
+        let low = compute_disclosure_waste(&traces, &operational, &detect_config(2));
+        let high = compute_disclosure_waste(&traces, &operational, &detect_config(50));
+
+        // Canonical: 5 of 10 ops on the 2.0 kWh application pool, plus the
+        // database at the canonical SQL ratio 5/6. The fixture has no
+        // publish span, so the broker's canonical leg is zero. Pricing the
+        // whole 3.8 kWh at the all-ops ratio would give 1.9.
+        assert!((low.canonical.avoidable_kwh - 2.0).abs() < 1e-9);
+        assert!((low.canonical.avoidable_gco2 - 11.0).abs() < 1e-9);
+        assert!((low.canonical.avoidable_kwh - high.canonical.avoidable_kwh).abs() < 1e-15);
+        assert!((low.canonical.avoidable_gco2 - high.canonical.avoidable_gco2).abs() < 1e-15);
+        // Operational: 6 of 10 on the application pool plus each host's
+        // own operational waste. Its gCO2 is co2.avoidable as scored.
+        assert!((low.operational.avoidable_kwh - (1.2 + 1.0 + 0.15)).abs() < 1e-9);
+        assert!((low.operational.avoidable_gco2 - 12.95).abs() < 1e-12);
+
+        // A host figure outside the totals adds no leg.
+        let mut outside = operational;
+        outside.energy_kwh = 2.0;
+        outside.database_waste.as_mut().unwrap().in_totals = false;
+        outside.messaging_waste.as_mut().unwrap().in_totals = false;
+        let waste = compute_disclosure_waste(&traces, &outside, &detect_config(2));
+        assert!((waste.canonical.avoidable_kwh - 1.0).abs() < 1e-9);
+        assert!((waste.canonical.avoidable_gco2 - 6.0).abs() < 1e-9);
+        assert!((waste.operational.avoidable_kwh - 1.2).abs() < 1e-9);
     }
 
     #[test]
@@ -271,6 +404,8 @@ mod tests {
             region: None,
             sql_waste_ratio: 0.0,
             model: "estimated".to_string(),
+            in_totals: false,
+            placement: None,
         });
         let db = build_db_waste_tiers(&operational, 0).expect("tiers");
         assert!(db.canonical_waste_kwh.abs() < 1e-12);

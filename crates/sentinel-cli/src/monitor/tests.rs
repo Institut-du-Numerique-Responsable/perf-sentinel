@@ -324,7 +324,39 @@ fn energy_renders_database_waste_line() {
     assert!(text.contains("20% SQL ratio"), "got: {text}");
     assert!(text.contains("0.090000 gCO2"), "got: {text}");
     assert!(text.contains("model alumet_rapl"), "got: {text}");
-    assert!(text.contains("excluded from totals"), "got: {text}");
+    assert!(text.contains("outside these totals"), "got: {text}");
+}
+
+#[test]
+fn energy_waste_line_in_the_totals_says_so() {
+    let mut snapshot = snapshot_with_energy_mix();
+    let db = snapshot.green_summary.database_waste.as_mut().unwrap();
+    db.in_totals = true;
+    let text = line_text(&build_energy_lines(Some(&snapshot)));
+    assert!(
+        text.contains("host energy, in the report totals"),
+        "got: {text}"
+    );
+    // The broker figure of the same snapshot stays outside.
+    assert!(text.contains("outside these totals"), "got: {text}");
+}
+
+#[test]
+fn window_energy_splits_only_in_total_hosts() {
+    let mut snapshot = snapshot_with_energy_mix();
+    let text = line_text(&build_energy_lines(Some(&snapshot)));
+    assert!(!text.contains("applications"), "outside figures: {text}");
+    assert!(!text.contains("plus database hosts"), "got: {text}");
+    let db = snapshot.green_summary.database_waste.as_mut().unwrap();
+    db.in_totals = true;
+    let text = line_text(&build_energy_lines(Some(&snapshot)));
+    assert!(
+        text.contains(
+            "rest modeled from I/O counts \u{b7} plus database hosts, alumet_rapl   = applications 1.590000 kWh + database hosts 0.010000 kWh"
+        ),
+        "got: {text}"
+    );
+    assert!(!text.contains("broker hosts"), "got: {text}");
 }
 
 #[test]
@@ -337,7 +369,7 @@ fn energy_renders_broker_waste_line() {
         text.contains("model broker_specpower"),
         "a declared cluster must not read as a measurement: {text}"
     );
-    assert!(text.contains("excluded from totals"), "got: {text}");
+    assert!(text.contains("outside these totals"), "got: {text}");
 }
 
 #[test]
@@ -347,7 +379,10 @@ fn energy_database_waste_estimated_reads_within_totals() {
     db.model = sentinel_core::report::DB_WASTE_MODEL_ESTIMATED.to_string();
     let text = line_text(&build_energy_lines(Some(&snapshot)));
     assert!(text.contains("model estimated"), "got: {text}");
-    assert!(text.contains("within the report totals"), "got: {text}");
+    assert!(
+        text.contains("application-side share, within the report totals"),
+        "got: {text}"
+    );
 }
 
 #[test]
@@ -418,10 +453,15 @@ fn energy_meas_dash_when_ratio_missing() {
 
 #[test]
 fn intensity_source_label_tags_cold_and_hot() {
-    assert!(intensity_source_label(IntensitySource::RealTime).contains("hot"));
-    assert!(intensity_source_label(IntensitySource::Annual).contains("cold"));
-    assert!(intensity_source_label(IntensitySource::Hourly).contains("cold"));
-    assert!(intensity_source_label(IntensitySource::MonthlyHourly).contains("cold"));
+    assert!(intensity_source_label(IntensitySource::RealTime, None).contains("hot"));
+    assert!(intensity_source_label(IntensitySource::Annual, None).contains("cold"));
+    assert!(intensity_source_label(IntensitySource::Hourly, None).contains("cold"));
+    assert!(intensity_source_label(IntensitySource::MonthlyHourly, None).contains("cold"));
+    let neso = Some(sentinel_core::score::carbon::RealTimeProvider::Neso);
+    assert_eq!(
+        intensity_source_label(IntensitySource::RealTime, neso),
+        "RealTime (neso)"
+    );
 }
 
 #[test]
@@ -1110,6 +1150,25 @@ fn trend_point_computes_percentages() {
     // Carbon: sum of the per-region co2_gco2 (0.5 + 2.0).
     assert!((p.carbon_gco2 - 2.5).abs() < 1e-9, "got {}", p.carbon_gco2);
     assert!((p.energy_kwh - 1.6).abs() < 1e-9);
+}
+
+#[test]
+fn trend_point_carbon_adds_the_in_total_host_terms() {
+    let mut snapshot = snapshot_with_energy_mix();
+    let estimate = r#"{"low":0,"mid":0,"high":0,"model":"m","methodology":"t"}"#;
+    snapshot.green_summary.co2 = Some(
+        serde_json::from_str(&format!(
+            r#"{{"total":{estimate},"avoidable":{estimate},"operational_gco2":2.5,
+                "embodied_gco2":0.0,"database_gco2":0.25,"messaging_gco2":0.125}}"#
+        ))
+        .unwrap(),
+    );
+    let p = trend_point(&snapshot);
+    assert!(
+        (p.carbon_gco2 - 2.875).abs() < 1e-9,
+        "got {}",
+        p.carbon_gco2
+    );
 }
 
 #[test]

@@ -166,7 +166,7 @@ fn an_attestation_naming_another_hash_is_refused() {
 fn a_newer_schema_is_unrenderable() {
     let (_, bytes) = baked_report();
     let mut value: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
-    value["schema_version"] = "perf-sentinel-report/v1.8".into();
+    value["schema_version"] = "perf-sentinel-report/v1.9".into();
 
     let err = render_disclosure_pdf(&inputs(
         &serde_json::to_vec(&value).expect("json"),
@@ -175,7 +175,7 @@ fn a_newer_schema_is_unrenderable() {
     ))
     .expect_err("newer");
 
-    assert!(matches!(err, RenderError::UnsupportedSchema(v) if v == "perf-sentinel-report/v1.8"));
+    assert!(matches!(err, RenderError::UnsupportedSchema(v) if v == "perf-sentinel-report/v1.9"));
 }
 
 #[test]
@@ -447,6 +447,8 @@ mod layout_and_pages {
             Some(crate::report::periodic::schema::CarbonBreakdown {
                 operational_kgco2eq: Some(1.71),
                 embodied_kgco2eq: Some(0.2),
+                database_kgco2eq: None,
+                messaging_kgco2eq: None,
                 database_kgco2eq_out_of_total: Some(0.12),
                 messaging_kgco2eq_out_of_total: None,
                 transport_kgco2eq: Some(0.04),
@@ -458,7 +460,145 @@ mod layout_and_pages {
         assert!(all.contains("embodied 0.20 kg"), "{all}");
         assert!(all.contains("network transport 0.04 kg"), "{all}");
         assert!(all.contains("database 0.12 kg"), "{all}");
-        assert!(!all.contains("broker"), "{all}");
+        // No broker figure, only the at-a-glance perimeter sentence.
+        assert!(!all.contains("broker 0."), "{all}");
+        assert!(!all.contains("broker hosts"), "{all}");
+    }
+
+    fn at_a_glance_text(report: &PeriodicReport) -> String {
+        texts(&layout_pages(&PageContext::for_report(report)))
+            .into_iter()
+            .find(|page| page.contains("Three numbers"))
+            .expect("at a glance page")
+    }
+
+    fn in_total_block(kwh: f64) -> crate::report::periodic::schema::DatabaseWasteAggregate {
+        crate::report::periodic::schema::DatabaseWasteAggregate {
+            energy_kwh: kwh,
+            in_totals_energy_kwh: kwh,
+            windows_with_figure: 1,
+            declared_windows: 1,
+            in_totals_windows: 1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn at_a_glance_states_the_host_perimeter() {
+        let (mut report, _) = baked_report();
+        report.aggregate.database_waste = None;
+        report.aggregate.messaging_waste = None;
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains("The database and broker servers are outside these totals."),
+            "{text}"
+        );
+        report.aggregate.database_waste = Some(in_total_block(0.42));
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains("The totals include the database hosts (0.42 kWh)."),
+            "{text}"
+        );
+        assert!(
+            text.contains("The broker servers are outside these totals."),
+            "{text}"
+        );
+        report.aggregate.messaging_waste = Some(in_total_block(0.07));
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains(
+                "The totals include the database hosts (0.42 kWh) and broker hosts (0.07 kWh)."
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("outside these totals"), "{text}");
+        // A block whose figure stayed beside the totals leaves its hosts out.
+        report.aggregate.messaging_waste =
+            Some(crate::report::periodic::schema::DatabaseWasteAggregate {
+                in_totals_energy_kwh: 0.0,
+                in_totals_windows: 0,
+                ..in_total_block(0.07)
+            });
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains("The broker servers are outside these totals."),
+            "{text}"
+        );
+        // In-total windows that billed nothing still put the hosts inside.
+        report.aggregate.messaging_waste = Some(in_total_block(0.0));
+        let text = at_a_glance_text(&report);
+        assert!(text.contains("and broker hosts (0.00 kWh)."), "{text}");
+        // A small host never reads as zero, a partial one names its windows.
+        report.aggregate.messaging_waste =
+            Some(crate::report::periodic::schema::DatabaseWasteAggregate {
+                windows_with_figure: 4,
+                ..in_total_block(0.0024)
+            });
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains("and broker hosts (2.4e-3 kWh, in 1 of 4 windows)."),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_application_table_shows_the_in_total_hosts() {
+        let (mut report, _) = baked_report();
+        report.aggregate.database_waste = Some(in_total_block(3.0));
+        report.aggregate.messaging_waste = None;
+        report.aggregate.carbon_breakdown =
+            Some(crate::report::periodic::schema::CarbonBreakdown {
+                database_kgco2eq: Some(0.25),
+                ..Default::default()
+            });
+        let pages = layout_pages(&PageContext::for_report(&report));
+        let page = &pages[page_of(&pages, "Which services consumed what") - 1];
+        let row_of = |name: &str| -> Vec<String> {
+            let y = page
+                .iter()
+                .find_map(|op| match op {
+                    Op::Text { y, text, .. } if text == name => Some(*y),
+                    _ => None,
+                })
+                .expect("the row");
+            page.iter()
+                .filter_map(|op| match op {
+                    Op::Text { y: row_y, text, .. } if (*row_y - y).abs() < 0.01 => {
+                        Some(text.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let host = row_of("Database hosts");
+        assert!(host.contains(&"3.00".to_string()), "{host:?}");
+        assert!(host.contains(&"0.25".to_string()), "{host:?}");
+        assert!(
+            !page
+                .iter()
+                .any(|op| matches!(op, Op::Text { text, .. } if text == "Broker hosts")),
+            "no broker host in the totals, no broker row"
+        );
+    }
+
+    #[test]
+    fn in_total_host_carbon_is_printed_inside_the_total() {
+        let (mut report, _) = baked_report();
+        report.aggregate.carbon_breakdown =
+            Some(crate::report::periodic::schema::CarbonBreakdown {
+                operational_kgco2eq: Some(1.71),
+                database_kgco2eq: Some(0.3),
+                messaging_kgco2eq: Some(0.05),
+                ..Default::default()
+            });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            all.contains(
+                "Made of operational 1.71 kg, database hosts 0.30 kg, broker hosts 0.05 kg."
+            ),
+            "{all}"
+        );
+        assert!(!all.contains("Outside this total"), "{all}");
     }
 
     #[test]

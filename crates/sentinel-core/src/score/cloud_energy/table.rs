@@ -17,8 +17,15 @@
 //! `SPECpower_ssj 2008` entries absent from the provider CSV are kept
 //! as-is in [`MANUAL_INSTANCE_ROWS`] below.
 //!
-//! Graviton 2 / 3 / 3E / 4 share the CCF EPYC 2nd Gen coefficient (no
-//! published `SPECpower` submissions for these silicon variants). The
+//! Rows exist for Graviton 2 (`m6g`, `c6g`, `r6g`, `t4g`), Graviton 3
+//! (`m7g`, `c7g`, `r7g`) and Graviton 4 (`m8g`, `c8g`, `r8g`), and the
+//! CSV gives all three the EPYC 2nd Gen coefficient (no published
+//! `SPECpower` submissions for this silicon). A Graviton `.medium` is
+//! 1 vCPU. Burstable families (AWS `t3`, `t3a`, `t4g`, Azure
+//! `Standard_B*`) count their full vCPU, burst credit is not modeled.
+//! GCP `n1` and Azure `Standard_B*` run on several processor
+//! generations and take the one with the highest max W/vCPU the
+//! provider CSV publishes (Skylake and Haswell). The
 //! Cobalt 100 ARM and Ampere Altra entries that are absent from the
 //! Azure / GCP CSV are kept on the `SPECpower` direct compute.
 //! Sierra Forest entries (`xeon-6780e`) are 1-chip system level for
@@ -42,6 +49,11 @@
 //! ~5x higher than neighbouring architectures, likely measured at chip
 //! granularity by an upstream `SPECpower` submission). See
 //! `docs/LIMITATIONS.md` for both rationale and uncertainty brackets.
+//!
+//! Managed database, cache, broker and search class names, and AWS or
+//! Azure names carrying a storage or network modifier, resolve to the
+//! VM row they run on through [`resolve_instance_class`], and Azure SQL
+//! Gen5 vCore objectives scale the largest Skylake Azure row per vCore.
 //!
 //! Full methodology, uncertainty bounds, and per-architecture caveats
 //! are in `docs/LIMITATIONS.md` "Cloud `SPECpower` precision bounds".
@@ -221,8 +233,12 @@ static PROVIDER_DEFAULTS: LazyLock<HashMap<&str, (f64, f64)>> = LazyLock::new(||
 /// (compile-time invariant, cannot happen in practice).
 #[must_use]
 pub fn lookup_instance_power(instance_type: &str, provider: &str) -> (f64, f64) {
-    if let Some(&power) = INSTANCE_POWER.get(instance_type) {
-        return power;
+    if let InstanceClass::Known {
+        idle_watts,
+        max_watts,
+    } = resolve_instance_class(instance_type)
+    {
+        return (idle_watts, max_watts);
     }
     if let Some(&power) = PROVIDER_DEFAULTS.get(provider) {
         return power;
@@ -233,10 +249,212 @@ pub fn lookup_instance_power(instance_type: &str, provider: &str) -> (f64, f64) 
         .expect("generic default must exist")
 }
 
-/// Returns `true` if the instance type is known in the embedded table.
+/// Returns `true` if the instance type resolves to a row of the
+/// embedded table, directly or through [`resolve_instance_class`].
 #[must_use]
 pub fn is_known_instance_type(instance_type: &str) -> bool {
-    INSTANCE_POWER.contains_key(instance_type)
+    matches!(
+        resolve_instance_class(instance_type),
+        InstanceClass::Known { .. }
+    )
+}
+
+/// How an instance type name resolves against the embedded table.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InstanceClass {
+    /// A row, reached directly or through a managed-class or modifier rule.
+    Known { idle_watts: f64, max_watts: f64 },
+    /// A class the model leaves out on purpose, with the reason.
+    Unsupported(&'static str),
+    /// No row and no rule matched.
+    Unknown,
+}
+
+/// Resolve an instance type to its power envelope.
+///
+/// Rules, first hit wins: an exact row, the classes left out on
+/// purpose, a managed wrapper (`db.`, `cache.`, `kafka.`, `express.`,
+/// `mq.`, `.search`, `.elasticsearch`) around a row, an AWS family
+/// carrying `d`, `n` or `b` modifiers, an Azure size carrying the
+/// `d` temp-disk feature, a Cloud SQL tier named after its machine
+/// type, an Azure SQL Gen5 vCore objective. Every rule but the last
+/// lands on an existing row, the last scales one per vCore.
+#[must_use]
+pub fn resolve_instance_class(name: &str) -> InstanceClass {
+    if let Some(&power) = INSTANCE_POWER.get(name) {
+        return known(power);
+    }
+    if let Some(reason) = unsupported_reason(name) {
+        return InstanceClass::Unsupported(reason);
+    }
+    let base = strip_managed_wrapper(name).unwrap_or(name);
+    INSTANCE_POWER
+        .get(base)
+        .copied()
+        .or_else(|| aws_base_family(base))
+        .or_else(|| azure_without_temp_disk(base))
+        .or_else(|| cloud_sql_tier(base))
+        .or_else(|| azure_sql_vcore(base))
+        .map_or(InstanceClass::Unknown, known)
+}
+
+/// The spelling that resolves when `name` only differs from it by case:
+/// the row name ignoring case, or the lowercase form for AWS and managed
+/// classes. `None` when no case variant resolves.
+#[must_use]
+pub(crate) fn case_variant(name: &str) -> Option<String> {
+    let row = INSTANCE_POWER
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case(name))
+        .map(|key| (*key).to_string());
+    row.into_iter()
+        .chain(std::iter::once(name.to_ascii_lowercase()))
+        .find(|candidate| {
+            candidate != name
+                && matches!(
+                    resolve_instance_class(candidate),
+                    InstanceClass::Known { .. }
+                )
+        })
+}
+
+fn known((idle_watts, max_watts): (f64, f64)) -> InstanceClass {
+    InstanceClass::Known {
+        idle_watts,
+        max_watts,
+    }
+}
+
+/// Managed classes an operator would type but the model cannot ground
+/// on a VM row.
+fn unsupported_reason(name: &str) -> Option<&'static str> {
+    match name {
+        // https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.how-it-works.html
+        "db.serverless" => Some(
+            "Aurora Serverless v2 is sized in ACUs, each about 2 GiB of memory with \
+             corresponding CPU and networking, and AWS publishes no vCPU equivalence",
+        ),
+        // Same exclusion as the shared-vCPU offers in scripts/refresh-instance-power.py.
+        "db-f1-micro" | "db-g1-small" => Some(
+            "Cloud SQL shared-core tiers run on a shared vCPU, excluded like every \
+             shared-vCPU offer",
+        ),
+        _ if name.starts_with("redis-") => Some(
+            "Memorystore node types publish a vCPU count but not the machine series \
+             behind it",
+        ),
+        // https://learn.microsoft.com/azure/azure-sql/database/service-tiers-sql-database-vcore
+        _ if name.contains("_Fsv2_") => {
+            Some("Azure SQL retired its Fsv2-series hardware on October 1, 2026")
+        }
+        // https://docs.cloud.google.com/sql/docs/mysql/machine-series-overview
+        // says x86-based and names no series. db-custom-N4-* names its series.
+        _ if name
+            .strip_prefix("db-custom-")
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit())) =>
+        {
+            Some(
+                "Cloud SQL names no machine series or processor behind its dedicated-core \
+                 custom tiers",
+            )
+        }
+        _ => None,
+    }
+}
+
+fn strip_managed_wrapper(name: &str) -> Option<&str> {
+    ["db.", "cache.", "kafka.", "express.", "mq."]
+        .iter()
+        .find_map(|prefix| name.strip_prefix(prefix))
+        .or_else(|| {
+            [".search", ".elasticsearch"]
+                .iter()
+                .find_map(|suffix| name.strip_suffix(suffix))
+        })
+}
+
+/// `<family>.<size>` with up to two trailing `d` (instance store), `n`
+/// (network) or `b` (block storage) letters on the family, which leave
+/// the processor unchanged. Processor letters (`a`, `g`, `i`) and the
+/// `z`, `e` modifiers are never dropped, so `m5zn` and `x2iedn` stay
+/// unknown.
+fn aws_base_family(name: &str) -> Option<(f64, f64)> {
+    let (mut family, size) = name.split_once('.')?;
+    if size.contains('.') {
+        return None;
+    }
+    for _ in 0..2 {
+        family = family.strip_suffix(['d', 'n', 'b'])?;
+        if let Some(&power) = INSTANCE_POWER.get(format!("{family}.{size}").as_str()) {
+            return Some(power);
+        }
+    }
+    None
+}
+
+/// `Standard_<series><size><features>_v<k>` with a `d` (local temp
+/// disk) feature letter, which leaves the processor unchanged:
+/// `Standard_D4ds_v5` resolves to `Standard_D4s_v5`.
+fn azure_without_temp_disk(name: &str) -> Option<(f64, f64)> {
+    let (shape, version) = name.strip_prefix("Standard_")?.rsplit_once("_v")?;
+    let size_start = shape.find(|c: char| c.is_ascii_digit())?;
+    let features_start = size_start + shape[size_start..].find(|c: char| !c.is_ascii_digit())?;
+    let (series_size, features) = shape.split_at(features_start);
+    let series_ok = size_start > 0 && shape[..size_start].bytes().all(|b| b.is_ascii_uppercase());
+    if !series_ok || !features.bytes().all(|b| b.is_ascii_lowercase()) || !features.contains('d') {
+        return None;
+    }
+    let features = features.replace('d', "");
+    INSTANCE_POWER
+        .get(format!("Standard_{series_size}{features}_v{version}").as_str())
+        .copied()
+}
+
+/// Cloud SQL tiers named after the Compute Engine type they run on:
+/// `db-n1-standard-N`, `db-n1-highmem-N`, and Enterprise Plus
+/// `db-perf-optimized-N-V`, on the N2 series at 8 GB per vCPU, hence
+/// `n2-highmem-V` (the 128 vCPU size carries 6.75 GB like
+/// `n2-highmem-128`).
+fn cloud_sql_tier(name: &str) -> Option<(f64, f64)> {
+    let row = match name.strip_prefix("db-perf-optimized-N-") {
+        Some(vcpu) => format!("n2-highmem-{vcpu}"),
+        None => name
+            .strip_prefix("db-")
+            .filter(|n| n.starts_with("n1-"))?
+            .to_owned(),
+    };
+    INSTANCE_POWER.get(row.as_str()).copied()
+}
+
+/// Azure SQL Database and Managed Instance vCore objectives on
+/// standard-series (Gen5) hardware, `{GP|BC|HS}_Gen5_N` and serverless
+/// `{GP|HS}_S_Gen5_N`: N vCores at the per-vCPU rate of
+/// `Standard_D64s_v3`. Microsoft lists Broadwell,
+/// Skylake, Cascade Lake, Ice Lake, Milan, Genoa and Emerald Rapids for
+/// Gen5, the Azure CSV publishes Broadwell, Skylake, Cascade Lake and
+/// EPYC 3rd Gen, and Skylake has the highest max W/vCPU among them
+/// (mixed-platform rule), so the largest Skylake row is the reference.
+/// Gen5 carries 5.1 GB per vCore, below the DRAM premium threshold. The
+/// serverless `S_` form takes N as its max vCores, a ceiling. Unrounded.
+fn azure_sql_vcore(name: &str) -> Option<(f64, f64)> {
+    const REFERENCE: &str = "Standard_D64s_v3";
+    const REFERENCE_VCPU: f64 = 64.0;
+    let (tier, rest) = name.split_once('_')?;
+    if !matches!(tier, "GP" | "BC" | "HS") {
+        return None;
+    }
+    let serverless = rest.strip_prefix("S_");
+    if serverless.is_some() && tier == "BC" {
+        return None;
+    }
+    let vcores = serverless.unwrap_or(rest).strip_prefix("Gen5_")?;
+    if vcores.starts_with('0') || !vcores.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let vcores: u32 = vcores.parse().ok().filter(|n| (1..=1024).contains(n))?;
+    let &(idle, max) = INSTANCE_POWER.get(REFERENCE)?;
+    let scale = f64::from(vcores) / REFERENCE_VCPU;
+    Some((idle * scale, max * scale))
 }
 
 /// Linearly interpolate watts from CPU utilization percentage.
@@ -279,371 +497,4 @@ pub fn compute_cloud_energy_per_op_kwh(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The published list must hold every type the lookup accepts, and
-    /// claim no type it does not. `refresh-instance-power.py` rewrites the
-    /// table from upstream coefficients, so a hand-maintained page would
-    /// go stale on the first refresh and quietly send operators to a
-    /// fallback average. Regenerate with
-    /// `python3 scripts/generate-instance-types-doc.py`.
-    #[test]
-    fn instance_types_doc_matches_the_table() {
-        fn rows(doc: &str) -> HashMap<&str, (f64, f64)> {
-            doc.lines()
-                .filter_map(|line| {
-                    let mut columns = line.split('|').map(str::trim);
-                    columns.next()?;
-                    let name = columns.next()?.strip_prefix('`')?.strip_suffix('`')?;
-                    let idle = columns.next()?.parse().ok()?;
-                    let max = columns.next()?.parse().ok()?;
-                    Some((name, (idle, max)))
-                })
-                .collect()
-        }
-
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
-        for relative in ["INSTANCE-TYPES.md", "FR/INSTANCE-TYPES-FR.md"] {
-            let doc = std::fs::read_to_string(root.join(relative)).expect("read instance docs");
-            let listed = rows(&doc);
-            assert_eq!(listed.len(), INSTANCE_POWER.len(), "{relative}");
-            for (name, expected) in INSTANCE_POWER.iter() {
-                assert_eq!(listed.get(name), Some(expected), "{relative}: {name}");
-            }
-            assert!(doc.contains(SPECPOWER_VINTAGE), "{relative}: vintage");
-            let bare_metal = doc.find("## Bare metal").expect("bare-metal section");
-            let xeon = doc.find("`xeon-6780e`").expect("bare-metal row");
-            assert!(xeon > bare_metal, "{relative}: bare-metal section");
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // lookup_instance_power
-    // ------------------------------------------------------------------
-
-    // Sizes within a family must scale linearly with vCPU count, per
-    // the `vCPU * coefficient` methodology. Relation-based so a data
-    // refresh does not break them. Exact values are reviewed on the
-    // refresh PR diff.
-    #[test]
-    fn known_aws_instance_scales_with_vcpu() {
-        let (idle_2, max_2) = lookup_instance_power("m5.large", "aws");
-        let (idle_4, max_4) = lookup_instance_power("m5.xlarge", "aws");
-        assert!((idle_4 - 2.0 * idle_2).abs() < 0.1);
-        assert!((max_4 - 2.0 * max_2).abs() < 0.2);
-    }
-
-    #[test]
-    fn known_gcp_instance_scales_with_vcpu() {
-        let (idle_2, max_2) = lookup_instance_power("n2-standard-2", "gcp");
-        let (idle_8, max_8) = lookup_instance_power("n2-standard-8", "gcp");
-        assert!((idle_8 - 4.0 * idle_2).abs() < 0.2);
-        assert!((max_8 - 4.0 * max_2).abs() < 0.4);
-    }
-
-    #[test]
-    fn known_azure_instance_scales_with_vcpu() {
-        let (idle_2, max_2) = lookup_instance_power("Standard_D2s_v3", "azure");
-        let (idle_8, max_8) = lookup_instance_power("Standard_D8s_v3", "azure");
-        assert!((idle_8 - 4.0 * idle_2).abs() < 0.2);
-        assert!((max_8 - 4.0 * max_2).abs() < 0.4);
-    }
-
-    #[test]
-    fn unknown_instance_falls_back_to_provider_default() {
-        let fallback = lookup_instance_power("m999.future", "aws");
-        let default = *PROVIDER_DEFAULTS.get("aws").expect("aws default");
-        assert_eq!(fallback, default);
-    }
-
-    // The generated/manual split relies on disjoint keys: a HashMap
-    // collision would silently shadow a generated row with a stale
-    // manual one (the exact mistake the refresh-script watchlist
-    // invites when a family moves from manual to generated).
-    #[test]
-    fn generated_and_manual_instance_keys_are_disjoint() {
-        assert_eq!(
-            INSTANCE_POWER.len(),
-            super::super::table_data::GENERATED_INSTANCE_ROWS.len() + MANUAL_INSTANCE_ROWS.len(),
-            "a manual instance row shadows a generated one"
-        );
-    }
-
-    // Cross-CSV sanity anchor: the same architecture (Cascade Lake, 2
-    // vCPU) must land in the same ballpark across provider CSVs. A
-    // mis-scaled or mis-parsed Azure CSV passes the positivity and
-    // linear-scaling tests, but not this one.
-    #[test]
-    fn azure_scale_sane_vs_aws_same_architecture() {
-        let (aws_idle, aws_max) = lookup_instance_power("m5.large", "aws");
-        let (az_idle, az_max) = lookup_instance_power("Standard_D2s_v4", "azure");
-        assert!(
-            az_idle > aws_idle * 0.5 && az_idle < aws_idle * 2.0,
-            "Azure Cascade Lake idle {az_idle} out of 2x band vs AWS {aws_idle}"
-        );
-        assert!(
-            az_max > aws_max * 0.5 && az_max < aws_max * 2.0,
-            "Azure Cascade Lake max {az_max} out of 2x band vs AWS {aws_max}"
-        );
-    }
-
-    /// Scaleway rows are derived from the catalog's exact CPU rather
-    /// than from a published wattage, so this test pins the invariants
-    /// that keep them correct. The same silicon must land on the same
-    /// per-vCPU figure as the provider whose coefficient it borrows, and
-    /// the excluded categories must stay out.
-    #[test]
-    fn scaleway_rows_agree_with_the_architecture_they_borrow() {
-        // Turin uses the GCP c4d SPECpower compute, same EPYC 9005
-        // generation, so 2 vCPU must price identically on both.
-        assert_eq!(
-            lookup_instance_power("COMPUTE3-X2C-4G", "scaleway"),
-            lookup_instance_power("c4d-standard-2", "gcp"),
-            "Turin rows must match the c4d reference they are derived from"
-        );
-        // POP2 is EPYC 3rd Gen (Milan) from the AWS CSV, the same
-        // coefficient m6a uses: 2 vCPU against m6a.large's 2 vCPU.
-        assert_eq!(
-            lookup_instance_power("POP2-2C-8G", "scaleway"),
-            lookup_instance_power("m6a.large", "aws"),
-            "POP2 must match the Milan coefficient it borrows"
-        );
-        // The memory-optimized range carries the DRAM premium, so it
-        // must draw strictly more than the compute range at equal vCPU.
-        let (mem_idle, mem_max) = lookup_instance_power("MEMORY3-X2C-16G", "scaleway");
-        let (cpu_idle, cpu_max) = lookup_instance_power("COMPUTE3-X2C-4G", "scaleway");
-        assert!(
-            mem_idle > cpu_idle && mem_max > cpu_max,
-            "MEMORY3 carries 8 GiB/vCPU, so it must exceed COMPUTE3: {mem_idle}/{mem_max} vs {cpu_idle}/{cpu_max}"
-        );
-        // Shared-vCPU, GPU and unmapped-architecture ranges stay out:
-        // each would need an assumption the model does not make.
-        for excluded in ["DEV1-S", "PLAY2-PICO", "H100-1-80G", "STANDARD2-X2C-8G"] {
-            assert!(
-                !is_known_instance_type(excluded),
-                "{excluded} must stay out of the table"
-            );
-        }
-    }
-
-    #[test]
-    fn modern_architecture_keys_present() {
-        for key in [
-            "m7i.large",
-            "c7a.large",
-            "r7a.large",
-            "m6a.xlarge",
-            "c7g.large",
-            "m8g.large",
-            "m8a.large",
-            "c8a.large",
-            "m8i.large",
-            "c8i.large",
-            "c4-standard-4",
-            "c4d-standard-8",
-            "c4a-standard-2",
-            "t2a-standard-2",
-            "Standard_D2s_v6",
-            "Standard_D2ps_v6",
-            "xeon-6780e",
-        ] {
-            assert!(is_known_instance_type(key), "missing modern entry: {key}");
-        }
-    }
-
-    #[test]
-    fn turin_overrides_to_genoa_proxy() {
-        // EPYC 5th Gen Turin (m8a/c8a) is proxied to EPYC 4th Gen Genoa
-        // (m7a/c7a) because the CCF 2026-04-24 Turin row is anomalously
-        // high. If this test fails, re-evaluate the override against the
-        // current CCF snapshot before silently aligning to a new value.
-        // See docs/LIMITATIONS.md section "EPYC 5th Gen Turin" for the
-        // rationale and the revalidation procedure.
-        let sizes = [
-            "large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "16xlarge",
-        ];
-        for size in sizes {
-            for (turin, genoa) in [("m8a", "m7a"), ("c8a", "c7a")] {
-                let turin_key = format!("{turin}.{size}");
-                let genoa_key = format!("{genoa}.{size}");
-                assert_eq!(
-                    lookup_instance_power(&turin_key, "aws"),
-                    lookup_instance_power(&genoa_key, "aws"),
-                    "{turin_key} (Turin) must alias to {genoa_key} (Genoa) until CCF correction"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn m_series_does_not_carry_dram_premium() {
-        // m5 and c5 share the bare Cascade Lake coefficient (CCF does
-        // not differentiate general-purpose vs compute). If a refactor
-        // applied the DRAM premium to general-purpose families, m5
-        // would drift away from c5 and this equality would break.
-        assert_eq!(
-            lookup_instance_power("m5.large", "aws"),
-            lookup_instance_power("c5.large", "aws"),
-            "m5.large must stay on the bare coefficient, like c5.large"
-        );
-    }
-
-    #[test]
-    fn r_series_includes_dram_premium_over_general_purpose() {
-        // r5.large (2 vCPU memory-optimized, Cascade Lake) should carry
-        // an additive DRAM premium over m5.large (2 vCPU general-purpose,
-        // same Cascade Lake): 2 vCPU * 8 GB/vCPU * 0.02 W/GB = 0.32 idle,
-        // 2 vCPU * 8 GB/vCPU * 0.05 W/GB = 0.80 max. If this test fails,
-        // re-check that DRAM_PREMIUM_W_PER_GB_{IDLE,MAX} and the inline
-        // r-series values stay in sync.
-        let (m5_idle, m5_max) = lookup_instance_power("m5.large", "aws");
-        let (r5_idle, r5_max) = lookup_instance_power("r5.large", "aws");
-        assert!(
-            (r5_idle - m5_idle - 0.32).abs() < 0.05,
-            "DRAM idle uplift drift: r5 {r5_idle} - m5 {m5_idle} expected ~0.32"
-        );
-        assert!(
-            (r5_max - m5_max - 0.80).abs() < 0.05,
-            "DRAM max uplift drift: r5 {r5_max} - m5 {m5_max} expected ~0.80"
-        );
-    }
-
-    #[test]
-    fn sierra_forest_entries_are_chip_level_not_vcpu_level() {
-        // Sierra Forest entries are 1-chip system-level watts, not vCPU-scaled.
-        // A vCPU-scaled value would never exceed ~6 W idle for a 144-thread
-        // entry, so floor at 50 W idle catches accidental rescaling errors.
-        let (idle, _) = lookup_instance_power("xeon-6780e", "generic");
-        assert!(
-            idle >= 50.0,
-            "xeon-6780e must be system-level (>=50W idle), got {idle}"
-        );
-    }
-
-    #[test]
-    fn unknown_provider_falls_back_to_generic() {
-        let (idle, max) = lookup_instance_power("custom.instance", "onprem");
-        assert!((idle - 3.0).abs() < 0.01);
-        assert!((max - 20.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn is_known_true_for_table_entry() {
-        assert!(is_known_instance_type("c5.4xlarge"));
-    }
-
-    #[test]
-    fn is_known_false_for_missing_entry() {
-        assert!(!is_known_instance_type("m99.jumbo"));
-    }
-
-    // ------------------------------------------------------------------
-    // interpolate_watts
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn interpolate_at_zero_percent() {
-        let w = interpolate_watts(2.0, 20.0, 0.0);
-        assert!((w - 2.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn interpolate_at_fifty_percent() {
-        let w = interpolate_watts(2.0, 20.0, 50.0);
-        assert!((w - 11.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn interpolate_at_hundred_percent() {
-        let w = interpolate_watts(2.0, 20.0, 100.0);
-        assert!((w - 20.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn interpolate_clamps_below_zero() {
-        let w = interpolate_watts(2.0, 20.0, -10.0);
-        assert!((w - 2.0).abs() < 1e-10, "should clamp to idle");
-    }
-
-    #[test]
-    fn interpolate_clamps_above_hundred() {
-        let w = interpolate_watts(2.0, 20.0, 150.0);
-        assert!((w - 20.0).abs() < 1e-10, "should clamp to max");
-    }
-
-    #[test]
-    fn interpolate_nan_returns_idle() {
-        let w = interpolate_watts(2.0, 20.0, f64::NAN);
-        assert!((w - 2.0).abs() < 1e-10, "NaN input should return idle");
-    }
-
-    #[test]
-    fn interpolate_infinity_returns_idle() {
-        let w = interpolate_watts(2.0, 20.0, f64::INFINITY);
-        assert!((w - 2.0).abs() < 1e-10, "Inf input should return idle");
-    }
-
-    // ------------------------------------------------------------------
-    // compute_cloud_energy_per_op_kwh
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn basic_energy_computation() {
-        // 10 W for 15 seconds, 100 ops.
-        // kWh = 10/1000 * 15/3600 = 0.0000416667
-        // per_op = 0.0000416667 / 100 = 4.16667e-7
-        let result = compute_cloud_energy_per_op_kwh(10.0, 15.0, 100);
-        assert!(result.is_some());
-        let per_op = result.unwrap();
-        let expected = (10.0 / 1000.0) * (15.0 / 3600.0) / 100.0;
-        assert!((per_op - expected).abs() < 1e-15);
-    }
-
-    #[test]
-    fn zero_ops_returns_none() {
-        assert!(compute_cloud_energy_per_op_kwh(10.0, 15.0, 0).is_none());
-    }
-
-    #[test]
-    fn negative_watts_returns_none() {
-        assert!(compute_cloud_energy_per_op_kwh(-1.0, 15.0, 100).is_none());
-    }
-
-    #[test]
-    fn nan_watts_returns_none() {
-        assert!(compute_cloud_energy_per_op_kwh(f64::NAN, 15.0, 100).is_none());
-    }
-
-    #[test]
-    fn infinite_watts_returns_none() {
-        assert!(compute_cloud_energy_per_op_kwh(f64::INFINITY, 15.0, 100).is_none());
-    }
-
-    // ------------------------------------------------------------------
-    // Table integrity
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn all_entries_have_positive_values() {
-        for (name, &(idle, max)) in INSTANCE_POWER.iter() {
-            assert!(idle > 0.0, "{name}: idle must be positive, got {idle}");
-            assert!(max > 0.0, "{name}: max must be positive, got {max}");
-            assert!(max >= idle, "{name}: max ({max}) must be >= idle ({idle})");
-        }
-    }
-
-    #[test]
-    fn table_has_expected_entry_count() {
-        // CCF 2026-04-24 vCPU * coefficient across AWS/GCP/Azure, plus a
-        // handful of direct-SPECpower entries where the provider CSV has
-        // no row (Azure v6, GCP t2a/c4d, Cobalt 100), plus 1 Sierra Forest
-        // CPU-named system-level row. Conservative floor that tolerates
-        // minor entry pruning.
-        assert!(
-            INSTANCE_POWER.len() >= 300,
-            "expected >= 300 entries, got {}",
-            INSTANCE_POWER.len()
-        );
-    }
-}
+mod tests;

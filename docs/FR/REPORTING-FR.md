@@ -20,7 +20,7 @@ Pour l'intent `official`, le validateur refuse également les rapports sous 75% 
 
 `disclose` rapporte `aggregate.temporal_coverage` : la fraction des jours calendaires de la période déclarée qui ont porté des mesures (`observed_days / days_in_period`). Quand elle tombe sous un seuil informatif, la CLI affiche un warning sur stderr et ajoute un disclaimer au rapport, mais elle ne bloque jamais un rapport `official`. L'archivage est déclenché par le trafic (une fenêtre sans trafic n'écrit rien), donc un chiffre bas peut être une période légitimement calme plutôt qu'un trou de mesure. À traiter comme une borne basse de l'activité, pas comme une garantie de disponibilité du daemon. Il existe pour qu'un lecteur distingue un trimestre mesuré en continu d'un trimestre où le daemon n'a tourné que quelques jours, le signal interne au binaire le plus proche de "l'opérateur a arrêté de mesurer une partie de la période". La non-participation totale (ne jamais lancer l'outil) ne laisse aucun rapport et sort du périmètre de toute vérification interne au binaire, voir [docs/FR/design/08-PERIODIC-DISCLOSURE-FR.md](design/08-PERIODIC-DISCLOSURE-FR.md).
 
-Deux vérifications supplémentaires resserrent la cohérence. Le validateur rejette en dur un `days_covered` qui ne vaut pas `(to_date - from_date) + 1` (un rapport produit par disclose le satisfait toujours, donc seul un fichier édité à la main le déclenche) et un `requests_measured` qui dépasse un `total_requests_in_period` déclaré par l'opérateur. Pour l'intent `official`, omettre `total_requests_in_period` dans l'org-config émet un warning, puisque `coverage_percentage` est alors absent du rapport.
+Deux vérifications supplémentaires resserrent la cohérence. Le validateur rejette en dur un `days_covered` qui ne vaut pas `(to_date - from_date) + 1` (un rapport produit par disclose le satisfait toujours, donc seul un fichier édité à la main le déclenche) et un `requests_measured` qui dépasse un `total_requests_in_period` déclaré par l'opérateur. Pour l'intent `official`, omettre `total_requests_in_period` à la fois dans l'org-config et dans `--total-requests-in-period` émet un warning, puisque `coverage_percentage` est alors absent du rapport.
 
 ### L'archive doit remonter au début de la période (0.28.0)
 
@@ -67,6 +67,7 @@ Perf Sentinel publie les rapports à deux niveaux de granularité, contrôlés p
 - `--org-config <PATH>` (requis pour `intent = "official"`). Le TOML statique organisation / méthodologie / scope décrit plus bas dans la section TOML org-config.
 - `--emit-attestation <PATH>` (optionnel). Quand fixé, écrit aussi le sidecar statement in-toto v1 à ce chemin. Nécessaire pour le workflow de signature.
 - `--strict-attribution` (optionnel). Par défaut, Perf Sentinel range les spans sans attribution `service.name` dans un service synthétique `_unattributed`. Ce service synthétique contribue aux totaux agrégés mais est exclu de la ventilation par service. Avec `--strict-attribution`, l'appel disclose refuse de produire un rapport si une fenêtre porte des spans non-attribués, en listant les horodatages en cause dans le message d'erreur. À utiliser pour une divulgation officielle quand on veut affirmer que 100% des opérations mesurées ont été correctement attribuées.
+- `--total-requests-in-period <N>` (optionnel). Nombre total de requêtes des applications du périmètre sur la période, le dénominateur de `coverage_percentage`. Prime sur `scope_manifest.total_requests_in_period` de l'org-config. Ce total n'est connu qu'une fois la période close, le passer à chaque exécution garde l'org-config statique. La prévisualisation `--tui` l'applique aussi et le reprend dans la commande qu'elle affiche.
 - `--tui` (optionnel, nécessite la feature de build `tui`). Ouvre une prévisualisation en lecture seule au lieu d'écrire un rapport, voir ci-dessous. Elle rend `--intent`, `--confidentiality`, `--period-type`, `--from`, `--to` et `--output` optionnels, puisqu'on les règle dans l'interface. Incompatible avec `--emit-attestation`.
 
 ## Prévisualisation interactive (`--tui`)
@@ -87,6 +88,7 @@ Seuls `--input` et `--org-config` restent requis. La période, l'intent et la co
 - `←` / `→` (ou `h` / `l`) déplacent la période d'une unité à la fois. En `custom` elles déplacent la borne active d'un jour, `[` et `]` la déplacent d'un mois, et `Tab` bascule entre la borne `from` et la borne `to`.
 - `i` bascule l'intent (internal ou official), `c` bascule la confidentialité (G1 internal ou G2 public).
 - Le résumé indique le nombre de fenêtres, la couverture de période face au seuil officiel, les services mesurés et exclus, les totaux (requêtes, carbone, énergie, ratio de gaspillage), et le verdict du validateur officiel quand l'intent est official.
+- Sous Totals, une ligne `Database:` et une ligne `Broker:` donnent le périmètre de chaque hôte : les kWh d'hôte inclus et combien des fenêtres portant un chiffre les ont comptés (`1.2500 kWh in the totals (3 of 5 windows)`), ou `outside the totals`. Voir [Périmètre des hôtes](#périmètre-des-hôtes-v18).
 - Le pied de page affiche la commande `disclose` exacte pour les réglages courants. Copiez-la pour produire le rapport haché.
 
 La prévisualisation nécessite un terminal interactif. Rediriger sa sortie (pas de TTY) se termine sur une erreur claire au lieu d'afficher quoi que ce soit.
@@ -106,12 +108,24 @@ Publier les deux permet à un lecteur de les comparer et de voir combien de gasp
 
 ![prévisualisation disclose, intent official : le validateur explique pourquoi le rapport n'est pas encore publiable](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/official.png)
 
+## Périmètre des hôtes (v1.8)
+
+`total_energy_kwh` et `total_carbon_kgco2eq` couvrent les services applicatifs, plus les hôtes de base de données et de broker dans les fenêtres qui les ont comptés. Une fenêtre compte un hôte quand un chiffre mesuré (`alumet_rapl`), modélisé (`cloud_specpower`) ou déclaré (`database_specpower`, `broker_specpower`) portait une conversion carbone. Le chiffre estimé est la part applicative des spans SQL ou de publication et reste dans les chiffres des applications. Un chiffre d'hôte archivé avant que l'énergie des hôtes n'entre dans les totaux, ou sans carbone, reste à côté d'eux sous `carbon_breakdown.*_kgco2eq_out_of_total`.
+
+Chaque rapport énonce ce périmètre trois fois :
+
+- `notes.disclaimers` se termine par une ligne par sous-système, base de données puis broker, ajoutée après les avertissements personnalisés ou par défaut. Elle dit que les hôtes sont dans les totaux sur les N fenêtres qui portaient un chiffre ou sur K fenêtres sur N (en nommant les fenêtres estimées et celles gardées à côté des totaux), avec les modèles et placements vus sur la période, ou que les totaux ne contiennent aucune énergie des hôtes de ce sous-système. Quand un hôte est inclus, la ligne ajoute que son carbone est dans `total_carbon_kgco2eq` et dans les chiffres d'aucune application.
+- La page « At a glance » du PDF nomme les hôtes de base de données et de broker dont le `in_totals_windows` n'est pas nul, le test de `notes.disclaimers`, avec leur `in_totals_energy_kwh` (et `in K of N windows` quand seule une partie des fenêtres les a comptés), et dit que les autres sont hors des totaux. Le tableau des applications ajoute une ligne `Database hosts` et une ligne `Broker hosts` pour ces mêmes hôtes, si bien que ses lignes s'additionnent jusqu'à la ligne Total.
+- `carbon_breakdown.database_kgco2eq` et `messaging_kgco2eq` portent le carbone des hôtes inclus, `database_waste.in_totals_energy_kwh` et `messaging_waste.in_totals_energy_kwh` leur énergie.
+
+Pour `intent = official`, le validateur contrôle ce périmètre : les deux termes carbone des hôtes sont finis et >= 0, les cinq termes de la ventilation s'additionnent en `total_carbon_kgco2eq` à 1e-6 près en relatif (contrôle sauté quand `carbon_methodologies` contient l'étiquette ancienne `sci_v1_numerator`), et le `energy_kwh` des applications plus les deux parts d'hôtes incluses tiennent dans `total_energy_kwh`.
+
 ## Correspondance ESRS E1 (v1.3)
 
 Chaque rapport porte `methodology.standard_crosswalk`, une correspondance interprétative de ses chiffres vers la norme européenne de reporting climat ESRS E1 (règlement délégué (UE) 2023/5303) :
 
-- `aggregate.total_energy_kwh` alimente **E1-5** (consommation et mix énergétiques), à convertir en MWh. Perf Sentinel ne ventile pas ce chiffre par source fossile, nucléaire ou renouvelable.
-- le terme carbone opérationnel alimente **E1-6 Scope 2** en base location-based. ESRS exige aussi un Scope 2 market-based, que SCI exclut, c'est donc une entrée partielle.
+- `aggregate.total_energy_kwh` alimente **E1-5** (consommation et mix énergétiques), à convertir en MWh. Perf Sentinel ne ventile pas ce chiffre par source fossile, nucléaire ou renouvelable. Il inclut l'énergie des hôtes de base de données et de broker quand le `in_totals_windows` correspondant n'est pas nul.
+- les termes carbone opérationnel, base de données et broker alimentent **E1-6 Scope 2** en base location-based. ESRS exige aussi un Scope 2 market-based, que SCI exclut, c'est donc une entrée partielle.
 - le carbone embarqué (le terme SCI `M`, agrégat seulement) alimente **E1-6 Scope 3** (catégories 1 et 2). ESRS admet les estimations et données proxy pour le Scope 3.
 
 C'est une **aide à la correspondance, pas une certification**. Elle ne transforme pas un rapport en déclaration CSRD : les chiffres gardent leur intervalle d'incertitude directionnel 2x, le périmètre est l'IT compute uniquement, et un inventaire audité par un organisme qualifié reste requis. Les mêmes mises en garde figurent dans le rapport lui-même, sous `standard_crosswalk.caveats` et dans `notes.disclaimers`.
@@ -146,6 +160,8 @@ Les opérateurs qui collectent déjà stdout du daemon via un sidecar peuvent pa
 ## TOML org-config
 
 Les champs statiques organisation/méthodologie/scope vivent dans un fichier TOML que vous versionnez dans votre dépôt d'infrastructure à côté du reste de la config Perf Sentinel. Un exemple complet est dans `docs/examples/perf-sentinel-org.toml`. Le même fichier est référencé par `[reporting] org_config_path` quand le daemon doit valider les rapports publiables au démarrage.
+
+`methodology.calibration.specpower_table_version` est optionnel. Omis, `disclose` le remplit avec la date de la table SPECpower que le binaire embarque, la seule qu'il puisse utiliser, si bien qu'une montée de version qui change la table ne demande aucune modification. Déclaré, il doit égaler cette date : `disclose --intent official` refuse un écart, tout comme le garde-fou de démarrage du daemon ci-dessous, pour que l'écart apparaisse au déploiement plutôt qu'à la production du rapport.
 
 ## Exemple : brouillon interne (G1)
 

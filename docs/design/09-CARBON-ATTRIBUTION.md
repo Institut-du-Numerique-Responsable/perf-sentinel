@@ -32,7 +32,7 @@ Once the loop completes, `score_green` produces the GreenSummary maps:
 - `per_service_energy_kwh[svc] = acc.energy_kwh`
 - `per_service_carbon_kgco2eq[svc] = acc.operational_gco2 / 1000.0`
 - `per_service_region[svc] = acc.region` (or `"unknown"` sentinel if empty)
-- `energy_kwh = sum(per_service_energy_kwh.values())`
+- `energy_kwh = sum(per_service_energy_kwh.values())`, plus the in-total database and broker host energy (see "Database and broker hosts are never a service" below)
 - `energy_model = select_co2_model_tag(window_flags)` when energy > 0, else empty string
 
 The per-service map is keyed by service name (lowercased upstream by `CarbonContext.service_regions`). The `region` field on the accumulator is also lowercased before storage, matching the keys in `per_region` so the two maps collate. Empty energy yields an empty `energy_model` string, which routes the window to the aggregator's proxy fallback path.
@@ -51,7 +51,7 @@ This trade-off keeps the per-service map simple. A more granular `BTreeMap<(Stri
 The per-window `energy_model` reuses the existing `select_co2_model_tag` from `score::region_breakdown`, which already implements the canonical precedence:
 
 ```
-electricity_maps_api > alumet_rapl > scaphandre_rapl > kepler_ebpf > redfish_bmc > cloud_specpower > io_proxy_v3 > io_proxy_v2 > io_proxy_v1
+electricity_maps_api > grid_operator_api > alumet_rapl > scaphandre_rapl > kepler_ebpf > redfish_bmc > cloud_specpower > io_proxy_v3 > io_proxy_v2 > io_proxy_v1
 ```
 
 with the optional `+cal` suffix when calibration data is active. The tag reflects the highest-fidelity model present in the window. No per-service breakdown of model tags is exposed: a transparent global tag is more useful than a per-service map that consumers would have to fold anyway.
@@ -65,6 +65,12 @@ The SCI `M` term lives only in `co2.total` and `aggregate.total_carbon_kgco2eq`.
 - Consumers (auditors, public dashboards) who need the per-service operational figure benefit from a cleaner number that maps directly to actionable optimisations.
 
 The invariant `sum(per_service_carbon_kgco2eq) × 1000 ≈ co2.operational_gco2` (tolerance 1e-6) is tested.
+
+## Database and broker hosts are never a service
+
+A measured or declared database or broker figure that a window counts inside its totals (`in_totals`) adds its kWh to `energy_kwh` and its carbon to `co2.total` as `co2.database_gco2` or `co2.messaging_gco2`, never to a per-service map. The host emits no span, so no operation of any service is its own, and spreading it over the services would bill an application for a database it only calls. `operational_gco2` and `regions[]` stay application-only too, so the invariant above holds unchanged, and `GreenSummary::application_energy_kwh()` gives `energy_kwh` minus the in-total host energy, which `sum(per_service_energy_kwh)` approximates.
+
+The aggregator keeps the same boundary. On the runtime path the per-service maps carry no host term. The proxy-share and `_unattributed` paths spread the window energy minus the in-total host energy and the window carbon minus its host carbon, and the host part is published in `aggregate.carbon_breakdown.database_kgco2eq` and `messaging_kgco2eq` instead. `applications[]` therefore sum to `total_energy_kwh` minus the in-total host energy, or less when the service cap drops services.
 
 ## Aggregator branching
 

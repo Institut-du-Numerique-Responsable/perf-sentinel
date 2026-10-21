@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 
 use super::carbon::{
     self, CO2_MODEL, CO2_MODEL_ALUMET, CO2_MODEL_CLOUD_SPECPOWER, CO2_MODEL_EMAPS,
-    CO2_MODEL_KEPLER, CO2_MODEL_REDFISH, CO2_MODEL_SCAPHANDRE, CO2_MODEL_V2, CO2_MODEL_V3,
-    CarbonEstimate, CarbonReport, GENERIC_PUE, IntensitySource, REGION_STATUS_KNOWN,
-    REGION_STATUS_OUT_OF_TABLE, REGION_STATUS_UNRESOLVED, RegionBreakdown, UNKNOWN_REGION,
-    lookup_region_lower,
+    CO2_MODEL_GRID_OPERATOR, CO2_MODEL_KEPLER, CO2_MODEL_REDFISH, CO2_MODEL_SCAPHANDRE,
+    CO2_MODEL_V2, CO2_MODEL_V3, CarbonEstimate, CarbonReport, GENERIC_PUE, IntensitySource,
+    REGION_STATUS_KNOWN, REGION_STATUS_OUT_OF_TABLE, REGION_STATUS_UNRESOLVED, RealTimeProvider,
+    RegionBreakdown, UNKNOWN_REGION, lookup_region_lower,
 };
 
 /// Per-region CO₂ accumulator. `intensity_sum_per_op / total_ops`
@@ -42,6 +42,8 @@ pub(super) struct RegionAccumulator {
     pub(super) realtime_estimated: Option<bool>,
     /// Latest `Electricity Maps` `estimationMethod` tag observed.
     pub(super) realtime_estimation_method: Option<String>,
+    /// Live API behind the `RealTime` intensity of this region.
+    pub(super) realtime_provider: Option<RealTimeProvider>,
 }
 
 /// Aggregated "which intensity sources / measured-energy backends did
@@ -65,6 +67,9 @@ pub(super) struct ReportFlags {
     any_cloud_specpower: bool,
     any_calibrated: bool,
     any_realtime: bool,
+    /// A `RealTime` region came from a grid operator feed rather than
+    /// Electricity Maps.
+    any_realtime_grid: bool,
 }
 
 impl ReportFlags {
@@ -110,6 +115,7 @@ pub(super) fn build_region_breakdowns(
             intensity_source: IntensitySource::Annual,
             intensity_estimated: None,
             intensity_estimation_method: None,
+            intensity_provider: None,
         });
     }
     (regions, flags, operational_gco2)
@@ -120,7 +126,14 @@ pub(super) fn build_region_breakdowns(
 fn update_flags_from_accumulator(flags: &mut ReportFlags, acc: &RegionAccumulator) {
     match acc.max_intensity_source {
         IntensitySource::RealTime => {
-            flags.any_realtime = true;
+            if acc
+                .realtime_provider
+                .is_some_and(|p| p != RealTimeProvider::ElectricityMaps)
+            {
+                flags.any_realtime_grid = true;
+            } else {
+                flags.any_realtime = true;
+            }
         }
         IntensitySource::MonthlyHourly => {
             flags.any_monthly_hourly = true;
@@ -155,7 +168,7 @@ fn build_single_region_row(region: String, acc: RegionAccumulator) -> RegionBrea
         let intensity_source = acc.max_intensity_source;
         let total_ops = acc.total_ops;
         let co2_gco2 = acc.co2_gco2;
-        let (intensity_estimated, intensity_estimation_method) =
+        let (intensity_estimated, intensity_estimation_method, intensity_provider) =
             realtime_metadata_for_row(intensity_source, acc);
         return RegionBreakdown {
             status: REGION_STATUS_KNOWN.to_string(),
@@ -167,6 +180,7 @@ fn build_single_region_row(region: String, acc: RegionAccumulator) -> RegionBrea
             intensity_source,
             intensity_estimated,
             intensity_estimation_method,
+            intensity_provider,
         };
     }
     // Out-of-table region: name resolved but not in our table. When a
@@ -195,7 +209,7 @@ fn build_single_region_row(region: String, acc: RegionAccumulator) -> RegionBrea
     };
     let total_ops = acc.total_ops;
     let co2_gco2 = acc.co2_gco2;
-    let (intensity_estimated, intensity_estimation_method) =
+    let (intensity_estimated, intensity_estimation_method, intensity_provider) =
         realtime_metadata_for_row(intensity_source, acc);
     RegionBreakdown {
         status: REGION_STATUS_OUT_OF_TABLE.to_string(),
@@ -207,6 +221,7 @@ fn build_single_region_row(region: String, acc: RegionAccumulator) -> RegionBrea
         intensity_source,
         intensity_estimated,
         intensity_estimation_method,
+        intensity_provider,
     }
 }
 
@@ -220,17 +235,26 @@ fn build_single_region_row(region: String, acc: RegionAccumulator) -> RegionBrea
 fn realtime_metadata_for_row(
     source: IntensitySource,
     acc: RegionAccumulator,
-) -> (Option<bool>, Option<String>) {
+) -> (Option<bool>, Option<String>, Option<RealTimeProvider>) {
     if source == IntensitySource::RealTime {
-        (acc.realtime_estimated, acc.realtime_estimation_method)
+        // Electricity Maps stays implicit so its rows keep their earlier shape.
+        let provider = acc
+            .realtime_provider
+            .filter(|p| *p != RealTimeProvider::ElectricityMaps);
+        (
+            acc.realtime_estimated,
+            acc.realtime_estimation_method,
+            provider,
+        )
     } else {
-        (None, None)
+        (None, None, None)
     }
 }
 
 /// Pick the top-level `co2.model` tag given the aggregate flags.
 ///
-/// Precedence (most to least precise): real-time, Alumet, Scaphandre,
+/// Precedence (most to least precise): real-time (Electricity Maps, then
+/// a grid operator feed when no region used Electricity Maps), Alumet, Scaphandre,
 /// Kepler, Redfish, cloud `SPECpower`, monthly/hourly proxy, annual
 /// proxy. The `+cal` suffix only applies to the proxy branches. The
 /// measured branches all short-circuit earlier, so the calibration flag
@@ -238,6 +262,8 @@ fn realtime_metadata_for_row(
 pub(super) fn select_co2_model_tag(flags: ReportFlags) -> &'static str {
     if flags.any_realtime {
         CO2_MODEL_EMAPS
+    } else if flags.any_realtime_grid {
+        CO2_MODEL_GRID_OPERATOR
     } else if flags.any_alumet {
         CO2_MODEL_ALUMET
     } else if flags.any_scaphandre {
@@ -361,6 +387,8 @@ pub(super) fn finalize_carbon_report(
         operational_gco2,
         embodied_gco2,
         transport_gco2,
+        database_gco2: None,
+        messaging_gco2: None,
         sci_per_trace,
         functional_unit: "trace".to_string(),
     }

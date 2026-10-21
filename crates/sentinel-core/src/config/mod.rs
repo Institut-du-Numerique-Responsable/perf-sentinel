@@ -12,6 +12,7 @@ use crate::detect::Confidence;
 use crate::score::alumet::AlumetConfig;
 use crate::score::carbon::DEFAULT_EMBODIED_CARBON_PER_REQUEST_GCO2;
 use crate::score::cloud_energy::config::CloudEnergyConfig;
+use crate::score::host_static::{StaticHostsConfig, Subsystem};
 use crate::score::kepler::KeplerConfig;
 use crate::score::redfish::RedfishConfig;
 #[cfg(test)]
@@ -219,9 +220,18 @@ pub struct GreenConfig {
     pub redfish: Option<RedfishConfig>,
     /// Cloud CPU% + `SPECpower` config (daemon only).
     pub cloud_energy: Option<CloudEnergyConfig>,
-    /// Declared broker cluster (`[green.broker_static]`, daemon only).
-    /// Needs no agent, so it covers managed brokers.
-    pub broker_static: Option<crate::score::broker_static::StaticBrokerConfig>,
+    /// Declared database hosts (`[green.database_static]`, daemon only).
+    /// Needs no agent, so it covers managed databases. A dedicated
+    /// declaration bills its ceiling, or prices its hosts from its
+    /// `cpu_query`, and a shared one bills its pod's share of its node.
+    pub database_static: Option<StaticHostsConfig>,
+    /// Declared broker hosts (`[green.broker_static]`, daemon only).
+    /// Needs no agent, so it covers provisioned managed brokers (not
+    /// serverless ones). A dedicated declaration bills its ceiling
+    /// ([`StaticHostsConfig::ceiling`]), or
+    /// prices its hosts from its `cpu_query`, and a shared one bills its
+    /// pod's share of its node.
+    pub broker_static: Option<StaticHostsConfig>,
     /// Whether to use per-operation energy coefficients (SQL verb weighting,
     /// HTTP payload size tiers) in the proxy model. Default: `true`.
     pub per_operation_coefficients: bool,
@@ -256,6 +266,10 @@ pub struct GreenConfig {
     pub calibration: Option<crate::calibrate::CalibrationData>,
     /// Electricity Maps real-time carbon intensity config (daemon only).
     pub electricity_maps: Option<crate::score::electricity_maps::ElectricityMapsConfig>,
+    /// Grid operator real-time intensity feeds (daemon only), in a fixed
+    /// order: RTE `éCO2mix`, NESO, Fingrid, Energinet, REE e·sios, Open
+    /// Electricity, MAVIR, em6.
+    pub grid_feeds: Vec<crate::score::grid_feed::GridFeedConfig>,
 }
 
 /// Daemon runtime config. Maps to `[daemon]`, whose `tls_cert_path` and
@@ -572,6 +586,7 @@ impl Default for GreenConfig {
             alumet: None,
             redfish: None,
             cloud_energy: None,
+            database_static: None,
             broker_static: None,
             per_operation_coefficients: true,
             hourly_profiles_file: None,
@@ -579,6 +594,44 @@ impl Default for GreenConfig {
             calibration_file: None,
             calibration: None,
             electricity_maps: None,
+            grid_feeds: Vec::new(),
+        }
+    }
+}
+
+impl GreenConfig {
+    /// Effective region of a subsystem's hosts: its declared section's,
+    /// else its Alumet workload's, else `default_region`. Validation
+    /// refuses two declared regions that differ, so every source of one
+    /// subsystem reads this one region.
+    #[must_use]
+    pub fn host_region(&self, subsystem: Subsystem) -> Option<&str> {
+        self.static_hosts(subsystem)
+            .and_then(|cfg| cfg.region.as_deref())
+            .or_else(|| self.alumet_host(subsystem).and_then(|(_, region)| region))
+            .or(self.default_region.as_deref())
+    }
+
+    /// The subsystem's declared-hosts section.
+    pub(crate) fn static_hosts(&self, subsystem: Subsystem) -> Option<&StaticHostsConfig> {
+        match subsystem {
+            Subsystem::Database => self.database_static.as_ref(),
+            Subsystem::Broker => self.broker_static.as_ref(),
+        }
+    }
+
+    /// The subsystem's Alumet workload, as its label value and region.
+    pub(crate) fn alumet_host(&self, subsystem: Subsystem) -> Option<(&str, Option<&str>)> {
+        let alumet = self.alumet.as_ref()?;
+        match subsystem {
+            Subsystem::Database => alumet
+                .database
+                .as_ref()
+                .map(|w| (w.label_value.as_str(), w.region.as_deref())),
+            Subsystem::Broker => alumet
+                .broker
+                .as_ref()
+                .map(|w| (w.label_value.as_str(), w.region.as_deref())),
         }
     }
 }
@@ -721,6 +774,20 @@ impl Config {
             },
             crate::score::carbon::ScoringConfig::from_electricity_maps,
         );
+        scoring_config.grid_feeds = self
+            .green
+            .grid_feeds
+            .iter()
+            .map(|feed| feed.kind.provider())
+            .collect();
+        scoring_config.fingrid_dataset =
+            self.green
+                .grid_feeds
+                .iter()
+                .find_map(|feed| match feed.kind {
+                    crate::score::grid_feed::GridFeedKind::Fingrid(dataset) => Some(dataset.id()),
+                    _ => None,
+                });
         scoring_config.embodied_per_request_gco2 = Some(self.effective_embodied_per_request_gco2());
         scoring_config.network_energy_per_byte_kwh =
             Some(crate::score::carbon::DEFAULT_NETWORK_ENERGY_PER_BYTE_KWH);
@@ -736,7 +803,7 @@ mod validate;
 
 use raw::{
     RawConfig, parse_daemon_environment, parse_kepler_metric_kind, validate_alumet_raw,
-    validate_broker_static_raw, validate_region_keys_raw,
+    validate_broker_static_raw, validate_database_static_raw, validate_region_keys_raw,
 };
 use toml_paths::normalize_toml_path_strings;
 pub(crate) use validate::has_control_char;
@@ -1064,6 +1131,7 @@ fn validate_raw_config(raw: RawConfig) -> Result<Config, ConfigError> {
     // so a missing one must be a loud error rather than a silently
     // dropped section.
     validate_alumet_raw(&raw.green.alumet).map_err(ConfigError::Validation)?;
+    validate_database_static_raw(&raw.green.database_static).map_err(ConfigError::Validation)?;
     validate_broker_static_raw(&raw.green.broker_static).map_err(ConfigError::Validation)?;
     validate_region_keys_raw(&raw).map_err(ConfigError::Validation)?;
     let config = Config::from(raw);

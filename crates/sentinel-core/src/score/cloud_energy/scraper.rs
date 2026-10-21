@@ -1,12 +1,16 @@
 //! Cloud energy scraper: Prometheus JSON API client and energy
 //! computation.
 //!
-//! Queries the Prometheus `/api/v1/query` endpoint for CPU utilization
-//! per service, interpolates watts via the `SPECpower` table, and
+//! Queries the Prometheus `/api/v1/query` endpoint once per distinct
+//! CPU query, interpolates watts via the `SPECpower` table, and
 //! publishes per-service energy-per-op coefficients to the shared
-//! [`CloudEnergyState`].
+//! [`CloudEnergyState`]. Services reading one single-series query with
+//! one power envelope share that node's watts by op count. A declared
+//! database or broker with a `cpu_query` is a [`HostProbe`], billed into
+//! its own state on the same ticks. A shared one's watts are taken out of
+//! the node it runs on before the split.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,21 +19,15 @@ use crate::ingest::auth_header::{AuthHeader, ScraperAuthOutcome, parse_scraper_a
 use crate::report::metrics::MetricsState;
 use crate::score::ops_snapshot_diff::OpsSnapshotDiff;
 
-use super::config::{CloudEnergyConfig, ServiceCloudConfig};
+use super::config::CloudEnergyConfig;
 use super::state::{CloudEnergyState, ServiceEnergy, monotonic_ms};
 use super::table;
+use crate::score::alumet::DbEnergyState;
+use crate::score::energy_state::split_by_ops;
+use crate::score::host_static::{HostPlacement, StaticHostsConfig, Subsystem};
 
 /// Number of consecutive scrape failures before a diagnostic warning.
 const FAILURE_THRESHOLD: u32 = 3;
-
-/// Default `PromQL` queries per cloud provider when no custom
-/// `cpu_metric` or `cpu_query` is configured.
-const DEFAULT_CPU_QUERY_AWS: &str = "aws_ec2_cpuutilization_average";
-const DEFAULT_CPU_QUERY_GCP: &str =
-    "stackdriver_gce_instance_compute_googleapis_com_instance_cpu_utilization";
-const DEFAULT_CPU_QUERY_AZURE: &str = "azure_compute_virtualmachines_percentage_cpu_average";
-const DEFAULT_CPU_QUERY_GENERIC: &str =
-    "100 - (avg by(instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)";
 
 // ---------------------------------------------------------------
 // Error type
@@ -53,6 +51,10 @@ pub(super) enum CloudScraperError {
     EmptyResult { query: String },
     #[error("Prometheus query returned error status: {0}")]
     QueryError(String),
+    /// A host CPU query must name one reading: the average CPU of the
+    /// declared hosts.
+    #[error("host CPU query '{query}' returned {count} series, expected one")]
+    MultipleSeries { query: String, count: usize },
 }
 
 // ---------------------------------------------------------------
@@ -82,13 +84,14 @@ struct PromResult {
 // Fetch helpers
 // ---------------------------------------------------------------
 
-/// Fetch a single `PromQL` instant query and return the scalar value.
+/// Fetch a single `PromQL` instant query and return the first series'
+/// value with the number of series in the response.
 async fn fetch_cpu_percent(
     client: &HttpClient,
     base_uri: &hyper::Uri,
     query: &str,
     auth: Option<&AuthHeader>,
-) -> Result<f64, CloudScraperError> {
+) -> Result<(f64, usize), CloudScraperError> {
     let encoded_query = percent_encode_query(query);
     let path_and_query = format!("/api/v1/query?query={encoded_query}");
 
@@ -123,8 +126,8 @@ async fn fetch_cpu_percent(
 }
 
 /// Parse a Prometheus instant query JSON response and extract the
-/// scalar value from the first result.
-fn parse_prom_scalar(body: &str, query: &str) -> Result<f64, CloudScraperError> {
+/// scalar value from the first result, with the number of results.
+fn parse_prom_scalar(body: &str, query: &str) -> Result<(f64, usize), CloudScraperError> {
     let resp: PromResponse =
         serde_json::from_str(body).map_err(|e| CloudScraperError::JsonParse(format!("{e}")))?;
 
@@ -145,11 +148,12 @@ fn parse_prom_scalar(body: &str, query: &str) -> Result<f64, CloudScraperError> 
             query: query.to_string(),
         })?;
 
-    first
+    let value = first
         .value
         .1
         .parse::<f64>()
-        .map_err(|e| CloudScraperError::JsonParse(format!("value parse: {e}")))
+        .map_err(|e| CloudScraperError::JsonParse(format!("value parse: {e}")))?;
+    Ok((value, data.result.len()))
 }
 
 /// Minimal percent-encoding for `PromQL` query parameters.
@@ -183,10 +187,339 @@ fn percent_encode_query(input: &str) -> String {
 const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
 
 // ---------------------------------------------------------------
+// Query groups
+// ---------------------------------------------------------------
+
+/// The services reading one resolved CPU query, with their power
+/// envelopes `(idle_watts, max_watts)`.
+#[derive(Debug)]
+struct CloudGroup {
+    query: String,
+    /// Sorted service names, parallel to `envelopes`.
+    services: Vec<String>,
+    envelopes: Vec<(f64, f64)>,
+    /// `Some` when every member resolves the same envelope.
+    envelope: Option<(f64, f64)>,
+}
+
+/// A CPU reading for one query: the first series' value and the number
+/// of series the response held.
+type Reading = (f64, usize);
+
+fn cloud_groups(cfg: &CloudEnergyConfig) -> Vec<CloudGroup> {
+    cfg.cpu_query_groups()
+        .into_iter()
+        .map(|(query, services)| {
+            let envelopes: Vec<(f64, f64)> = services
+                .iter()
+                .map(|name| cfg.service_power(&cfg.services[name]))
+                .collect();
+            let envelope = envelopes
+                .first()
+                .copied()
+                .filter(|first| envelopes.iter().all(|e| e == first));
+            CloudGroup {
+                query,
+                services,
+                envelopes,
+                envelope,
+            }
+        })
+        .collect()
+}
+
+/// Warn once per query for the daemon's lifetime when a group's query
+/// returned several series, debug after. Returns whether this call
+/// warned.
+fn warn_multi_series(group: &CloudGroup, count: usize, warned: &mut HashSet<String>) -> bool {
+    if warned.contains(&group.query) {
+        tracing::debug!(
+            query = %group.query,
+            series = count,
+            "Cloud energy: CPU query still returns several series"
+        );
+        return false;
+    }
+    tracing::warn!(
+        query = %group.query,
+        series = count,
+        services = ?group.services,
+        "Cloud energy: CPU query returned several series, so it names no single node. \
+         Each service keeps its own reading of the first series. Give the services of \
+         each node a cpu_query filtered to that node so they share its watts"
+    );
+    warned.insert(group.query.clone());
+    true
+}
+
+// ---------------------------------------------------------------
+// Host CPU probes
+// ---------------------------------------------------------------
+
+/// The CPU query of a declared database or broker, priced on a
+/// `SPECpower` envelope and billed into `state` each tick.
+#[derive(Debug)]
+pub struct HostProbe {
+    pub subsystem: Subsystem,
+    pub placement: HostPlacement,
+    /// Trimmed at load.
+    pub query: String,
+    pub nodes: u32,
+    pub idle_watts: f64,
+    pub max_watts: f64,
+    /// A shared host's node: the CPU query its listed group reads, the
+    /// key its watts are deducted under. `None` otherwise.
+    pub group_key: Option<String>,
+    /// Read by the event loop as the subsystem's live source.
+    pub state: Arc<DbEnergyState>,
+    last_success_ms: u64,
+    warned: bool,
+}
+
+impl HostProbe {
+    /// A probe for a dedicated declaration with a `cpu_query`, `nodes`
+    /// and an instance type that resolves to an envelope. `None` for any
+    /// other declaration.
+    #[must_use]
+    pub fn dedicated(subsystem: Subsystem, cfg: &StaticHostsConfig) -> Option<Self> {
+        if cfg.placement != HostPlacement::Dedicated {
+            return None;
+        }
+        let envelope = cfg.node_power()?;
+        let query = cfg.cpu_query.clone()?;
+        Some(Self::new(
+            subsystem,
+            cfg.placement,
+            query,
+            cfg.nodes?,
+            envelope,
+            None,
+        ))
+    }
+
+    /// A probe for a shared declaration: one node, priced on the envelope
+    /// of the group it lists (one envelope, D7/B7), else on its instance
+    /// type. `None` for any other declaration.
+    #[must_use]
+    pub fn shared(
+        subsystem: Subsystem,
+        cfg: &StaticHostsConfig,
+        cloud: &CloudEnergyConfig,
+    ) -> Option<Self> {
+        if cfg.placement != HostPlacement::Shared {
+            return None;
+        }
+        // Every listed service resolves the group's query (D7/B7).
+        let listed = cfg
+            .shared_with
+            .first()
+            .and_then(|name| cloud.services.get(name));
+        let envelope = listed
+            .map(|svc| cloud.service_power(svc))
+            .or_else(|| cfg.node_power())?;
+        let group_key = listed.map(|svc| cloud.service_cpu_query(svc).into_owned());
+        let query = cfg.cpu_query.clone()?;
+        Some(Self::new(
+            subsystem,
+            cfg.placement,
+            query,
+            1,
+            envelope,
+            group_key,
+        ))
+    }
+
+    fn new(
+        subsystem: Subsystem,
+        placement: HostPlacement,
+        query: String,
+        nodes: u32,
+        (idle_watts, max_watts): (f64, f64),
+        group_key: Option<String>,
+    ) -> Self {
+        Self {
+            subsystem,
+            placement,
+            query,
+            nodes,
+            idle_watts,
+            max_watts,
+            group_key,
+            state: DbEnergyState::new(),
+            last_success_ms: monotonic_ms(),
+            warned: false,
+        }
+    }
+
+    /// Watts above idle at `cpu` percent, clamped like the interpolation.
+    fn dynamic_watts(&self, cpu: f64) -> f64 {
+        table::interpolate_watts(self.idle_watts, self.max_watts, cpu) - self.idle_watts
+    }
+
+    fn age_gauge<'m>(&self, metrics: &'m MetricsState) -> &'m prometheus::Gauge {
+        match self.subsystem {
+            Subsystem::Database => &metrics.database_cpu_last_scrape_age_seconds,
+            Subsystem::Broker => &metrics.broker_cpu_last_scrape_age_seconds,
+        }
+    }
+
+    /// Advance the age gauge and warn on the first failure of a run of
+    /// failures, debug after.
+    fn record_failure(&mut self, metrics: &MetricsState, reason: &str) {
+        #[allow(clippy::cast_precision_loss)]
+        let age_secs = monotonic_ms().saturating_sub(self.last_success_ms) as f64 / 1000.0;
+        self.age_gauge(metrics).set(age_secs);
+        if self.warned {
+            tracing::debug!(query = %self.query, reason, "Host CPU scrape failed");
+            return;
+        }
+        tracing::warn!(
+            subsystem = self.subsystem.noun(),
+            query = %self.query,
+            reason,
+            "Host CPU scrape failed, so no host energy is billed from it this tick. \
+             The query must return one series, the average CPU of the declared hosts. \
+             Subsequent failures at debug level"
+        );
+        self.warned = true;
+    }
+}
+
+/// Fetch one probe's CPU percent. A response with several series, an
+/// error or a non-finite value is a failure.
+async fn fetch_host_cpu(
+    probe: &mut HostProbe,
+    client: &HttpClient,
+    uri: &hyper::Uri,
+    auth: Option<&AuthHeader>,
+    metrics: &MetricsState,
+) -> Option<f64> {
+    let fetched = fetch_cpu_percent(client, uri, &probe.query, auth).await;
+    match single_series(fetched, &probe.query) {
+        Ok(cpu) if cpu.is_finite() => {
+            probe.last_success_ms = monotonic_ms();
+            probe.warned = false;
+            probe.age_gauge(metrics).set(0.0);
+            Some(cpu)
+        }
+        Ok(cpu) => {
+            probe.record_failure(metrics, &format!("non-finite CPU% {cpu}"));
+            None
+        }
+        Err(e) => {
+            probe.record_failure(metrics, &e.to_string());
+            None
+        }
+    }
+}
+
+/// A host reading is one series: several fail with
+/// [`CloudScraperError::MultipleSeries`].
+fn single_series(
+    fetched: Result<Reading, CloudScraperError>,
+    query: &str,
+) -> Result<f64, CloudScraperError> {
+    match fetched {
+        Ok((_, count)) if count > 1 => Err(CloudScraperError::MultipleSeries {
+            query: query.to_string(),
+            count,
+        }),
+        other => other.map(|(cpu, _)| cpu),
+    }
+}
+
+/// Fetch every probe, one reading per probe in probe order. The database
+/// and broker probes run together, so a slow endpoint costs one timeout.
+async fn fetch_host_probes(
+    probes: &mut [HostProbe],
+    client: &HttpClient,
+    uri: &hyper::Uri,
+    auth: Option<&AuthHeader>,
+    metrics: &MetricsState,
+) -> Vec<Option<f64>> {
+    if let [database, broker] = probes {
+        let (a, b) = tokio::join!(
+            fetch_host_cpu(database, client, uri, auth, metrics),
+            fetch_host_cpu(broker, client, uri, auth, metrics),
+        );
+        return vec![a, b];
+    }
+    let mut readings = Vec::with_capacity(probes.len());
+    for probe in probes {
+        readings.push(fetch_host_cpu(probe, client, uri, auth, metrics).await);
+    }
+    readings
+}
+
+/// Bill each probe with a reading over the interval, in probe order
+/// (database first), and return the watts to take out of each listed
+/// group's node, keyed by its query.
+///
+/// A dedicated probe bills `nodes × interpolate(idle, max, cpu)`. A shared
+/// probe bills its dynamic share `(max - idle) × cpu / 100`: with an empty
+/// `shared_with` nothing is deducted, otherwise it needs a one-series
+/// reading of its group and is capped at what is left of the node's
+/// dynamic watts after the probes before it.
+fn bill_host_probes(
+    probes: &[HostProbe],
+    probe_cpu: &[Option<f64>],
+    readings: &HashMap<String, Reading>,
+    interval_secs: f64,
+    now_ms: u64,
+) -> HashMap<String, f64> {
+    let mut deductions: HashMap<String, f64> = HashMap::new();
+    for (probe, cpu) in probes.iter().zip(probe_cpu) {
+        let Some(cpu) = *cpu else { continue };
+        let Some(watts) = probe_watts(probe, cpu, readings, &mut deductions) else {
+            continue;
+        };
+        probe
+            .state
+            .add_window_kwh(watts * interval_secs / 3_600_000.0, now_ms);
+    }
+    deductions
+}
+
+/// One probe's watts this tick, recording a listed shared probe's watts
+/// in `deductions`. `None` when a listed group has no one-node reading.
+fn probe_watts(
+    probe: &HostProbe,
+    cpu: f64,
+    readings: &HashMap<String, Reading>,
+    deductions: &mut HashMap<String, f64>,
+) -> Option<f64> {
+    if probe.placement == HostPlacement::Dedicated {
+        return Some(
+            f64::from(probe.nodes)
+                * table::interpolate_watts(probe.idle_watts, probe.max_watts, cpu),
+        );
+    }
+    let Some(group) = &probe.group_key else {
+        return Some(probe.dynamic_watts(cpu));
+    };
+    let Some(&(group_cpu, _)) = readings.get(group).filter(|&&(_, series)| series == 1) else {
+        // The probe's own gauge stays fresh while this tick bills nothing.
+        tracing::debug!(
+            group = %group,
+            "shared host probe skipped: its node query has no one-series reading"
+        );
+        return None;
+    };
+    let taken = deductions.entry(group.clone()).or_insert(0.0);
+    let watts = probe
+        .dynamic_watts(cpu)
+        .min(probe.dynamic_watts(group_cpu) - *taken);
+    *taken += watts;
+    Some(watts)
+}
+
+// ---------------------------------------------------------------
 // Scraper loop
 // ---------------------------------------------------------------
 
-/// Spawn the periodic cloud energy scraper task.
+/// Spawn the periodic cloud energy scraper task. `probes` are the host
+/// CPU probes, database first, fetched and billed after the service
+/// queries on every tick.
 ///
 /// Returns a `JoinHandle` that the daemon captures and aborts on
 /// Ctrl-C shutdown.
@@ -194,10 +527,11 @@ const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
 pub fn spawn_cloud_scraper(
     cfg: CloudEnergyConfig,
     state: Arc<CloudEnergyState>,
+    probes: Vec<HostProbe>,
     metrics: Arc<MetricsState>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        run_cloud_scraper_loop(cfg, state, metrics).await;
+        run_cloud_scraper_loop(cfg, state, probes, metrics).await;
     })
 }
 
@@ -205,6 +539,7 @@ pub fn spawn_cloud_scraper(
 async fn run_cloud_scraper_loop(
     cfg: CloudEnergyConfig,
     state: Arc<CloudEnergyState>,
+    mut probes: Vec<HostProbe>,
     metrics: Arc<MetricsState>,
 ) {
     use std::str::FromStr;
@@ -253,82 +588,79 @@ async fn run_cloud_scraper_loop(
     let mut last_success_ms = monotonic_ms();
     let mut unreachable_warned = false;
 
+    let groups = cloud_groups(&cfg);
+    let mut last_tick = std::time::Instant::now();
+    let mut multi_series_warned: HashSet<String> = HashSet::new();
+
     tracing::info!(
         endpoint = %redacted,
         scrape_interval_secs = cfg.scrape_interval.as_secs(),
         services = cfg.services.len(),
+        queries = groups.len(),
+        host_probes = probes.len(),
         "Cloud energy scraper started"
     );
 
     loop {
         ticker.tick().await;
+        // A tick's energy covers the time since the previous tick, which a
+        // slow tick (missed-tick Delay) stretches past the interval, as the
+        // ops delta below does.
+        let tick_at = std::time::Instant::now();
+        let elapsed_secs = tick_at.duration_since(last_tick).as_secs_f64();
+        last_tick = tick_at;
 
         let current_ops = metrics.snapshot_service_io_ops();
         let deltas = snapshot_diff.delta_and_advance(current_ops);
 
         let tick_start = std::time::Instant::now();
-        let mut any_success = false;
-        let mut cpu_readings: HashMap<String, f64> = HashMap::with_capacity(cfg.services.len());
 
-        // Query CPU% for all configured services in parallel via a
+        // Query CPU% once per distinct query in parallel via a
         // `JoinSet`, collecting results as they return. A sequential
-        // loop costs N × request_time, which at 1024 services × 20ms
+        // loop costs N × request_time, which at 1024 queries × 20ms
         // exceeds the 15s scrape interval and backs up the ticker. The
         // hyper client holds an Arc internally so `.clone()` is cheap.
-        let mut set: tokio::task::JoinSet<(String, Result<f64, CloudScraperError>)> =
+        let mut set: tokio::task::JoinSet<(String, Result<Reading, CloudScraperError>)> =
             tokio::task::JoinSet::new();
-        for (service, svc_cfg) in &cfg.services {
-            let query = resolve_cpu_query(svc_cfg, &cfg).into_owned();
+        for group in &groups {
+            let query = group.query.clone();
             let client_clone = client.clone();
             let uri_clone = uri.clone();
-            let service_clone = service.clone();
             // Option::clone is a no-op on None and one Arc bump on Some.
             let auth_clone = parsed_auth.clone();
             set.spawn(async move {
                 let result =
                     fetch_cpu_percent(&client_clone, &uri_clone, &query, auth_clone.as_deref())
                         .await;
-                (service_clone, result)
+                (query, result)
             });
         }
 
-        while let Some(join_result) = set.join_next().await {
-            match join_result {
-                Ok((service, Ok(cpu_pct))) if cpu_pct.is_finite() => {
-                    cpu_readings.insert(service, cpu_pct);
-                    any_success = true;
-                }
-                Ok((service, Ok(cpu_pct))) => {
-                    tracing::debug!(
-                        service = %service,
-                        value = %cpu_pct,
-                        "Cloud energy: Prometheus returned non-finite CPU%, skipping"
-                    );
-                }
-                Ok((service, Err(e))) => {
-                    tracing::debug!(
-                        service = %service,
-                        error = %e,
-                        "Cloud energy: failed to fetch CPU% for service"
-                    );
-                }
-                Err(e) => {
-                    // Task panicked or was cancelled. Neither should
-                    // happen in normal operation but don't bring the
-                    // scraper loop down.
-                    tracing::debug!(
-                        error = %e,
-                        "Cloud energy: CPU% fetch task panicked or was cancelled"
-                    );
-                }
-            }
-        }
+        // The host probes do not depend on the service readings: fetch
+        // both at once so a slow endpoint stretches the tick only once.
+        let (cpu_readings, probe_cpu) = tokio::join!(
+            collect_readings(set, groups.len()),
+            fetch_host_probes(&mut probes, &client, &uri, parsed_auth.as_deref(), &metrics),
+        );
+        warn_multi_series_groups(&groups, &cpu_readings, &mut multi_series_warned);
+        let any_success = !cpu_readings.is_empty();
+        let now_ms = monotonic_ms();
+        // Whether or not a service reading landed: the hosts are billed on
+        // their own query, and a shared one's watts leave its node first.
+        let deductions = bill_host_probes(&probes, &probe_cpu, &cpu_readings, elapsed_secs, now_ms);
 
         if any_success {
             first_failure_warned = false;
             consecutive_failures = 0;
-            let now_ms = monotonic_ms();
-            apply_cloud_scrape(&state, &cpu_readings, &deltas, &cfg, now_ms);
+            apply_cloud_scrape(
+                &state,
+                &groups,
+                &cpu_readings,
+                &deltas,
+                elapsed_secs,
+                now_ms,
+                &deductions,
+            );
             metrics.cloud_energy_last_scrape_age_seconds.set(0.0);
             last_success_ms = now_ms;
             tracing::debug!(
@@ -393,80 +725,105 @@ fn warn_if_slow(cfg: &CloudEnergyConfig, elapsed: Duration) {
     }
 }
 
-/// Resolve the `PromQL` query for a service.
-///
-/// Returns a `Cow` to avoid allocating when the query is a `&'static str`
-/// default or a borrowed reference from config.
-fn resolve_cpu_query<'a>(
-    svc_cfg: &'a ServiceCloudConfig,
-    cfg: &'a CloudEnergyConfig,
-) -> std::borrow::Cow<'a, str> {
-    use std::borrow::Cow;
-    // 1. Per-service custom query
-    if let Some(q) = svc_cfg.cpu_query() {
-        return Cow::Borrowed(q);
+/// Drain the fetch tasks into one reading per query, finite values only.
+async fn collect_readings(
+    mut set: tokio::task::JoinSet<(String, Result<Reading, CloudScraperError>)>,
+    capacity: usize,
+) -> HashMap<String, Reading> {
+    let mut readings = HashMap::with_capacity(capacity);
+    while let Some(join_result) = set.join_next().await {
+        if let Some((query, reading)) = finite_reading(join_result) {
+            readings.insert(query, reading);
+        }
     }
-    // 2. Top-level cpu_metric override
-    if let Some(ref m) = cfg.cpu_metric {
-        return Cow::Borrowed(m.as_str());
+    readings
+}
+
+fn warn_multi_series_groups(
+    groups: &[CloudGroup],
+    readings: &HashMap<String, Reading>,
+    warned: &mut HashSet<String>,
+) {
+    for group in groups {
+        if let Some(&(_, count)) = readings.get(&group.query)
+            && count > 1
+        {
+            warn_multi_series(group, count, warned);
+        }
     }
-    // 3. Default per provider
-    let provider = match svc_cfg {
-        ServiceCloudConfig::InstanceType { provider, .. } => provider.as_deref(),
-        ServiceCloudConfig::ManualWatts { .. } => None,
-    };
-    let provider = provider
-        .or(cfg.default_provider.as_deref())
-        .unwrap_or("generic");
-    match provider {
-        "aws" => Cow::Borrowed(DEFAULT_CPU_QUERY_AWS),
-        "gcp" => Cow::Borrowed(DEFAULT_CPU_QUERY_GCP),
-        "azure" => Cow::Borrowed(DEFAULT_CPU_QUERY_AZURE),
-        _ => Cow::Borrowed(DEFAULT_CPU_QUERY_GENERIC),
+}
+
+/// Keep a finished fetch's reading when it is finite, logging the
+/// skipped cases at debug level.
+fn finite_reading(
+    join_result: Result<(String, Result<Reading, CloudScraperError>), tokio::task::JoinError>,
+) -> Option<(String, Reading)> {
+    match join_result {
+        Ok((query, Ok(reading))) if reading.0.is_finite() => Some((query, reading)),
+        Ok((query, Ok((cpu_pct, _)))) => {
+            tracing::debug!(
+                query = %query,
+                value = %cpu_pct,
+                "Cloud energy: Prometheus returned non-finite CPU%, skipping"
+            );
+            None
+        }
+        Ok((query, Err(e))) => {
+            tracing::debug!(
+                query = %query,
+                error = %e,
+                "Cloud energy: failed to fetch CPU% for query"
+            );
+            None
+        }
+        Err(e) => {
+            // Task panicked or was cancelled. Neither should happen in
+            // normal operation but don't bring the scraper loop down.
+            tracing::debug!(
+                error = %e,
+                "Cloud energy: CPU% fetch task panicked or was cancelled"
+            );
+            None
+        }
     }
 }
 
 /// Apply CPU% readings to the cloud energy state.
 ///
-/// For each configured service, looks up `(idle_watts, max_watts)`
-/// from the `SPECpower` table (or manual config), interpolates watts
-/// from the CPU% reading, and computes `energy_per_op_kwh`. Services
-/// with zero ops in the current window keep their previous entry.
+/// A group whose reading holds one series and whose services share one
+/// envelope is one node: its interpolated watts, less the shared hosts'
+/// `deductions` on it (never below idle), are split between the services
+/// by the ops each emitted. Any other group with a reading prices each
+/// service alone on its own envelope and takes no deduction. Services
+/// with zero ops this tick, and groups without a reading, keep their
+/// previous rows.
 fn apply_cloud_scrape(
     state: &CloudEnergyState,
-    cpu_readings: &HashMap<String, f64>,
+    groups: &[CloudGroup],
+    cpu_readings: &HashMap<String, Reading>,
     op_deltas: &HashMap<String, u64>,
-    cfg: &CloudEnergyConfig,
+    interval_secs: f64,
     now_ms: u64,
+    deductions: &HashMap<String, f64>,
 ) {
-    let interval_secs = cfg.scrape_interval.as_secs_f64();
     let mut next = state.current_owned();
     let mut any_change = false;
 
-    for (service, svc_cfg) in &cfg.services {
-        let Some(&cpu_pct) = cpu_readings.get(service) else {
-            continue; // no reading for this service this tick
+    for group in groups {
+        let Some(&(cpu_pct, series)) = cpu_readings.get(&group.query) else {
+            continue; // no reading for this query this tick
         };
-        let Some(&ops) = op_deltas.get(service) else {
-            continue; // service had no ops this window
+        any_change |= match group.envelope {
+            Some((idle_watts, max_watts)) if series == 1 => {
+                let hosts = deductions.get(&group.query).copied().unwrap_or(0.0);
+                let watts = (table::interpolate_watts(idle_watts, max_watts, cpu_pct) - hosts)
+                    .max(idle_watts);
+                apply_group_split(&mut next, group, watts, op_deltas, interval_secs, now_ms)
+            }
+            _ => {
+                apply_group_per_service(&mut next, group, cpu_pct, op_deltas, interval_secs, now_ms)
+            }
         };
-
-        let (idle_watts, max_watts) = resolve_power(svc_cfg, cfg);
-        let watts = table::interpolate_watts(idle_watts, max_watts, cpu_pct);
-
-        let Some(energy_per_op) = table::compute_cloud_energy_per_op_kwh(watts, interval_secs, ops)
-        else {
-            continue;
-        };
-
-        next.insert(
-            service.clone(),
-            ServiceEnergy {
-                energy_per_op_kwh: energy_per_op,
-                last_update_ms: now_ms,
-            },
-        );
-        any_change = true;
     }
 
     if any_change {
@@ -474,40 +831,46 @@ fn apply_cloud_scrape(
     }
 }
 
-/// Resolve `(idle_watts, max_watts)` for a service config entry.
-///
-/// For `InstanceType` entries, falls back to `cfg.default_instance_type`
-/// when the per-service instance type is empty, then to the provider
-/// default.
-fn resolve_power(svc_cfg: &ServiceCloudConfig, cfg: &CloudEnergyConfig) -> (f64, f64) {
-    match svc_cfg {
-        ServiceCloudConfig::ManualWatts {
-            idle_watts,
-            max_watts,
-            ..
-        } => (*idle_watts, *max_watts),
-        ServiceCloudConfig::InstanceType {
-            provider,
-            instance_type,
-            ..
-        } => {
-            let provider_key = provider
-                .as_deref()
-                .or(cfg.default_provider.as_deref())
-                .unwrap_or("generic");
-            let effective_type = if instance_type.is_empty() {
-                cfg.default_instance_type.as_deref().unwrap_or("")
-            } else {
-                instance_type.as_str()
-            };
-            table::lookup_instance_power(effective_type, provider_key)
-        }
+fn apply_group_split(
+    next: &mut HashMap<String, ServiceEnergy>,
+    group: &CloudGroup,
+    watts: f64,
+    op_deltas: &HashMap<String, u64>,
+    interval_secs: f64,
+    now_ms: u64,
+) -> bool {
+    split_by_ops(next, &group.services, op_deltas, now_ms, |ops| {
+        table::compute_cloud_energy_per_op_kwh(watts, interval_secs, ops)
+    })
+}
+
+fn apply_group_per_service(
+    next: &mut HashMap<String, ServiceEnergy>,
+    group: &CloudGroup,
+    cpu_pct: f64,
+    op_deltas: &HashMap<String, u64>,
+    interval_secs: f64,
+    now_ms: u64,
+) -> bool {
+    let mut changed = false;
+    for (service, &(idle_watts, max_watts)) in group.services.iter().zip(&group.envelopes) {
+        let watts = table::interpolate_watts(idle_watts, max_watts, cpu_pct);
+        changed |= split_by_ops(
+            next,
+            std::slice::from_ref(service),
+            op_deltas,
+            now_ms,
+            |ops| table::compute_cloud_energy_per_op_kwh(watts, interval_secs, ops),
+        );
     }
+    changed
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::config::ServiceCloudConfig;
     use super::*;
+    use crate::score::energy_state::tests::ops;
     use core::assert_matches;
 
     // ------------------------------------------------------------------
@@ -517,8 +880,17 @@ mod tests {
     #[test]
     fn parse_valid_prom_response() {
         let body = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1234567890.123,"42.5"]}]}}"#;
-        let val = parse_prom_scalar(body, "test_query").unwrap();
+        let (val, series) = parse_prom_scalar(body, "test_query").unwrap();
         assert!((val - 42.5).abs() < 1e-10);
+        assert_eq!(series, 1);
+    }
+
+    #[test]
+    fn parse_prom_scalar_counts_series() {
+        let body = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{"instance":"a"},"value":[1.0,"10"]},{"metric":{"instance":"b"},"value":[1.0,"90"]}]}}"#;
+        let (val, series) = parse_prom_scalar(body, "q").unwrap();
+        assert!((val - 10.0).abs() < 1e-10, "first series wins");
+        assert_eq!(series, 2);
     }
 
     #[test]
@@ -550,7 +922,7 @@ mod tests {
         // returns Ok(NaN), but the scraper loop filters non-finite
         // values before inserting into cpu_readings.
         let body = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1234567890.123,"NaN"]}]}}"#;
-        let val = parse_prom_scalar(body, "test_query").unwrap();
+        let (val, _) = parse_prom_scalar(body, "test_query").unwrap();
         assert!(val.is_nan());
     }
 
@@ -578,112 +950,93 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // resolve_cpu_query
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn custom_cpu_query_takes_precedence() {
-        let svc = ServiceCloudConfig::InstanceType {
-            provider: Some("aws".into()),
-            instance_type: "m5.large".into(),
-            cpu_query: Some("custom_metric".into()),
-        };
-        let cfg = make_test_config();
-        assert_eq!(resolve_cpu_query(&svc, &cfg), "custom_metric");
-    }
-
-    #[test]
-    fn top_level_cpu_metric_used_when_no_per_service_query() {
-        let svc = ServiceCloudConfig::InstanceType {
-            provider: Some("aws".into()),
-            instance_type: "m5.large".into(),
-            cpu_query: None,
-        };
-        let mut cfg = make_test_config();
-        cfg.cpu_metric = Some("global_cpu_metric".into());
-        assert_eq!(resolve_cpu_query(&svc, &cfg), "global_cpu_metric");
-    }
-
-    #[test]
-    fn provider_default_used_as_fallback() {
-        let svc = ServiceCloudConfig::InstanceType {
-            provider: Some("gcp".into()),
-            instance_type: "n2-standard-2".into(),
-            cpu_query: None,
-        };
-        let cfg = make_test_config();
-        assert_eq!(resolve_cpu_query(&svc, &cfg), DEFAULT_CPU_QUERY_GCP);
-    }
-
-    // ------------------------------------------------------------------
-    // resolve_power
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn manual_watts_used_directly() {
-        let svc = ServiceCloudConfig::ManualWatts {
-            idle_watts: 45.0,
-            max_watts: 120.0,
-            cpu_query: None,
-        };
-        let cfg = make_test_config();
-        let (idle, max) = resolve_power(&svc, &cfg);
-        assert!((idle - 45.0).abs() < 1e-10);
-        assert!((max - 120.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn instance_type_looked_up_in_table() {
-        let svc = ServiceCloudConfig::InstanceType {
-            provider: Some("aws".into()),
-            instance_type: "c5.4xlarge".into(),
-            cpu_query: None,
-        };
-        let cfg = make_test_config();
-        let (idle, max) = resolve_power(&svc, &cfg);
-        // c5.4xlarge (16 vCPU, Cascade Lake) at CCF 2026-04-24:
-        // 16 * 0.690 = 11.0 idle, 16 * 4.063 = 65.0 max.
-        assert!((idle - 11.0).abs() < 0.01);
-        assert!((max - 65.0).abs() < 0.1);
-    }
-
-    // ------------------------------------------------------------------
     // apply_cloud_scrape
     // ------------------------------------------------------------------
 
-    #[test]
-    fn apply_scrape_computes_energy() {
-        let state = CloudEnergyState::new();
-        let mut cpu = HashMap::new();
-        cpu.insert("svc-a".to_string(), 50.0); // 50% CPU
-        let mut ops = HashMap::new();
-        ops.insert("svc-a".to_string(), 1000_u64);
+    const INTERVAL: f64 = 15.0;
 
-        let mut services = HashMap::new();
-        services.insert(
-            "svc-a".to_string(),
-            ServiceCloudConfig::ManualWatts {
-                idle_watts: 2.0,
-                max_watts: 20.0,
-                cpu_query: None,
-            },
-        );
-        let cfg = CloudEnergyConfig {
+    fn manual(idle_watts: f64, max_watts: f64, cpu_query: Option<&str>) -> ServiceCloudConfig {
+        ServiceCloudConfig::ManualWatts {
+            idle_watts,
+            max_watts,
+            cpu_query: cpu_query.map(str::to_string),
+        }
+    }
+
+    fn config_with(services: &[(&str, ServiceCloudConfig)]) -> CloudEnergyConfig {
+        CloudEnergyConfig {
             prometheus_endpoint: "http://localhost:9090".into(),
             scrape_interval: Duration::from_secs(15),
             default_provider: None,
             default_instance_type: None,
             cpu_metric: None,
-            services,
+            services: services
+                .iter()
+                .map(|(name, svc)| ((*name).to_string(), svc.clone()))
+                .collect(),
             auth_header: None,
-        };
+        }
+    }
 
-        apply_cloud_scrape(&state, &cpu, &ops, &cfg, 100);
-        let snap = state.snapshot(200, 500);
+    /// Every group's query reads `cpu` with `series` series.
+    fn readings(groups: &[CloudGroup], cpu: f64, series: usize) -> HashMap<String, Reading> {
+        groups
+            .iter()
+            .map(|g| (g.query.clone(), (cpu, series)))
+            .collect()
+    }
+
+    /// Run one scrape and return the published coefficients.
+    fn scrape(
+        cfg: &CloudEnergyConfig,
+        state: &CloudEnergyState,
+        cpu: f64,
+        series: usize,
+        op_deltas: &HashMap<String, u64>,
+    ) -> HashMap<String, f64> {
+        let groups = cloud_groups(cfg);
+        apply_cloud_scrape(
+            state,
+            &groups,
+            &readings(&groups, cpu, series),
+            op_deltas,
+            INTERVAL,
+            100,
+            &HashMap::new(),
+        );
+        state.snapshot(200, 500)
+    }
+
+    fn watts_of(e: f64, ops: u64) -> f64 {
+        e * ops as f64 * 3.6e6 / INTERVAL
+    }
+
+    fn per_op(watts: f64, ops: u64) -> f64 {
+        table::compute_cloud_energy_per_op_kwh(watts, INTERVAL, ops).unwrap()
+    }
+
+    #[test]
+    fn services_on_one_query_split_the_node() {
+        let cfg = config_with(&[
+            ("a", manual(10.0, 50.0, Some("node_cpu"))),
+            ("b", manual(10.0, 50.0, Some("node_cpu"))),
+        ]);
+        let state = CloudEnergyState::new();
+        let snap = scrape(&cfg, &state, 50.0, 1, &ops(&[("a", 100), ("b", 300)]));
+        // 50% on 10/50 W is 30 W for the node, once.
+        let total = watts_of(snap["a"], 100) + watts_of(snap["b"], 300);
+        assert!((total - 30.0).abs() <= 30.0 * 1e-9, "node watts {total}");
+        assert!((snap["a"] - snap["b"]).abs() < 1e-24, "one coefficient");
+    }
+
+    #[test]
+    fn single_service_group_matches_previous_formula() {
+        let cfg = config_with(&[("svc-a", manual(2.0, 20.0, None))]);
+        let state = CloudEnergyState::new();
+        let snap = scrape(&cfg, &state, 50.0, 1, &ops(&[("svc-a", 1000)]));
         assert_eq!(snap.len(), 1);
         // 50% CPU on 2/20W = 11W. energy = (11/1000) * (15/3600) / 1000
-        let expected_watts = 11.0;
-        let expected = (expected_watts / 1000.0) * (15.0 / 3600.0) / 1000.0;
+        let expected = (11.0 / 1000.0) * (15.0 / 3600.0) / 1000.0;
         assert!(
             (snap["svc-a"] - expected).abs() < 1e-15,
             "expected {expected}, got {}",
@@ -692,216 +1045,409 @@ mod tests {
     }
 
     #[test]
-    fn apply_scrape_zero_ops_keeps_previous() {
+    fn distinct_queries_do_not_split() {
+        let cfg = config_with(&[
+            ("a", manual(10.0, 50.0, Some("cpu{node=\"1\"}"))),
+            ("b", manual(10.0, 50.0, Some("cpu{node=\"2\"}"))),
+        ]);
         let state = CloudEnergyState::new();
-        state.insert_for_test("svc-a".into(), 1e-7, 50);
-
-        let cpu = HashMap::new(); // no readings
-        let ops = HashMap::new(); // no ops
-
-        let cfg = make_test_config();
-        apply_cloud_scrape(&state, &cpu, &ops, &cfg, 100);
-
-        // Previous entry should still be there.
-        let snap = state.snapshot(100, 500);
-        assert_eq!(snap.len(), 1);
-        assert!((snap["svc-a"] - 1e-7).abs() < 1e-15);
+        let snap = scrape(&cfg, &state, 50.0, 1, &ops(&[("a", 100), ("b", 300)]));
+        assert!((snap["a"] - per_op(30.0, 100)).abs() < 1e-24);
+        assert!((snap["b"] - per_op(30.0, 300)).abs() < 1e-24);
     }
 
-    fn make_test_config() -> CloudEnergyConfig {
-        CloudEnergyConfig {
-            prometheus_endpoint: "http://localhost:9090".into(),
-            scrape_interval: Duration::from_secs(15),
-            default_provider: Some("aws".into()),
-            default_instance_type: None,
-            cpu_metric: None,
-            services: HashMap::new(),
-            auth_header: None,
+    #[test]
+    fn multi_series_reading_keeps_per_service_attribution() {
+        let cfg = config_with(&[
+            ("a", manual(10.0, 50.0, None)),
+            ("b", manual(10.0, 50.0, None)),
+        ]);
+        let state = CloudEnergyState::new();
+        let snap = scrape(&cfg, &state, 50.0, 2, &ops(&[("a", 100), ("b", 300)]));
+        assert!((snap["a"] - per_op(30.0, 100)).abs() < 1e-24);
+        assert!((snap["b"] - per_op(30.0, 300)).abs() < 1e-24);
+    }
+
+    #[test]
+    fn mixed_envelopes_keep_per_service_attribution() {
+        let cfg = config_with(&[
+            ("a", manual(10.0, 50.0, None)),
+            ("b", manual(20.0, 80.0, None)),
+        ]);
+        let groups = cloud_groups(&cfg);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].envelope, None);
+        let state = CloudEnergyState::new();
+        let snap = scrape(&cfg, &state, 50.0, 1, &ops(&[("a", 100), ("b", 300)]));
+        assert!((snap["a"] - per_op(30.0, 100)).abs() < 1e-24);
+        assert!((snap["b"] - per_op(50.0, 300)).abs() < 1e-24);
+    }
+
+    #[test]
+    fn zero_ops_member_keeps_previous_row() {
+        let cfg = config_with(&[
+            ("a", manual(10.0, 50.0, None)),
+            ("b", manual(10.0, 50.0, None)),
+        ]);
+        let state = CloudEnergyState::new();
+        state.insert_for_test("b".into(), 1e-7, 150);
+        let snap = scrape(&cfg, &state, 50.0, 1, &ops(&[("a", 100), ("b", 0)]));
+        // The busy member takes the whole node, the idle one keeps its row.
+        assert!((snap["a"] - per_op(30.0, 100)).abs() < 1e-24);
+        assert!((snap["b"] - 1e-7).abs() < 1e-20);
+    }
+
+    #[test]
+    fn group_without_reading_keeps_all_rows() {
+        let cfg = config_with(&[
+            ("a", manual(10.0, 50.0, None)),
+            ("b", manual(10.0, 50.0, None)),
+        ]);
+        let state = CloudEnergyState::new();
+        state.insert_for_test("a".into(), 1e-7, 150);
+        state.insert_for_test("b".into(), 2e-7, 150);
+        let groups = cloud_groups(&cfg);
+        apply_cloud_scrape(
+            &state,
+            &groups,
+            &HashMap::new(),
+            &ops(&[("a", 100), ("b", 300)]),
+            INTERVAL,
+            100,
+            &HashMap::new(),
+        );
+        let snap = state.snapshot(200, 500);
+        assert!((snap["a"] - 1e-7).abs() < 1e-20);
+        assert!((snap["b"] - 2e-7).abs() < 1e-20);
+    }
+
+    #[test]
+    fn service_without_ops_delta_is_not_inserted() {
+        let cfg = config_with(&[("svc-a", manual(2.0, 20.0, None))]);
+        let state = CloudEnergyState::new();
+        assert!(scrape(&cfg, &state, 50.0, 1, &HashMap::new()).is_empty());
+        assert!(scrape(&cfg, &state, 50.0, 1, &ops(&[("svc-a", 0)])).is_empty());
+    }
+
+    #[test]
+    fn warn_multi_series_latches_once_per_query() {
+        let cfg = config_with(&[("a", manual(10.0, 50.0, None))]);
+        let groups = cloud_groups(&cfg);
+        let mut warned = HashSet::new();
+        assert!(warn_multi_series(&groups[0], 2, &mut warned));
+        assert!(!warn_multi_series(&groups[0], 3, &mut warned));
+        assert!(warned.contains(&groups[0].query));
+    }
+
+    // ------------------------------------------------------------------
+    // Host CPU probes
+    // ------------------------------------------------------------------
+
+    fn probe(nodes: u32, idle_watts: f64, max_watts: f64) -> HostProbe {
+        let mut probe = HostProbe::new(
+            Subsystem::Database,
+            HostPlacement::Dedicated,
+            "avg(db_cpu)".to_string(),
+            nodes,
+            (idle_watts, max_watts),
+            None,
+        );
+        // Last success at boot, so a failure shows a positive age.
+        probe.last_success_ms = 0;
+        probe
+    }
+
+    /// A shared probe on 10/50 W, listing `group` when given.
+    fn shared_probe(subsystem: Subsystem, group: Option<&str>) -> HostProbe {
+        HostProbe::new(
+            subsystem,
+            HostPlacement::Shared,
+            "host_cpu".to_string(),
+            1,
+            (10.0, 50.0),
+            group.map(str::to_string),
+        )
+    }
+
+    /// No group reading, for the probes that need none.
+    fn no_readings() -> HashMap<String, Reading> {
+        HashMap::new()
+    }
+
+    fn hosts(placement: HostPlacement, cpu_query: Option<&str>) -> StaticHostsConfig {
+        StaticHostsConfig {
+            placement,
+            nodes: Some(2),
+            instance_type: Some("m5.large".to_string()),
+            region: None,
+            cpu_query: cpu_query.map(str::to_string),
+            shared_with: Vec::new(),
         }
     }
 
-    // ------------------------------------------------------------------
-    // resolve_cpu_query: exhaustive provider-branch coverage
-    // ------------------------------------------------------------------
-
     #[test]
-    fn azure_provider_uses_azure_default_query() {
-        let svc = ServiceCloudConfig::InstanceType {
-            provider: Some("azure".into()),
-            instance_type: "Standard_D4s_v3".into(),
-            cpu_query: None,
-        };
-        let cfg = make_test_config();
-        assert_eq!(resolve_cpu_query(&svc, &cfg), DEFAULT_CPU_QUERY_AZURE);
+    fn a_probe_is_built_for_a_dedicated_cpu_query_only() {
+        let p = HostProbe::dedicated(
+            Subsystem::Broker,
+            &hosts(HostPlacement::Dedicated, Some("avg(cpu)")),
+        )
+        .expect("dedicated with cpu_query");
+        let envelope = table::lookup_instance_power("m5.large", "generic");
+        assert_eq!((p.idle_watts, p.max_watts), envelope);
+        assert_eq!((p.nodes, p.query.as_str()), (2, "avg(cpu)"));
+        let without = hosts(HostPlacement::Dedicated, None);
+        assert!(HostProbe::dedicated(Subsystem::Broker, &without).is_none());
+        let shared = hosts(HostPlacement::Shared, Some("avg(cpu)"));
+        assert!(HostProbe::dedicated(Subsystem::Broker, &shared).is_none());
     }
 
     #[test]
-    fn aws_provider_uses_aws_default_query() {
-        let svc = ServiceCloudConfig::InstanceType {
-            provider: Some("aws".into()),
-            instance_type: "m5.large".into(),
-            cpu_query: None,
-        };
-        let cfg = make_test_config();
-        assert_eq!(resolve_cpu_query(&svc, &cfg), DEFAULT_CPU_QUERY_AWS);
+    fn a_dedicated_probe_bills_nodes_times_the_interpolated_watts() {
+        let probes = [probe(2, 10.0, 50.0)];
+        bill_host_probes(&probes, &[Some(25.0)], &no_readings(), INTERVAL, 1_000);
+        // 25% on 10/50 W is 20 W per node, 40 W for two.
+        let kwh = probes[0].state.take_window_kwh(1_000, 45_000).unwrap();
+        let expected = 40.0 * INTERVAL / 3.6e6;
+        assert!((kwh - expected).abs() <= expected * 1e-12, "{kwh} kWh");
+        assert!(probes[0].state.has_recent_sample(1_000, 45_000));
     }
 
     #[test]
-    fn unknown_provider_falls_back_to_generic_query() {
-        let svc = ServiceCloudConfig::InstanceType {
-            provider: Some("hetzner".into()),
-            instance_type: "cx21".into(),
-            cpu_query: None,
-        };
-        let cfg = make_test_config();
-        assert_eq!(resolve_cpu_query(&svc, &cfg), DEFAULT_CPU_QUERY_GENERIC);
+    fn a_probe_without_reading_bills_nothing() {
+        let probes = [probe(2, 10.0, 50.0)];
+        bill_host_probes(&probes, &[None], &no_readings(), INTERVAL, 1_000);
+        assert_eq!(probes[0].state.take_window_kwh(1_000, 45_000), None);
+        assert!(!probes[0].state.has_recent_sample(1_000, 45_000));
     }
 
     #[test]
-    fn manual_watts_variant_uses_default_provider_for_query() {
-        // ManualWatts has no provider field, so resolve_cpu_query must
-        // fall back to cfg.default_provider, exercising its second
-        // match arm.
-        let svc = ServiceCloudConfig::ManualWatts {
-            idle_watts: 10.0,
-            max_watts: 100.0,
-            cpu_query: None,
-        };
-        let mut cfg = make_test_config();
-        cfg.default_provider = Some("azure".into());
-        assert_eq!(resolve_cpu_query(&svc, &cfg), DEFAULT_CPU_QUERY_AZURE);
-    }
-
-    #[test]
-    fn manual_watts_variant_no_default_provider_uses_generic() {
-        let svc = ServiceCloudConfig::ManualWatts {
-            idle_watts: 10.0,
-            max_watts: 100.0,
-            cpu_query: None,
-        };
-        let mut cfg = make_test_config();
-        cfg.default_provider = None;
-        assert_eq!(resolve_cpu_query(&svc, &cfg), DEFAULT_CPU_QUERY_GENERIC);
-    }
-
-    // ------------------------------------------------------------------
-    // apply_cloud_scrape: missing-readings and non-finite branches
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn apply_scrape_skips_service_without_cpu_reading() {
-        let state = CloudEnergyState::new();
-        let cpu = HashMap::new(); // no CPU reading for svc-a
-        let mut ops = HashMap::new();
-        ops.insert("svc-a".to_string(), 1000_u64);
-
-        let mut services = HashMap::new();
-        services.insert(
-            "svc-a".to_string(),
-            ServiceCloudConfig::ManualWatts {
-                idle_watts: 2.0,
-                max_watts: 20.0,
-                cpu_query: None,
-            },
+    fn a_host_reading_must_hold_one_series() {
+        assert_matches!(
+            single_series(Ok((25.0, 2)), "q"),
+            Err(CloudScraperError::MultipleSeries { count: 2, .. })
         );
-        let cfg = CloudEnergyConfig {
-            prometheus_endpoint: "http://localhost:9090".into(),
-            scrape_interval: Duration::from_secs(15),
-            default_provider: None,
-            default_instance_type: None,
-            cpu_metric: None,
-            services,
-            auth_header: None,
-        };
-
-        apply_cloud_scrape(&state, &cpu, &ops, &cfg, 100);
-        // No CPU reading, so the service is skipped and the snapshot
-        // stays empty.
-        let snap = state.snapshot(200, 500);
-        assert!(snap.is_empty());
+        assert!((single_series(Ok((25.0, 1)), "q").unwrap() - 25.0).abs() < 1e-12);
     }
 
     #[test]
-    fn apply_scrape_skips_service_without_ops_delta() {
+    fn a_dedicated_probe_leaves_the_application_rows_alone() {
+        let cfg = config_with(&[
+            ("a", manual(10.0, 50.0, Some("node_cpu"))),
+            ("b", manual(10.0, 50.0, Some("node_cpu"))),
+        ]);
         let state = CloudEnergyState::new();
-        let mut cpu = HashMap::new();
-        cpu.insert("svc-a".to_string(), 50.0);
-        let ops = HashMap::new(); // no ops delta for svc-a
-
-        let mut services = HashMap::new();
-        services.insert(
-            "svc-a".to_string(),
-            ServiceCloudConfig::ManualWatts {
-                idle_watts: 2.0,
-                max_watts: 20.0,
-                cpu_query: None,
-            },
+        let snap = scrape(&cfg, &state, 50.0, 1, &ops(&[("a", 100), ("b", 300)]));
+        let deductions = bill_host_probes(
+            &[probe(2, 10.0, 50.0)],
+            &[Some(90.0)],
+            &no_readings(),
+            INTERVAL,
+            100,
         );
-        let cfg = CloudEnergyConfig {
-            prometheus_endpoint: "http://localhost:9090".into(),
-            scrape_interval: Duration::from_secs(15),
-            default_provider: None,
-            default_instance_type: None,
-            cpu_metric: None,
-            services,
-            auth_header: None,
-        };
+        assert!(deductions.is_empty(), "a dedicated host deducts nothing");
+        assert_eq!(state.snapshot(200, 500), snap);
+        let total = watts_of(snap["a"], 100) + watts_of(snap["b"], 300);
+        assert!((total - 30.0).abs() <= 30.0 * 1e-9, "node watts {total}");
+    }
 
-        apply_cloud_scrape(&state, &cpu, &ops, &cfg, 100);
-        // No ops delta, so the service is skipped and nothing is inserted.
-        let snap = state.snapshot(200, 500);
-        assert!(snap.is_empty());
+    // ------------------------------------------------------------------
+    // Shared host CPU probes
+    // ------------------------------------------------------------------
+
+    /// Two services on one 10/50 W node read by `node_cpu`.
+    fn node_ab() -> CloudEnergyConfig {
+        config_with(&[
+            ("a", manual(10.0, 50.0, Some("node_cpu"))),
+            ("b", manual(10.0, 50.0, Some("node_cpu"))),
+        ])
+    }
+
+    /// Bill the probes, then apply the node reading with their
+    /// deductions, and return the published coefficients.
+    fn host_tick(
+        state: &CloudEnergyState,
+        probes: &[HostProbe],
+        probe_cpu: &[Option<f64>],
+        node: Option<Reading>,
+        op_deltas: &HashMap<String, u64>,
+    ) -> HashMap<String, f64> {
+        let groups = cloud_groups(&node_ab());
+        let readings: HashMap<String, Reading> = node
+            .map(|r| ("node_cpu".to_string(), r))
+            .into_iter()
+            .collect();
+        let deductions = bill_host_probes(probes, probe_cpu, &readings, INTERVAL, 100);
+        apply_cloud_scrape(
+            state,
+            &groups,
+            &readings,
+            op_deltas,
+            INTERVAL,
+            100,
+            &deductions,
+        );
+        state.snapshot(200, 500)
+    }
+
+    fn billed_watts(probe: &HostProbe) -> Option<f64> {
+        probe
+            .state
+            .take_window_kwh(100, 45_000)
+            .map(|kwh| kwh * 3.6e6 / INTERVAL)
+    }
+
+    fn published_watts(snap: &HashMap<String, f64>) -> f64 {
+        watts_of(snap["a"], 100) + watts_of(snap["b"], 300)
+    }
+
+    fn close(actual: f64, expected: f64) -> bool {
+        (actual - expected).abs() <= expected.abs().max(1.0) * 1e-9
     }
 
     #[test]
-    fn apply_scrape_zero_ops_non_finite_energy_skipped() {
-        // ops=0 makes `compute_cloud_energy_per_op_kwh` return None,
-        // which hits the `continue` after that call in `apply_cloud_scrape`.
-        // The service should NOT be inserted into state.
+    fn shared_subtracts_exactly_what_it_bills() {
         let state = CloudEnergyState::new();
-        let mut cpu = HashMap::new();
-        cpu.insert("svc-a".to_string(), 50.0);
-        let mut ops = HashMap::new();
-        ops.insert("svc-a".to_string(), 0_u64); // zero ops yields None
-
-        let mut services = HashMap::new();
-        services.insert(
-            "svc-a".to_string(),
-            ServiceCloudConfig::ManualWatts {
-                idle_watts: 2.0,
-                max_watts: 20.0,
-                cpu_query: None,
-            },
-        );
-        let cfg = CloudEnergyConfig {
-            prometheus_endpoint: "http://localhost:9090".into(),
-            scrape_interval: Duration::from_secs(15),
-            default_provider: None,
-            default_instance_type: None,
-            cpu_metric: None,
-            services,
-            auth_header: None,
-        };
-
-        apply_cloud_scrape(&state, &cpu, &ops, &cfg, 100);
-        let snap = state.snapshot(200, 500);
-        assert!(snap.is_empty(), "zero-ops service must not be inserted");
+        let probes = [shared_probe(Subsystem::Database, Some("node_cpu"))];
+        let ab = ops(&[("a", 100), ("b", 300)]);
+        // Node at 60% is 34 W, the database at 20% takes 8 W of it.
+        let snap = host_tick(&state, &probes, &[Some(20.0)], Some((60.0, 1)), &ab);
+        assert!(close(published_watts(&snap), 26.0), "{snap:?}");
+        assert!(close(billed_watts(&probes[0]).unwrap(), 8.0));
     }
 
     #[test]
-    fn resolve_power_falls_back_to_default_instance_type() {
-        // An empty svc_cfg.instance_type falls back to cfg.default_instance_type.
-        let svc = ServiceCloudConfig::InstanceType {
-            provider: Some("aws".into()),
-            instance_type: String::new(), // empty, takes the fallback path
-            cpu_query: None,
-        };
-        let mut cfg = make_test_config();
-        cfg.default_instance_type = Some("c5.4xlarge".into());
-        let (idle, max) = resolve_power(&svc, &cfg);
-        // c5.4xlarge per CCF 2026-04-24 Cascade Lake coefficient.
-        assert!((idle - 11.0).abs() < 0.01);
-        assert!((max - 65.0).abs() < 0.1);
+    fn shared_caps_the_host_at_node_dynamic() {
+        let state = CloudEnergyState::new();
+        let probes = [shared_probe(Subsystem::Database, Some("node_cpu"))];
+        let ab = ops(&[("a", 100), ("b", 300)]);
+        let snap = host_tick(&state, &probes, &[Some(90.0)], Some((50.0, 1)), &ab);
+        // The node's 20 W above idle all go to the host, idle stays once.
+        assert!(close(billed_watts(&probes[0]).unwrap(), 20.0));
+        assert!(close(published_watts(&snap), 10.0), "{snap:?}");
+    }
+
+    #[test]
+    fn joint_budget_on_one_node() {
+        let state = CloudEnergyState::new();
+        let probes = [
+            shared_probe(Subsystem::Database, Some("node_cpu")),
+            shared_probe(Subsystem::Broker, Some("node_cpu")),
+        ];
+        let ab = ops(&[("a", 100), ("b", 300)]);
+        let cpu = [Some(20.0), Some(30.0)];
+        let snap = host_tick(&state, &probes, &cpu, Some((40.0, 1)), &ab);
+        // 16 W above idle: the database takes 8, the broker what is left.
+        let (db, broker) = (
+            billed_watts(&probes[0]).unwrap(),
+            billed_watts(&probes[1]).unwrap(),
+        );
+        assert!(close(db, 8.0) && close(broker, 8.0), "{db} {broker}");
+        let published = published_watts(&snap);
+        assert!(close(published, 10.0), "{snap:?}");
+        assert!(close(published + db + broker, 26.0), "the node, once");
+    }
+
+    #[test]
+    fn a_shared_host_without_a_one_node_reading_bills_nothing() {
+        let ab = ops(&[("a", 100), ("b", 300)]);
+        let cases: [(Option<f64>, Option<Reading>); 3] = [
+            (None, Some((60.0, 1))),       // no probe reading
+            (Some(20.0), None),            // no group reading
+            (Some(20.0), Some((60.0, 2))), // the group names no node
+        ];
+        for (probe_cpu, node) in cases {
+            let state = CloudEnergyState::new();
+            let probes = [shared_probe(Subsystem::Database, Some("node_cpu"))];
+            let snap = host_tick(&state, &probes, &[probe_cpu], node, &ab);
+            assert_eq!(billed_watts(&probes[0]), None, "{probe_cpu:?} {node:?}");
+            let without_host = host_tick(&CloudEnergyState::new(), &[], &[], node, &ab);
+            assert_eq!(snap, without_host, "nothing subtracted");
+        }
+    }
+
+    #[test]
+    fn an_unlisted_shared_host_bills_its_dynamic_share_alone() {
+        let state = CloudEnergyState::new();
+        let probes = [shared_probe(Subsystem::Database, None)];
+        let ab = ops(&[("a", 100), ("b", 300)]);
+        let snap = host_tick(&state, &probes, &[Some(20.0)], Some((60.0, 1)), &ab);
+        assert!(close(billed_watts(&probes[0]).unwrap(), 8.0));
+        assert!(close(published_watts(&snap), 34.0), "no service changes");
+    }
+
+    #[test]
+    fn a_member_without_ops_keeps_its_row_while_the_host_is_billed() {
+        let state = CloudEnergyState::new();
+        state.insert_for_test("b".into(), 1e-7, 150);
+        let probes = [shared_probe(Subsystem::Database, Some("node_cpu"))];
+        let only_a = ops(&[("a", 100), ("b", 0)]);
+        let snap = host_tick(&state, &probes, &[Some(20.0)], Some((60.0, 1)), &only_a);
+        assert!(close(billed_watts(&probes[0]).unwrap(), 8.0));
+        assert!((snap["a"] - per_op(26.0, 100)).abs() < 1e-24);
+        assert!((snap["b"] - 1e-7).abs() < 1e-20);
+    }
+
+    #[test]
+    fn a_shared_probe_takes_its_group_envelope_and_query() {
+        let cloud = config_with(&[
+            ("a", manual(10.0, 50.0, Some(" node_cpu "))),
+            ("b", manual(10.0, 50.0, Some("node_cpu"))),
+        ]);
+        let mut listed = hosts(HostPlacement::Shared, Some("pg_cpu"));
+        listed.nodes = None;
+        listed.instance_type = None;
+        listed.shared_with = vec!["a".to_string(), "b".to_string()];
+        let p = HostProbe::shared(Subsystem::Database, &listed, &cloud).expect("listed");
+        assert_eq!((p.idle_watts, p.max_watts, p.nodes), (10.0, 50.0, 1));
+        assert_eq!(p.group_key.as_deref(), Some("node_cpu"));
+        assert_eq!(p.placement, HostPlacement::Shared);
+
+        let unlisted = hosts(HostPlacement::Shared, Some("pg_cpu"));
+        let p = HostProbe::shared(Subsystem::Database, &unlisted, &cloud).expect("typed");
+        assert_eq!(
+            (p.idle_watts, p.max_watts),
+            table::lookup_instance_power("m5.large", "generic")
+        );
+        assert_eq!(p.group_key, None);
+        let dedicated = hosts(HostPlacement::Dedicated, Some("pg_cpu"));
+        assert!(HostProbe::shared(Subsystem::Database, &dedicated, &cloud).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_two_series_probe_response_fails_and_bills_nothing() {
+        let body = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{"instance":"a"},"value":[1.0,"10"]},{"metric":{"instance":"b"},"value":[1.0,"90"]}]}}"#;
+        let (endpoint, server) = spawn_one_shot_server(http_200_json(body)).await;
+        let client = http_client::build_client();
+        let uri = <hyper::Uri as std::str::FromStr>::from_str(&endpoint).unwrap();
+        let metrics = MetricsState::new();
+        let mut probes = [probe(2, 10.0, 50.0)];
+        let cpu = fetch_host_probes(&mut probes, &client, &uri, None, &metrics).await;
+        assert_eq!(cpu, vec![None]);
+        assert!(probes[0].warned, "the first failure warns");
+        bill_host_probes(&probes, &cpu, &no_readings(), INTERVAL, monotonic_ms());
+        assert_eq!(
+            probes[0].state.take_window_kwh(monotonic_ms(), 45_000),
+            None
+        );
+        assert!(metrics.database_cpu_last_scrape_age_seconds.get() > 0.0);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_one_series_probe_response_resets_its_age_gauge() {
+        let body = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1.0,"25"]}]}}"#;
+        let (endpoint, server) = spawn_one_shot_server(http_200_json(body)).await;
+        let client = http_client::build_client();
+        let uri = <hyper::Uri as std::str::FromStr>::from_str(&endpoint).unwrap();
+        let metrics = MetricsState::new();
+        metrics.database_cpu_last_scrape_age_seconds.set(30.0);
+        let mut probes = [probe(2, 10.0, 50.0)];
+        probes[0].warned = true;
+        let cpu = fetch_host_probes(&mut probes, &client, &uri, None, &metrics).await;
+        assert_eq!(cpu, vec![Some(25.0)]);
+        assert!(!probes[0].warned, "a success re-arms the warning");
+        assert!(metrics.database_cpu_last_scrape_age_seconds.get().abs() < 1e-12);
+        server.await.unwrap();
     }
 
     // ------------------------------------------------------------------
@@ -1004,7 +1550,8 @@ mod tests {
         let val = fetch_cpu_percent(&client, &uri, "test_query", None)
             .await
             .expect("valid response should parse");
-        assert!((val - 42.5).abs() < 1e-10);
+        assert_eq!(val.1, 1);
+        assert!((val.0 - 42.5).abs() < 1e-10);
         server.await.unwrap();
     }
 
@@ -1073,7 +1620,7 @@ mod tests {
         };
         let state = CloudEnergyState::new();
         let metrics = Arc::new(MetricsState::new());
-        let handle = spawn_cloud_scraper(cfg, state, metrics);
+        let handle = spawn_cloud_scraper(cfg, state, Vec::new(), metrics);
         // The task returns almost immediately on the InvalidUri branch.
         tokio::time::timeout(Duration::from_secs(2), handle)
             .await
@@ -1098,7 +1645,7 @@ mod tests {
         };
         let state = CloudEnergyState::new();
         let metrics = Arc::new(MetricsState::new());
-        let handle = spawn_cloud_scraper(cfg, state, metrics);
+        let handle = spawn_cloud_scraper(cfg, state, Vec::new(), metrics);
         // Let a couple of ticks fire.
         tokio::time::sleep(Duration::from_millis(180)).await;
         handle.abort();
@@ -1130,7 +1677,7 @@ mod tests {
         };
         let state = CloudEnergyState::new();
         let metrics = Arc::new(MetricsState::new());
-        let handle = spawn_cloud_scraper(cfg, state.clone(), metrics.clone());
+        let handle = spawn_cloud_scraper(cfg, state.clone(), Vec::new(), metrics.clone());
         // Enough ticks to step past the FAILURE_THRESHOLD.
         tokio::time::sleep(Duration::from_millis(220)).await;
         handle.abort();
@@ -1183,7 +1730,7 @@ mod tests {
         let val = fetch_cpu_percent(&client, &base_uri, "up", Some(&auth))
             .await
             .expect("fetch_cpu_percent must succeed");
-        assert!((val - 42.5).abs() < 1e-10);
+        assert!((val.0 - 42.5).abs() < 1e-10);
 
         let captured = rx.recv().await.expect("captured request");
         let text = std::str::from_utf8(&captured).expect("utf8");

@@ -15,6 +15,7 @@ pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] = &[
     "perf-sentinel-report/v1.4",
     "perf-sentinel-report/v1.5",
     "perf-sentinel-report/v1.6",
+    "perf-sentinel-report/v1.7",
     SCHEMA_VERSION,
 ];
 
@@ -73,7 +74,7 @@ mod tests {
 
     #[test]
     fn accepts_every_published_version() {
-        for minor in 0..=7 {
+        for minor in 0..=8 {
             let raw = format!(r#"{{"schema_version":"perf-sentinel-report/v1.{minor}"}}"#);
             assert!(check_schema_version(raw.as_bytes()).is_ok(), "v1.{minor}");
         }
@@ -81,10 +82,10 @@ mod tests {
 
     #[test]
     fn refuses_a_newer_version() {
-        let raw = br#"{"schema_version":"perf-sentinel-report/v1.8"}"#;
+        let raw = br#"{"schema_version":"perf-sentinel-report/v1.9"}"#;
         assert!(matches!(
             check_schema_version(raw),
-            Err(SchemaVersionError::Unsupported(v)) if v == "perf-sentinel-report/v1.8"
+            Err(SchemaVersionError::Unsupported(v)) if v == "perf-sentinel-report/v1.9"
         ));
     }
 

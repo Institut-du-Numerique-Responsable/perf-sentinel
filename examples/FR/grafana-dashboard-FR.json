@@ -1741,7 +1741,7 @@
     },
     {
       "title": "Énergie par fenêtre de scoring (kWh)",
-      "description": "Électricité attribuée à la charge analysée pour la dernière fenêtre de scoring. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux.\n\nLe détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.",
+      "description": "Électricité attribuée à la charge analysée pour la dernière fenêtre de scoring. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Quand une source d'hôte de base de données ou de broker est configurée, elle comprend aussi l'énergie de ces hôtes comptée dans les totaux.\n\nLe détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1775,7 +1775,7 @@
     },
     {
       "title": "Carbone par fenêtre de scoring (gCO2e)",
-      "description": "Émissions opérationnelles pour la même fenêtre, sommées sur les régions : l'énergie multipliée par l'intensité carbone du réseau local.\n\nElles bougent avec la charge mais aussi avec le réseau électrique, donc une baisse peut être une heure plus propre plutôt qu'une optimisation. Les émissions de fabrication sont exclues.",
+      "description": "Émissions opérationnelles pour la même fenêtre, sommées sur les régions : l'énergie multipliée par l'intensité carbone du réseau local. Quand une source d'hôte de base de données ou de broker est configurée, elles comprennent aussi le carbone de ces hôtes compté dans les totaux.\n\nElles bougent avec la charge mais aussi avec le réseau électrique, donc une baisse peut être une heure plus propre plutôt qu'une optimisation. Les émissions de fabrication sont exclues.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1805,6 +1805,62 @@
           }
         },
         "overrides": []
+      }
+    },
+    {
+      "title": "Énergie sur la plage choisie (kWh)",
+      "description": "Électricité attribuée à la charge analysée. Quand une source d'hôte de base de données ou de broker est configurée, elle comprend aussi l'énergie de ces hôtes comptée dans les totaux. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner le panneau par fenêtre ci-dessus compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 110
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(perf_sentinel_scored_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth"
+        }
+      }
+    },
+    {
+      "title": "Carbone sur la plage choisie (gCO2e)",
+      "description": "Carbone opérationnel de la charge analysée, hors carbone incorporé et transport réseau. Quand une source d'hôte de base de données ou de broker est configurée, il comprend aussi le carbone de ces hôtes compté dans les totaux. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner le panneau par fenêtre ci-dessus compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 110
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(perf_sentinel_scored_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "massg"
+        }
       }
     }
   ],

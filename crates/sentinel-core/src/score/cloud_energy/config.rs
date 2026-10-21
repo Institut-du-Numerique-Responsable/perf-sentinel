@@ -1,7 +1,29 @@
 //! User-facing configuration for cloud-native energy estimation.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
+
+use super::table;
+
+/// Default `PromQL` queries per cloud provider when no custom
+/// `cpu_metric` or `cpu_query` is configured.
+pub(crate) const DEFAULT_CPU_QUERY_AWS: &str = "aws_ec2_cpuutilization_average";
+pub(crate) const DEFAULT_CPU_QUERY_GCP: &str =
+    "stackdriver_gce_instance_compute_googleapis_com_instance_cpu_utilization";
+pub(crate) const DEFAULT_CPU_QUERY_AZURE: &str =
+    "azure_compute_virtualmachines_percentage_cpu_average";
+pub(crate) const DEFAULT_CPU_QUERY_GENERIC: &str =
+    "100 - (avg by(instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)";
+
+/// The four provider defaults. Each reads every node of the fleet, so
+/// none can stand for one declared host.
+pub(crate) const DEFAULT_CPU_QUERIES: [&str; 4] = [
+    DEFAULT_CPU_QUERY_AWS,
+    DEFAULT_CPU_QUERY_GCP,
+    DEFAULT_CPU_QUERY_AZURE,
+    DEFAULT_CPU_QUERY_GENERIC,
+];
 
 /// Per-service cloud energy configuration.
 ///
@@ -99,6 +121,93 @@ impl ServiceCloudConfig {
     }
 }
 
+impl CloudEnergyConfig {
+    /// Resolve `(idle_watts, max_watts)` for a service config entry.
+    ///
+    /// For `InstanceType` entries, falls back to `default_instance_type`
+    /// when the per-service instance type is empty, then to the provider
+    /// default.
+    #[must_use]
+    pub fn service_power(&self, svc: &ServiceCloudConfig) -> (f64, f64) {
+        match svc {
+            ServiceCloudConfig::ManualWatts {
+                idle_watts,
+                max_watts,
+                ..
+            } => (*idle_watts, *max_watts),
+            ServiceCloudConfig::InstanceType {
+                provider,
+                instance_type,
+                ..
+            } => {
+                let provider_key = provider
+                    .as_deref()
+                    .or(self.default_provider.as_deref())
+                    .unwrap_or("generic");
+                let effective_type = if instance_type.is_empty() {
+                    self.default_instance_type.as_deref().unwrap_or("")
+                } else {
+                    instance_type.as_str()
+                };
+                table::lookup_instance_power(effective_type, provider_key)
+            }
+        }
+    }
+
+    /// Resolve the `PromQL` query for a service, trimmed of leading and
+    /// trailing whitespace.
+    ///
+    /// `PromQL` ignores that whitespace, so the trimmed form fetches the
+    /// same series and serves as a stable key for comparing queries.
+    /// Returns a `Cow` to avoid allocating when the query is a
+    /// `&'static str` default or a borrowed reference from config.
+    #[must_use]
+    pub fn service_cpu_query<'a>(&'a self, svc: &'a ServiceCloudConfig) -> Cow<'a, str> {
+        // 1. Per-service custom query
+        if let Some(q) = svc.cpu_query() {
+            return Cow::Borrowed(q.trim());
+        }
+        // 2. Top-level cpu_metric override
+        if let Some(ref m) = self.cpu_metric {
+            return Cow::Borrowed(m.trim());
+        }
+        // 3. Default per provider
+        let provider = match svc {
+            ServiceCloudConfig::InstanceType { provider, .. } => provider.as_deref(),
+            ServiceCloudConfig::ManualWatts { .. } => None,
+        };
+        let provider = provider
+            .or(self.default_provider.as_deref())
+            .unwrap_or("generic");
+        match provider {
+            "aws" => Cow::Borrowed(DEFAULT_CPU_QUERY_AWS),
+            "gcp" => Cow::Borrowed(DEFAULT_CPU_QUERY_GCP),
+            "azure" => Cow::Borrowed(DEFAULT_CPU_QUERY_AZURE),
+            _ => Cow::Borrowed(DEFAULT_CPU_QUERY_GENERIC),
+        }
+    }
+
+    /// Group the configured services by their resolved CPU query.
+    ///
+    /// Keys are the trimmed queries of [`Self::service_cpu_query`], values
+    /// the sorted service names reading each one. Services on one query
+    /// read one CPU figure, so the scraper fetches it once per group.
+    #[must_use]
+    pub fn cpu_query_groups(&self) -> BTreeMap<String, Vec<String>> {
+        let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (name, svc) in &self.services {
+            groups
+                .entry(self.service_cpu_query(svc).into_owned())
+                .or_default()
+                .push(name.clone());
+        }
+        for names in groups.values_mut() {
+            names.sort();
+        }
+        groups
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +240,191 @@ mod tests {
         assert!(dbg.contains("http://prometheus:9090"));
         assert!(dbg.contains("c5.xlarge"));
         assert!(dbg.contains("aws"));
+    }
+
+    // ------------------------------------------------------------------
+    // service_cpu_query
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn custom_cpu_query_takes_precedence() {
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("aws".into()),
+            instance_type: "m5.large".into(),
+            cpu_query: Some("custom_metric".into()),
+        };
+        let cfg = sample_config();
+        assert_eq!(cfg.service_cpu_query(&svc), "custom_metric");
+    }
+
+    #[test]
+    fn top_level_cpu_metric_used_when_no_per_service_query() {
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("aws".into()),
+            instance_type: "m5.large".into(),
+            cpu_query: None,
+        };
+        let mut cfg = sample_config();
+        cfg.cpu_metric = Some("global_cpu_metric".into());
+        assert_eq!(cfg.service_cpu_query(&svc), "global_cpu_metric");
+    }
+
+    #[test]
+    fn provider_default_used_as_fallback() {
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("gcp".into()),
+            instance_type: "n2-standard-2".into(),
+            cpu_query: None,
+        };
+        let cfg = sample_config();
+        assert_eq!(cfg.service_cpu_query(&svc), DEFAULT_CPU_QUERY_GCP);
+    }
+
+    // ------------------------------------------------------------------
+    // service_power
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn manual_watts_used_directly() {
+        let svc = ServiceCloudConfig::ManualWatts {
+            idle_watts: 45.0,
+            max_watts: 120.0,
+            cpu_query: None,
+        };
+        let cfg = sample_config();
+        let (idle, max) = cfg.service_power(&svc);
+        assert!((idle - 45.0).abs() < 1e-10);
+        assert!((max - 120.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn instance_type_looked_up_in_table() {
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("aws".into()),
+            instance_type: "c5.4xlarge".into(),
+            cpu_query: None,
+        };
+        let cfg = sample_config();
+        let (idle, max) = cfg.service_power(&svc);
+        // c5.4xlarge (16 vCPU, Cascade Lake) at CCF 2026-04-24:
+        // 16 * 0.690 = 11.0 idle, 16 * 4.063 = 65.0 max.
+        assert!((idle - 11.0).abs() < 0.01);
+        assert!((max - 65.0).abs() < 0.1);
+    }
+
+    // ------------------------------------------------------------------
+    // service_cpu_query: exhaustive provider-branch coverage
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn azure_provider_uses_azure_default_query() {
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("azure".into()),
+            instance_type: "Standard_D4s_v3".into(),
+            cpu_query: None,
+        };
+        let cfg = sample_config();
+        assert_eq!(cfg.service_cpu_query(&svc), DEFAULT_CPU_QUERY_AZURE);
+    }
+
+    #[test]
+    fn aws_provider_uses_aws_default_query() {
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("aws".into()),
+            instance_type: "m5.large".into(),
+            cpu_query: None,
+        };
+        let cfg = sample_config();
+        assert_eq!(cfg.service_cpu_query(&svc), DEFAULT_CPU_QUERY_AWS);
+    }
+
+    #[test]
+    fn unknown_provider_falls_back_to_generic_query() {
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("hetzner".into()),
+            instance_type: "cx21".into(),
+            cpu_query: None,
+        };
+        let cfg = sample_config();
+        assert_eq!(cfg.service_cpu_query(&svc), DEFAULT_CPU_QUERY_GENERIC);
+    }
+
+    #[test]
+    fn manual_watts_variant_uses_default_provider_for_query() {
+        // ManualWatts has no provider field, so service_cpu_query must
+        // fall back to cfg.default_provider, exercising its second
+        // match arm.
+        let svc = ServiceCloudConfig::ManualWatts {
+            idle_watts: 10.0,
+            max_watts: 100.0,
+            cpu_query: None,
+        };
+        let mut cfg = sample_config();
+        cfg.default_provider = Some("azure".into());
+        assert_eq!(cfg.service_cpu_query(&svc), DEFAULT_CPU_QUERY_AZURE);
+    }
+
+    #[test]
+    fn manual_watts_variant_no_default_provider_uses_generic() {
+        let svc = ServiceCloudConfig::ManualWatts {
+            idle_watts: 10.0,
+            max_watts: 100.0,
+            cpu_query: None,
+        };
+        let mut cfg = sample_config();
+        cfg.default_provider = None;
+        assert_eq!(cfg.service_cpu_query(&svc), DEFAULT_CPU_QUERY_GENERIC);
+    }
+
+    #[test]
+    fn service_power_falls_back_to_default_instance_type() {
+        // An empty svc_cfg.instance_type falls back to cfg.default_instance_type.
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("aws".into()),
+            instance_type: String::new(), // empty, takes the fallback path
+            cpu_query: None,
+        };
+        let mut cfg = sample_config();
+        cfg.default_instance_type = Some("c5.4xlarge".into());
+        let (idle, max) = cfg.service_power(&svc);
+        // c5.4xlarge per CCF 2026-04-24 Cascade Lake coefficient.
+        assert!((idle - 11.0).abs() < 0.01);
+        assert!((max - 65.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn padded_per_service_cpu_query_comes_back_trimmed() {
+        let svc = ServiceCloudConfig::InstanceType {
+            provider: Some("aws".into()),
+            instance_type: "m5.large".into(),
+            cpu_query: Some("  \n custom_metric{job=\"db\"}\t ".into()),
+        };
+        let cfg = sample_config();
+        assert_eq!(cfg.service_cpu_query(&svc), "custom_metric{job=\"db\"}");
+    }
+
+    fn manual(cpu_query: Option<&str>) -> ServiceCloudConfig {
+        ServiceCloudConfig::ManualWatts {
+            idle_watts: 10.0,
+            max_watts: 50.0,
+            cpu_query: cpu_query.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn cpu_query_groups_merge_default_and_padded_queries() {
+        let mut cfg = sample_config();
+        cfg.services.insert("b".into(), manual(None));
+        cfg.services.insert("a".into(), manual(None));
+        cfg.services
+            .insert("c".into(), manual(Some("node_cpu{x=\"1\"}")));
+        cfg.services
+            .insert("d".into(), manual(Some("  node_cpu{x=\"1\"} ")));
+        cfg.services.insert("e".into(), manual(Some("other_query")));
+        let groups = cfg.cpu_query_groups();
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[DEFAULT_CPU_QUERY_AWS], ["a", "b"]);
+        assert_eq!(groups["node_cpu{x=\"1\"}"], ["c", "d"]);
+        assert_eq!(groups["other_query"], ["e"]);
     }
 }

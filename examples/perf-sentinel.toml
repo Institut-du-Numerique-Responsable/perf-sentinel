@@ -488,17 +488,17 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # service_mappings = { "account-svc" = "account-pod", "game-svc" = "game-pod" }   # default empty
 # auth_header = "Authorization: Bearer TOKEN"    # default unset, prefer PERF_SENTINEL_ALUMET_AUTH_HEADER
 #
-# Attribute the database cgroup, which turns the estimated database waste
-# figure into a measured one. `label_value` is the series label of that
-# cgroup on your endpoint.
+# Attribute the database cgroup, which replaces the estimated database waste
+# figure (the application-side share of the SQL spans) with a measured one.
+# `label_value` is the series label of that cgroup on your endpoint.
 # [green.alumet.database]
 # label_value = "postgres-pod"   # no default
-# region = "eu-west-3"           # default: the service region
+# region = "eu-west-3"           # else [green] default_region, one of them is required
 #
 # Same for the message broker, feeding messaging waste.
 # [green.alumet.broker]
 # label_value = "kafka-pod"      # no default
-# region = "eu-west-3"           # default: the service region
+# region = "eu-west-3"           # else [green] default_region, one of them is required
 
 # --- Kepler energy scraper (opt-in, no default egress) ---------------------
 # Kepler 0.10+ reads RAPL through sysfs (hwmon as an experimental fallback
@@ -557,29 +557,56 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # scrape_interval_secs = 30             # default 15
 # default_provider = "aws"              # default unset, used when a service omits it
 # default_instance_type = "c5.4xlarge"  # default unset, same
-# cpu_metric = "aws_ec2_cpuutilization_average"  # default unset
+# `cpu_metric` replaces the provider default query for every service without
+# its own `cpu_query`, so those services would read one node. It stays
+# commented when the block is enabled, the services below sit on different
+# nodes.
+# # cpu_metric = "aws_ec2_cpuutilization_average"  # default unset
 # auth_header = "Authorization: Bearer TOKEN"    # default unset, prefer PERF_SENTINEL_CLOUD_AUTH_HEADER
 #
 # Per service, either an instance type read from the embedded SPECpower
 # table, or the two watt figures when your hardware is not in it.
-# `cpu_query` overrides `cpu_metric` for one service.
+# `cpu_query` overrides `cpu_metric` for one service. Services reading one
+# CPU query split that node's watts by operation count when it returns one
+# series, so services on different nodes need a query filtered to their node.
 # [green.cloud.services]
 # "api-us" = { provider = "aws", instance_type = "c5.4xlarge" }
 # "api-asia" = { provider = "gcp", instance_type = "n2-standard-8" }
 # "analytics" = { provider = "azure", instance_type = "Standard_D8s_v3" }
-# "custom" = { idle_watts = 45.0, max_watts = 120.0 }
+# "custom" = { idle_watts = 45.0, max_watts = 120.0, cpu_query = "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\",instance=\"custom:9100\"}[5m])) * 100)" }
 # "special" = { provider = "aws", instance_type = "c5.4xlarge", cpu_query = "avg(node_cpu{job=\"special\"})" }
 
+# --- Declared database hosts (opt-in, no agent needed) --------------------
+# The keys and rules of [green.broker_static] below, without provider. A
+# dedicated declaration with nodes and instance_type bills nodes x P_max,
+# tagged database_specpower, and next to [green.alumet.database] only while
+# its series is stale. Declare it in one daemon only.
+# [green.database_static]
+# placement = "dedicated"        # required once any key is set: "dedicated" or "shared"
+# nodes = 2                      # hosts, readers and standbys included
+# instance_type = "db.r6i.large" # an embedded row or a managed class, an unknown type fails the load
+# region = "eu-west-3"           # else [green.alumet.database] region, else [green] default_region, one is required
+
 # --- Declared broker cluster (opt-in, no agent needed) ---------------------
-# Messaging energy for a managed broker you cannot instrument. Declared, not
+# Messaging energy for a provisioned broker cluster with a typed instance
+# class and no agent (a managed Kafka or MQ cluster, self-managed VMs).
+# Serverless and capacity-unit brokers cannot be declared. Declared, not
 # measured: the disclosure schema keeps it in its own provenance bucket so it
 # is never published as a measurement. Prefer [green.alumet.broker] when an
 # agent can reach the broker cgroup.
 # [green.broker_static]
+# placement = "dedicated"        # required once any key is set: "dedicated" or "shared"
 # nodes = 3                      # no default, cluster size
-# instance_type = "m5.large"     # no default, looked up in the SPECpower table
-# provider = "aws"               # no default
-# region = "eu-west-3"           # default: the service region
+# instance_type = "kafka.m5.large"  # an embedded row or a managed class, an unknown type fails the load
+# region = "eu-west-3"           # else [green.alumet.broker] region, else [green] default_region, one is required
+# A broker pod on an application node instead: placement = "shared", nodes
+# and instance_type dropped (the node's envelope comes from shared_with), its
+# CPU as a percent of that node (filtered to it, divided by its vCPUs), and
+# the [green.cloud.services] entries reading that node, here the "custom"
+# service above. Its share is billed and taken out of the node's reading, so
+# the node counts once.
+# # cpu_query = '100 * sum(rate(container_cpu_usage_seconds_total{container="kafka",instance="custom:9100"}[5m])) / 4'
+# # shared_with = ["custom"]
 
 # --- Carbon: per-service regions -------------------------------------------
 # Region override when the OTel `cloud.region` resource attribute is absent.
@@ -601,11 +628,99 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # [green.electricity_maps]
 # api_key = "your-api-key"                         # no default, required, prefer PERF_SENTINEL_EMAPS_TOKEN
 # endpoint = "https://api.electricitymaps.com/v4"  # default https://api.electricitymaps.com/v4
-# poll_interval_secs = 3600                        # default 300, bounds 60..86400. The free tier is about 30 requests
-#                                                  # per zone per month, so it needs 3600 or more
+# poll_interval_secs = 3600                        # default 300, bounds 60..86400. Size it to your plan's quota: the
+#                                                  # free tier is for non-commercial use only
 # region_map = { "eu-west-3" = "FR", "us-east-1" = "US-MIDA-PJM", "eu-central-1" = "DE" }   # no default, at least one entry required
 # emission_factor_type = "lifecycle"               # default "lifecycle", or "direct" (combustion only)
 # temporal_granularity = "hourly"                  # default "hourly", or "5_minutes" / "15_minutes"
+
+# --- Carbon: grid operator open data (opt-in, free, daemon only) ------------
+# Real-time intensity published by grid operators themselves, for the regions
+# on their grid. All of them count direct emissions, lifecycle excluded, so they
+# read lower than an Electricity Maps lifecycle figure. Electricity Maps wins
+# for any region both cover, and a region belongs to one feed only. Model tag
+# `grid_operator_api` when no region uses Electricity Maps; each region row
+# names its feed in `intensity_provider`.
+#
+# RTE éCO2mix, France: `eco2mix-national-tr` on the ODRÉ portal (Licence
+# Ouverte v2.0, no key, 50,000 calls a month). Direct emissions of French
+# production, imports excluded.
+# [green.rte_eco2mix]
+# endpoint = "https://odre.opendatasoft.com/api/explore/v2.1"  # default https://odre.opendatasoft.com/api/explore/v2.1
+# poll_interval_secs = 900                         # default 900 (the dataset refreshes every 15 minutes), bounds 60..86400
+# regions = ["eu-west-3", "francecentral", "europe-west9"]   # no default, at least one cloud region on the French grid
+#
+# NESO Carbon Intensity API, Great Britain (CC BY 4.0, no key). Direct CO2 of
+# generation plus imports per kWh consumed. Its terms forbid reselling or
+# re-hosting the API: each daemon calls it for its own use.
+# [green.neso]
+# endpoint = "https://api.carbonintensity.org.uk"  # default https://api.carbonintensity.org.uk
+# poll_interval_secs = 300                         # default 300 (half-hourly values), bounds 60..86400
+# regions = ["eu-west-2", "europe-west2", "uksouth"]   # no default, England, Scotland and Wales only
+#
+# Fingrid, Finland (CC BY 4.0). Needs a free key from data.fingrid.fi, set
+# through PERF_SENTINEL_FINGRID_API_KEY: without one the feed is disabled with
+# a warning. Limits: 10,000 calls a day, one every 2 seconds per key.
+# [green.fingrid]
+# endpoint = "https://data.fingrid.fi/api"         # default https://data.fingrid.fi/api
+# poll_interval_secs = 180                         # default 180 (3-minute values), bounds 60..86400
+# regions = ["europe-north1"]                      # no default, at least one cloud region on the Finnish grid
+# dataset = "production"                           # default "production" (266, the RTE basis), or "consumption" (265, imports included)
+# api_key = "your-fingrid-key"                     # no default, prefer PERF_SENTINEL_FINGRID_API_KEY
+#
+# Energinet Energi Data Service, Denmark (CC BY 4.0, no key). CO2 per kWh
+# consumed, 5-minute values per bidding zone. Energinet asks vendors not to
+# poll from every unit of an application: keep one daemon per site.
+# [green.energinet]
+# endpoint = "https://api.energidataservice.dk"    # default https://api.energidataservice.dk
+# poll_interval_secs = 300                         # default 300 (5-minute values), bounds 60..86400
+# region_map = { "dk-west" = "DK1", "dk-east" = "DK2" }   # no default, DK1 west of the Great Belt, DK2 east
+#
+# The next four operators publish free of charge but restrict reuse: a
+# non-commercial clause (REE e·sios, Open Electricity) or no open licence at
+# all (MAVIR, em6). Perf Sentinel is AGPL-3.0 software and its disclosures are
+# public, declarative and unpaid, made to cut the footprint of web
+# applications, a use the project reads as non-commercial. Each operator
+# applies its own definition: read its terms against your use before enabling
+# its feed (docs/CONFIGURATION.md quotes them).
+#
+# REE e·sios, mainland Spain: indicator 10355, CO2 of peninsular generation
+# every 5 minutes. Needs a free personal token requested on the e·sios site,
+# set through PERF_SENTINEL_REE_ESIOS_API_KEY: without one the feed is
+# disabled with a warning. The legal notice forbids commercial use and asks to
+# credit Red Eléctrica without suggesting it endorses the reuse.
+# [green.ree_esios]
+# endpoint = "https://api.esios.ree.es"            # default https://api.esios.ree.es
+# poll_interval_secs = 300                         # default 300 (5-minute values), bounds 60..86400
+# regions = ["eu-south-2", "spaincentral", "europe-southwest1"]   # no default, mainland Spain only, not the islands
+# api_key = "your-esios-token"                     # no default, prefer PERF_SENTINEL_REE_ESIOS_API_KEY
+#
+# Open Electricity, Australia (The Superpower Institute, data under CC BY-NC
+# 4.0). Emissions over generation, rooftop solar included, per NEM region and
+# for the WEM, every 5 minutes. The key is optional: anonymous calls get the
+# free plan's 500 calls a day.
+# [green.open_electricity]
+# endpoint = "https://api.openelectricity.org.au/v4"   # default https://api.openelectricity.org.au/v4
+# poll_interval_secs = 600                         # default 600 (two networks make 288 calls a day), bounds 60..86400
+# region_map = { "ap-southeast-2" = "AU-NSW", "ap-southeast-4" = "AU-VIC" }   # no default, AU-NSW, AU-QLD, AU-SA, AU-TAS, AU-VIC or AU-WA
+# api_key = "your-open-electricity-key"            # no default, optional, prefer PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY
+#
+# MAVIR, Hungary: CO2 of domestic power plants per gross domestic generation,
+# every quarter hour, from the export of its public real-time data (no key).
+# The legal notice lets its information be used within the law and reserves
+# other uses.
+# [green.mavir]
+# endpoint = "https://rtdwweb.mavir.hu/rtdwweb/webuser"   # default https://rtdwweb.mavir.hu/rtdwweb/webuser
+# poll_interval_secs = 300                         # default 300 (15-minute values), bounds 60..86400
+# regions = ["hu-central"]                         # no default, the region names your spans carry on the Hungarian grid
+#
+# em6, New Zealand (Energy Market Services, a Transpower business): CO2 of
+# grid-connected generation per half hour, free and without key, all rights
+# reserved.
+# [green.em6]
+# endpoint = "https://api.em6.co.nz/ords/em6/data_api"   # default https://api.em6.co.nz/ords/em6/data_api
+# poll_interval_secs = 300                         # default 300 (half-hourly values), bounds 60..86400
+# regions = ["ap-southeast-6", "newzealandnorth"]  # no default, at least one cloud region on the New Zealand grid
 
 # --- Per-window NDJSON archive (input for `disclose`) ----------------------
 # Written only when `path` is set. Requires `[green] enabled = true`, the

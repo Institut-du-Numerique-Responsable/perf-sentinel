@@ -506,22 +506,21 @@ prometheus_endpoint = "http://prometheus:9090"
 scrape_interval_secs = 15
 default_provider = "aws"
 default_instance_type = "m7i.xlarge"
-cpu_metric = "node_cpu_seconds_total"
 
 [green.cloud.services.api-us]
 provider = "aws"
-region = "us-east-1"
 instance_type = "m7i.4xlarge"  # Sapphire Rapids
+cpu_query = 'aws_ec2_cpuutilization_average{instance_id="i-0123456789abcdef0"}'
 
 [green.cloud.services.analytics]
 provider = "azure"
-region = "westeurope"
 instance_type = "Standard_D8s_v6"  # Emerald Rapids
+cpu_query = '100 - (avg(rate(node_cpu_seconds_total{mode="idle",instance="analytics:9100"}[5m])) * 100)'
 ```
 
-The daemon interpolates power consumption as `watts = idle_watts + (max_watts - idle_watts) * (cpu% / 100)` using CCF 2026-04-24 per-vCPU coefficients embedded in the binary (~390 instance types across AWS, GCP, Azure, including modern architectures Sapphire Rapids, Emerald Rapids, Genoa, Turin, Graviton 3/4 and Cobalt 100). The model tag is `"cloud_specpower"`. Like Scaphandre, this is a daemon-only feature.
+The daemon interpolates power consumption as `watts = idle_watts + (max_watts - idle_watts) * (cpu% / 100)` using CCF 2026-04-24 per-vCPU coefficients embedded in the binary (every type listed in [`INSTANCE-TYPES.md`](./INSTANCE-TYPES.md), across AWS, GCP, Azure and Scaleway, including modern architectures Sapphire Rapids, Emerald Rapids, Genoa, Turin, Graviton 3/4 and Cobalt 100). The model tag is `"cloud_specpower"`. Like Scaphandre, this is a daemon-only feature.
 
-**Energy source precedence.** When several measured sources are configured for the same service, the highest-fidelity wins. The full chain: `electricity_maps_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`. See `docs/LIMITATIONS.md` for the precision-bounds discussion of each measured source.
+**Energy source precedence.** When several measured sources are configured for the same service, the highest-fidelity wins. The full chain: `electricity_maps_api` > `grid_operator_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`. See `docs/LIMITATIONS.md` for the precision-bounds discussion of each measured source.
 
 #### Authenticated Prometheus endpoint
 

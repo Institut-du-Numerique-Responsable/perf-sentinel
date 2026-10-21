@@ -126,10 +126,11 @@ pub struct QueryApiState {
     pub energy_backends: EnergyBackendsConfigured,
 }
 
-/// Configured-or-not flags for the five scraped energy backends.
-/// Electricity Maps is not here: its presence is already carried by
-/// `QueryApiState.scoring_config`.
-// Five independent flags, not a disguised state machine.
+/// Configured-or-not flags for the five scraped energy backends and the
+/// two host CPU queries (`[green.database_static]` and
+/// `[green.broker_static]` `cpu_query`). Electricity Maps is not here:
+/// its presence is already carried by `QueryApiState.scoring_config`.
+// Seven independent flags, not a disguised state machine.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EnergyBackendsConfigured {
@@ -138,20 +139,43 @@ pub struct EnergyBackendsConfigured {
     pub kepler: bool,
     pub redfish: bool,
     pub cloud_energy: bool,
+    pub database_cpu: bool,
+    pub broker_cpu: bool,
 }
 
 impl EnergyBackendsConfigured {
+    /// The flags of a loaded `[green]` config. A host CPU query counts
+    /// once its `[green.database_static]` or `[green.broker_static]`
+    /// section sets `cpu_query`.
+    #[must_use]
+    pub fn from_green(green: &crate::config::GreenConfig) -> Self {
+        let cpu_query = |hosts: Option<&crate::score::host_static::StaticHostsConfig>| {
+            hosts.is_some_and(|h| h.cpu_query.is_some())
+        };
+        Self {
+            alumet: green.alumet.is_some(),
+            scaphandre: green.scaphandre.is_some(),
+            kepler: green.kepler.is_some(),
+            redfish: green.redfish.is_some(),
+            cloud_energy: green.cloud_energy.is_some(),
+            database_cpu: cpu_query(green.database_static.as_ref()),
+            broker_cpu: cpu_query(green.broker_static.as_ref()),
+        }
+    }
+
     /// The flags paired with the label values `/metrics` publishes, the
     /// single place mapping the fields to those names so the gauge and
     /// `/api/energy` cannot drift apart.
     #[must_use]
-    pub fn as_labelled(&self) -> [(&'static str, bool); 5] {
+    pub fn as_labelled(&self) -> [(&'static str, bool); 7] {
         [
             ("alumet", self.alumet),
             ("scaphandre", self.scaphandre),
             ("kepler", self.kepler),
             ("redfish", self.redfish),
             ("cloud_energy", self.cloud_energy),
+            ("database_cpu", self.database_cpu),
+            ("broker_cpu", self.broker_cpu),
         ]
     }
 }
@@ -734,13 +758,15 @@ async fn handle_config(State(state): State<Arc<QueryApiState>>) -> Json<ConfigRe
 /// `last_scrape_age_seconds` and the scrape counters are `None` when the
 /// backend is not configured (its pre-registered metrics would read as a
 /// misleading fresh 0) or when the backend has no such metric at all.
-/// `cloud_energy` has no scrape counters, and `electricity_maps` has no
+/// `cloud_energy`, `database_cpu` and `broker_cpu` have no scrape
+/// counters, and `electricity_maps` has no
 /// freshness gauge: its liveness shows as `intensity_source = real_time`
 /// on the report's region breakdown.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnergyBackendStatus {
     /// Stable backend name: `alumet`, `scaphandre`, `kepler`,
-    /// `redfish`, `cloud_energy` or `electricity_maps`.
+    /// `redfish`, `cloud_energy`, `database_cpu`, `broker_cpu`,
+    /// `electricity_maps` or a grid operator feed.
     pub backend: String,
     pub configured: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -751,7 +777,7 @@ pub struct EnergyBackendStatus {
     pub scrapes_failed: Option<u64>,
 }
 
-/// `GET /api/energy` response: the six energy/intensity backends in a
+/// `GET /api/energy` response: the energy and intensity backends in a
 /// fixed order. Additive surface for operator tooling (`query monitor`).
 /// The per-service/per-region mix itself lives on `/api/export/report`.
 #[derive(Debug, Serialize, Deserialize)]
@@ -759,10 +785,29 @@ pub struct EnergyStatusResponse {
     pub backends: Vec<EnergyBackendStatus>,
 }
 
+/// A grid operator feed row of `/api/energy`: configured or not, and like
+/// Electricity Maps no freshness gauge, its liveness shows as `real_time`
+/// regions on the report.
+fn grid_feed_row<'a>(
+    state: &QueryApiState,
+    provider: crate::score::carbon::RealTimeProvider,
+) -> (
+    &'static str,
+    bool,
+    Option<&'a prometheus::Gauge>,
+    Option<(&'a prometheus::IntCounter, &'a prometheus::IntCounter)>,
+) {
+    let configured = state
+        .scoring_config
+        .as_ref()
+        .is_some_and(|c| c.grid_feeds.contains(&provider));
+    (provider.as_str(), configured, None, None)
+}
+
 /// Live health of the energy backends, from the shared metrics registry
 /// plus the configured flags frozen at startup. One table row per
 /// backend keeps the name, flag, gauge and counters together: adding a
-/// seventh backend is one row here plus its flag in
+/// backend is one row here plus its flag in
 /// [`EnergyBackendsConfigured`], not three uncoupled edits.
 /// Bumps no request counter: the monitor polls it once per refresh tick,
 /// and the other read-only endpoints are not counted either.
@@ -774,7 +819,7 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
     type CounterPair<'a> = (&'a prometheus::IntCounter, &'a prometheus::IntCounter);
     let m = &state.metrics;
     let b = state.energy_backends;
-    let rows: [(&str, bool, Option<&prometheus::Gauge>, Option<CounterPair>); 6] = [
+    let rows: [(&str, bool, Option<&prometheus::Gauge>, Option<CounterPair>); 8] = [
         (
             "alumet",
             b.alumet,
@@ -806,6 +851,19 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
             Some(&m.cloud_energy_last_scrape_age_seconds),
             None,
         ),
+        // The host CPU queries, interval evaluations like cloud_energy.
+        (
+            "database_cpu",
+            b.database_cpu,
+            Some(&m.database_cpu_last_scrape_age_seconds),
+            None,
+        ),
+        (
+            "broker_cpu",
+            b.broker_cpu,
+            Some(&m.broker_cpu_last_scrape_age_seconds),
+            None,
+        ),
         // No freshness gauge: liveness shows as real_time
         // intensity sources on the report's region breakdown.
         (
@@ -818,8 +876,11 @@ async fn handle_energy(State(state): State<Arc<QueryApiState>>) -> Json<EnergySt
             None,
         ),
     ];
+    let grid_feeds = crate::score::carbon::RealTimeProvider::GRID_OPERATORS
+        .map(|provider| grid_feed_row(&state, provider));
     let backends = rows
         .into_iter()
+        .chain(grid_feeds)
         .map(|(name, configured, age, counters)| EnergyBackendStatus {
             backend: name.to_string(),
             configured,

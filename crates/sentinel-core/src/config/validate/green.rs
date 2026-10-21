@@ -1,9 +1,13 @@
 //! Validation of the `[green]` section and its energy-backend subsections.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::config::GreenConfig;
 use crate::score::alumet::AlumetConfig;
-use crate::score::cloud_energy::config::{CloudEnergyConfig, ServiceCloudConfig};
+use crate::score::cloud_energy::config::{
+    CloudEnergyConfig, DEFAULT_CPU_QUERIES, ServiceCloudConfig,
+};
+use crate::score::host_static::{HostPlacement, StaticHostsConfig, Subsystem};
 use crate::score::kepler::{KeplerConfig, KeplerMetricKind};
 use crate::score::redfish::{RedfishConfig, RedfishEndpoint};
 use crate::score::scaphandre::ScaphandreConfig;
@@ -13,61 +17,727 @@ use super::{
     warn_unknown_region,
 };
 
-/// Validate `[green.broker_static]`: a declared cluster must be
-/// countable and its instance type nameable.
-pub(super) fn validate_broker_static(
-    cfg: &crate::score::broker_static::StaticBrokerConfig,
-) -> Result<(), String> {
-    if cfg.nodes == 0 {
-        return Err("[green.broker_static] nodes must be at least 1".to_string());
+/// The tail of a load-time warning for an instance type the embedded
+/// table cannot price: `None` when it resolves to a row, empty when it
+/// is unknown, `": <reason>"` when it names a class left out on purpose.
+pub(crate) fn unpriced_instance_suffix(instance_type: &str) -> Option<String> {
+    use crate::score::cloud_energy::table::{InstanceClass, resolve_instance_class};
+    match resolve_instance_class(instance_type) {
+        InstanceClass::Known { .. } => None,
+        InstanceClass::Unsupported(reason) => Some(format!(": {reason}")),
+        InstanceClass::Unknown => Some(String::new()),
     }
-    if cfg.nodes > 10_000 {
-        return Err(format!(
-            "[green.broker_static] nodes = {} is implausible, cap is 10000",
-            cfg.nodes
-        ));
+}
+
+/// One message per CPU query read by services whose resolved power
+/// envelopes differ (rule C1), naming the first conflicting pair in
+/// sorted order. Such a query names no single node, so the scraper
+/// prices each of its services alone.
+pub(crate) fn mixed_query_envelope_conflicts(cfg: &CloudEnergyConfig) -> Vec<String> {
+    let mut out = Vec::new();
+    for (query, services) in cfg.cpu_query_groups() {
+        let mut members = services
+            .iter()
+            .map(|name| (name, cfg.service_power(&cfg.services[name])));
+        let Some((first, envelope)) = members.next() else {
+            continue;
+        };
+        if let Some((other, other_envelope)) = members.find(|(_, e)| *e != envelope) {
+            out.push(format!(
+                "[green.cloud.services] '{first}' ({} to {} W) and '{other}' ({} to {} W) \
+                 read the same CPU query '{query}' with different power envelopes, so each \
+                 is priced alone on the full reading instead of sharing one node. Give each \
+                 node a cpu_query filtered to it, or one instance type for the services of \
+                 one node",
+                envelope.0, envelope.1, other_envelope.0, other_envelope.1
+            ));
+        }
     }
-    if cfg.instance_type.is_empty()
-        || cfg.instance_type.len() > 256
-        || has_control_char(&cfg.instance_type)
+    out
+}
+
+fn warn_mixed_query_envelopes(cfg: &CloudEnergyConfig) {
+    for message in mixed_query_envelope_conflicts(cfg) {
+        tracing::warn!("{message}");
+    }
+}
+
+/// Scheme, host, port and chassis path of a Redfish endpoint URL.
+type RedfishChassisKey = (String, String, u16, String);
+
+const REDFISH_CHASSIS_PREFIX: &str = "/redfish/v1/Chassis/";
+
+/// Chassis identity of an endpoint URL (rule R1): scheme and host
+/// lowercased, the port or the scheme default, and the path cut to
+/// `/redfish/v1/Chassis/<id>` so `/Power`, `/EnvironmentMetrics` and
+/// `/Sensors/<x>` of one chassis collide. Other paths keep their full
+/// form without a trailing slash. Parsed by hand like
+/// `validate_http_authority`, which has already accepted the URL,
+/// because `hyper` is optional outside the daemon features.
+fn redfish_chassis_key(url: &str) -> RedfishChassisKey {
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
+    let scheme = scheme.to_ascii_lowercase();
+    let (authority, path) = rest.find('/').map_or((rest, ""), |i| rest.split_at(i));
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    // `]` closes a bracketed IPv6 host, so a colon after it starts the port.
+    let host_end = authority.rfind(']').map_or(0, |i| i + 1);
+    let (host, port) = match authority[host_end..].rfind(':') {
+        Some(i) => authority.split_at(host_end + i),
+        None => (authority, ""),
+    };
+    let port = port
+        .strip_prefix(':')
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(default_port);
+    let path = path
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/');
+    let path_key = match path.strip_prefix(REDFISH_CHASSIS_PREFIX) {
+        Some(rest) if !rest.is_empty() => {
+            let id = rest.split('/').next().unwrap_or(rest);
+            format!("{REDFISH_CHASSIS_PREFIX}{id}")
+        }
+        _ => path.to_string(),
+    };
+    (scheme, host.to_ascii_lowercase(), port, path_key)
+}
+
+/// A node-level reading and the services it is attributed to.
+type NodeGroup = (String, Vec<String>);
+
+/// `service -> key` inverted to `key -> sorted services`.
+fn groups_by_value(section: &str, map: &HashMap<String, String>) -> Vec<NodeGroup> {
+    let mut groups: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (service, key) in map {
+        groups.entry(key).or_default().push(service.clone());
+    }
+    groups
+        .into_iter()
+        .map(|(key, mut services)| {
+            services.sort();
+            (format!("{section} '{key}'"), services)
+        })
+        .collect()
+}
+
+/// Node-level groups ranked by precedence, lowest first: cloud CPU
+/// queries, Redfish chassis, then Alumet domains (only under
+/// `label_key = "domain"`, the one Alumet key that names a node).
+fn node_level_groups(green: &GreenConfig) -> [Vec<NodeGroup>; 3] {
+    let cloud = green.cloud_energy.as_ref().map_or_else(Vec::new, |cfg| {
+        cfg.cpu_query_groups()
+            .into_iter()
+            .map(|(query, services)| (format!("[green.cloud] CPU query '{query}'"), services))
+            .collect()
+    });
+    let redfish = green.redfish.as_ref().map_or_else(Vec::new, |cfg| {
+        groups_by_value("[green.redfish] chassis", &cfg.service_mappings)
+    });
+    let alumet = green
+        .alumet
+        .as_ref()
+        .filter(|cfg| cfg.label_key == "domain")
+        .map_or_else(Vec::new, |cfg| {
+            groups_by_value("[green.alumet] domain", &cfg.service_mappings)
+        });
+    [cloud, redfish, alumet]
+}
+
+/// Messages for node-level readings that overlap without containment
+/// (rule O1). A lower group X sharing services with a higher group Y,
+/// with members outside Y, still splits its node among those members
+/// while Y bills the same node again.
+pub(crate) fn overlapping_node_readings(green: &GreenConfig) -> Vec<String> {
+    let ranks = node_level_groups(green);
+    let mut out = Vec::new();
+    for (i, lower) in ranks.iter().enumerate() {
+        for higher in &ranks[i + 1..] {
+            push_overlaps(lower, higher, &mut out);
+        }
+    }
+    out
+}
+
+fn push_overlaps(lower: &[NodeGroup], higher: &[NodeGroup], out: &mut Vec<String>) {
+    for (x_label, x_services) in lower {
+        for (y_label, y_services) in higher {
+            let (shared, outside): (Vec<&str>, Vec<&str>) = x_services
+                .iter()
+                .map(String::as_str)
+                .partition(|s| y_services.iter().any(|y| y == s));
+            if shared.is_empty() || outside.is_empty() {
+                continue;
+            }
+            out.push(format!(
+                "{x_label} ({}) and {y_label} ({}) share {}: {} keep a share of the node \
+                 {x_label} reads while {y_label} bills it again. Map every service of that \
+                 node to {y_label}, or each service to the one node it runs on",
+                x_services.join(", "),
+                y_services.join(", "),
+                shared.join(", "),
+                outside.join(", "),
+            ));
+        }
+    }
+}
+
+/// Rule B2: host count and instance type within bounds.
+fn validate_host_counts(section: &str, cfg: &StaticHostsConfig) -> Result<(), String> {
+    if let Some(nodes) = cfg.nodes
+        && !(1..=10_000).contains(&nodes)
     {
-        return Err(
-            "[green.broker_static] instance_type must be 1-256 chars and free of \
-             control characters"
-                .to_string(),
-        );
+        return Err(format!("{section} nodes = {nodes} must be 1 to 10000"));
     }
-    // Same allow-list as [green.cloud.services]: an unrecognised provider
-    // would silently resolve to the generic on-prem watts, a very
-    // different number from the AWS default, under a typo.
-    if !matches!(
-        cfg.provider.as_str(),
-        "aws" | "gcp" | "azure" | "scaleway" | "generic"
-    ) {
-        return Err(format!(
-            "[green.broker_static] provider must be 'aws', 'gcp', 'azure', \
-             'scaleway' or 'generic', got '{}'",
-            cfg.provider
-        ));
-    }
-    if let Some(region) = cfg.region.as_deref()
-        && (region.is_empty() || !crate::score::carbon::is_valid_region_id(region))
+    if let Some(instance_type) = cfg.instance_type.as_deref()
+        && (instance_type.is_empty()
+            || instance_type.len() > 256
+            || has_control_char(instance_type))
     {
         return Err(format!(
-            "[green.broker_static] region '{region}' is not a valid region id"
+            "{section} instance_type must be 1-256 chars and free of control characters"
         ));
-    }
-    warn_unknown_region("[green.broker_static]", cfg.region.as_deref());
-    // An unknown type still yields a provider default, so warn rather
-    // than reject: the figure stays sound, just coarser.
-    if !crate::score::cloud_energy::table::is_known_instance_type(&cfg.instance_type) {
-        tracing::warn!(
-            instance_type = %cfg.instance_type,
-            "[green.broker_static] instance_type is absent from the embedded \
-             SPECpower table, falling back to the provider default watts"
-        );
     }
     Ok(())
+}
+
+/// Rule B3: the instance type resolves to an embedded row. Runs after
+/// [`validate_host_counts`], so the type is printable.
+fn validate_host_class(section: &str, cfg: &StaticHostsConfig) -> Result<(), String> {
+    use crate::score::cloud_energy::table::{InstanceClass, case_variant, resolve_instance_class};
+    let Some(instance_type) = cfg.instance_type.as_deref() else {
+        return Ok(());
+    };
+    match resolve_instance_class(instance_type) {
+        InstanceClass::Known { .. } => Ok(()),
+        InstanceClass::Unsupported(reason) => Err(format!(
+            "{section} instance_type '{instance_type}' cannot be priced: {reason}"
+        )),
+        InstanceClass::Unknown => Err(match case_variant(instance_type) {
+            Some(canonical) => format!(
+                "{section} instance_type '{instance_type}' is unknown, names match case \
+                 exactly: did you mean '{canonical}'?"
+            ),
+            None => format!(
+                "{section} instance_type '{instance_type}' is neither an embedded row nor a \
+                 managed class that resolves to one. Use a listed type or managed class, see \
+                 docs/INSTANCE-TYPES.md#managed-service-classes"
+            ),
+        }),
+    }
+}
+
+/// Rule B4: a dedicated declaration names its hosts as a pair, or only
+/// its placement next to the Alumet workload.
+fn validate_dedicated_hosts(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    alumet_present: bool,
+) -> Result<(), String> {
+    let section = subsystem.section();
+    if !cfg.shared_with.is_empty() {
+        return Err(format!(
+            "{section} shared_with applies to placement = 'shared' only: dedicated hosts \
+             share no application node"
+        ));
+    }
+    match (cfg.nodes.is_some(), cfg.instance_type.is_some()) {
+        (true, true) => Ok(()),
+        (false, false) if alumet_present && cfg.cpu_query.is_none() => Ok(()),
+        (false, false) => Err(format!(
+            "{section} placement = 'dedicated' needs nodes and instance_type. Placement \
+             alone is accepted only next to {} and without cpu_query",
+            subsystem.alumet_section()
+        )),
+        _ => Err(format!(
+            "{section} nodes and instance_type go together: set both, or neither"
+        )),
+    }
+}
+
+/// Rule B5: a shared host is one application node read by its own query,
+/// which the subsystem's Alumet workload leaves no room for.
+fn validate_shared_host(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    alumet_present: bool,
+) -> Result<(), String> {
+    let section = subsystem.section();
+    if alumet_present {
+        return Err(format!(
+            "{section} placement = 'shared' cannot sit next to {alumet}: Alumet already \
+             measures the {} hosts. Use placement = 'dedicated' (placement alone is enough \
+             next to {alumet}) or remove {alumet}",
+            subsystem.noun(),
+            alumet = subsystem.alumet_section(),
+        ));
+    }
+    if cfg.cpu_query.is_none() {
+        return Err(format!(
+            "{section} placement = 'shared' needs cpu_query, the {}'s CPU as a percent \
+             of the node it shares",
+            subsystem.noun()
+        ));
+    }
+    if cfg.nodes.is_some_and(|nodes| nodes != 1) {
+        return Err(format!(
+            "{section} placement = 'shared' is one node: drop nodes or set it to 1. A \
+             workload spread over several application nodes cannot be declared shared"
+        ));
+    }
+    if cfg.instance_type.is_none() && cfg.shared_with.is_empty() {
+        return Err(format!(
+            "{section} placement = 'shared' needs instance_type when shared_with is \
+             empty: no cloud service gives the node's power envelope"
+        ));
+    }
+    Ok(())
+}
+
+/// Rule D6/B6: a declared host's CPU query is a reading of its own, run
+/// against `[green.cloud]`, never one the application side already reads.
+fn validate_host_cpu_query(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    green: &GreenConfig,
+) -> Result<(), String> {
+    let Some(query) = cfg.cpu_query.as_deref().map(str::trim) else {
+        return Ok(());
+    };
+    let section = subsystem.section();
+    if query.is_empty() || query.chars().count() > 4096 || has_control_char(query) {
+        return Err(format!(
+            "{section} cpu_query must be 1-4096 chars and free of control characters"
+        ));
+    }
+    if green.alumet_host(subsystem).is_some() {
+        return Err(format!(
+            "{section} cpu_query cannot sit next to {}: Alumet already measures the {} \
+             hosts, drop cpu_query",
+            subsystem.alumet_section(),
+            subsystem.noun()
+        ));
+    }
+    let Some(cloud) = green.cloud_energy.as_ref() else {
+        return Err(format!(
+            "{section} cpu_query needs [green.cloud]: it runs against its prometheus_endpoint"
+        ));
+    };
+    match application_query_reader(query, cloud) {
+        Some(reader) => Err(format!(
+            "{section} cpu_query '{query}' is {reader}, which reads application nodes. \
+             Give the {} hosts a CPU query of their own",
+            subsystem.noun()
+        )),
+        None => Ok(()),
+    }
+}
+
+/// What already reads `query` on the application side, if anything.
+fn application_query_reader(query: &str, cloud: &CloudEnergyConfig) -> Option<String> {
+    if DEFAULT_CPU_QUERIES.contains(&query) {
+        return Some("a provider default CPU query".to_string());
+    }
+    if cloud.cpu_metric.as_deref().map(str::trim) == Some(query) {
+        return Some("[green.cloud] cpu_metric".to_string());
+    }
+    cloud.cpu_query_groups().remove(query).map(|services| {
+        format!(
+            "the CPU query of [green.cloud.services] {}",
+            services.join(", ")
+        )
+    })
+}
+
+/// Maximum `shared_with` entries (rule D7/B7).
+const MAX_SHARED_WITH: usize = 256;
+
+/// Rule D7/B7: `shared_with` names exactly the services of one CPU query
+/// group, a node that only `[green.cloud]` reads.
+fn validate_shared_with(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    green: &GreenConfig,
+) -> Result<(), String> {
+    if cfg.shared_with.is_empty() {
+        return Ok(());
+    }
+    let section = subsystem.section();
+    // Defensive: D6 already refuses the cpu_query a shared placement needs
+    // without [green.cloud], and B4 refuses shared_with on a dedicated one.
+    let Some(cloud) = green.cloud_energy.as_ref() else {
+        return Err(format!(
+            "{section} shared_with needs [green.cloud]: it lists [green.cloud.services] entries"
+        ));
+    };
+    check_shared_with_entries(section, &cfg.shared_with, cloud)?;
+    let query = shared_with_query(section, &cfg.shared_with, cloud)?;
+    let envelope = shared_with_envelope(section, &query, &cfg.shared_with, cloud)?;
+    if let (Some(instance_type), Some(node)) = (cfg.instance_type.as_deref(), cfg.node_power())
+        && node != envelope
+    {
+        return Err(format!(
+            "{section} instance_type '{instance_type}' ({} to {} W) differs from the \
+             envelope of the services it shares ({} to {} W): one node has one power \
+             envelope",
+            node.0, node.1, envelope.0, envelope.1
+        ));
+    }
+    check_shared_with_node_backends(subsystem, &cfg.shared_with, green)
+}
+
+/// Bounded, without duplicates, each a `[green.cloud.services]` key.
+fn check_shared_with_entries(
+    section: &str,
+    names: &[String],
+    cloud: &CloudEnergyConfig,
+) -> Result<(), String> {
+    if names.len() > MAX_SHARED_WITH {
+        return Err(format!(
+            "{section} shared_with has {} entries; maximum is {MAX_SHARED_WITH}",
+            names.len()
+        ));
+    }
+    let mut seen = HashSet::new();
+    for name in names {
+        if !seen.insert(name.as_str()) {
+            return Err(format!("{section} shared_with lists '{name}' twice"));
+        }
+        if !cloud.services.contains_key(name) {
+            return Err(format!(
+                "{section} shared_with entry '{name}' is not a [green.cloud.services] key"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The one CPU query the listed services resolve, every service reading
+/// it listed.
+fn shared_with_query(
+    section: &str,
+    names: &[String],
+    cloud: &CloudEnergyConfig,
+) -> Result<String, String> {
+    let mut by_query: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for name in names {
+        by_query
+            .entry(cloud.service_cpu_query(&cloud.services[name]).into_owned())
+            .or_default()
+            .push(name);
+    }
+    if by_query.len() > 1 {
+        let spans = by_query
+            .iter()
+            .map(|(query, services)| format!("'{query}' ({})", services.join(", ")))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        return Err(format!(
+            "{section} shared_with spans several CPU queries, {spans}: a shared host runs \
+             on one node, list the services of one query"
+        ));
+    }
+    let query = by_query.into_keys().next().unwrap_or_default();
+    let group = cloud.cpu_query_groups().remove(&query).unwrap_or_default();
+    let missing: Vec<&str> = group
+        .iter()
+        .map(String::as_str)
+        .filter(|service| !names.iter().any(|name| name == service))
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "{section} shared_with misses {}, which also read the CPU query '{query}': \
+             list every service of that node",
+            missing.join(", ")
+        ));
+    }
+    Ok(query)
+}
+
+/// The one power envelope of the listed services.
+fn shared_with_envelope(
+    section: &str,
+    query: &str,
+    names: &[String],
+    cloud: &CloudEnergyConfig,
+) -> Result<(f64, f64), String> {
+    let mut members = names
+        .iter()
+        .map(|name| (name, cloud.service_power(&cloud.services[name])));
+    let Some((first, envelope)) = members.next() else {
+        return Err(format!("{section} shared_with is empty"));
+    };
+    if let Some((other, other_envelope)) = members.find(|(_, e)| *e != envelope) {
+        return Err(format!(
+            "{section} shared_with services '{first}' ({} to {} W) and '{other}' ({} to \
+             {} W) read the CPU query '{query}' with different power envelopes: one node \
+             has one envelope, give them one instance type",
+            envelope.0, envelope.1, other_envelope.0, other_envelope.1
+        ));
+    }
+    Ok(envelope)
+}
+
+/// No listed service sits on a node a higher-precedence backend reads
+/// whole: Redfish chassis, or Alumet under `label_key = "domain"`.
+fn check_shared_with_node_backends(
+    subsystem: Subsystem,
+    names: &[String],
+    green: &GreenConfig,
+) -> Result<(), String> {
+    let redfish = green.redfish.as_ref().map(|cfg| &cfg.service_mappings);
+    let alumet = green
+        .alumet
+        .as_ref()
+        .filter(|cfg| cfg.label_key == "domain")
+        .map(|cfg| &cfg.service_mappings);
+    for (backend, mappings) in [
+        ("[green.redfish] service_mappings", redfish),
+        (
+            "[green.alumet] service_mappings under label_key = 'domain'",
+            alumet,
+        ),
+    ] {
+        if let Some(name) = mappings.and_then(|m| names.iter().find(|n| m.contains_key(*n))) {
+            return Err(format!(
+                "{} shared_with entry '{name}' is in {backend}: that node is read whole by a \
+                 higher-precedence backend, so a {} host on it is already inside that \
+                 reading and must not be declared. Declare it dedicated only if it runs on \
+                 separate hosts",
+                subsystem.section(),
+                subsystem.noun()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Rule W2: a shared host with an empty `shared_with` next to backends
+/// that read application nodes. Its dynamic share is billed on top of
+/// every reading, so it may count a node twice.
+pub(crate) fn unlisted_shared_host_warnings(green: &GreenConfig) -> Vec<String> {
+    let reads_nodes = green
+        .cloud_energy
+        .as_ref()
+        .is_some_and(|cfg| !cfg.services.is_empty())
+        || green
+            .redfish
+            .as_ref()
+            .is_some_and(|cfg| !cfg.service_mappings.is_empty())
+        || green
+            .alumet
+            .as_ref()
+            .is_some_and(|cfg| cfg.label_key == "domain" && !cfg.service_mappings.is_empty());
+    if !reads_nodes {
+        return Vec::new();
+    }
+    [Subsystem::Database, Subsystem::Broker]
+        .into_iter()
+        .filter(|&subsystem| {
+            green.static_hosts(subsystem).is_some_and(|cfg| {
+                cfg.placement == HostPlacement::Shared && cfg.shared_with.is_empty()
+            })
+        })
+        .map(|subsystem| {
+            format!(
+                "{} placement = 'shared' with an empty shared_with: the {}'s dynamic share is \
+                 billed on top of every [green.cloud.services], [green.redfish] or [green.alumet] \
+                 domain reading. List the query group of the node it runs on, or do not declare \
+                 a host whose node is read whole",
+                subsystem.section(),
+                subsystem.noun()
+            )
+        })
+        .collect()
+}
+
+/// Rules A1/BA1 and A2/BA2: an Alumet database or broker workload reads
+/// hosts that no node-level application reading already covers.
+fn validate_alumet_workload_scope(subsystem: Subsystem, green: &GreenConfig) -> Result<(), String> {
+    let Some(alumet) = green
+        .alumet
+        .as_ref()
+        .filter(|_| green.alumet_host(subsystem).is_some())
+    else {
+        return Ok(());
+    };
+    let (section, noun) = (subsystem.alumet_section(), subsystem.noun());
+    if alumet.label_key == "domain" && !alumet.service_mappings.is_empty() {
+        return Err(format!(
+            "{section} cannot sit next to [green.alumet] service_mappings under label_key = \
+             'domain': a RAPL domain covers a whole node, so the {noun} and the services on \
+             it would count the same joules. Measure per cgroup with another label_key, or \
+             drop one of the two"
+        ));
+    }
+    if green.static_hosts(subsystem).is_some() {
+        return Ok(());
+    }
+    let backend = if green
+        .cloud_energy
+        .as_ref()
+        .is_some_and(|cfg| !cfg.services.is_empty())
+    {
+        "[green.cloud.services]"
+    } else if green
+        .redfish
+        .as_ref()
+        .is_some_and(|cfg| !cfg.service_mappings.is_empty())
+    {
+        "[green.redfish] service_mappings"
+    } else {
+        return Ok(());
+    };
+    Err(format!(
+        "{section} sits next to {backend} without {static_section}: if the {noun} runs on \
+         hosts {backend} reads, remove {section}, its energy is already in their readings. \
+         If it runs on separate hosts, add {static_section} with placement = 'dedicated'",
+        static_section = subsystem.section()
+    ))
+}
+
+/// The database and broker sources configured, as their section names.
+fn host_source_sections(green: &GreenConfig) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for subsystem in [Subsystem::Database, Subsystem::Broker] {
+        if green.static_hosts(subsystem).is_some() {
+            out.push(subsystem.section());
+        }
+        if green.alumet_host(subsystem).is_some() {
+            out.push(subsystem.alumet_section());
+        }
+    }
+    out
+}
+
+/// Rules W1 and W3, once a database or broker source is configured: an
+/// unfiltered provider default CPU query reads the first series of a
+/// fleet, possibly that host, and calibrated readings may include it.
+pub(crate) fn host_source_warnings(green: &GreenConfig) -> Vec<String> {
+    let sources = host_source_sections(green);
+    if sources.is_empty() {
+        return Vec::new();
+    }
+    let sources = sources.join(", ");
+    let mut out = Vec::new();
+    if let Some(cloud) = green.cloud_energy.as_ref() {
+        for (query, services) in cloud.cpu_query_groups() {
+            if DEFAULT_CPU_QUERIES.contains(&query.as_str()) {
+                out.push(format!(
+                    "[green.cloud.services] {} read the unfiltered provider default CPU query \
+                     '{query}', which returns the first series of the fleet, possibly a host \
+                     declared in {sources}. Give them a cpu_query filtered to their nodes",
+                    services.join(", ")
+                ));
+            }
+        }
+    }
+    if green.calibration_file.is_some() {
+        out.push(format!(
+            "[green] calibration_file is set next to {sources}: the calibrated readings must \
+             exclude those hosts, whose energy already enters the totals as a host term, or it \
+             counts twice"
+        ));
+    }
+    out
+}
+
+impl Config {
+    fn validate_alumet_workload_scopes(&self) -> Result<(), String> {
+        validate_alumet_workload_scope(Subsystem::Database, &self.green)?;
+        validate_alumet_workload_scope(Subsystem::Broker, &self.green)
+    }
+
+    fn warn_host_sources(&self) {
+        for message in host_source_warnings(&self.green) {
+            tracing::warn!("{message}");
+        }
+    }
+
+    /// Rules D2 to D8/D9 (database), B2 to B8/B9 (broker) for one
+    /// subsystem's declared hosts.
+    fn validate_static_hosts(&self, subsystem: Subsystem) -> Result<(), String> {
+        let alumet = self.green.alumet_host(subsystem);
+        if let Some(cfg) = self.green.static_hosts(subsystem) {
+            let section = subsystem.section();
+            validate_host_counts(section, cfg)?;
+            validate_host_class(section, cfg)?;
+            match cfg.placement {
+                HostPlacement::Dedicated => {
+                    validate_dedicated_hosts(subsystem, cfg, alumet.is_some())?;
+                }
+                HostPlacement::Shared => validate_shared_host(subsystem, cfg, alumet.is_some())?,
+            }
+            validate_host_cpu_query(subsystem, cfg, &self.green)?;
+            validate_shared_with(subsystem, cfg, &self.green)?;
+        }
+        self.validate_host_region(subsystem)
+    }
+
+    /// Rule X1: the database and broker hosts read different CPU queries.
+    fn validate_distinct_host_queries(&self) -> Result<(), String> {
+        let query = |subsystem| {
+            self.green
+                .static_hosts(subsystem)
+                .and_then(|cfg| cfg.cpu_query.as_deref())
+                .map(str::trim)
+        };
+        match (query(Subsystem::Database), query(Subsystem::Broker)) {
+            (Some(database), Some(broker)) if database == broker => Err(format!(
+                "[green.database_static] and [green.broker_static] read the same cpu_query \
+                 '{database}': each declared host reads its own CPU, give each its own query"
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    fn warn_unlisted_shared_hosts(&self) {
+        for message in unlisted_shared_host_warnings(&self.green) {
+            tracing::warn!("{message}");
+        }
+    }
+
+    /// Rules B8 and B9: a valid declared region, one region per
+    /// subsystem, and an effective one whenever a source is configured.
+    fn validate_host_region(&self, subsystem: Subsystem) -> Result<(), String> {
+        let declared = self
+            .green
+            .static_hosts(subsystem)
+            .map(|cfg| cfg.region.as_deref());
+        let alumet = self.green.alumet_host(subsystem);
+        if declared.is_none() && alumet.is_none() {
+            return Ok(());
+        }
+        let section = subsystem.section();
+        if let Some(region) = declared.flatten() {
+            if region.is_empty() || !crate::score::carbon::is_valid_region_id(region) {
+                return Err(format!(
+                    "{section} region '{region}' is not a valid region id"
+                ));
+            }
+            warn_unknown_region(section, Some(region));
+        }
+        if let (Some(region), Some((_, Some(alumet_region)))) = (declared.flatten(), alumet)
+            && !region.eq_ignore_ascii_case(alumet_region)
+        {
+            return Err(format!(
+                "{section} region '{region}' and {} region '{alumet_region}' differ: the \
+                 {} hosts have one region, keep one of the two",
+                subsystem.alumet_section(),
+                subsystem.noun()
+            ));
+        }
+        if self.green.host_region(subsystem).is_none() {
+            return Err(format!(
+                "the {} host energy needs a region to convert to gCO2: set region in {section} \
+                 or {}, or [green] default_region",
+                subsystem.noun(),
+                subsystem.alumet_section()
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Config {
@@ -84,20 +754,31 @@ impl Config {
         if let Some(cfg) = &self.green.alumet {
             Self::validate_alumet(cfg)?;
         }
+        self.validate_alumet_workload_scopes()?;
         if let Some(cfg) = &self.green.redfish {
             Self::validate_redfish(cfg)?;
         }
         if let Some(cfg) = &self.green.cloud_energy {
             Self::validate_cloud_energy(cfg)?;
         }
-        if let Some(cfg) = &self.green.broker_static {
-            validate_broker_static(cfg)?;
-        }
+        self.validate_static_hosts(Subsystem::Database)?;
+        self.validate_static_hosts(Subsystem::Broker)?;
+        self.validate_distinct_host_queries()?;
+        self.warn_unlisted_shared_hosts();
+        self.warn_host_sources();
         self.validate_hourly_profiles_file()?;
         if let Some(cfg) = &self.green.electricity_maps {
             Self::validate_electricity_maps(cfg)?;
         }
+        Self::validate_grid_feeds(&self.green.grid_feeds)?;
+        self.warn_overlapping_node_readings();
         Ok(())
+    }
+
+    fn warn_overlapping_node_readings(&self) {
+        for message in overlapping_node_readings(&self.green) {
+            tracing::warn!("{message}");
+        }
     }
 
     fn validate_embodied_carbon(value: f64) -> Result<(), String> {
@@ -246,6 +927,67 @@ impl Config {
                     "[green.electricity_maps.region_map] region key '{region}' \
                      contains control characters"
                 ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate the grid operator feed sections. A cloud region may be
+    /// served by one feed only, so the merge order never decides silently.
+    pub(in crate::config) fn validate_grid_feeds(
+        feeds: &[crate::score::grid_feed::GridFeedConfig],
+    ) -> Result<(), String> {
+        let mut owner: HashMap<&str, &str> = HashMap::new();
+        for feed in feeds {
+            let section = feed.kind.section();
+            if !feed.endpoint.starts_with("http://") && !feed.endpoint.starts_with("https://") {
+                return Err(format!(
+                    "{section} endpoint '{}' must start with 'http://' or 'https://'",
+                    feed.endpoint
+                ));
+            }
+            validate_http_authority(&feed.endpoint, &format!("{section} endpoint"))?;
+            let secs = feed.poll_interval.as_secs();
+            check_range(&format!("{section} poll_interval_secs"), &secs, &60, &86400)?;
+            if feed.regions.is_empty() {
+                return Err(format!(
+                    "{section} must map at least one cloud region to the operator's grid"
+                ));
+            }
+            if let Some(key) = &feed.api_key {
+                // The rule the header sender applies, so a bad key fails here
+                // rather than silently disabling the feed at startup.
+                if !key.bytes().all(|b| b.is_ascii_graphic()) {
+                    return Err(format!(
+                        "{section} API key must be printable ASCII without spaces"
+                    ));
+                }
+                if feed.endpoint.starts_with("http://") {
+                    tracing::warn!(
+                        "{section} API key will be sent over http:// (no TLS). Use https:// \
+                         for production or set the endpoint to a loopback/private address \
+                         if this is intentional."
+                    );
+                }
+            }
+            for (region, zone) in &feed.regions {
+                if region.is_empty() || has_control_char(region) {
+                    return Err(format!(
+                        "{section} region {region:?} is empty or contains control characters"
+                    ));
+                }
+                if !feed.kind.zones().contains(&zone.as_str()) {
+                    return Err(format!(
+                        "{section} zone {zone:?} for region {region:?} is not one of {:?}",
+                        feed.kind.zones()
+                    ));
+                }
+                if let Some(other) = owner.insert(region, section) {
+                    return Err(format!(
+                        "region {region:?} is listed in both {other} and {section}; \
+                         keep it in the feed of the grid that serves it"
+                    ));
+                }
             }
         }
         Ok(())
@@ -605,35 +1347,51 @@ impl Config {
     }
 
     /// Validate each `chassis_id -> RedfishEndpoint` pair in
-    /// `[green.redfish.endpoints]`. The `schema` field is type-checked
-    /// by serde at deserialization, so only the URL needs runtime
-    /// validation here.
+    /// `[green.redfish.endpoints]`, in sorted id order, and reject a
+    /// second id that resolves a chassis already declared (rule R1):
+    /// its power would be counted once per id. The `schema` field is
+    /// type-checked by serde at deserialization, so only the URL needs
+    /// runtime validation here.
     fn validate_redfish_endpoints(
         endpoints: &HashMap<String, RedfishEndpoint>,
     ) -> Result<(), String> {
-        for (chassis_id, endpoint) in endpoints {
-            if chassis_id.is_empty() || chassis_id.len() > 256 {
+        let mut ids: Vec<&String> = endpoints.keys().collect();
+        ids.sort();
+        let mut seen: HashMap<RedfishChassisKey, &str> = HashMap::new();
+        for chassis_id in ids {
+            let url = &endpoints[chassis_id].url;
+            Self::validate_redfish_endpoint(chassis_id, url)?;
+            if let Some(first) = seen.insert(redfish_chassis_key(url), chassis_id) {
                 return Err(format!(
-                    "[green.redfish] endpoints chassis id '{chassis_id}' must be 1-256 chars"
+                    "[green.redfish] endpoints '{first}' and '{chassis_id}' read the same \
+                     chassis ('{url}'), so its power would be counted once per id. Declare \
+                     the chassis once and map its services to that id"
                 ));
             }
-            if has_control_char(chassis_id) {
-                return Err(format!(
-                    "[green.redfish] endpoints chassis id '{chassis_id}' contains control characters"
-                ));
-            }
-            let url = &endpoint.url;
-            if !url.starts_with("http://") && !url.starts_with("https://") {
-                return Err(format!(
-                    "[green.redfish] endpoint URL for chassis '{chassis_id}' must start with 'http://' or 'https://', got '{url}'"
-                ));
-            }
-            validate_http_authority(
-                url,
-                &format!("[green.redfish] endpoint URL for chassis '{chassis_id}'"),
-            )?;
         }
         Ok(())
+    }
+
+    fn validate_redfish_endpoint(chassis_id: &str, url: &str) -> Result<(), String> {
+        if chassis_id.is_empty() || chassis_id.len() > 256 {
+            return Err(format!(
+                "[green.redfish] endpoints chassis id '{chassis_id}' must be 1-256 chars"
+            ));
+        }
+        if has_control_char(chassis_id) {
+            return Err(format!(
+                "[green.redfish] endpoints chassis id '{chassis_id}' contains control characters"
+            ));
+        }
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(format!(
+                "[green.redfish] endpoint URL for chassis '{chassis_id}' must start with 'http://' or 'https://', got '{url}'"
+            ));
+        }
+        validate_http_authority(
+            url,
+            &format!("[green.redfish] endpoint URL for chassis '{chassis_id}'"),
+        )
     }
 
     /// Validate each `service -> chassis_id` pair in `[green.redfish.service_mappings]`.
@@ -751,12 +1509,12 @@ impl Config {
             ));
         }
         if let Some(ref it) = cfg.default_instance_type
-            && !crate::score::cloud_energy::table::is_known_instance_type(it)
+            && let Some(why) = unpriced_instance_suffix(it)
         {
             tracing::warn!(
                 instance_type = %it,
                 "[green.cloud] default_instance_type is not in the embedded \
-                 SPECpower table; the provider default watts will be used"
+                 SPECpower table; the provider default watts will be used{why}"
             );
         }
         if let Some(ref m) = cfg.cpu_metric
@@ -797,6 +1555,7 @@ impl Config {
                 )?,
             }
         }
+        warn_mixed_query_envelopes(cfg);
         Ok(())
     }
 
@@ -880,13 +1639,13 @@ impl Config {
             ));
         }
         if !instance_type.is_empty()
-            && !crate::score::cloud_energy::table::is_known_instance_type(instance_type)
+            && let Some(why) = unpriced_instance_suffix(instance_type)
         {
             tracing::warn!(
                 service = %service,
                 instance_type = %instance_type,
                 "[green.cloud.services] instance_type is not in the embedded \
-                 SPECpower table; provider default watts will be used"
+                 SPECpower table; provider default watts will be used{why}"
             );
         }
         Ok(())

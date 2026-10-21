@@ -36,9 +36,24 @@ pub struct CalibrationTemplate {
     #[serde(default)]
     pub cloud_regions: Vec<String>,
     pub carbon_intensity_source: String,
-    pub specpower_table_version: String,
+    /// Date of the embedded `SPECpower` table. Omit it to take the running
+    /// binary's, which ships the only table: see
+    /// [`CalibrationTemplate::resolved_specpower_table_version`].
+    #[serde(default)]
+    pub specpower_table_version: Option<String>,
     #[serde(default)]
     pub scaphandre_used: bool,
+}
+
+impl CalibrationTemplate {
+    /// The declared `specpower_table_version`, or the running binary's
+    /// table date when the org config omits it.
+    #[must_use]
+    pub fn resolved_specpower_table_version(&self) -> String {
+        self.specpower_table_version
+            .clone()
+            .unwrap_or_else(|| crate::score::cloud_energy::embedded_specpower_date().to_string())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,20 +139,31 @@ pub fn validate_for_official(cfg: &OrgConfig) -> Vec<String> {
     if src.is_empty() {
         errors
             .push("methodology.calibration.carbon_intensity_source must not be empty".to_string());
-    } else if !matches!(src, "electricity_maps" | "static_tables" | "mixed") {
+    } else if !super::validator::CARBON_SOURCE_VALUES.contains(&src) {
         errors.push(format!(
-            "methodology.calibration.carbon_intensity_source must be one of \"electricity_maps\", \"static_tables\", \"mixed\", got {src:?}"
+            "methodology.calibration.carbon_intensity_source must be one of {:?}, got {src:?}",
+            super::validator::CARBON_SOURCE_VALUES
         ));
     }
-    if cfg
+    if let Some(declared) = cfg
         .methodology
         .calibration
         .specpower_table_version
-        .trim()
-        .is_empty()
+        .as_deref()
     {
-        errors
-            .push("methodology.calibration.specpower_table_version must not be empty".to_string());
+        let binary_date = crate::score::cloud_energy::embedded_specpower_date();
+        if declared.trim().is_empty() {
+            errors.push(
+                "methodology.calibration.specpower_table_version must not be empty, omit it to use the running binary's table date"
+                    .to_string(),
+            );
+        } else if declared.trim() != binary_date {
+            // Same check `disclose` runs, surfaced at daemon startup so an
+            // upgrade that changes the table fails at deploy time.
+            errors.push(format!(
+                "methodology.calibration.specpower_table_version {declared:?} does not match the running binary's table date {binary_date:?}, align it or omit it"
+            ));
+        }
     }
     let core_required = super::schema::core_patterns_required();
     for core in &core_required {
@@ -205,7 +231,6 @@ conformance = "core-required"
 [methodology.calibration]
 cloud_regions = ["eu-west-3"]
 carbon_intensity_source = "electricity_maps"
-specpower_table_version = "2026-04-24"
 scaphandre_used = false
 
 [scope_manifest]
@@ -257,6 +282,92 @@ environments_measured = ["prod"]
         let errors = validate_for_official(&cfg);
         assert!(
             errors.iter().any(|e| e.contains("n_plus_one_sql")),
+            "got {errors:?}"
+        );
+    }
+
+    fn with_specpower(version: &str) -> OrgConfig {
+        let toml = sample_toml().replace(
+            "scaphandre_used = false",
+            &format!("specpower_table_version = {version:?}\nscaphandre_used = false"),
+        );
+        let file = write_toml(&toml);
+        load_from_path(file.path()).unwrap()
+    }
+
+    #[test]
+    fn omitted_specpower_version_resolves_to_binary_date() {
+        let file = write_toml(sample_toml());
+        let cfg = load_from_path(file.path()).unwrap();
+        assert_eq!(cfg.methodology.calibration.specpower_table_version, None);
+        assert_eq!(
+            cfg.methodology
+                .calibration
+                .resolved_specpower_table_version(),
+            crate::score::cloud_energy::embedded_specpower_date()
+        );
+    }
+
+    #[test]
+    fn declared_specpower_version_matching_binary_passes() {
+        let cfg = with_specpower(crate::score::cloud_energy::embedded_specpower_date());
+        assert_eq!(validate_for_official(&cfg), Vec::<String>::new());
+        assert_eq!(
+            cfg.methodology
+                .calibration
+                .resolved_specpower_table_version(),
+            crate::score::cloud_energy::embedded_specpower_date()
+        );
+    }
+
+    #[test]
+    fn declared_specpower_version_drifting_from_binary_is_flagged() {
+        let cfg = with_specpower("2023-05-01");
+        let errors = validate_for_official(&cfg);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("specpower_table_version") && e.contains("does not match")),
+            "got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn declared_empty_specpower_version_is_flagged() {
+        let cfg = with_specpower("  ");
+        let errors = validate_for_official(&cfg);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("specpower_table_version must not be empty")),
+            "got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn rte_eco2mix_carbon_source_is_accepted() {
+        let toml = sample_toml().replace(
+            "carbon_intensity_source = \"electricity_maps\"",
+            "carbon_intensity_source = \"rte_eco2mix\"",
+        );
+        let file = write_toml(&toml);
+        let cfg = load_from_path(file.path()).unwrap();
+        assert_eq!(validate_for_official(&cfg), Vec::<String>::new());
+    }
+
+    #[test]
+    fn unknown_carbon_source_is_flagged() {
+        let toml = sample_toml().replace(
+            "carbon_intensity_source = \"electricity_maps\"",
+            "carbon_intensity_source = \"ademe\"",
+        );
+        let file = write_toml(&toml);
+        let cfg = load_from_path(file.path()).unwrap();
+        let errors = validate_for_official(&cfg);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("carbon_intensity_source") && e.contains("rte_eco2mix")),
             "got {errors:?}"
         );
     }

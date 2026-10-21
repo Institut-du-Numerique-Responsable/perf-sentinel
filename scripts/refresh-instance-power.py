@@ -39,17 +39,28 @@ AWS_VCPU = {
     "nano": 2, "micro": 2, "small": 2, "medium": 2, "large": 2,
     "xlarge": 4, "2xlarge": 8, "4xlarge": 16, "8xlarge": 32,
     "9xlarge": 36, "12xlarge": 48, "16xlarge": 64, "18xlarge": 72,
-    "24xlarge": 96, "32xlarge": 128,
+    "24xlarge": 96, "32xlarge": 128, "48xlarge": 192,
 }
+
+# A Graviton `.medium` is 1 vCPU (AWS instance type specifications), the
+# t families keep the 2 vCPU of the default map.
+GRAVITON_VCPU = {"medium": 1}
 
 T_SIZES = ["nano", "micro", "small", "medium", "large", "xlarge", "2xlarge"]
 M5_SIZES = ["large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge", "24xlarge"]
 M6I_SIZES = M5_SIZES + ["32xlarge"]
 M7_SIZES = ["large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "16xlarge"]
+# 7th and 8th generation x86 families, sizes checked against the AWS
+# instance type specifications.
+X86_7_SIZES = ["large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge",
+               "24xlarge", "48xlarge"]
+G_SIZES = ["medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge"]
+G_XL_SIZES = G_SIZES + ["24xlarge", "48xlarge"]
 
 
-def aws(prefix: str, sizes: "list[str]") -> "list[tuple[str, int]]":
-    return [(f"{prefix}.{s}", AWS_VCPU[s]) for s in sizes]
+def aws(prefix: str, sizes: list[str], vcpu: dict[str, int] | None = None) -> list[tuple[str, int]]:
+    counts = {**AWS_VCPU, **(vcpu or {})}
+    return [(f"{prefix}.{s}", counts[s]) for s in sizes]
 
 
 def gcp(prefix: str, sizes: "list[int]") -> "list[tuple[str, int]]":
@@ -64,6 +75,13 @@ def azure(pattern: str, sizes: "list[int]") -> "list[tuple[str, int]]":
 # premium, instances, extra note lines). Adding a family means adding a
 # line here, by hand. The Turin families map to the Genoa architecture
 # pending an upstream CCF correction, see docs/LIMITATIONS.md.
+#
+# Mixed-platform rule, for series added from the managed-class coverage
+# work on (GCP n1, Azure B, Azure Eas v5): when the vendor lists several
+# processors for one series, the row takes the architecture with the
+# highest max W/vCPU among those the vendor lists and the provider CSV
+# publishes, an upper bound for whichever host the VM lands on. Families
+# listed before that work keep their mapping.
 FAMILIES = [
     ("t3 (Nitro, Cascade Lake, burstable)", "aws", "Cascade Lake", False, aws("t3", T_SIZES),
      ["Burst credit is not modeled by CCF, sizes below xlarge count as 2 vCPU."]),
@@ -78,26 +96,33 @@ FAMILIES = [
     ("r5a (EPYC 1st Gen Naples, memory-optimized)", "aws", "EPYC 1st Gen", True, aws("r5a", M5_SIZES), []),
     ("m6i (Ice Lake, general purpose)", "aws", "Ice Lake", False, aws("m6i", M6I_SIZES), []),
     ("c6i (Ice Lake, compute-optimized)", "aws", "Ice Lake", False, aws("c6i", M6I_SIZES), []),
-    ("r6i (Ice Lake, memory-optimized)", "aws", "Ice Lake", True, aws("r6i", M5_SIZES), []),
-    ("m7i (Sapphire Rapids, Xeon Platinum 8488C)", "aws", "Sapphire Rapids", False, aws("m7i", M7_SIZES), []),
-    ("c7i (Sapphire Rapids, compute-optimized)", "aws", "Sapphire Rapids", False, aws("c7i", M7_SIZES), []),
-    ("r7i (Sapphire Rapids, memory-optimized)", "aws", "Sapphire Rapids", True, aws("r7i", M7_SIZES), []),
-    ("m7a (AMD Genoa, EPYC 9R14)", "aws", "EPYC 4th Gen", False, aws("m7a", M7_SIZES), []),
-    ("c7a (Genoa, compute-optimized)", "aws", "EPYC 4th Gen", False, aws("c7a", M7_SIZES), []),
-    ("r7a (Genoa, memory-optimized)", "aws", "EPYC 4th Gen", True, aws("r7a", M7_SIZES), []),
+    ("r6i (Ice Lake, memory-optimized)", "aws", "Ice Lake", True, aws("r6i", M6I_SIZES), []),
+    ("m7i (Sapphire Rapids, Xeon Platinum 8488C)", "aws", "Sapphire Rapids", False, aws("m7i", X86_7_SIZES), []),
+    ("c7i (Sapphire Rapids, compute-optimized)", "aws", "Sapphire Rapids", False, aws("c7i", X86_7_SIZES), []),
+    ("r7i (Sapphire Rapids, memory-optimized)", "aws", "Sapphire Rapids", True, aws("r7i", X86_7_SIZES), []),
+    ("m7a (AMD Genoa, EPYC 9R14)", "aws", "EPYC 4th Gen", False, aws("m7a", X86_7_SIZES), []),
+    ("c7a (Genoa, compute-optimized)", "aws", "EPYC 4th Gen", False, aws("c7a", X86_7_SIZES), []),
+    ("r7a (Genoa, memory-optimized)", "aws", "EPYC 4th Gen", True, aws("r7a", X86_7_SIZES), []),
     ("m6a (AMD Milan, EPYC 7R13)", "aws", "EPYC 3rd Gen", False, aws("m6a", M7_SIZES), []),
     ("c6a (Milan, compute-optimized)", "aws", "EPYC 3rd Gen", False, aws("c6a", M7_SIZES), []),
-    ("m7g (Graviton 3, Neoverse V1)", "aws", "Graviton3", False, aws("m7g", M7_SIZES),
+    ("m6g (Graviton 2, Neoverse N1)", "aws", "Graviton2", False, aws("m6g", G_SIZES, GRAVITON_VCPU),
      ["CCF has no measured SPECpower for Graviton silicon (EPYC 2nd Gen proxy)."]),
-    ("c7g (Graviton 3, compute-optimized)", "aws", "Graviton3", False, aws("c7g", M7_SIZES), []),
-    ("m8g (Graviton 4, Neoverse V2)", "aws", "Graviton4", False, aws("m8g", M7_SIZES), []),
-    ("c8g (Graviton 4, compute-optimized)", "aws", "Graviton4", False, aws("c8g", M7_SIZES), []),
-    ("m8a (AMD Turin, EPYC 5th Gen, Genoa proxy)", "aws", "EPYC 4th Gen", False, aws("m8a", M7_SIZES),
+    ("c6g (Graviton 2, compute-optimized)", "aws", "Graviton2", False, aws("c6g", G_SIZES, GRAVITON_VCPU), []),
+    ("r6g (Graviton 2, memory-optimized)", "aws", "Graviton2", True, aws("r6g", G_SIZES, GRAVITON_VCPU), []),
+    ("t4g (Graviton 2, burstable)", "aws", "Graviton2", False, aws("t4g", T_SIZES),
+     ["Burst credit is not modeled by CCF, sizes below xlarge count as 2 vCPU."]),
+    ("m7g (Graviton 3, Neoverse V1)", "aws", "Graviton3", False, aws("m7g", G_SIZES, GRAVITON_VCPU), []),
+    ("c7g (Graviton 3, compute-optimized)", "aws", "Graviton3", False, aws("c7g", G_SIZES, GRAVITON_VCPU), []),
+    ("r7g (Graviton 3, memory-optimized)", "aws", "Graviton3", True, aws("r7g", G_SIZES, GRAVITON_VCPU), []),
+    ("m8g (Graviton 4, Neoverse V2)", "aws", "Graviton4", False, aws("m8g", G_XL_SIZES, GRAVITON_VCPU), []),
+    ("c8g (Graviton 4, compute-optimized)", "aws", "Graviton4", False, aws("c8g", G_XL_SIZES, GRAVITON_VCPU), []),
+    ("r8g (Graviton 4, memory-optimized)", "aws", "Graviton4", True, aws("r8g", G_XL_SIZES, GRAVITON_VCPU), []),
+    ("m8a (AMD Turin, EPYC 5th Gen, Genoa proxy)", "aws", "EPYC 4th Gen", False, aws("m8a", X86_7_SIZES),
      ["Turin is proxied to Genoa pending an upstream CCF correction,",
       "see table.rs module docs and docs/LIMITATIONS.md."]),
-    ("c8a (Turin, compute-optimized, Genoa proxy)", "aws", "EPYC 4th Gen", False, aws("c8a", M7_SIZES), []),
-    ("m8i (Intel Emerald Rapids, general purpose)", "aws", "Emerald Rapids", False, aws("m8i", M7_SIZES), []),
-    ("c8i (Emerald Rapids, compute-optimized)", "aws", "Emerald Rapids", False, aws("c8i", M7_SIZES), []),
+    ("c8a (Turin, compute-optimized, Genoa proxy)", "aws", "EPYC 4th Gen", False, aws("c8a", X86_7_SIZES), []),
+    ("m8i (Intel Emerald Rapids, general purpose)", "aws", "Emerald Rapids", False, aws("m8i", X86_7_SIZES), []),
+    ("c8i (Emerald Rapids, compute-optimized)", "aws", "Emerald Rapids", False, aws("c8i", X86_7_SIZES), []),
     ("n2-standard (Cascade Lake, general purpose)", "gcp", "Cascade Lake", False,
      gcp("n2-standard", [2, 4, 8, 16, 32, 48, 64, 80, 96, 128]), []),
     ("n2-highcpu (Cascade Lake, compute-optimized)", "gcp", "Cascade Lake", False,
@@ -116,6 +141,14 @@ FAMILIES = [
      gcp("c4-standard", [2, 4, 8, 16, 32, 96]), []),
     ("n2d (Genoa-era newer, EPYC 9004)", "gcp", "EPYC 4th Gen", False,
      gcp("n2d-standard", [2, 4, 8, 16, 32, 64]), []),
+    # GCP CPU platforms page lists Skylake, Broadwell, Haswell, Ivy Bridge
+    # and Sandy Bridge for N1. The GCP CSV publishes Skylake and Broadwell,
+    # Skylake has the higher max W/vCPU.
+    ("n1-standard (Skylake / Broadwell / Haswell / Ivy Bridge / Sandy Bridge mix)", "gcp", "Skylake", False,
+     gcp("n1-standard", [1, 2, 4, 8, 16, 32, 64, 96]),
+     ["Mixed platform, priced on Skylake, the highest max W/vCPU the GCP CSV publishes."]),
+    ("n1-highmem (same platforms, 6.5 GiB per vCPU, no DRAM premium)", "gcp", "Skylake", False,
+     gcp("n1-highmem", [2, 4, 8, 16, 32, 64, 96]), []),
     ("c4a (Google Axion, Neoverse V2 ARM)", "aws", "Graviton4", False,
      gcp("c4a-standard", [1, 2, 4, 8, 16, 32, 48, 72]),
      ["No native ARM entry in the GCP CSV. Proxied to AWS Graviton 4",
@@ -128,12 +161,25 @@ FAMILIES = [
      azure("Standard_D{}s_v5", [2, 4, 8, 16, 32, 48, 64, 96]), []),
     ("Standard_Das v5 (EPYC 3rd Gen)", "azure", "EPYC 3rd Gen", False,
      azure("Standard_D{}as_v5", [2, 4, 8, 16, 32, 48, 64, 96]), []),
+    # Azure Easv5 size page lists EPYC 7763v (Milan) and EPYC 9004 (Genoa).
+    # The Azure CSV publishes EPYC 3rd Gen only.
+    ("Standard_Eas v5 (EPYC 3rd Gen / 4th Gen mix, memory-optimized)", "azure", "EPYC 3rd Gen", True,
+     azure("Standard_E{}as_v5", [2, 4, 8, 16, 20, 32, 48, 64, 96]), []),
+    # Azure Bv1 size page lists Ice Lake, Cascade Lake, Skylake, Broadwell
+    # and Haswell. The Azure CSV publishes all but Ice Lake, Haswell has
+    # the highest max W/vCPU.
+    ("Standard_B (Ice Lake / Cascade Lake / Skylake / Broadwell / Haswell mix, burstable)", "azure", "Haswell", False,
+     [("Standard_B1s", 1), ("Standard_B1ms", 1), ("Standard_B2s", 2), ("Standard_B2ms", 2),
+      ("Standard_B4ms", 4), ("Standard_B8ms", 8), ("Standard_B12ms", 12), ("Standard_B16ms", 16),
+      ("Standard_B20ms", 20)],
+     ["Burst credit is not modeled, every size counts its full vCPU.",
+      "Mixed platform, priced on Haswell, the highest max W/vCPU the Azure CSV publishes."]),
     ("Standard_E v3 (Skylake, memory-optimized)", "azure", "Skylake", True,
      azure("Standard_E{}s_v3", [2, 4, 8, 16, 32, 48, 64]), []),
     ("Standard_E v4 (Cascade Lake, memory-optimized)", "azure", "Cascade Lake", True,
-     azure("Standard_E{}s_v4", [2, 4, 8, 16, 32, 48, 64]), []),
+     azure("Standard_E{}s_v4", [2, 4, 8, 16, 20, 32, 48, 64]), []),
     ("Standard_E v5 (Cascade Lake / Ice Lake, memory-optimized)", "azure", "Cascade Lake", True,
-     azure("Standard_E{}s_v5", [2, 4, 8, 16, 32, 48, 64, 96]), []),
+     azure("Standard_E{}s_v5", [2, 4, 8, 16, 20, 32, 48, 64, 96]), []),
     ("Standard_F v2 (Cascade Lake, compute-optimized)", "azure", "Cascade Lake", False,
      azure("Standard_F{}s_v2", [2, 4, 8, 16, 32, 48, 64, 72]), []),
 ]

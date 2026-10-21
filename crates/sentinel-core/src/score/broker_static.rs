@@ -1,9 +1,14 @@
-//! Provisioned-cluster broker energy, declared rather than measured.
+//! Provisioned-cluster host energy, declared rather than measured.
 //!
-//! A managed broker (Confluent Cloud, MSK, SQS, managed Pulsar) offers no
-//! host to run an agent on, so neither Alumet nor a CPU scrape is
-//! available. The operator declares the cluster instead, and the embedded
-//! `SPECpower` table turns that declaration into watts.
+//! A provisioned broker or database cluster with a typed instance class
+//! (a managed Kafka, MQ or database cluster, or self-managed VMs) may
+//! offer no host to run an agent on. The operator declares the cluster
+//! instead, and the embedded `SPECpower` table turns that declaration into
+//! watts. This ceiling is the source when no Alumet agent and no
+//! `cpu_query` is configured, and the fallback when a dedicated
+//! declaration's `cpu_query` probe has no fresh reading. The same ceiling
+//! bills a declared broker and a declared database. Serverless and
+//! capacity-unit services have no provisioned node and cannot be declared.
 //!
 //! The model is `E(n) = n * P_max`, provisioned nodes times their power
 //! ceiling. What it bounds is narrower than it reads, and it errs in both
@@ -25,19 +30,20 @@ const MAX_BILLABLE_MS: u64 = 3_600_000;
 /// take, keeping a sub-second tick on the borrowed fast path.
 const MIN_BILLABLE_MS: u64 = 1_000;
 
-/// Operator declaration of a provisioned broker cluster.
+/// The provisioned ceiling of a broker cluster, built from a dedicated
+/// declaration by [`crate::score::host_static::StaticHostsConfig::ceiling`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StaticBrokerConfig {
     /// Number of provisioned broker nodes.
     pub nodes: u32,
     /// Instance type looked up in the embedded `SPECpower` table.
     pub instance_type: String,
-    /// `aws`, `gcp`, `azure`, or `generic` for an on-prem default.
-    /// Validation rejects anything else because an unrecognised value
-    /// would silently resolve to the generic watts.
+    /// Fallback of the table lookup. A declaration that passed validation
+    /// resolves to a row, so the ceiling sets `generic` and it is unread.
     pub provider: String,
-    /// Declared region, used to convert the waste energy to gCO2.
-    /// `None` reports the waste in kWh only.
+    /// The section's declared region, copied as is. The daemon converts
+    /// with the subsystem's effective region
+    /// ([`crate::config::GreenConfig::host_region`]) and never reads it.
     pub region: Option<String>,
 }
 

@@ -221,6 +221,10 @@ fn standardized_example_fragments_compose() {
     assert!(config.green.kepler.is_some());
     assert!(config.green.redfish.is_some());
     assert!(config.green.electricity_maps.is_some());
+    assert_eq!(
+        validate::green::overlapping_node_readings(&config.green),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -3619,6 +3623,146 @@ fn validate_redfish_rejects_scrape_interval_above_max() {
     assert!(err.contains("4000"));
 }
 
+fn redfish_with_two_chassis(first: &str, second: &str) -> RedfishConfig {
+    let mut cfg = minimal_redfish_config();
+    cfg.endpoints.clear();
+    cfg.endpoints
+        .insert("rack-a".to_string(), redfish_endpoint(first));
+    cfg.endpoints
+        .insert("rack-b".to_string(), redfish_endpoint(second));
+    cfg
+}
+
+#[test]
+fn validate_redfish_rejects_one_chassis_declared_twice() {
+    let cases = [
+        (
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+        ),
+        (
+            "https://BMC.Local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+        ),
+        (
+            "https://bmc.local:443/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/1/Power/",
+        ),
+        (
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/1/EnvironmentMetrics",
+        ),
+        (
+            "http://[::1]/redfish/v1/Chassis/1/Sensors/PowerMeter",
+            "http://[::1]:80/redfish/v1/Chassis/1/Power",
+        ),
+    ];
+    for (first, second) in cases {
+        let err = Config::validate_redfish(&redfish_with_two_chassis(first, second))
+            .expect_err("one chassis under two ids must error");
+        assert!(
+            err.contains("'rack-a' and 'rack-b' read the same chassis"),
+            "{first} vs {second}: {err}"
+        );
+    }
+}
+
+#[test]
+fn validate_redfish_accepts_two_chassis_on_one_host_and_distinct_hosts() {
+    let cases = [
+        (
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local/redfish/v1/Chassis/2/Power",
+        ),
+        (
+            "https://bmc-1.local/redfish/v1/Chassis/1/Power",
+            "https://bmc-2.local/redfish/v1/Chassis/1/Power",
+        ),
+        (
+            "https://bmc.local/redfish/v1/Chassis/1/Power",
+            "https://bmc.local:8443/redfish/v1/Chassis/1/Power",
+        ),
+    ];
+    for (first, second) in cases {
+        assert!(
+            Config::validate_redfish(&redfish_with_two_chassis(first, second)).is_ok(),
+            "{first} vs {second}"
+        );
+    }
+}
+
+fn cloud_and_redfish_toml(chassis_services: &[&str]) -> String {
+    let toml = String::from(
+        r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+cpu_metric = "node_cpu"
+
+[green.cloud.services]
+"a" = { idle_watts = 10.0, max_watts = 50.0 }
+"b" = { idle_watts = 10.0, max_watts = 50.0 }
+
+[green.redfish.endpoints.rack1]
+url = "https://bmc.local/redfish/v1/Chassis/1/Power"
+schema = "legacy_power"
+
+[green.redfish.service_mappings]
+"#,
+    );
+    let mappings: Vec<String> = chassis_services
+        .iter()
+        .map(|service| format!("\"{service}\" = \"rack1\""))
+        .collect();
+    toml + &mappings.join("\n")
+}
+
+fn node_overlaps(chassis_services: &[&str]) -> Vec<String> {
+    let config = load_from_str(&cloud_and_redfish_toml(chassis_services))
+        .expect("overlapping node readings warn, they do not reject");
+    validate::green::overlapping_node_readings(&config.green)
+}
+
+#[test]
+fn overlapping_node_readings_warn_without_containment() {
+    let warnings = node_overlaps(&["b", "c"]);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    let message = &warnings[0];
+    assert!(message.contains("CPU query 'node_cpu' (a, b)"), "{message}");
+    assert!(message.contains("chassis 'rack1' (b, c)"), "{message}");
+    assert!(message.contains("share b: a keep a share"), "{message}");
+}
+
+#[test]
+fn overlapping_node_readings_accept_containment_and_disjoint_groups() {
+    assert_eq!(node_overlaps(&["a", "b", "c"]), Vec::<String>::new());
+    assert_eq!(node_overlaps(&["c"]), Vec::<String>::new());
+}
+
+#[test]
+fn overlapping_node_readings_rank_alumet_domains_only() {
+    let alumet = |label_key: &str| {
+        format!(
+            "{}\n\n[green.alumet]\nendpoint = \"http://localhost:9091/metrics\"\n\
+             metric_name = \"rapl_consumed_energy_alumet\"\nlabel_key = \"{label_key}\"\n\n\
+             [green.alumet.service_mappings]\nb = \"package-0\"\n",
+            cloud_and_redfish_toml(&["a", "b"])
+        )
+    };
+    let overlaps = |toml: String| {
+        let config =
+            load_from_str(&toml).expect("overlapping node readings warn, they do not reject");
+        validate::green::overlapping_node_readings(&config.green)
+    };
+    let warnings = overlaps(alumet("domain"));
+    assert!(
+        warnings.iter().any(|m| m.contains("chassis 'rack1' (a, b)")
+            && m.contains("[green.alumet] domain 'package-0' (b)")),
+        "{warnings:?}"
+    );
+    // Only a domain names a node: other label keys rank nothing.
+    assert_eq!(overlaps(alumet("name")), Vec::<String>::new());
+}
+
 #[test]
 fn validate_redfish_rejects_unknown_chassis_in_mapping() {
     let mut cfg = minimal_redfish_config();
@@ -3918,88 +4062,807 @@ label_value = "shared-pod"
     );
 }
 
+const ALUMET_BROKER: &str = r#"
+[green.alumet]
+endpoint = "http://localhost:9091/metrics"
+metric_name = "attributed_energy_cpu_alumet"
+label_key = "name"
+
+[green.alumet.broker]
+label_value = "kafka-pod"
+"#;
+
+fn broker_static_error(toml: &str) -> String {
+    load_from_str(toml)
+        .expect_err("the broker declaration must be rejected")
+        .to_string()
+}
+
 #[test]
-fn broker_static_is_parsed() {
+fn broker_static_dedicated_managed_cluster_is_parsed() {
     let toml = r#"
 [green.broker_static]
+placement = "dedicated"
 nodes = 3
-instance_type = "m5.2xlarge"
-provider = "AWS"
+instance_type = " kafka.m5.large "
 region = "eu-west-3"
 "#;
     let cfg = load_from_str(toml).expect("valid broker_static section");
     let b = cfg.green.broker_static.as_ref().expect("declared");
-    assert_eq!(b.nodes, 3);
-    assert_eq!(b.instance_type, "m5.2xlarge");
-    assert_eq!(b.provider, "aws", "provider is lowercased");
-    assert!(b.cluster_watts() > 0.0);
+    assert_eq!(
+        b.placement,
+        crate::score::host_static::HostPlacement::Dedicated
+    );
+    assert_eq!(b.nodes, Some(3));
+    assert_eq!(
+        b.instance_type.as_deref(),
+        Some("kafka.m5.large"),
+        "trimmed"
+    );
+    let ceiling = b.ceiling().expect("dedicated with hosts bills a ceiling");
+    assert!(ceiling.cluster_watts() > 0.0);
+    assert_eq!(cfg.green.host_region(Subsystem::Broker), Some("eu-west-3"));
 }
 
 #[test]
-fn broker_static_provider_allow_list() {
+fn broker_static_placement_alone_next_to_alumet_is_accepted() {
+    let toml = format!(
+        "[green]\ndefault_region = \"eu-west-3\"\n{ALUMET_BROKER}\n\
+         [green.broker_static]\nplacement = \"dedicated\"\n"
+    );
+    let cfg = load_from_str(&toml).expect("placement alone next to Alumet loads");
+    let b = cfg.green.broker_static.as_ref().expect("declared");
+    assert_eq!(b.ceiling(), None, "no hosts declared, nothing to bill");
+}
+
+#[test]
+fn broker_static_shared_with_cpu_query_is_accepted() {
+    let toml = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+
+[green.broker_static]
+placement = "shared"
+instance_type = "m5.large"
+cpu_query = "avg(broker_cpu)"
+shared_with = []
+region = "eu-west-3"
+"#;
+    let cfg = load_from_str(toml).expect("a shared broker loads");
+    let b = cfg.green.broker_static.as_ref().expect("declared");
+    assert_eq!(b.cpu_query.as_deref(), Some("avg(broker_cpu)"));
+    assert_eq!(b.ceiling(), None, "a shared host has no ceiling");
+}
+
+#[test]
+fn broker_static_provider_warns_and_loads() {
     let with = |line: &str| {
         load_from_str(&format!(
-            "[green.broker_static]\nnodes = 1\ninstance_type = \"m5.2xlarge\"\n{line}\n"
+            "[green.broker_static]\nplacement = \"dedicated\"\nnodes = 1\n\
+             instance_type = \"m5.2xlarge\"\nregion = \"eu-west-3\"\n{line}\n"
         ))
     };
-    // An unrecognised provider would silently resolve to the generic
-    // on-prem watts, so it is rejected rather than guessed.
+    // A typo still fails rather than reading as a valid provider.
     assert!(with("provider = \"asw\"").is_err());
-    assert!(with("provider = \"on-prem\"").is_err());
-    for accepted in ["aws", "gcp", "azure", "generic"] {
+    for accepted in ["aws", "gcp", "azure", "generic", "AWS", "", "  "] {
         assert!(
             with(&format!("provider = \"{accepted}\"")).is_ok(),
-            "{accepted} must be accepted"
+            "'{accepted}' must be accepted"
         );
-    }
-    // Omitted and explicitly blank both mean "unset", not "invalid".
-    for unset in ["", "provider = \"\"", "provider = \"  \""] {
-        let cfg = with(unset).expect("an unset provider must load");
-        let b = cfg.green.broker_static.as_ref().expect("declared");
-        assert_eq!(b.provider, "generic");
     }
 }
 
 #[test]
-fn broker_static_without_instance_type_is_rejected() {
-    let toml = "
+fn broker_static_rejections_name_their_rule() {
+    let dedicated = "[green.broker_static]\nplacement = \"dedicated\"\nregion = \"eu-west-3\"\n";
+    let shared = "[green.broker_static]\nplacement = \"shared\"\nregion = \"eu-west-3\"\n";
+    let cases = [
+        (
+            "[green.broker_static]\nnodes = 3\ninstance_type = \"m5.large\"\n".to_string(),
+            "placement is required",
+        ),
+        (
+            format!("{dedicated}nodes = 3\ninstance_type = \"kafka.zz9.large\"\n"),
+            "kafka.zz9.large",
+        ),
+        (
+            format!("{dedicated}nodes = 3\ninstance_type = \"M5.LARGE\"\n"),
+            "did you mean 'm5.large'?",
+        ),
+        (
+            format!("{dedicated}nodes = 3\ninstance_type = \"db.serverless\"\n"),
+            "cannot be priced",
+        ),
+        (
+            format!("{dedicated}nodes = 0\ninstance_type = \"m5.large\"\n"),
+            "must be 1 to 10000",
+        ),
+        (format!("{dedicated}nodes = 3\n"), "go together"),
+        (
+            format!("{dedicated}instance_type = \"m5.large\"\n"),
+            "go together",
+        ),
+        (dedicated.to_string(), "needs nodes and instance_type"),
+        (
+            format!(
+                "{dedicated}nodes = 3\ninstance_type = \"m5.large\"\nshared_with = [\"api\"]\n"
+            ),
+            "shared_with applies to placement = 'shared' only",
+        ),
+        (
+            format!("{shared}instance_type = \"m5.large\"\n"),
+            "needs cpu_query",
+        ),
+        (
+            format!("{shared}nodes = 2\ninstance_type = \"m5.large\"\ncpu_query = \"q\"\n"),
+            "is one node",
+        ),
+        (
+            format!("{shared}cpu_query = \"q\"\n"),
+            "needs instance_type when shared_with is empty",
+        ),
+        (
+            format!("{dedicated}nodes = 3\ninstance_type = \"m5.large\"\nnode_count = 4\n"),
+            "node_count",
+        ),
+        (
+            "[green.broker_static]\nplacement = \"elsewhere\"\n".to_string(),
+            "elsewhere",
+        ),
+    ];
+    for (toml, expected) in cases {
+        let err = broker_static_error(&toml);
+        assert!(err.contains(expected), "{toml}\n=> {err}");
+    }
+}
+
+#[test]
+fn broker_static_without_any_region_is_rejected() {
+    let toml = r#"
 [green.broker_static]
+placement = "dedicated"
 nodes = 3
-";
-    assert!(
-        load_from_str(toml).is_err(),
-        "a half-declared cluster must fail loudly, not stay silently inert"
+instance_type = "m5.large"
+"#;
+    let err = broker_static_error(toml);
+    assert!(err.contains("needs a region"), "{err}");
+    // [green] default_region is enough.
+    load_from_str(&format!("[green]\ndefault_region = \"eu-west-3\"\n{toml}"))
+        .expect("the default region applies");
+}
+
+#[test]
+fn alumet_broker_without_any_region_is_rejected() {
+    let err = broker_static_error(ALUMET_BROKER);
+    assert!(err.contains("needs a region"), "{err}");
+}
+
+#[test]
+fn broker_static_and_alumet_regions_must_agree() {
+    let toml = format!(
+        "{ALUMET_BROKER}region = \"eu-west-3\"\n\n[green.broker_static]\n\
+         placement = \"dedicated\"\nnodes = 3\ninstance_type = \"m5.large\"\n\
+         region = \"us-east-1\"\n"
+    );
+    let err = broker_static_error(&toml);
+    assert!(err.contains("differ"), "{err}");
+    load_from_str(&toml.replace("us-east-1", "eu-west-3")).expect("one region loads");
+}
+
+const ALUMET_DATABASE: &str = r#"
+[green.alumet]
+endpoint = "http://localhost:9091/metrics"
+metric_name = "attributed_energy_cpu_alumet"
+label_key = "name"
+
+[green.alumet.database]
+label_value = "postgres-pod"
+"#;
+
+fn database_static_error(toml: &str) -> String {
+    load_from_str(toml)
+        .expect_err("the database declaration must be rejected")
+        .to_string()
+}
+
+#[test]
+fn database_static_dedicated_managed_hosts_are_parsed() {
+    let toml = r#"
+[green.database_static]
+placement = "dedicated"
+nodes = 2
+instance_type = " db.r6i.large "
+region = "eu-west-3"
+"#;
+    let cfg = load_from_str(toml).expect("valid database_static section");
+    let db = cfg.green.database_static.as_ref().expect("declared");
+    assert_eq!(
+        db.placement,
+        crate::score::host_static::HostPlacement::Dedicated
+    );
+    assert_eq!(db.nodes, Some(2));
+    assert_eq!(db.instance_type.as_deref(), Some("db.r6i.large"), "trimmed");
+    assert_eq!(
+        cfg.green.host_region(Subsystem::Database),
+        Some("eu-west-3")
     );
 }
 
 #[test]
-fn broker_static_without_nodes_is_rejected() {
-    let toml = r#"
-[green.broker_static]
-instance_type = "m5.2xlarge"
-"#;
-    assert!(load_from_str(toml).is_err());
+fn database_static_accepts_managed_sql_tiers() {
+    for tier in ["GP_Gen5_4", "db-n1-standard-4", "db-perf-optimized-N-8"] {
+        let toml = format!(
+            "[green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+             instance_type = \"{tier}\"\nregion = \"eu-west-3\"\n"
+        );
+        load_from_str(&toml).unwrap_or_else(|e| panic!("{tier}: {e}"));
+    }
 }
 
 #[test]
-fn broker_static_zero_nodes_is_rejected() {
-    let toml = r#"
-[green.broker_static]
-nodes = 0
-instance_type = "m5.2xlarge"
-"#;
-    assert!(load_from_str(toml).is_err());
+fn database_static_placement_alone_next_to_alumet_is_accepted() {
+    let toml = format!(
+        "[green]\ndefault_region = \"eu-west-3\"\n{ALUMET_DATABASE}\n\
+         [green.database_static]\nplacement = \"dedicated\"\n"
+    );
+    let cfg = load_from_str(&toml).expect("placement alone next to Alumet loads");
+    let db = cfg.green.database_static.as_ref().expect("declared");
+    assert_eq!(db.ceiling(), None, "no hosts declared, nothing to bill");
 }
 
 #[test]
-fn broker_static_unknown_key_is_rejected() {
+fn database_static_shared_with_cpu_query_is_accepted() {
     let toml = r#"
-[green.broker_static]
-nodes = 3
-instance_type = "m5.2xlarge"
-node_count = 4
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+
+[green.database_static]
+placement = "shared"
+instance_type = "m5.large"
+cpu_query = " avg(postgres_cpu) "
+region = "eu-west-3"
 "#;
-    assert!(load_from_str(toml).is_err());
+    let cfg = load_from_str(toml).expect("a shared database loads");
+    let db = cfg.green.database_static.as_ref().expect("declared");
+    assert_eq!(db.cpu_query.as_deref(), Some("avg(postgres_cpu)"));
+    assert_eq!(db.ceiling(), None, "a shared host has no ceiling");
+}
+
+#[test]
+fn database_static_rejections_name_their_rule() {
+    let dedicated = "[green.database_static]\nplacement = \"dedicated\"\nregion = \"eu-west-3\"\n";
+    let shared = "[green.database_static]\nplacement = \"shared\"\nregion = \"eu-west-3\"\n";
+    let cases = [
+        (
+            "[green.database_static]\nnodes = 2\ninstance_type = \"db.r6i.large\"\n".to_string(),
+            "[green.database_static] placement is required",
+        ),
+        (
+            "[green.database_static]\nplacement = \"elsewhere\"\n".to_string(),
+            "elsewhere",
+        ),
+        (
+            format!("{dedicated}nodes = 0\ninstance_type = \"db.r6i.large\"\n"),
+            "must be 1 to 10000",
+        ),
+        (
+            format!("{dedicated}nodes = 10001\ninstance_type = \"db.r6i.large\"\n"),
+            "must be 1 to 10000",
+        ),
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db.zz9.large\"\n"),
+            "db.zz9.large",
+        ),
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db.serverless\"\n"),
+            "ACU",
+        ),
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db-custom-4-15360\"\n"),
+            "dedicated-core custom tiers",
+        ),
+        (
+            format!(
+                "{dedicated}nodes = 2\ninstance_type = \"db.r6i.large\"\nshared_with = [\"api\"]\n"
+            ),
+            "shared_with applies to placement = 'shared' only",
+        ),
+        (format!("{dedicated}nodes = 2\n"), "go together"),
+        (
+            format!("{dedicated}instance_type = \"db.r6i.large\"\n"),
+            "go together",
+        ),
+        (dedicated.to_string(), "needs nodes and instance_type"),
+        (
+            format!("{shared}instance_type = \"m5.large\"\n"),
+            "needs cpu_query",
+        ),
+        (
+            format!("{shared}nodes = 2\ninstance_type = \"m5.large\"\ncpu_query = \"q\"\n"),
+            "is one node",
+        ),
+        // The broker's deprecated key is not a database key.
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db.r6i.large\"\nprovider = \"aws\"\n"),
+            "provider",
+        ),
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db.r6i.large\"\nnode_count = 4\n"),
+            "node_count",
+        ),
+    ];
+    for (toml, expected) in cases {
+        let err = database_static_error(&toml);
+        assert!(err.contains(expected), "{toml}\n=> {err}");
+    }
+}
+
+#[test]
+fn database_static_without_any_region_is_rejected() {
+    let toml = r#"
+[green.database_static]
+placement = "dedicated"
+nodes = 2
+instance_type = "db.r6i.large"
+"#;
+    let err = database_static_error(toml);
+    assert!(err.contains("database host energy needs a region"), "{err}");
+}
+
+#[test]
+fn alumet_database_needs_an_effective_region() {
+    let err = database_static_error(ALUMET_DATABASE);
+    assert!(err.contains("needs a region"), "{err}");
+    let cfg = load_from_str(&format!(
+        "[green]\ndefault_region = \"eu-west-3\"\n{ALUMET_DATABASE}"
+    ))
+    .expect("the default region applies");
+    assert_eq!(
+        cfg.green.host_region(Subsystem::Database),
+        Some("eu-west-3")
+    );
+}
+
+#[test]
+fn database_static_and_alumet_regions_must_agree() {
+    let toml = format!(
+        "{ALUMET_DATABASE}region = \"eu-west-3\"\n\n[green.database_static]\n\
+         placement = \"dedicated\"\nnodes = 2\ninstance_type = \"db.r6i.large\"\n\
+         region = \"us-east-1\"\n"
+    );
+    let err = database_static_error(&toml);
+    assert!(err.contains("differ"), "{err}");
+    load_from_str(&toml.replace("us-east-1", "eu-west-3")).expect("one region loads");
+}
+
+/// Node A read by `orders` and `billing` (one query, padded once), two
+/// services on the AWS default query, and node B whose two services
+/// declare different envelopes.
+const CLOUD_NODES: &str = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+default_provider = "aws"
+
+[green.cloud.services]
+orders = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-a"})' }
+billing = { instance_type = "m5.large", cpu_query = ' avg(node_cpu{node="node-a"}) ' }
+search = { instance_type = "m5.large" }
+api = { instance_type = "m5.large" }
+cache = { instance_type = "m5.xlarge", cpu_query = 'avg(node_cpu{node="node-b"})' }
+queue = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-b"})' }
+"#;
+
+const HOST_QUERY: &str = r#"cpu_query = 'avg(container_cpu{container="host", node="node-a"})'"#;
+
+const SUBSYSTEMS: [Subsystem; 2] = [Subsystem::Database, Subsystem::Broker];
+
+fn alumet_workload(subsystem: Subsystem) -> &'static str {
+    match subsystem {
+        Subsystem::Database => ALUMET_DATABASE,
+        Subsystem::Broker => ALUMET_BROKER,
+    }
+}
+
+/// A shared declaration of `subsystem` next to [`CLOUD_NODES`].
+fn shared_host_toml(subsystem: Subsystem, keys: &str) -> String {
+    format!(
+        "{CLOUD_NODES}\n{}\nplacement = \"shared\"\nregion = \"eu-west-3\"\n{keys}\n",
+        subsystem.section()
+    )
+}
+
+#[test]
+fn host_cpu_query_rejections_name_their_rule() {
+    for subsystem in SUBSYSTEMS {
+        let section = subsystem.section();
+        let shared = |query: &str| {
+            shared_host_toml(
+                subsystem,
+                &format!("instance_type = \"m5.large\"\ncpu_query = {query}"),
+            )
+        };
+        let cases = [
+            (
+                format!(
+                    "{section}\nplacement = \"shared\"\nregion = \"eu-west-3\"\n\
+                     instance_type = \"m5.large\"\ncpu_query = \"avg(host_cpu)\"\n"
+                ),
+                "cpu_query needs [green.cloud]".to_string(),
+            ),
+            (
+                shared("\"aws_ec2_cpuutilization_average\""),
+                "is a provider default CPU query".to_string(),
+            ),
+            (
+                shared("\"  aws_ec2_cpuutilization_average \""),
+                "is a provider default CPU query".to_string(),
+            ),
+            (
+                shared("'avg(node_cpu{node=\"node-a\"})'"),
+                "the CPU query of [green.cloud.services] billing, orders".to_string(),
+            ),
+            (
+                format!(
+                    "[green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n\
+                     cpu_metric = \" node_cpu \"\n\n{section}\nplacement = \"shared\"\n\
+                     region = \"eu-west-3\"\ninstance_type = \"m5.large\"\n\
+                     cpu_query = \"node_cpu\"\n"
+                ),
+                "is [green.cloud] cpu_metric".to_string(),
+            ),
+            (
+                shared("\"avg(host\\u0007cpu)\""),
+                "free of control characters".to_string(),
+            ),
+            (
+                shared(&format!("\"{}\"", "q".repeat(4097))),
+                "must be 1-4096 chars".to_string(),
+            ),
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{}\n\
+                     {section}\nplacement = \"dedicated\"\nnodes = 2\n\
+                     instance_type = \"m5.large\"\n{HOST_QUERY}\n",
+                    alumet_workload(subsystem)
+                ),
+                format!(
+                    "cpu_query cannot sit next to {}",
+                    subsystem.alumet_section()
+                ),
+            ),
+            // A shared host next to Alumet gets one way out, with or
+            // without cpu_query.
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{}\n\
+                     {section}\nplacement = \"shared\"\ninstance_type = \"m5.large\"\n\
+                     {HOST_QUERY}\n",
+                    alumet_workload(subsystem)
+                ),
+                "Use placement = 'dedicated'".to_string(),
+            ),
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{}\n\
+                     {section}\nplacement = \"shared\"\ninstance_type = \"m5.large\"\n",
+                    alumet_workload(subsystem)
+                ),
+                "Use placement = 'dedicated'".to_string(),
+            ),
+        ];
+        for (toml, expected) in cases {
+            let err = load_from_str(&toml)
+                .expect_err("the host cpu_query must be rejected")
+                .to_string();
+            assert!(err.contains(section), "{toml}\n=> {err}");
+            assert!(err.contains(&expected), "{toml}\n=> {err}");
+        }
+    }
+}
+
+#[test]
+fn database_and_broker_hosts_need_their_own_cpu_query() {
+    let toml = format!(
+        "{CLOUD_NODES}\n[green.database_static]\nplacement = \"shared\"\n\
+         region = \"eu-west-3\"\ninstance_type = \"m5.large\"\n\
+         cpu_query = \" avg(host_cpu) \"\n\n[green.broker_static]\nplacement = \"shared\"\n\
+         region = \"eu-west-3\"\ninstance_type = \"m5.large\"\ncpu_query = \"avg(host_cpu)\"\n"
+    );
+    let err = load_from_str(&toml)
+        .expect_err("one query for both hosts must be rejected")
+        .to_string();
+    assert!(
+        err.contains("read the same cpu_query 'avg(host_cpu)'"),
+        "{err}"
+    );
+    load_from_str(&toml.replacen("avg(host_cpu)", "avg(db_cpu)", 1)).expect("two queries load");
+}
+
+#[test]
+fn shared_with_rejections_name_their_rule() {
+    let redfish = REDFISH_ORDERS;
+    let alumet_domain = "\n[green.alumet]\nendpoint = \"http://localhost:9091/metrics\"\n\
+                         metric_name = \"rapl_consumed_energy_alumet\"\nlabel_key = \"domain\"\n\n\
+                         [green.alumet.service_mappings]\nbilling = \"package-0\"\n";
+    let too_many = format!(
+        "[{}]",
+        (0..=256)
+            .map(|i| format!("\"s{i}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    for subsystem in SUBSYSTEMS {
+        let listing = |shared_with: &str, extra: &str| {
+            shared_host_toml(
+                subsystem,
+                &format!(
+                    "instance_type = \"m5.large\"\n{HOST_QUERY}\nshared_with = {shared_with}\n{extra}"
+                ),
+            )
+        };
+        let cases = [
+            (listing(&too_many, ""), "has 257 entries; maximum is 256"),
+            (
+                listing("[\"nope\"]", ""),
+                "'nope' is not a [green.cloud.services] key",
+            ),
+            (
+                listing("[\"orders\", \"orders\"]", ""),
+                "lists 'orders' twice",
+            ),
+            (listing("[\"search\"]", ""), "misses api, which also read"),
+            (
+                listing("[\"orders\", \"billing\", \"api\", \"search\"]", ""),
+                "spans several CPU queries",
+            ),
+            (
+                listing("[\"cache\", \"queue\"]", ""),
+                "different power envelopes",
+            ),
+            (
+                listing("[\"orders\", \"billing\"]", "").replace(
+                    "instance_type = \"m5.large\"\ncpu_query = 'avg(container",
+                    "instance_type = \"m5.xlarge\"\ncpu_query = 'avg(container",
+                ),
+                "differs from the envelope of the services it shares",
+            ),
+            (
+                listing("[\"orders\", \"billing\"]", "") + redfish,
+                "'orders' is in [green.redfish] service_mappings",
+            ),
+            (
+                listing("[\"orders\", \"billing\"]", "") + alumet_domain,
+                "'billing' is in [green.alumet] service_mappings under label_key = 'domain'",
+            ),
+        ];
+        for (toml, expected) in cases {
+            let err = load_from_str(&toml)
+                .expect_err("the shared_with list must be rejected")
+                .to_string();
+            assert!(err.contains(subsystem.section()), "{toml}\n=> {err}");
+            assert!(err.contains(expected), "{toml}\n=> {err}");
+        }
+    }
+}
+
+#[test]
+fn shared_with_two_query_groups_names_each_side() {
+    let err = load_from_str(&shared_host_toml(
+        Subsystem::Database,
+        &format!("{HOST_QUERY}\nshared_with = [\"orders\", \"billing\", \"api\", \"search\"]"),
+    ))
+    .expect_err("two groups must be rejected")
+    .to_string();
+    assert!(
+        err.contains("'aws_ec2_cpuutilization_average' (api, search)"),
+        "{err}"
+    );
+    assert!(err.contains("(orders, billing)"), "{err}");
+}
+
+#[test]
+fn shared_with_the_exact_group_of_a_filtered_query_loads() {
+    for subsystem in SUBSYSTEMS {
+        for keys in [
+            format!("{HOST_QUERY}\nshared_with = [\"billing\", \"orders\"]"),
+            format!(
+                "instance_type = \"m5.large\"\n{HOST_QUERY}\nshared_with = [\"orders\", \"billing\"]"
+            ),
+        ] {
+            let cfg = load_from_str(&shared_host_toml(subsystem, &keys))
+                .unwrap_or_else(|err| panic!("{keys}\n=> {err}"));
+            assert_eq!(
+                validate::green::unlisted_shared_host_warnings(&cfg.green),
+                Vec::<String>::new(),
+                "a listed group does not warn"
+            );
+        }
+    }
+}
+
+#[test]
+fn shared_host_with_an_empty_shared_with_warns_and_loads() {
+    for subsystem in SUBSYSTEMS {
+        let keys = format!("instance_type = \"m5.large\"\n{HOST_QUERY}");
+        let cfg = load_from_str(&shared_host_toml(subsystem, &keys))
+            .expect("an unlisted shared host warns, it does not reject");
+        let warnings = validate::green::unlisted_shared_host_warnings(&cfg.green);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains(&format!(
+                "{} placement = 'shared' with an empty shared_with",
+                subsystem.section()
+            )),
+            "{}",
+            warnings[0]
+        );
+        // No backend reads application nodes: nothing to count twice.
+        let alone = load_from_str(&format!(
+            "[green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n\n{}\n\
+             placement = \"shared\"\nregion = \"eu-west-3\"\n{keys}\n",
+            subsystem.section()
+        ))
+        .expect("loads");
+        assert_eq!(
+            validate::green::unlisted_shared_host_warnings(&alone.green),
+            Vec::<String>::new()
+        );
+    }
+}
+
+const REDFISH_ORDERS: &str = "\n[green.redfish.endpoints.rack1]\n\
+                              url = \"https://bmc.local/redfish/v1/Chassis/1/Power\"\n\
+                              schema = \"legacy_power\"\n\n[green.redfish.service_mappings]\n\
+                              orders = \"rack1\"\n";
+
+#[test]
+fn alumet_workload_scope_rejections_name_their_rule() {
+    for subsystem in SUBSYSTEMS {
+        let section = subsystem.alumet_section();
+        let domain = alumet_workload(subsystem)
+            .replace("label_key = \"name\"", "label_key = \"domain\"")
+            .replace(
+                &format!("\n{section}"),
+                &format!("\n[green.alumet.service_mappings]\norders = \"package-0\"\n\n{section}"),
+            );
+        let cases = [
+            (
+                format!("[green]\ndefault_region = \"eu-west-3\"\n{domain}"),
+                "cannot sit next to [green.alumet] service_mappings under label_key = 'domain'"
+                    .to_string(),
+            ),
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{}",
+                    alumet_workload(subsystem)
+                ),
+                format!(
+                    "sits next to [green.cloud.services] without {}",
+                    subsystem.section()
+                ),
+            ),
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{REDFISH_ORDERS}\n{}",
+                    alumet_workload(subsystem)
+                ),
+                format!(
+                    "sits next to [green.redfish] service_mappings without {}",
+                    subsystem.section()
+                ),
+            ),
+        ];
+        for (toml, expected) in cases {
+            let err = load_from_str(&toml)
+                .expect_err("the Alumet workload must be rejected")
+                .to_string();
+            assert!(err.contains(section), "{toml}\n=> {err}");
+            assert!(err.contains(&expected), "{toml}\n=> {err}");
+        }
+    }
+}
+
+#[test]
+fn alumet_workload_on_hosts_of_its_own_loads() {
+    let kepler = "\n[green.kepler]\nendpoint = \"http://kepler:9102/metrics\"\n\n\
+                  [green.kepler.service_mappings]\norders = \"orders-pod\"\n";
+    for subsystem in SUBSYSTEMS {
+        let workload = alumet_workload(subsystem);
+        let dedicated = format!("{}\nplacement = \"dedicated\"\n", subsystem.section());
+        // A RAPL domain with no service mapped: the whole database node.
+        let domain = workload.replace("label_key = \"name\"", "label_key = \"domain\"");
+        for toml in [
+            format!("[green]\ndefault_region = \"eu-west-3\"\n{domain}"),
+            format!("[green]\ndefault_region = \"eu-west-3\"\n{kepler}\n{workload}"),
+            format!(
+                "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{workload}\n{dedicated}"
+            ),
+            format!(
+                "[green]\ndefault_region = \"eu-west-3\"\n{REDFISH_ORDERS}\n{workload}\n{dedicated}"
+            ),
+        ] {
+            load_from_str(&toml).unwrap_or_else(|err| panic!("{toml}\n=> {err}"));
+        }
+    }
+}
+
+#[test]
+fn host_sources_warn_on_a_default_cpu_metric() {
+    for subsystem in SUBSYSTEMS {
+        let toml = format!(
+            "[green]\ndefault_region = \"eu-west-3\"\n\n[green.cloud]\n\
+             prometheus_endpoint = \"http://prom:9090\"\n\
+             cpu_metric = \"  aws_ec2_cpuutilization_average \"\n\n[green.cloud.services]\n\
+             search = {{ instance_type = \"m5.large\" }}\napi = {{ instance_type = \"m5.large\" }}\n\n\
+             {}\nplacement = \"dedicated\"\nnodes = 2\ninstance_type = \"m5.large\"\n",
+            subsystem.section()
+        );
+        let cfg = load_from_str(&toml).expect("W1 warns, it does not reject");
+        let warnings = validate::green::host_source_warnings(&cfg.green);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains(
+                "[green.cloud.services] api, search read the unfiltered provider default CPU \
+                 query 'aws_ec2_cpuutilization_average'"
+            ),
+            "{}",
+            warnings[0]
+        );
+    }
+}
+
+#[test]
+fn host_sources_warn_on_default_queries_and_calibration() {
+    for subsystem in SUBSYSTEMS {
+        let toml = format!(
+            "[green]\ndefault_region = \"eu-west-3\"\n\
+             calibration_file = \"missing-calibration.toml\"\n{CLOUD_NODES}\n{}\n\
+             placement = \"dedicated\"\nnodes = 2\ninstance_type = \"m5.large\"\n",
+            subsystem.section()
+        );
+        let cfg = load_from_str(&toml).expect("W1 and W3 warn, they do not reject");
+        let warnings = validate::green::host_source_warnings(&cfg.green);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[0].contains(
+                "[green.cloud.services] api, search read the unfiltered provider default CPU \
+                 query 'aws_ec2_cpuutilization_average'"
+            ),
+            "{}",
+            warnings[0]
+        );
+        assert!(warnings[0].contains(subsystem.section()), "{}", warnings[0]);
+        assert!(
+            warnings[1].contains(&format!(
+                "[green] calibration_file is set next to {}",
+                subsystem.section()
+            )),
+            "{}",
+            warnings[1]
+        );
+        let alumet = format!(
+            "[green]\ndefault_region = \"eu-west-3\"\n\
+             calibration_file = \"missing-calibration.toml\"\n{}",
+            alumet_workload(subsystem)
+        );
+        let warnings =
+            validate::green::host_source_warnings(&load_from_str(&alumet).expect("loads").green);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains(subsystem.alumet_section()),
+            "{}",
+            warnings[0]
+        );
+    }
+    // No database or broker source: nothing to count twice.
+    let alone = load_from_str(&format!(
+        "[green]\ncalibration_file = \"missing-calibration.toml\"\n{CLOUD_NODES}"
+    ))
+    .expect("loads");
+    assert_eq!(
+        validate::green::host_source_warnings(&alone.green),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -4660,4 +5523,344 @@ fn electricity_maps_region_keys_differing_only_in_case_are_rejected() {
 fn an_inert_electricity_maps_region_map_is_not_checked() {
     let raw: RawConfig = toml::from_str(COLLIDING_REGION_MAP).unwrap();
     assert_eq!(validate_region_keys_raw_with_env(&raw, || None), Ok(()));
+}
+
+// --- grid operator feeds: [green.rte_eco2mix], [green.neso], [green.fingrid], [green.energinet],
+// [green.ree_esios], [green.open_electricity], [green.em6] ---
+
+#[test]
+fn grid_feeds_absent_by_default() {
+    let config = load_from_str("").unwrap();
+    assert!(config.green.grid_feeds.is_empty());
+    assert_eq!(
+        config.scoring_config().grid_feeds,
+        Vec::<crate::score::carbon::RealTimeProvider>::new()
+    );
+}
+
+#[test]
+fn rte_eco2mix_section_fills_defaults_and_normalizes_regions() {
+    let config =
+        load_from_str("[green.rte_eco2mix]\nregions = [\" EU-WEST-3 \", \"francecentral\"]\n")
+            .unwrap();
+    let rte = &config.green.grid_feeds[0];
+    assert_eq!(rte.kind, crate::score::grid_feed::GridFeedKind::RteEco2mix);
+    assert_eq!(rte.endpoint, rte.kind.default_endpoint());
+    assert_eq!(rte.poll_interval, Duration::from_mins(15));
+    assert_eq!(rte.regions["eu-west-3"], "FR");
+    assert_eq!(rte.regions["francecentral"], "FR");
+    let scoring = config.scoring_config();
+    assert_eq!(
+        scoring.grid_feeds,
+        [crate::score::carbon::RealTimeProvider::RteEco2mix]
+    );
+    assert_eq!(scoring.electricity_maps, Some(false));
+}
+
+#[test]
+fn grid_feed_endpoint_trailing_slash_is_trimmed() {
+    let config = load_from_str(
+        "[green.neso]\nendpoint = \"https://ci.example/\"\nregions = [\"eu-west-2\"]\n",
+    )
+    .unwrap();
+    assert_eq!(config.green.grid_feeds[0].endpoint, "https://ci.example");
+}
+
+#[test]
+fn grid_feed_rejects_missing_regions() {
+    let err = load_from_str("[green.rte_eco2mix]\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("[green.rte_eco2mix]") && err.contains("region"),
+        "got {err}"
+    );
+}
+
+#[test]
+fn grid_feed_rejects_non_http_endpoint() {
+    let err = load_from_str(
+        "[green.rte_eco2mix]\nendpoint = \"ftp://odre.example\"\nregions = [\"eu-west-3\"]\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("http://"), "got {err}");
+}
+
+#[test]
+fn grid_feed_rejects_out_of_range_poll_interval() {
+    let err = load_from_str("[green.neso]\npoll_interval_secs = 30\nregions = [\"eu-west-2\"]\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("poll_interval_secs"), "got {err}");
+}
+
+#[test]
+fn grid_feed_rejects_unknown_key() {
+    assert!(
+        load_from_str("[green.rte_eco2mix]\nregions = [\"eu-west-3\"]\nzone = \"FR\"\n").is_err()
+    );
+}
+
+#[test]
+fn energinet_rejects_a_zone_that_is_not_dk1_or_dk2() {
+    let err = load_from_str("[green.energinet]\nregion_map = { denmarkeast = \"DK3\" }\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("DK3") && err.contains("DK1"), "got {err}");
+}
+
+#[test]
+fn fingrid_rejects_an_unknown_dataset() {
+    let err = load_from_str(
+        "[green.fingrid]\nregions = [\"europe-north1\"]\ndataset = \"lifecycle\"\napi_key = \"k\"\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("lifecycle"), "got {err}");
+}
+
+#[test]
+fn fingrid_key_from_env_wins_over_the_file() {
+    let raw: RawConfig =
+        toml::from_str("[green.fingrid]\nregions = [\"europe-north1\"]\napi_key = \"from-file\"\n")
+            .unwrap();
+    let feeds = raw::convert_grid_feed_sections(&raw.green, |_| Some("from-env".to_string()));
+    assert_eq!(feeds[0].api_key.as_deref(), Some("from-env"));
+    assert_eq!(
+        feeds[0].kind,
+        crate::score::grid_feed::GridFeedKind::Fingrid(
+            crate::score::grid_feed::FingridDataset::Production
+        )
+    );
+}
+
+#[test]
+fn a_region_served_by_two_feeds_is_rejected() {
+    let err = load_from_str(
+        "[green.rte_eco2mix]\nregions = [\"eu-west-3\"]\n[green.neso]\nregions = [\"eu-west-3\"]\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("[green.rte_eco2mix]") && err.contains("[green.neso]"),
+        "got {err}"
+    );
+}
+
+/// Grid feeds converted with no process env, then validated: the tests
+/// must not depend on a `PERF_SENTINEL_FINGRID_API_KEY` exported locally.
+fn grid_feeds_without_env(
+    toml: &str,
+) -> Result<Vec<crate::score::grid_feed::GridFeedConfig>, String> {
+    let raw: RawConfig = toml::from_str(toml).map_err(|e| e.to_string())?;
+    let feeds = raw::convert_grid_feed_sections(&raw.green, |_| None);
+    Config::validate_grid_feeds(&feeds).map(|()| feeds)
+}
+
+#[test]
+fn all_four_feeds_load_in_a_fixed_order() {
+    use crate::score::grid_feed::{FingridDataset, GridFeedKind};
+    let toml = "[green.energinet]\nregion_map = { denmarkeast = \"dk2\" }\n\
+                [green.fingrid]\nregions = [\"europe-north1\"]\ndataset = \"consumption\"\napi_key = \" k3y\\n\"\n\
+                [green.neso]\nregions = [\"eu-west-2\"]\n\
+                [green.rte_eco2mix]\nregions = [\"eu-west-3\"]\n";
+    let feeds = grid_feeds_without_env(toml).unwrap();
+    let kinds: Vec<GridFeedKind> = feeds.iter().map(|f| f.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            GridFeedKind::RteEco2mix,
+            GridFeedKind::Neso,
+            GridFeedKind::Fingrid(FingridDataset::Consumption),
+            GridFeedKind::Energinet,
+        ]
+    );
+    assert_eq!(feeds[1].poll_interval, Duration::from_mins(5));
+    // Trimmed, like a Secret mounted with a final newline.
+    assert_eq!(feeds[2].api_key.as_deref(), Some("k3y"));
+    assert_eq!(feeds[3].regions["denmarkeast"], "DK2");
+}
+
+#[test]
+fn fingrid_without_a_key_is_disabled_not_fatal() {
+    let feeds = grid_feeds_without_env("[green.fingrid]\nregions = [\"europe-north1\"]\n").unwrap();
+    assert!(feeds.is_empty());
+    let blank = grid_feeds_without_env(
+        "[green.fingrid]\nregions = [\"europe-north1\"]\napi_key = \"   \"\n",
+    )
+    .unwrap();
+    assert!(blank.is_empty());
+}
+
+#[test]
+fn fingrid_rejects_a_key_the_header_would_refuse() {
+    let err = grid_feeds_without_env(
+        "[green.fingrid]\nregions = [\"europe-north1\"]\napi_key = \"cl\u{e9} secr\u{e8}te\"\n",
+    )
+    .unwrap_err();
+    assert!(err.contains("printable ASCII"), "got {err}");
+}
+
+#[test]
+fn the_optional_feeds_load_after_the_others() {
+    use crate::score::grid_feed::GridFeedKind;
+    let toml = "[green.em6]\nregions = [\"nz-north\"]\n\
+                [green.mavir]\nregions = [\"hungarycentral\"]\n\
+                [green.open_electricity]\nregion_map = { \"ap-southeast-2\" = \"au-nsw\", \"ap-southeast-4\" = \"AU-VIC\" }\n\
+                [green.ree_esios]\nregions = [\"eu-south-2\"]\napi_key = \"t0k\"\n";
+    let feeds = grid_feeds_without_env(toml).unwrap();
+    let kinds: Vec<GridFeedKind> = feeds.iter().map(|f| f.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            GridFeedKind::ReeEsios,
+            GridFeedKind::OpenElectricity,
+            GridFeedKind::Mavir,
+            GridFeedKind::Em6
+        ]
+    );
+    assert_eq!(feeds[0].regions["eu-south-2"], "ES");
+    assert_eq!(feeds[0].api_key.as_deref(), Some("t0k"));
+    assert_eq!(feeds[1].regions["ap-southeast-2"], "AU-NSW");
+    // Optional for Open Electricity: anonymous calls get the free plan.
+    assert_eq!(feeds[1].api_key, None);
+    assert_eq!(feeds[1].poll_interval, Duration::from_mins(10));
+    assert_eq!(feeds[2].regions["hungarycentral"], "HU");
+    assert_eq!(feeds[3].regions["nz-north"], "NZ");
+}
+
+#[test]
+fn each_feed_reads_its_own_key_variable() {
+    let raw: RawConfig = toml::from_str(
+        "[green.ree_esios]\nregions = [\"eu-south-2\"]\n\
+         [green.open_electricity]\nregion_map = { \"ap-southeast-2\" = \"AU-NSW\" }\n",
+    )
+    .unwrap();
+    let env = |name: &str| match name {
+        "PERF_SENTINEL_REE_ESIOS_API_KEY" => Some("esios".to_string()),
+        "PERF_SENTINEL_OPEN_ELECTRICITY_API_KEY" => Some(" oe\n".to_string()),
+        _ => None,
+    };
+    let feeds = raw::convert_grid_feed_sections(&raw.green, env);
+    assert_eq!(feeds[0].api_key.as_deref(), Some("esios"));
+    assert_eq!(feeds[1].api_key.as_deref(), Some("oe"));
+}
+
+#[test]
+fn ree_esios_without_a_key_is_disabled_not_fatal() {
+    let feeds = grid_feeds_without_env("[green.ree_esios]\nregions = [\"eu-south-2\"]\n").unwrap();
+    assert!(feeds.is_empty());
+}
+
+#[test]
+fn open_electricity_rejects_a_zone_it_does_not_serve() {
+    let err = grid_feeds_without_env(
+        "[green.open_electricity]\nregion_map = { \"ap-southeast-2\" = \"AU-NT\" }\n",
+    )
+    .unwrap_err();
+    assert!(err.contains("AU-NT"), "got {err}");
+}
+
+#[test]
+fn open_electricity_region_keys_colliding_by_case_are_rejected() {
+    let err = load_from_str(
+        "[green.open_electricity]\nregion_map = { \"Sydney\" = \"AU-NSW\", \"sydney\" = \"AU-VIC\" }\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("sydney") && err.contains("Sydney"),
+        "got {err}"
+    );
+}
+
+#[test]
+fn fingrid_dataset_is_recorded_in_the_scoring_config() {
+    let raw: RawConfig = toml::from_str(
+        "[green.fingrid]\nregions = [\"europe-north1\"]\ndataset = \"consumption\"\napi_key = \"k\"\n",
+    )
+    .unwrap();
+    let feeds = raw::convert_grid_feed_sections(&raw.green, |_| None);
+    let mut config = Config::from(raw);
+    config.green.grid_feeds = feeds;
+    assert_eq!(config.scoring_config().fingrid_dataset, Some(265));
+}
+
+#[test]
+fn energinet_region_keys_colliding_by_case_are_rejected() {
+    let err = load_from_str(
+        "[green.energinet]\nregion_map = { \"DK-West\" = \"DK2\", \"dk-west\" = \"DK1\" }\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("dk-west") && err.contains("DK-West"),
+        "got {err}"
+    );
+    // The same zone spelled twice is not a conflict.
+    assert!(
+        load_from_str(
+            "[green.energinet]\nregion_map = { \"DK-West\" = \"dk1\", \"dk-west\" = \"DK1\" }\n"
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn cloud_service_on_a_left_out_class_loads_with_its_reason() {
+    let toml = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+
+[green.cloud.services.orders-db]
+provider = "aws"
+instance_type = "db.serverless"
+"#;
+    load_from_str(toml).expect("a left-out class warns, it does not reject");
+    let suffix = validate::green::unpriced_instance_suffix("db.serverless")
+        .expect("db.serverless is not priced");
+    assert!(suffix.contains("ACU"), "{suffix}");
+    assert_eq!(
+        validate::green::unpriced_instance_suffix("db.r6i.large"),
+        None
+    );
+    assert_eq!(
+        validate::green::unpriced_instance_suffix("m5zn.large").as_deref(),
+        Some("")
+    );
+}
+
+#[test]
+fn mixed_envelopes_on_one_cpu_query_load_with_a_warning() {
+    let toml = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+cpu_metric = "node_cpu"
+
+[green.cloud.services]
+"b-svc" = { idle_watts = 20.0, max_watts = 80.0 }
+"a-svc" = { idle_watts = 10.0, max_watts = 50.0 }
+"c-svc" = { idle_watts = 10.0, max_watts = 50.0, cpu_query = "other_cpu" }
+"#;
+    let config = load_from_str(toml).expect("mixed envelopes warn, they do not reject");
+    let cloud = config.green.cloud_energy.expect("cloud section");
+    let conflicts = validate::green::mixed_query_envelope_conflicts(&cloud);
+    assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+    let message = &conflicts[0];
+    assert!(message.contains("'a-svc' (10 to 50 W)"), "{message}");
+    assert!(message.contains("'b-svc' (20 to 80 W)"), "{message}");
+    assert!(message.contains("'node_cpu'"), "{message}");
+}
+
+#[test]
+fn shipped_cloud_examples_share_no_query_across_envelopes() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let text = std::fs::read_to_string(root.join("31-green-cloud.toml")).expect("read example");
+    let config = load_from_str(&text).expect("example loads");
+    let cloud = config.green.cloud_energy.expect("cloud section");
+    assert_eq!(
+        validate::green::mixed_query_envelope_conflicts(&cloud),
+        Vec::<String>::new()
+    );
 }

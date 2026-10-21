@@ -4,7 +4,9 @@ use chrono::{DateTime, Datelike, Days, Months, NaiveDate, Utc};
 use sentinel_core::report::periodic::AggregationError;
 use sentinel_core::report::periodic::aggregator::aggregate_from_paths;
 use sentinel_core::report::periodic::org_config::OrgConfig;
-use sentinel_core::report::periodic::schema::{Confidentiality, Period, PeriodType, ReportIntent};
+use sentinel_core::report::periodic::schema::{
+    Confidentiality, DatabaseWasteAggregate, Period, PeriodType, ReportIntent,
+};
 use sentinel_core::report::periodic::{MIN_PERIOD_COVERAGE_FOR_OFFICIAL, validate_official};
 use sentinel_core::text_safety::sanitize_for_terminal;
 
@@ -202,6 +204,9 @@ pub(crate) struct PreviewSummary {
     pub fallback_windows: u64,
     pub malformed_lines: u64,
     pub validator: ValidatorStatus,
+    /// The host perimeters of the totals, database then broker.
+    pub database_waste: Option<DatabaseWasteAggregate>,
+    pub messaging_waste: Option<DatabaseWasteAggregate>,
 }
 
 /// Read-only outcome of a preview re-aggregation.
@@ -275,7 +280,24 @@ pub(crate) fn compute_preview(
         fallback_windows,
         malformed_lines,
         validator,
+        database_waste: report.aggregate.database_waste,
+        messaging_waste: report.aggregate.messaging_waste,
     }))
+}
+
+/// One host perimeter under Totals: the in-total kWh and its windows, or
+/// that the hosts are outside the totals.
+fn host_perimeter_line(label: &str, block: Option<&DatabaseWasteAggregate>) -> PreviewLine {
+    match block.filter(|b| b.in_totals_windows > 0) {
+        Some(b) => PreviewLine::new(
+            Tone::Normal,
+            format!(
+                "{label}{:.4} kWh in the totals ({} of {} windows)",
+                b.in_totals_energy_kwh, b.in_totals_windows, b.windows_with_figure
+            ),
+        ),
+        None => PreviewLine::new(Tone::Dim, format!("{label}outside the totals")),
+    }
 }
 
 /// Which custom-period edge `step`/`step_month` move while editing a
@@ -330,6 +352,9 @@ pub(crate) struct DiscloseState {
     org: OrgConfig,
     org_config_path: PathBuf,
     strict_attribution: bool,
+    /// `--total-requests-in-period`, already applied to `org` and echoed in
+    /// the equivalent command.
+    total_requests_cli: Option<u64>,
     /// Earliest and latest window timestamp in the archive, for default
     /// anchoring and the range hint. `None` for an empty archive.
     archive_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
@@ -365,6 +390,7 @@ impl DiscloseState {
             org,
             org_config_path,
             strict_attribution,
+            total_requests_cli: None,
             archive_range,
             granularity: Granularity::Month,
             anchor,
@@ -378,6 +404,15 @@ impl DiscloseState {
         };
         state.recompute();
         state
+    }
+
+    /// Record `--total-requests-in-period` so the equivalent command
+    /// reproduces it. The caller applies it to the org config before
+    /// [`Self::new`], which keeps the archive read to a single pass.
+    #[must_use]
+    pub(crate) fn with_total_requests_cli(mut self, total: Option<u64>) -> Self {
+        self.total_requests_cli = total;
+        self
     }
 
     pub(crate) fn granularity(&self) -> Granularity {
@@ -530,7 +565,7 @@ impl DiscloseState {
     /// The `disclose` command equivalent to the current settings.
     pub(crate) fn equivalent_command(&self) -> String {
         let (from, to) = self.resolved_dates();
-        equivalent_command(
+        let mut cmd = equivalent_command(
             self.intent,
             self.confidentiality,
             self.granularity.period_type(),
@@ -538,7 +573,15 @@ impl DiscloseState {
             to,
             &self.input,
             &self.org_config_path,
-        )
+        );
+        if self.strict_attribution {
+            cmd.push_str(" --strict-attribution");
+        }
+        if let Some(total) = self.total_requests_cli {
+            use std::fmt::Write as _;
+            let _ = write!(cmd, " --total-requests-in-period {total}");
+        }
+        cmd
     }
 
     /// The scrollable summary, as styled lines. Drives both the renderer and
@@ -618,6 +661,14 @@ impl DiscloseState {
         lines.push(PreviewLine::new(
             Tone::Normal,
             format!("  Energy:              {:.4} kWh", s.total_energy_kwh),
+        ));
+        lines.push(host_perimeter_line(
+            "  Database:            ",
+            s.database_waste.as_ref(),
+        ));
+        lines.push(host_perimeter_line(
+            "  Broker:              ",
+            s.messaging_waste.as_ref(),
         ));
         lines.push(PreviewLine::new(
             Tone::Normal,
@@ -893,6 +944,26 @@ mod tests {
     }
 
     #[test]
+    fn cli_flags_are_echoed_in_the_equivalent_command() {
+        let state = empty_state(d(2026, 5, 15));
+        let cmd = state.equivalent_command();
+        assert!(!cmd.contains("--total-requests-in-period"));
+        assert!(!cmd.contains("--strict-attribution"));
+        let state = DiscloseState::new(
+            Vec::new(),
+            sample_org(),
+            PathBuf::from("org.toml"),
+            true,
+            None,
+            d(2026, 5, 15),
+        )
+        .with_total_requests_cli(Some(4_200_000));
+        let cmd = state.equivalent_command();
+        assert!(cmd.contains(" --strict-attribution"));
+        assert!(cmd.ends_with(" --total-requests-in-period 4200000"));
+    }
+
+    #[test]
     fn empty_archive_reports_no_windows() {
         let state = empty_state(d(2026, 5, 15));
         let lines = state.summary_lines();
@@ -915,7 +986,46 @@ mod tests {
             fallback_windows: 6,
             malformed_lines: 0,
             validator,
+            database_waste: None,
+            messaging_waste: None,
         }
+    }
+
+    #[test]
+    fn totals_state_each_host_perimeter() {
+        let mut s = summary(0.9, ValidatorStatus::NotApplicable);
+        let lines = DiscloseState::ready_lines(&s);
+        for label in ["Database:", "Broker:"] {
+            let line = lines
+                .iter()
+                .find(|l| l.text.contains(label))
+                .expect("host line");
+            assert!(line.text.ends_with("outside the totals"), "{}", line.text);
+        }
+        s.database_waste = Some(DatabaseWasteAggregate {
+            in_totals_energy_kwh: 1.25,
+            windows_with_figure: 5,
+            in_totals_windows: 3,
+            ..Default::default()
+        });
+        s.messaging_waste = Some(DatabaseWasteAggregate {
+            windows_with_figure: 2,
+            estimated_windows: 2,
+            ..Default::default()
+        });
+        let lines = DiscloseState::ready_lines(&s);
+        let text = |label: &str| {
+            lines
+                .iter()
+                .find(|l| l.text.contains(label))
+                .map(|l| l.text.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            text("Database:"),
+            "  Database:            1.2500 kWh in the totals (3 of 5 windows)"
+        );
+        assert_eq!(text("Broker:"), "  Broker:              outside the totals");
     }
 
     #[test]

@@ -41,8 +41,10 @@ use crate::detect::Finding;
 use crate::detect::correlate_cross::CrossTraceCorrelation;
 use crate::report::interpret::InterpretationLevel;
 use crate::score::carbon::{CO2_MODEL_CAL_SUFFIX, CarbonReport, RegionBreakdown, ScoringConfig};
+use crate::score::host_static::HostPlacement;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 /// Read `detection_config` without ever failing the enclosing report: a
 /// shape this binary cannot parse becomes `None`.
@@ -165,12 +167,12 @@ pub struct AvoidableTier {
 pub struct DisclosureWaste {
     pub canonical: AvoidableTier,
     pub operational: AvoidableTier,
-    /// Database-side waste for the window, both tiers. `None` when the
+    /// Database waste for the window, both tiers. `None` when the
     /// window produced no [`DatabaseWaste`] figure. Absent on archives
     /// predating the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<DisclosureDbWaste>,
-    /// Broker-side waste for the window, both tiers. `None` when the
+    /// Messaging waste for the window, both tiers. `None` when the
     /// window produced no messaging figure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messaging: Option<DisclosureMsgWaste>,
@@ -182,25 +184,40 @@ pub struct DisclosureWaste {
 /// be shrunk by raising the operator threshold.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DisclosureDbWaste {
-    /// Window energy of the database figure (measured or estimated).
+    /// Window energy of the database figure: the database host energy on
+    /// the measured, modeled and declared paths, the application-side
+    /// share of the SQL spans on the estimated path.
     pub energy_kwh: f64,
-    /// Provenance tag of that energy (`alumet_rapl` measured,
-    /// `estimated` fallback).
+    /// Provenance tag of that energy: `alumet_rapl` for a reading of the
+    /// database cgroup, `cloud_specpower` for declared hosts priced from
+    /// their `cpu_query`, `database_specpower` or `broker_specpower` for a
+    /// declared ceiling, `estimated` for the application-side share of the
+    /// SQL spans, already inside the totals.
     pub model: String,
     pub operational_waste_kwh: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operational_waste_gco2: Option<f64>,
     pub canonical_waste_kwh: f64,
     /// Total carbon of the subsystem for the window, not just its waste.
-    /// `None` when the window energy had no carbon conversion. Reported
-    /// beside the totals, never inside them: this is a different scope
-    /// from the instrumented services.
+    /// `None` when the window energy had no carbon conversion. On the
+    /// measured path this is host carbon, inside the totals when
+    /// `in_totals` is set and beside them otherwise. On the estimated
+    /// path it is a share of the services' own carbon, already inside
+    /// the totals, so never add it to them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_gco2: Option<f64>,
     /// Window `energy_gco2` scaled by the canonical SQL ratio. `None`
     /// when the window energy had no carbon conversion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canonical_waste_gco2: Option<f64>,
+    /// Copied from the window figure: its host energy and carbon are
+    /// inside the report totals. Omitted when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_totals: bool,
+    /// Copied from the window figure: where the declared or measured
+    /// hosts run. Omitted on the estimated path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<HostPlacement>,
 }
 
 /// Window messaging waste at both thresholds. Wire-identical to the
@@ -359,10 +376,13 @@ pub struct GreenSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scoring_config: Option<ScoringConfig>,
     /// Total energy consumed by the workload during the scoring window
-    /// in kWh, runtime-calibrated. Sum of per-service energy when
-    /// service-level measurement is available, falls back to the
-    /// operational proxy (`total_io_ops × ENERGY_PER_IO_OP_KWH`) when
-    /// not. `0.0` on pre-carbon-attribution baselines via `serde(default)`.
+    /// in kWh, runtime-calibrated: the sum of the per-service energy
+    /// (measured when service-level measurement is available, the
+    /// operational proxy `total_io_ops × ENERGY_PER_IO_OP_KWH` when not),
+    /// plus the database and broker host energy of the waste figures
+    /// flagged `in_totals`. [`GreenSummary::application_energy_kwh`] gives
+    /// the per-service part alone. `0.0` on pre-carbon-attribution
+    /// baselines via `serde(default)`.
     #[serde(default)]
     pub energy_kwh: f64,
     /// Energy model used to compute `energy_kwh`. One of
@@ -394,9 +414,10 @@ pub struct GreenSummary {
     /// Operational energy per service in kWh. Built at scoring time
     /// using the runtime-resolved energy entries (Scaphandre per-process
     /// RAPL when available, cloud `SPECpower` interpolation otherwise,
-    /// proxy fallback). Sum is approximately `energy_kwh` up to
-    /// floating-point rounding. Empty on pre-carbon-attribution
-    /// baselines.
+    /// proxy fallback). Holds no database or broker host energy, so its
+    /// sum is approximately `energy_kwh` minus the in-total host energy
+    /// ([`GreenSummary::application_energy_kwh`]) up to floating-point
+    /// rounding. Empty on pre-carbon-attribution baselines.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_service_energy_kwh: BTreeMap<String, f64>,
     /// Per-service region attribution snapshot at scoring time. Surfaces
@@ -424,31 +445,50 @@ pub struct GreenSummary {
     /// Fraction of spans whose energy was resolved by a measured backend
     /// (versus proxy fallback) per service, in `[0.0,
     /// 1.0]`. `1.0` means every span had measured energy, `0.0` means
-    /// the service fell back to proxy entirely. Pair with
+    /// the service fell back to proxy entirely. The measurement covers the
+    /// service's own host only, never its database or broker. Pair with
     /// `per_service_energy_model` to assess fidelity. The aggregator
     /// surfaces a simple arithmetic mean of these per-window ratios
     /// under `aggregate.per_service_measured_ratio`, not a span-weighted
     /// average. Empty on pre-per-service-ratio baselines.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_service_measured_ratio: BTreeMap<String, f64>,
-    /// Database-side waste figure, on every run. Measured on the
-    /// declared `[green.alumet.database]` cgroup when a reading landed
-    /// (daemon), otherwise estimated from the modeled energy of the
-    /// window's SQL spans, and `model` says which. Never summed into
-    /// `energy_kwh`/`co2` (the estimated energy is a re-presented share
-    /// of them), published in the disclosure only as the separate
+    /// Database waste figure, on every run, in one of four forms that
+    /// `model` names. Measured (`alumet_rapl`): the energy of the declared
+    /// `[green.alumet.database]` cgroup when a reading landed (daemon).
+    /// Modeled (`cloud_specpower`): the `[green.database_static]` hosts
+    /// priced from their `cpu_query` (daemon). Declared
+    /// (`database_specpower`): the `[green.database_static]` ceiling
+    /// (daemon). All three are host energy counted inside `energy_kwh`
+    /// and `co2.total` (as `co2.database_gco2`) once their carbon
+    /// converts, which `in_totals` records. Without a carbon conversion
+    /// they stay beside them.
+    /// Estimated (`estimated`): the application-side share of the
+    /// window's SQL spans, the energy the span scoring gave the emitting
+    /// services, already inside `energy_kwh`/`co2` and never added to
+    /// them again. Published in the disclosure as the separate
     /// `aggregate.database_waste` block (`docs/METHODOLOGY.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_waste: Option<DatabaseWaste>,
-    /// Broker-side avoidable energy, same construction and same status.
-    /// `None` when no broker energy was available for the window.
+    /// Messaging twin of `database_waste`. Measured (`alumet_rapl`),
+    /// modeled (`cloud_specpower`) or declared (`broker_specpower`): broker
+    /// host energy inside the
+    /// totals (as `co2.messaging_gco2`) once its carbon converts, beside
+    /// them otherwise, `in_totals` says which. Estimated: the
+    /// application-side share of the window's publish spans, already
+    /// inside the totals. `None` when a configured broker source (Alumet
+    /// or `[green.broker_static]`) delivered no reading, or when the
+    /// window has no publish energy or ops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messaging_waste: Option<MessagingWaste>,
 }
 
-/// `model` value on the estimated [`DatabaseWaste`] path: the figure is
-/// built from the modeled energy of the SQL spans, not a measurement of
-/// the database. The measured path carries `alumet_rapl` instead.
+/// `model` value on the estimated [`DatabaseWaste`] and [`MessagingWaste`]
+/// path: the figure is the application-side share of the SQL or publish
+/// spans, the energy the span scoring gave the emitting services, already
+/// inside the report totals. It is not a reading of the database or the
+/// broker host. The host paths carry `alumet_rapl`, `cloud_specpower` or
+/// a declared `*_specpower` ceiling tag instead.
 pub const DB_WASTE_MODEL_ESTIMATED: &str = "estimated";
 
 /// Provenance tag of a broker figure built from a declared cluster and
@@ -456,11 +496,52 @@ pub const DB_WASTE_MODEL_ESTIMATED: &str = "estimated";
 /// which means a CPU scrape rather than a declaration.
 pub const BROKER_WASTE_MODEL_SPECPOWER: &str = "broker_specpower";
 
-/// Database window energy × the SQL-only waste ratio. Informational,
-/// never summed into the report totals.
+/// Provenance tag of a database figure built from a declared cluster
+/// and the embedded `SPECpower` table, the database twin of
+/// [`BROKER_WASTE_MODEL_SPECPOWER`].
+pub const DB_WASTE_MODEL_SPECPOWER: &str = "database_specpower";
+
+/// Whether a waste model tag names a declared ceiling (database or
+/// broker) rather than a reading or the estimated share.
+#[must_use]
+pub fn is_declared_model(model: &str) -> bool {
+    model == DB_WASTE_MODEL_SPECPOWER || model == BROKER_WASTE_MODEL_SPECPOWER
+}
+
+/// Where a database or broker waste figure sits against the report
+/// totals, for the text report, the monitor and the HTML dashboard
+/// (`wasteScope` mirrors it): host energy counted in them, the estimated
+/// application-side share already within them, or a host figure left
+/// outside (no carbon conversion, or a window archived before host
+/// energy entered the totals).
+#[must_use]
+pub fn waste_scope_label(model: &str, in_totals: bool) -> &'static str {
+    if in_totals {
+        "host energy, in the report totals"
+    } else if model == DB_WASTE_MODEL_ESTIMATED {
+        "application-side share, within the report totals"
+    } else {
+        "outside these totals"
+    }
+}
+
+/// Why a window has no database waste figure, for the text report and
+/// the TUI (the HTML dashboard words its muted card the same way).
+pub const DATABASE_WASTE_ABSENT: &str = "not available: no SQL activity this window, or no database reading yet, see [green.database_static] or [green.alumet.database]";
+
+/// Broker twin of [`DATABASE_WASTE_ABSENT`].
+pub const MESSAGING_WASTE_ABSENT: &str = "not available: no broker publish spans this window, or no broker reading yet, see [green.broker_static] or [green.alumet.broker]";
+
+/// Database window energy × the SQL-only waste ratio. On the measured,
+/// modeled and declared paths the host energy is inside the report totals when
+/// `in_totals` is set, beside them otherwise. On the estimated path it
+/// is already a share of them, never added again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseWaste {
-    /// Window energy of the database cgroup in kWh (CPU share only).
+    /// Window energy in kWh. Measured path: the database cgroup (CPU
+    /// share only). Modeled path: the `SPECpower` envelope at the hosts'
+    /// CPU. Declared path: the `nodes × P_max` ceiling. Estimated path:
+    /// the application-side share of the window's SQL spans.
     pub energy_kwh: f64,
     /// `energy_kwh × sql_waste_ratio`.
     pub waste_kwh: f64,
@@ -474,31 +555,45 @@ pub struct DatabaseWaste {
     /// zero the canonical carbon figure. `None` without a conversion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_gco2: Option<f64>,
-    /// Operator-declared region of the database host. `None` on the
+    /// Effective region of the database host (`GreenConfig::host_region`:
+    /// a declared region, else `[green] default_region`). `None` on the
     /// estimated path (no database was declared).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     /// `avoidable_sql_io_ops / total_sql_io_ops`, in `[0, 1]`.
     pub sql_waste_ratio: f64,
     /// Provenance tag: `alumet_rapl` when the energy is measured on the
-    /// declared database cgroup, otherwise the window's energy model
-    /// (`io_proxy_v3`, ...) for the estimated fallback built from the
-    /// modeled energy of the window's SQL spans. Empty on baselines
-    /// predating the field.
+    /// declared database cgroup, `cloud_specpower` for declared hosts
+    /// priced from their `cpu_query`, `database_specpower` for a declared
+    /// cluster's ceiling, otherwise `estimated` for the application-side share of
+    /// the window's SQL spans. Empty on baselines predating the field.
     #[serde(default)]
     pub model: String,
+    /// The host energy and carbon of this figure are inside the report
+    /// totals (`energy_kwh`, `co2.total`, `co2.database_gco2`). Never set on
+    /// the estimated path, which is already a share of them. Omitted
+    /// when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_totals: bool,
+    /// Where the hosts behind a measured or declared figure run, from
+    /// the operator's declaration. `None` on the estimated path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<HostPlacement>,
 }
 
-/// Broker-side avoidable energy for the window, the messaging twin of
-/// [`DatabaseWaste`]. Informational, never folded into the report
-/// totals. Which way it errs depends on `model`, since the three
+/// Messaging avoidable energy for the window, the twin of
+/// [`DatabaseWaste`], inside the report totals under the same rule
+/// (`in_totals`). Which way it errs depends on `model`, since the four
 /// sources do not agree: `alumet_rapl` reads CPU only and so
-/// under-counts, `broker_specpower` bounds the declared vCPUs at full
-/// load without storage or network, `estimated` re-presents a share of
-/// the totals.
+/// under-counts, `cloud_specpower` follows the load on an envelope
+/// without storage or network, `broker_specpower` bounds the declared vCPUs at full
+/// load without storage or network, `estimated` is the application-side
+/// share of the publish spans, already inside the totals, and holds no
+/// broker host energy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MessagingWaste {
-    /// Window energy of the broker, measured or declared.
+    /// Window energy: the broker host when measured, modeled or declared,
+    /// the application-side share of the publish spans when estimated.
     pub energy_kwh: f64,
     /// `energy_kwh` × `messaging_waste_ratio`.
     pub waste_kwh: f64,
@@ -509,16 +604,28 @@ pub struct MessagingWaste {
     /// disclosure's canonical tier rescales from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_gco2: Option<f64>,
-    /// Operator-declared region of the broker. `None` on the estimated path.
+    /// Effective region of the broker hosts (`GreenConfig::host_region`).
+    /// `None` on the estimated path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     /// `avoidable_messaging_io_ops / total_messaging_io_ops`, in `[0, 1]`.
     pub messaging_waste_ratio: f64,
     /// Provenance: `alumet_rapl` measured on the declared cgroup,
-    /// `broker_specpower` for a declared cluster, `estimated` for the
-    /// fallback built from the modeled energy of the window's publishes.
+    /// `cloud_specpower` for declared hosts priced from their `cpu_query`,
+    /// `broker_specpower` for a declared cluster's ceiling, `estimated` for the
+    /// application-side share of the window's publish spans.
     #[serde(default)]
     pub model: String,
+    /// The host energy and carbon of this figure are inside the report
+    /// totals (`energy_kwh`, `co2.total`, `co2.messaging_gco2`). Never set on
+    /// the estimated path, which is already a share of them. Omitted
+    /// when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_totals: bool,
+    /// Where the hosts behind a measured or declared figure run, from
+    /// the operator's declaration. `None` on the estimated path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<HostPlacement>,
 }
 
 /// Raw I/O operation count for a single `(service, endpoint)` pair.
@@ -601,6 +708,46 @@ impl GreenSummary {
         }
     }
 
+    /// The database figure when its host energy is inside the totals.
+    #[must_use]
+    pub fn database_in_totals(&self) -> Option<&DatabaseWaste> {
+        self.database_waste.as_ref().filter(|w| w.in_totals)
+    }
+
+    /// The broker figure when its host energy is inside the totals.
+    #[must_use]
+    pub fn messaging_in_totals(&self) -> Option<&MessagingWaste> {
+        self.messaging_waste.as_ref().filter(|w| w.in_totals)
+    }
+
+    /// Database and broker host kWh counted inside `energy_kwh`.
+    #[must_use]
+    pub fn host_energy_in_totals_kwh(&self) -> f64 {
+        self.database_in_totals().map_or(0.0, |w| w.energy_kwh)
+            + self.messaging_in_totals().map_or(0.0, |w| w.energy_kwh)
+    }
+
+    /// `energy_kwh` without the in-total host energy: the applications'
+    /// own share, floored at 0 against rounding.
+    #[must_use]
+    pub fn application_energy_kwh(&self) -> f64 {
+        (self.energy_kwh - self.host_energy_in_totals_kwh()).max(0.0)
+    }
+
+    /// Scored carbon: the regions' operational gCO₂ plus the in-total
+    /// database and broker host terms. Embodied and transport stay out.
+    /// Reads the host terms without their `in_totals` flag: it relies on
+    /// the producer setting `co2.database_gco2` and `co2.messaging_gco2`
+    /// exactly when the matching figure is in the totals.
+    #[must_use]
+    pub fn scored_carbon_gco2(&self) -> f64 {
+        let operational: f64 = self.regions.iter().map(|r| r.co2_gco2).sum();
+        let hosts = self.co2.as_ref().map_or(0.0, |c| {
+            c.database_gco2.unwrap_or(0.0) + c.messaging_gco2.unwrap_or(0.0)
+        });
+        operational + hosts
+    }
+
     /// Plain-text source of `energy_kwh` for display: `"source <tags>"`,
     /// `"modeled from I/O counts"`, ... `None` when no energy was computed.
     ///
@@ -609,11 +756,72 @@ impl GreenSummary {
     /// daemons it holds an intensity tag, and `io_proxy_vN` names the
     /// intensity tier. The HTML dashboard's `energySourceLabel` mirrors
     /// these rules and strings.
+    ///
+    /// Each subsystem whose host energy is inside `energy_kwh` adds a
+    /// `" · plus database hosts, <tag>"` (or broker) suffix.
     #[must_use]
     pub fn energy_source_label(&self) -> Option<String> {
         if self.energy_kwh.is_nan() || self.energy_kwh <= 0.0 {
             return None;
         }
+        let mut label = self.application_source_label();
+        for (noun, model, _) in self.hosts_in_totals() {
+            let tag = display_tag(model).unwrap_or("unknown");
+            let _ = write!(label, " \u{b7} plus {noun}, {tag}");
+        }
+        Some(label)
+    }
+
+    /// `energy_kwh` split into its terms, `"applications A kWh + database
+    /// hosts D kWh + broker hosts B kWh"`, the host terms only when inside
+    /// the totals. `None` when no host energy is in them. The HTML
+    /// dashboard's `energySplitLabel` mirrors it.
+    #[must_use]
+    pub fn energy_split_label(&self) -> Option<String> {
+        let hosts = self.hosts_in_totals();
+        if hosts.is_empty() {
+            return None;
+        }
+        let mut label = format!(
+            "applications {} kWh",
+            fmt_kwh(self.application_energy_kwh())
+        );
+        for (noun, _, kwh) in hosts {
+            let _ = write!(label, " + {noun} {} kWh", fmt_kwh(kwh));
+        }
+        Some(label)
+    }
+
+    /// The host models inside the total, `" + database hosts <tag>"` then
+    /// `" + broker hosts <tag>"`, to append after `co2.total.model`, which
+    /// names the application part only. Empty when no host is in the
+    /// totals. Tags pass [`display_tag`] (else `unknown`), so the result is
+    /// safe on a terminal and in HTML.
+    #[must_use]
+    pub fn host_model_suffix(&self) -> String {
+        let mut suffix = String::new();
+        for (noun, model, _) in self.hosts_in_totals() {
+            let tag = display_tag(model).unwrap_or("unknown");
+            let _ = write!(suffix, " + {noun} {tag}");
+        }
+        suffix
+    }
+
+    /// `(noun, model, kWh)` of each host figure inside the totals, database
+    /// first.
+    fn hosts_in_totals(&self) -> Vec<(&'static str, &str, f64)> {
+        let db = self
+            .database_in_totals()
+            .map(|w| ("database hosts", w.model.as_str(), w.energy_kwh));
+        let mw = self
+            .messaging_in_totals()
+            .map(|w| ("broker hosts", w.model.as_str(), w.energy_kwh));
+        db.into_iter().chain(mw).collect()
+    }
+
+    /// The application part of [`Self::energy_source_label`], for a
+    /// window with energy.
+    fn application_source_label(&self) -> String {
         let ratios = &self.per_service_measured_ratio;
         let covered: Vec<&String> = ratios
             .iter()
@@ -629,7 +837,7 @@ impl GreenSummary {
                 .any(|m| m.ends_with(CO2_MODEL_CAL_SUFFIX));
         let calibrated = if calibrated { " \u{b7} calibrated" } else { "" };
         if covered.is_empty() {
-            return Some(format!("modeled from I/O counts{calibrated}"));
+            return format!("modeled from I/O counts{calibrated}");
         }
         let tags: BTreeSet<&str> = covered
             .iter()
@@ -642,13 +850,13 @@ impl GreenSummary {
             tags.into_iter().collect::<Vec<_>>().join(", ")
         };
         if ratios.values().all(|r| *r >= 1.0) {
-            return Some(format!("source {tags}"));
+            return format!("source {tags}");
         }
-        Some(format!(
+        format!(
             "source {tags} on {} of {} services \u{b7} rest modeled from I/O counts{calibrated}",
             covered.len(),
             ratios.len()
-        ))
+        )
     }
 
     /// Energy source of one service for display: its tag, through the
@@ -673,9 +881,22 @@ impl GreenSummary {
     }
 }
 
+/// kWh for a label: six decimals, scientific below 1e-5 so a tiny host
+/// term never reads as zero (the CLI's `fmt_tiny` rule).
+fn fmt_kwh(v: f64) -> String {
+    // Normalize negative zero so a floored term never renders "-0.000000".
+    let v = if v == 0.0 { 0.0 } else { v };
+    if v == 0.0 || v >= 1e-5 {
+        format!("{v:.6}")
+    } else {
+        format!("{v:.3e}")
+    }
+}
+
 /// A per-service energy tag without its `+cal` suffix, or `None` when it
 /// is not a short `[A-Za-z0-9_+-]` token (hostile `--input`, bidi bytes).
-fn display_tag(tag: &str) -> Option<&str> {
+#[must_use]
+pub fn display_tag(tag: &str) -> Option<&str> {
     let tag = tag.strip_suffix(CO2_MODEL_CAL_SUFFIX).unwrap_or(tag);
     let valid = (1..=64).contains(&tag.len())
         && tag
@@ -727,6 +948,7 @@ pub trait ReportSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::score::carbon::CarbonEstimate;
 
     #[test]
     fn green_summary_pre_0512_baseline_loads_without_scoring_config() {
@@ -1050,5 +1272,203 @@ mod tests {
             only_hostile.energy_source_label().as_deref(),
             Some("source unknown on 1 of 2 services \u{b7} rest modeled from I/O counts")
         );
+    }
+
+    /// A database or broker figure as a pre-in-totals window wrote it.
+    const LEGACY_WASTE: &str =
+        r#"{"energy_kwh":2.0,"waste_kwh":1.0,"sql_waste_ratio":0.5,"model":"alumet_rapl"}"#;
+
+    fn waste_summary(db_in_totals: bool, msg_in_totals: bool) -> GreenSummary {
+        let mut db: DatabaseWaste = serde_json::from_str(LEGACY_WASTE).expect("db figure");
+        db.in_totals = db_in_totals;
+        db.placement = Some(HostPlacement::Dedicated);
+        let mut mw: MessagingWaste = serde_json::from_str(
+            r#"{"energy_kwh":0.5,"waste_kwh":0.1,"messaging_waste_ratio":0.2,"model":"broker_specpower"}"#,
+        )
+        .expect("broker figure");
+        mw.in_totals = msg_in_totals;
+        let mut gs = GreenSummary::disabled(10);
+        gs.energy_kwh = 3.0;
+        gs.database_waste = Some(db);
+        gs.messaging_waste = Some(mw);
+        gs.regions = serde_json::from_value(serde_json::json!([{
+            "status": "known", "region": "eu-west-3", "grid_intensity_gco2_kwh": 50.0,
+            "pue": 1.1, "io_ops": 10, "co2_gco2": 4.0
+        }]))
+        .expect("region row");
+        gs
+    }
+
+    #[test]
+    fn window_written_before_the_host_fields_deserializes_with_defaults() {
+        let db: DatabaseWaste = serde_json::from_str(LEGACY_WASTE).expect("legacy db");
+        assert!(!db.in_totals);
+        assert_eq!(db.placement, None);
+        let block: DisclosureDbWaste = serde_json::from_str(
+            r#"{"energy_kwh":1.0,"model":"estimated","operational_waste_kwh":0.0,"canonical_waste_kwh":0.0}"#,
+        )
+        .expect("legacy block");
+        assert!(!block.in_totals);
+        assert_eq!(block.placement, None);
+        let co2: CarbonReport = serde_json::from_value(serde_json::json!({
+            "total": CarbonEstimate::sci_numerator(1.0),
+            "avoidable": CarbonEstimate::operational_ratio(0.0),
+            "operational_gco2": 1.0,
+            "embodied_gco2": 0.0
+        }))
+        .expect("legacy co2");
+        assert_eq!((co2.database_gco2, co2.messaging_gco2), (None, None));
+    }
+
+    #[test]
+    fn host_fields_are_skipped_at_their_defaults_and_round_trip_when_set() {
+        let db: DatabaseWaste = serde_json::from_str(LEGACY_WASTE).expect("db");
+        let json = serde_json::to_value(&db).expect("serialize");
+        assert!(json.get("in_totals").is_none() && json.get("placement").is_none());
+        let json = serde_json::to_value(DisclosureDbWaste::default()).expect("serialize");
+        assert!(json.get("in_totals").is_none() && json.get("placement").is_none());
+
+        let set = waste_summary(true, true);
+        let json = serde_json::to_value(&set).expect("serialize");
+        assert_eq!(json["database_waste"]["in_totals"], true);
+        assert_eq!(json["database_waste"]["placement"], "dedicated");
+        let back: GreenSummary = serde_json::from_value(json).expect("round trip");
+        assert_eq!(back.database_waste, set.database_waste);
+        assert_eq!(back.messaging_waste, set.messaging_waste);
+
+        let mut co2: CarbonReport = serde_json::from_value(serde_json::json!({
+            "total": CarbonEstimate::sci_numerator(1.0),
+            "avoidable": CarbonEstimate::operational_ratio(0.0),
+            "operational_gco2": 1.0,
+            "embodied_gco2": 0.0
+        }))
+        .expect("co2");
+        assert!(
+            serde_json::to_value(&co2)
+                .unwrap()
+                .get("database_gco2")
+                .is_none()
+        );
+        co2.database_gco2 = Some(2.5);
+        co2.messaging_gco2 = Some(0.5);
+        let back: CarbonReport =
+            serde_json::from_value(serde_json::to_value(&co2).unwrap()).expect("round trip");
+        assert_eq!(back, co2);
+    }
+
+    #[test]
+    fn in_total_helpers_count_only_flagged_host_figures() {
+        let none = waste_summary(false, false);
+        assert!(none.database_in_totals().is_none() && none.messaging_in_totals().is_none());
+        assert!(none.host_energy_in_totals_kwh().abs() < 1e-12);
+        assert!((none.application_energy_kwh() - 3.0).abs() < 1e-12);
+
+        let both = waste_summary(true, true);
+        assert!(both.database_in_totals().is_some() && both.messaging_in_totals().is_some());
+        assert!((both.host_energy_in_totals_kwh() - 2.5).abs() < 1e-12);
+        assert!((both.application_energy_kwh() - 0.5).abs() < 1e-12);
+
+        let db_only = waste_summary(true, false);
+        assert!((db_only.application_energy_kwh() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn host_model_suffix_names_each_in_total_host() {
+        assert_eq!(waste_summary(false, false).host_model_suffix(), "");
+        assert_eq!(
+            waste_summary(true, false).host_model_suffix(),
+            " + database hosts alumet_rapl"
+        );
+        assert_eq!(
+            waste_summary(true, true).host_model_suffix(),
+            " + database hosts alumet_rapl + broker hosts broker_specpower"
+        );
+        let mut forged = waste_summary(true, false);
+        if let Some(w) = forged.database_waste.as_mut() {
+            w.model = "x\u{1b}[2J".to_string();
+        }
+        assert_eq!(forged.host_model_suffix(), " + database hosts unknown");
+    }
+
+    #[test]
+    fn application_energy_floors_at_zero() {
+        let mut gs = waste_summary(true, true);
+        gs.energy_kwh = 2.0;
+        assert!(gs.application_energy_kwh().abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn energy_labels_name_only_in_total_host_terms() {
+        // Legacy or carbon-less host figures stay outside: no suffix, no split.
+        let none = waste_summary(false, false);
+        assert_eq!(
+            none.energy_source_label().as_deref(),
+            Some("modeled from I/O counts")
+        );
+        assert_eq!(none.energy_split_label(), None);
+
+        let db_only = waste_summary(true, false);
+        assert_eq!(
+            db_only.energy_source_label().as_deref(),
+            Some("modeled from I/O counts \u{b7} plus database hosts, alumet_rapl")
+        );
+        assert_eq!(
+            db_only.energy_split_label().as_deref(),
+            Some("applications 1.000000 kWh + database hosts 2.000000 kWh")
+        );
+
+        let mut both = waste_summary(true, true);
+        both.messaging_waste.as_mut().unwrap().model = "broker\u{1b}[2J".to_string();
+        assert_eq!(
+            both.energy_source_label().as_deref(),
+            Some(
+                "modeled from I/O counts \u{b7} plus database hosts, alumet_rapl \u{b7} plus broker hosts, unknown"
+            )
+        );
+        assert_eq!(
+            both.energy_split_label().as_deref(),
+            Some(
+                "applications 0.500000 kWh + database hosts 2.000000 kWh + broker hosts 0.500000 kWh"
+            )
+        );
+
+        let broker_only = waste_summary(false, true);
+        let split = broker_only.energy_split_label().unwrap();
+        assert!(split.starts_with("applications 2.500000 kWh + broker hosts"));
+        assert!(!split.contains("database"), "{split}");
+    }
+
+    #[test]
+    fn split_label_keeps_a_tiny_host_term_visible() {
+        let mut gs = waste_summary(true, false);
+        gs.database_waste.as_mut().unwrap().energy_kwh = 3e-7;
+        assert!(
+            gs.energy_split_label()
+                .unwrap()
+                .ends_with("database hosts 3.000e-7 kWh")
+        );
+    }
+
+    #[test]
+    fn scored_carbon_sums_regions_and_host_terms() {
+        let mut gs = waste_summary(true, true);
+        assert!(
+            (gs.scored_carbon_gco2() - 4.0).abs() < 1e-12,
+            "no co2: regions only"
+        );
+        gs.co2 = Some(
+            serde_json::from_value(serde_json::json!({
+                "total": CarbonEstimate::sci_numerator(9.0),
+                "avoidable": CarbonEstimate::operational_ratio(0.0),
+                "operational_gco2": 4.0,
+                "embodied_gco2": 3.0,
+                "transport_gco2": 1.0,
+                "database_gco2": 1.5,
+                "messaging_gco2": 0.25
+            }))
+            .expect("co2"),
+        );
+        // Embodied and transport stay out.
+        assert!((gs.scored_carbon_gco2() - 5.75).abs() < 1e-12);
     }
 }

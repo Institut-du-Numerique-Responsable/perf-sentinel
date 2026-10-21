@@ -111,7 +111,8 @@ pub struct AggregateInputs {
     /// Later than the period's first day means the archive does not reach
     /// back to it, see [`archive_reaches_period_start`].
     pub earliest_archived_window: Option<DateTime<Utc>>,
-    /// The three terms whose sum is the published total, in gCO2eq.
+    /// Three of the five terms of the published total, in gCO2eq. The
+    /// in-total database and broker host terms are in `carbon_breakdown`.
     /// Only `operational` carries an avoidable share: embodied hardware
     /// and network transport are irreducible by fixing an anti-pattern.
     pub embodied_gco2_total: f64,
@@ -246,8 +247,23 @@ struct WindowMetrics {
     total_io: u64,
     avoidable_io: u64,
     traces: u64,
+    /// Window energy: the application part plus `host_kwh`.
     energy_kwh: f64,
+    /// Database and broker host energy inside `energy_kwh`, and its carbon
+    /// inside `carbon_kg`. Never attributed to an application.
+    host_kwh: f64,
+    host_kg: f64,
     runtime_attribution: bool,
+}
+
+impl WindowMetrics {
+    fn application_energy_kwh(&self) -> f64 {
+        sanitize_f64(self.energy_kwh - self.host_kwh)
+    }
+
+    fn application_carbon_kg(&self) -> f64 {
+        sanitize_f64(self.carbon_kg - self.host_kg)
+    }
 }
 
 /// Period-summed avoidable energy/carbon for one N+1 threshold tier.
@@ -267,51 +283,35 @@ fn fold_waste_block(acc: &mut DbWasteAccumulator, block: &crate::report::Disclos
     let crate::report::DisclosureDbWaste {
         model,
         energy_kwh,
-        operational_waste_kwh: operational_kwh,
-        operational_waste_gco2: operational_gco2,
-        canonical_waste_kwh: canonical_kwh,
-        canonical_waste_gco2: canonical_gco2,
+        operational_waste_kwh,
+        operational_waste_gco2,
+        canonical_waste_kwh,
+        canonical_waste_gco2,
         energy_gco2,
+        in_totals,
+        placement,
     } = block;
-    let (energy_kwh, operational_kwh, canonical_kwh) =
-        (*energy_kwh, *operational_kwh, *canonical_kwh);
-    let (operational_gco2, canonical_gco2, energy_gco2) =
-        (*operational_gco2, *canonical_gco2, *energy_gco2);
     if !super::schema::is_valid_model_tag(model) {
         return;
     }
-    let energy = sanitize_f64(energy_kwh);
+    let energy = sanitize_f64(*energy_kwh);
     acc.energy_kwh += energy;
-    acc.operational_kwh += sanitize_f64(operational_kwh);
-    acc.canonical_kwh += sanitize_f64(canonical_kwh);
+    acc.operational_kwh += sanitize_f64(*operational_waste_kwh);
+    acc.canonical_kwh += sanitize_f64(*canonical_waste_kwh);
     // Keep None-vs-zero: sums stay None until a window carried a carbon
     // conversion.
-    if let Some(g) = operational_gco2 {
-        acc.operational_g = Some(acc.operational_g.unwrap_or(0.0) + sanitize_f64(g));
-    }
-    if let Some(g) = canonical_gco2 {
-        acc.canonical_g = Some(acc.canonical_g.unwrap_or(0.0) + sanitize_f64(g));
-    }
+    add_sanitized(&mut acc.operational_g, *operational_waste_gco2);
+    add_sanitized(&mut acc.canonical_g, *canonical_waste_gco2);
     // Estimated subsystem carbon is already attributed inside the service
-    // total. Only measured or declared external-scope figures sit beside it.
-    if model != crate::report::DB_WASTE_MODEL_ESTIMATED
-        && let Some(g) = energy_gco2
-    {
-        acc.energy_g = Some(acc.energy_g.unwrap_or(0.0) + sanitize_f64(g));
+    // total, and an in-total host figure is inside the window total. Only
+    // the remaining measured or declared figures sit beside it.
+    if model != crate::report::DB_WASTE_MODEL_ESTIMATED && !*in_totals {
+        add_sanitized(&mut acc.energy_g, *energy_gco2);
     }
     acc.windows = acc.windows.saturating_add(1);
-    // Three provenance classes, three buckets, see
-    // `docs/design/08-PERIODIC-DISCLOSURE.md`.
-    if model == crate::report::DB_WASTE_MODEL_ESTIMATED {
-        acc.estimated_windows = acc.estimated_windows.saturating_add(1);
-    } else if model == crate::report::BROKER_WASTE_MODEL_SPECPOWER {
-        acc.declared_windows = acc.declared_windows.saturating_add(1);
-        acc.declared_energy_kwh += energy;
-    } else {
-        acc.measured_windows = acc.measured_windows.saturating_add(1);
-        acc.measured_energy_kwh += energy;
-    }
-    if operational_gco2.is_some() || canonical_gco2.is_some() {
+    fold_provenance(acc, model, energy);
+    fold_host_scope(acc, model, *in_totals, *placement, energy);
+    if operational_waste_gco2.is_some() || canonical_waste_gco2.is_some() {
         acc.windows_with_carbon = acc.windows_with_carbon.saturating_add(1);
     }
     // Same cap as the sibling energy-model collector.
@@ -320,17 +320,74 @@ fn fold_waste_block(acc: &mut DbWasteAccumulator, block: &crate::report::Disclos
     }
 }
 
+/// Four provenance classes, four buckets, see
+/// `docs/design/08-PERIODIC-DISCLOSURE.md`.
+fn fold_provenance(acc: &mut DbWasteAccumulator, model: &str, energy: f64) {
+    if model == crate::report::DB_WASTE_MODEL_ESTIMATED {
+        acc.estimated_windows = acc.estimated_windows.saturating_add(1);
+    } else if crate::report::is_declared_model(model) {
+        acc.declared_windows = acc.declared_windows.saturating_add(1);
+        acc.declared_energy_kwh += energy;
+    } else if model == crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER {
+        acc.modeled_windows = acc.modeled_windows.saturating_add(1);
+        acc.modeled_energy_kwh += energy;
+    } else {
+        acc.measured_windows = acc.measured_windows.saturating_add(1);
+        acc.measured_energy_kwh += energy;
+    }
+}
+
+/// Whether a window's host block is a host term inside its totals. An
+/// estimated figure is the application-side share, never a host term,
+/// whatever its flag says, and an out-of-spec tag never reaches the sums.
+fn is_in_total_host(in_totals: bool, model: &str) -> bool {
+    in_totals
+        && model != crate::report::DB_WASTE_MODEL_ESTIMATED
+        && super::schema::is_valid_model_tag(model)
+}
+
+/// The in-total share and the declared placement.
+fn fold_host_scope(
+    acc: &mut DbWasteAccumulator,
+    model: &str,
+    in_totals: bool,
+    placement: Option<crate::score::host_static::HostPlacement>,
+    energy: f64,
+) {
+    if is_in_total_host(in_totals, model) {
+        acc.in_totals_windows = acc.in_totals_windows.saturating_add(1);
+        acc.in_totals_energy_kwh += energy;
+    }
+    if let Some(p) = placement {
+        acc.placements.insert(p.as_str().to_string());
+    }
+}
+
+/// Add a sanitized optional figure, leaving `slot` `None` while every
+/// value seen so far was absent.
+fn add_sanitized(slot: &mut Option<f64>, value: Option<f64>) {
+    if let Some(v) = value {
+        *slot = Some(slot.unwrap_or(0.0) + sanitize_f64(v));
+    }
+}
+
+/// Struct-level `default`: a rollup line written before a field existed
+/// still deserializes.
 #[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
 struct DbWasteAccumulator {
     energy_kwh: f64,
     measured_energy_kwh: f64,
+    modeled_energy_kwh: f64,
+    in_totals_energy_kwh: f64,
     operational_kwh: f64,
     /// `None` until a window carried a carbon conversion, so an absent
     /// conversion is not published as an affirmative zero.
     operational_g: Option<f64>,
     canonical_kwh: f64,
     canonical_g: Option<f64>,
-    /// Total carbon of the subsystem, beside the totals and never in them.
+    /// Carbon of the measured or declared figures that stayed beside the
+    /// totals: windows archived before host accounting, or without carbon.
     energy_g: Option<f64>,
     models: BTreeSet<String>,
     windows: u64,
@@ -338,6 +395,9 @@ struct DbWasteAccumulator {
     declared_energy_kwh: f64,
     declared_windows: u64,
     estimated_windows: u64,
+    modeled_windows: u64,
+    in_totals_windows: u64,
+    placements: BTreeSet<String>,
     windows_with_carbon: u64,
 }
 
@@ -391,10 +451,15 @@ pub(crate) struct PeriodState {
     /// Set once a window contributed transport under a coefficient that
     /// is not the fixed one, or under none this binary can read.
     transport_coefficient_uncertain: bool,
-    /// Running sums of the three terms of the published total, in gCO2eq.
+    /// Running sums of the first three terms of the published total, in
+    /// gCO2eq.
     embodied_gco2_total: f64,
     operational_gco2_total: f64,
     transport_gco2_total: f64,
+    /// In-total database and broker host carbon, in gCO2eq, the fourth and
+    /// fifth terms of the published total.
+    database_gco2_total: f64,
+    messaging_gco2_total: f64,
     /// Per-service set of distinct energy model tags accumulated across
     /// the period's windows. The `+cal` suffix is stripped before
     /// insertion. Service cardinality is bounded by `MAX_SERVICES`,
@@ -754,7 +819,7 @@ impl PeriodState {
             &report.green_summary.energy_model,
             report.green_summary.energy_calibrated,
         );
-        self.fold_carbon_methodology(report.green_summary.co2.as_ref());
+        self.fold_carbon_methodology(&report.green_summary);
         self.fold_transport_coefficient(
             report.green_summary.co2.as_ref(),
             report.green_summary.scoring_config.as_ref(),
@@ -804,11 +869,14 @@ impl PeriodState {
             tracing::warn!(ts = %ts, "skipping window with non-finite carbon");
             return None;
         }
+        let (host_kwh, host_kg) = in_total_host_terms(&report.green_summary);
         // Sanitize against `+Inf` from tampered archives. NaN / -Inf /
         // negative inputs fall through the `> 0.0` check to the proxy
-        // path. The post-clamp catches the remaining `+Inf` case.
-        let raw_energy = if report.green_summary.energy_kwh > 0.0 {
-            report.green_summary.energy_kwh
+        // path. The post-clamp catches the remaining `+Inf` case. The proxy
+        // prices the application part only, the host energy is kept.
+        let application = report.green_summary.energy_kwh - host_kwh;
+        let raw_application = if application > 0.0 {
+            application
         } else {
             (report.green_summary.total_io_ops as f64) * ENERGY_PER_IO_OP_KWH
         };
@@ -818,7 +886,9 @@ impl PeriodState {
             total_io: report.green_summary.total_io_ops as u64,
             avoidable_io: report.green_summary.avoidable_io_ops as u64,
             traces: report.analysis.traces_analyzed as u64,
-            energy_kwh: sanitize_f64(raw_energy),
+            energy_kwh: sanitize_f64(raw_application) + host_kwh,
+            host_kwh,
+            host_kg,
             runtime_attribution: !report.green_summary.per_service_carbon_kgco2eq.is_empty()
                 && !report.green_summary.per_service_energy_kwh.is_empty(),
         })
@@ -843,10 +913,12 @@ impl PeriodState {
             fold_tier(&mut self.canonical_waste, &dw.canonical);
             fold_tier(&mut self.operational_waste, &dw.operational);
             if let Some(db) = &dw.database {
-                self.fold_database_block(db);
+                fold_waste_block(&mut self.db_waste, db);
+                self.record_in_total_model(db);
             }
             if let Some(mw) = &dw.messaging {
-                self.fold_messaging_block(mw);
+                fold_waste_block(&mut self.msg_waste, mw);
+                self.record_in_total_model(mw);
             }
         } else {
             self.legacy_waste_windows += 1;
@@ -866,17 +938,12 @@ impl PeriodState {
         }
     }
 
-    /// Fold one window's `disclosure_waste.database` block into the running
-    /// database-waste sums. An out-of-spec provenance tag drops the whole
-    /// block: a figure whose provenance cannot be published must not reach
-    /// the sums either.
-    fn fold_database_block(&mut self, db: &crate::report::DisclosureDbWaste) {
-        fold_waste_block(&mut self.db_waste, db);
-    }
-
-    /// Same fold for the window's `disclosure_waste.messaging` block.
-    fn fold_messaging_block(&mut self, mw: &crate::report::DisclosureMsgWaste) {
-        fold_waste_block(&mut self.msg_waste, mw);
+    /// An in-total host block's energy is part of `total_energy_kwh`, so
+    /// its model is one of the period's energy sources.
+    fn record_in_total_model(&mut self, block: &crate::report::DisclosureDbWaste) {
+        if is_in_total_host(block.in_totals, &block.model) {
+            self.record_energy_model_tag(&block.model);
+        }
     }
 
     fn fold_binary_version(&mut self, bv: &str) {
@@ -937,15 +1004,18 @@ impl PeriodState {
         }
     }
 
-    /// Collect the methodology tag and the three terms of one window's
-    /// total: operational, embodied, transport. Only the first carries an
-    /// avoidable share, so the split tells a reader how much of the
-    /// published total is reducible at all.
-    fn fold_carbon_methodology(&mut self, co2: Option<&crate::score::carbon::CarbonReport>) {
-        let Some(co2) = co2 else { return };
+    /// Collect the methodology tag and the terms of one window's total:
+    /// operational, embodied, transport, and the in-total database and
+    /// broker hosts. The split tells a reader how much of the published
+    /// total is reducible at all.
+    fn fold_carbon_methodology(&mut self, gs: &crate::report::GreenSummary) {
+        let Some(co2) = gs.co2.as_ref() else { return };
         self.embodied_gco2_total += sanitize_f64(co2.embodied_gco2);
         self.operational_gco2_total += sanitize_f64(co2.operational_gco2);
         self.transport_gco2_total += sanitize_f64(co2.transport_gco2.unwrap_or(0.0));
+        let (database_gco2, messaging_gco2) = in_total_host_gco2(gs);
+        self.database_gco2_total += database_gco2;
+        self.messaging_gco2_total += messaging_gco2;
         let tag = co2.total.methodology.as_str();
         if tag.is_empty() || tag.len() > MAX_ENERGY_MODEL_LEN {
             return;
@@ -1085,8 +1155,8 @@ impl PeriodState {
             .or_default();
         bucket.total_requests += m.traces;
         bucket.total_io_ops += m.total_io;
-        bucket.energy_kwh += m.energy_kwh;
-        bucket.carbon_kgco2eq += m.carbon_kg;
+        bucket.energy_kwh += m.application_energy_kwh();
+        bucket.carbon_kgco2eq += m.application_carbon_kg();
     }
 
     fn attribute_proxy_share(
@@ -1097,6 +1167,7 @@ impl PeriodState {
     ) {
         self.fallback_windows += 1;
         let total_window_io: u64 = per_service_io.values().sum();
+        let (energy, carbon) = (m.application_energy_kwh(), m.application_carbon_kg());
         for (service, io) in per_service_io {
             let share = if total_window_io == 0 {
                 0.0
@@ -1108,8 +1179,8 @@ impl PeriodState {
             };
             bucket.total_io_ops += *io;
             bucket.total_requests += scale_u64(m.traces, share);
-            bucket.energy_kwh += m.energy_kwh * share;
-            bucket.carbon_kgco2eq += m.carbon_kg * share;
+            bucket.energy_kwh += energy * share;
+            bucket.carbon_kgco2eq += carbon * share;
         }
         collect_endpoints_seen(&mut self.per_service, &report.per_endpoint_io_ops);
     }
@@ -1245,6 +1316,8 @@ impl PeriodState {
             embodied_gco2_total,
             operational_gco2_total,
             transport_gco2_total,
+            database_gco2_total,
+            messaging_gco2_total,
             per_service_energy_models,
             per_service_measured_ratio_sums,
             observed_days,
@@ -1266,6 +1339,8 @@ impl PeriodState {
         self.embodied_gco2_total += sanitize_f64(embodied_gco2_total);
         self.operational_gco2_total += sanitize_f64(operational_gco2_total);
         self.transport_gco2_total += sanitize_f64(transport_gco2_total);
+        self.database_gco2_total += sanitize_f64(database_gco2_total);
+        self.messaging_gco2_total += sanitize_f64(messaging_gco2_total);
         self.calibration_applied |= calibration_applied;
         self.transport_coefficient_uncertain |= transport_coefficient_uncertain;
         merge_tier(&mut self.canonical_waste, &canonical_waste);
@@ -1422,28 +1497,36 @@ fn merge_tier(acc: &mut WasteTierAccumulator, other: &WasteTierAccumulator) {
 }
 
 fn merge_waste_block(acc: &mut DbWasteAccumulator, other: DbWasteAccumulator) {
-    let add_opt = |slot: &mut Option<f64>, value: Option<f64>| {
-        if let Some(g) = value {
-            *slot = Some(slot.unwrap_or(0.0) + sanitize_f64(g));
-        }
-    };
     acc.energy_kwh += sanitize_f64(other.energy_kwh);
     acc.measured_energy_kwh += sanitize_f64(other.measured_energy_kwh);
     acc.operational_kwh += sanitize_f64(other.operational_kwh);
     acc.canonical_kwh += sanitize_f64(other.canonical_kwh);
     acc.declared_energy_kwh += sanitize_f64(other.declared_energy_kwh);
-    add_opt(&mut acc.operational_g, other.operational_g);
-    add_opt(&mut acc.canonical_g, other.canonical_g);
-    add_opt(&mut acc.energy_g, other.energy_g);
+    acc.modeled_energy_kwh += sanitize_f64(other.modeled_energy_kwh);
+    acc.in_totals_energy_kwh += sanitize_f64(other.in_totals_energy_kwh);
+    add_sanitized(&mut acc.operational_g, other.operational_g);
+    add_sanitized(&mut acc.canonical_g, other.canonical_g);
+    add_sanitized(&mut acc.energy_g, other.energy_g);
     acc.windows = acc.windows.saturating_add(other.windows);
     acc.measured_windows = acc.measured_windows.saturating_add(other.measured_windows);
     acc.declared_windows = acc.declared_windows.saturating_add(other.declared_windows);
     acc.estimated_windows = acc
         .estimated_windows
         .saturating_add(other.estimated_windows);
+    acc.modeled_windows = acc.modeled_windows.saturating_add(other.modeled_windows);
+    acc.in_totals_windows = acc
+        .in_totals_windows
+        .saturating_add(other.in_totals_windows);
     acc.windows_with_carbon = acc
         .windows_with_carbon
         .saturating_add(other.windows_with_carbon);
+    // A rollup line is read back from disk: only the two TOML spellings.
+    acc.placements.extend(
+        other
+            .placements
+            .into_iter()
+            .filter(|p| super::schema::is_known_placement(p)),
+    );
     for model in other.models {
         if super::schema::is_valid_model_tag(&model) {
             insert_capped(&mut acc.models, model, MAX_BINARY_VERSIONS);
@@ -1733,14 +1816,7 @@ impl Builder {
                 total_requests,
                 total_energy_kwh,
                 total_carbon_kgco2eq: total_carbon,
-                carbon_breakdown: build_carbon_breakdown(
-                    state.operational_gco2_total,
-                    state.embodied_gco2_total,
-                    state.transport_gco2_total,
-                    state.db_waste.energy_g,
-                    state.msg_waste.energy_g,
-                    !state.transport_coefficient_uncertain,
-                ),
+                carbon_breakdown: build_carbon_breakdown(&state),
                 aggregate_efficiency_score: canonical_waste.efficiency_score,
                 aggregate_waste_ratio: canonical_waste.waste_ratio,
                 anti_patterns_detected_count: anti_patterns_count,
@@ -1751,22 +1827,8 @@ impl Builder {
                 binary_versions: state.binary_versions,
                 runtime_windows_count: state.runtime_windows,
                 fallback_windows_count: state.fallback_windows,
-                database_waste: (state.db_waste.windows > 0).then(|| DatabaseWasteAggregate {
-                    energy_kwh: state.db_waste.energy_kwh,
-                    measured_energy_kwh: state.db_waste.measured_energy_kwh,
-                    declared_energy_kwh: state.db_waste.declared_energy_kwh,
-                    models: state.db_waste.models,
-                    windows_with_figure: state.db_waste.windows,
-                    measured_windows: state.db_waste.measured_windows,
-                    declared_windows: state.db_waste.declared_windows,
-                    estimated_windows: state.db_waste.estimated_windows,
-                    windows_with_carbon: state.db_waste.windows_with_carbon,
-                    operational_waste_kwh: state.db_waste.operational_kwh,
-                    operational_waste_kgco2eq: state.db_waste.operational_g.map(|g| g / 1000.0),
-                    canonical_waste_kwh: state.db_waste.canonical_kwh,
-                    canonical_waste_kgco2eq: state.db_waste.canonical_g.map(|g| g / 1000.0),
-                }),
-                messaging_waste: messaging_waste_aggregate(state.msg_waste),
+                database_waste: waste_aggregate(state.db_waste),
+                messaging_waste: waste_aggregate(state.msg_waste),
                 per_service_energy_models: state.per_service_energy_models,
                 per_service_measured_ratio: state
                     .per_service_measured_ratio_sums
@@ -1819,19 +1881,23 @@ pub fn archive_reaches_period_start(earliest: Option<DateTime<Utc>>, period: &Pe
     earliest.is_some_and(|ts| ts.date_naive() <= period.from_date)
 }
 
-/// Broker-side waste block, emitted only once a window carried a figure.
-fn messaging_waste_aggregate(
-    w: DbWasteAccumulator,
-) -> Option<super::schema::MessagingWasteAggregate> {
-    (w.windows > 0).then(|| super::schema::MessagingWasteAggregate {
+/// One waste block, database or broker, emitted only once a window
+/// carried a figure.
+fn waste_aggregate(w: DbWasteAccumulator) -> Option<DatabaseWasteAggregate> {
+    (w.windows > 0).then(|| DatabaseWasteAggregate {
         energy_kwh: w.energy_kwh,
         measured_energy_kwh: w.measured_energy_kwh,
+        modeled_energy_kwh: w.modeled_energy_kwh,
         declared_energy_kwh: w.declared_energy_kwh,
+        in_totals_energy_kwh: w.in_totals_energy_kwh,
         models: w.models,
+        placements: w.placements,
         windows_with_figure: w.windows,
         measured_windows: w.measured_windows,
+        modeled_windows: w.modeled_windows,
         declared_windows: w.declared_windows,
         estimated_windows: w.estimated_windows,
+        in_totals_windows: w.in_totals_windows,
         windows_with_carbon: w.windows_with_carbon,
         operational_waste_kwh: w.operational_kwh,
         operational_waste_kgco2eq: w.operational_g.map(|g| g / 1000.0),
@@ -1840,31 +1906,26 @@ fn messaging_waste_aggregate(
     })
 }
 
-/// Split the period total into its three terms, in kgCO2eq. One rule for
-/// every term: absent when zero, so unmeasured never reads as zero.
-/// Transport is linear in its coefficient, so low/high are mid rescaled,
-/// and omitted when a window used another coefficient than the fixed one.
-fn build_carbon_breakdown(
-    operational_gco2: f64,
-    embodied_gco2: f64,
-    transport_gco2: f64,
-    database_gco2: Option<f64>,
-    messaging_gco2: Option<f64>,
-    fixed_coefficient: bool,
-) -> Option<CarbonBreakdown> {
+/// Split the period total into its five terms, in kgCO2eq, then the host
+/// carbon that stayed beside it. One rule for every term: absent when zero,
+/// so unmeasured never reads as zero. Transport is linear in its
+/// coefficient, so low/high are mid rescaled, and omitted when a window
+/// used another coefficient than the fixed one.
+fn build_carbon_breakdown(state: &PeriodState) -> Option<CarbonBreakdown> {
     use crate::score::carbon::{
         DEFAULT_NETWORK_ENERGY_PER_BYTE_KWH, NETWORK_ENERGY_PER_BYTE_KWH_HIGH,
         NETWORK_ENERGY_PER_BYTE_KWH_LOW,
     };
-    let transport = (transport_gco2 > 0.0).then_some(transport_gco2 / 1000.0);
-    (operational_gco2 > 0.0
-        || embodied_gco2 > 0.0
-        || transport.is_some()
-        || database_gco2.is_some()
-        || messaging_gco2.is_some())
-    .then(|| CarbonBreakdown {
-        operational_kgco2eq: (operational_gco2 > 0.0).then_some(operational_gco2 / 1000.0),
-        embodied_kgco2eq: (embodied_gco2 > 0.0).then_some(embodied_gco2 / 1000.0),
+    let kg = |g: f64| (g > 0.0).then_some(g / 1000.0);
+    let fixed_coefficient = !state.transport_coefficient_uncertain;
+    let transport = kg(state.transport_gco2_total);
+    let breakdown = CarbonBreakdown {
+        operational_kgco2eq: kg(state.operational_gco2_total),
+        embodied_kgco2eq: kg(state.embodied_gco2_total),
+        database_kgco2eq: kg(state.database_gco2_total),
+        messaging_kgco2eq: kg(state.messaging_gco2_total),
+        database_kgco2eq_out_of_total: state.db_waste.energy_g.map(|g| g / 1000.0),
+        messaging_kgco2eq_out_of_total: state.msg_waste.energy_g.map(|g| g / 1000.0),
         transport_kgco2eq: transport,
         transport_kgco2eq_low: transport
             .filter(|_| fixed_coefficient)
@@ -1872,9 +1933,62 @@ fn build_carbon_breakdown(
         transport_kgco2eq_high: transport
             .filter(|_| fixed_coefficient)
             .map(|t| t * (NETWORK_ENERGY_PER_BYTE_KWH_HIGH / DEFAULT_NETWORK_ENERGY_PER_BYTE_KWH)),
-        database_kgco2eq_out_of_total: database_gco2.map(|g| g / 1000.0),
-        messaging_kgco2eq_out_of_total: messaging_gco2.map(|g| g / 1000.0),
-    })
+    };
+    (breakdown.operational_kgco2eq.is_some()
+        || breakdown.embodied_kgco2eq.is_some()
+        || breakdown.transport_kgco2eq.is_some()
+        || breakdown.database_kgco2eq.is_some()
+        || breakdown.messaging_kgco2eq.is_some()
+        || breakdown.database_kgco2eq_out_of_total.is_some()
+        || breakdown.messaging_kgco2eq_out_of_total.is_some())
+    .then_some(breakdown)
+}
+
+/// In-total database and broker host energy (kWh) and carbon (kg) of one
+/// window, each term sanitized on its own. The kWh follows the block
+/// rule of [`is_in_total_host`], so the application part keeps what the
+/// in-total share leaves out.
+fn in_total_host_terms(gs: &crate::report::GreenSummary) -> (f64, f64) {
+    let kwh = gs
+        .database_waste
+        .as_ref()
+        .filter(|w| is_in_total_host(w.in_totals, &w.model))
+        .map_or(0.0, |w| sanitize_f64(w.energy_kwh))
+        + gs.messaging_waste
+            .as_ref()
+            .filter(|w| is_in_total_host(w.in_totals, &w.model))
+            .map_or(0.0, |w| sanitize_f64(w.energy_kwh));
+    let (database_gco2, messaging_gco2) = in_total_host_gco2(gs);
+    (kwh, (database_gco2 + messaging_gco2) / 1000.0)
+}
+
+/// In-total database and broker host carbon (g) of one window, under the
+/// same [`is_in_total_host`] rule as the kWh: a dropped block takes its
+/// carbon out of the host perimeter too.
+fn in_total_host_gco2(gs: &crate::report::GreenSummary) -> (f64, f64) {
+    let Some(co2) = gs.co2.as_ref() else {
+        return (0.0, 0.0);
+    };
+    let term = |tag: Option<(bool, &str)>, gco2: Option<f64>| match tag {
+        Some((in_totals, model)) if is_in_total_host(in_totals, model) => {
+            sanitize_f64(gco2.unwrap_or(0.0))
+        }
+        _ => 0.0,
+    };
+    (
+        term(
+            gs.database_waste
+                .as_ref()
+                .map(|w| (w.in_totals, w.model.as_str())),
+            co2.database_gco2,
+        ),
+        term(
+            gs.messaging_waste
+                .as_ref()
+                .map(|w| (w.in_totals, w.model.as_str())),
+            co2.messaging_gco2,
+        ),
+    )
 }
 
 /// One warning per file, whatever the number of broken lines.

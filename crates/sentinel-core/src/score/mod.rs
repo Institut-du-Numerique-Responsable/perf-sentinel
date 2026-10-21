@@ -8,14 +8,16 @@ mod carbon_data;
 pub(crate) mod carbon_profiles;
 pub mod cloud_energy;
 pub mod electricity_maps;
-// `energy_state` is the shared `ArcSwap`-backed storage used by the
-// Scaphandre and cloud SPECpower scrapers. It depends on the `arc-swap`
-// crate which is optional (only pulled in under the `daemon` feature),
-// and its only callers (`scaphandre::state` and `cloud_energy::state`)
-// are themselves gated on `daemon`. Gating the module here keeps
+// `energy_state` is the shared `ArcSwap`-backed storage and one-source
+// split used by the Scaphandre, cloud, Kepler, Alumet and Redfish
+// scrapers. It depends on the `arc-swap` crate which is optional (only
+// pulled in under the `daemon` feature), and every caller is itself
+// gated on `daemon`. Gating the module here keeps
 // `cargo publish -p perf-sentinel-core` (default features off) green.
 #[cfg(feature = "daemon")]
 pub(crate) mod energy_state;
+pub mod grid_feed;
+pub mod host_static;
 pub mod kepler;
 // Shared per-service ops-delta tracker for every measured-energy
 // scraper. Daemon-gated for the same reason as `energy_state`.
@@ -232,9 +234,9 @@ pub fn score_green(
     } else {
         0.0
     };
-    let database_waste =
-        build_database_waste(carbon, &carbon_outputs, total_sql_io_ops, avoidable.sql);
-    let messaging_waste = build_messaging_waste(
+    let mut database_figure =
+        database_figure(carbon, &carbon_outputs, total_sql_io_ops, avoidable.sql);
+    let mut messaging_figure = messaging_figure(
         carbon,
         &carbon_outputs,
         total_messaging_io_ops,
@@ -248,7 +250,13 @@ pub fn score_green(
         String::new()
     };
 
-    let co2 = carbon_outputs.report;
+    let mut co2 = carbon_outputs.report;
+    let host_kwh = fold_host_terms(
+        carbon,
+        co2.as_mut(),
+        [database_figure.as_mut(), messaging_figure.as_mut()],
+        traces.len(),
+    );
     let green_summary = GreenSummary {
         total_io_ops,
         avoidable_io_ops,
@@ -271,7 +279,7 @@ pub fn score_green(
         co2,
         regions: carbon_outputs.regions,
         scoring_config: carbon.and_then(|ctx| ctx.scoring_config.clone()),
-        energy_kwh: per_service.energy_kwh,
+        energy_kwh: per_service.energy_kwh + host_kwh,
         energy_model,
         energy_calibrated: carbon_outputs.calibrated,
         per_service_carbon_kgco2eq: per_service.carbon_kgco2eq,
@@ -279,8 +287,8 @@ pub fn score_green(
         per_service_region: per_service.region,
         per_service_energy_model: per_service.energy_model,
         per_service_measured_ratio: per_service.measured_ratio,
-        database_waste,
-        messaging_waste,
+        database_waste: database_figure.map(WasteFigure::into_database),
+        messaging_waste: messaging_figure.map(WasteFigure::into_messaging),
     };
 
     (enriched, green_summary, per_endpoint_io_ops)
@@ -413,6 +421,102 @@ struct WasteFigure {
     region: Option<String>,
     ratio: f64,
     model: String,
+    in_totals: bool,
+    placement: Option<host_static::HostPlacement>,
+}
+
+impl WasteFigure {
+    fn into_database(self) -> DatabaseWaste {
+        DatabaseWaste {
+            energy_kwh: self.energy_kwh,
+            waste_kwh: self.waste_kwh,
+            waste_gco2: self.waste_gco2,
+            energy_gco2: self.energy_gco2,
+            region: self.region,
+            sql_waste_ratio: self.ratio,
+            model: self.model,
+            in_totals: self.in_totals,
+            placement: self.placement,
+        }
+    }
+
+    fn into_messaging(self) -> crate::report::MessagingWaste {
+        crate::report::MessagingWaste {
+            energy_kwh: self.energy_kwh,
+            waste_kwh: self.waste_kwh,
+            waste_gco2: self.waste_gco2,
+            energy_gco2: self.energy_gco2,
+            region: self.region,
+            messaging_waste_ratio: self.ratio,
+            model: self.model,
+            in_totals: self.in_totals,
+            placement: self.placement,
+        }
+    }
+}
+
+/// One in-total host term: its kWh, its gCO₂, and that gCO₂ times the
+/// subsystem waste ratio.
+#[derive(Default)]
+struct HostTerm {
+    kwh: f64,
+    gco2: f64,
+    avoidable_gco2: f64,
+}
+
+/// Put a measured or declared host figure inside the totals. It enters
+/// only when it is not the estimated share (already in the totals), its
+/// carbon converted, and the window has a carbon report, so the energy
+/// and carbon perimeters always agree. Writes the host carbon into
+/// `slot` (`co2.database_gco2` or `co2.messaging_gco2`).
+fn fold_host_term(slot: Option<&mut Option<f64>>, figure: Option<&mut WasteFigure>) -> HostTerm {
+    let (Some(slot), Some(figure)) = (slot, figure) else {
+        return HostTerm::default();
+    };
+    let Some(gco2) = figure.energy_gco2 else {
+        return HostTerm::default();
+    };
+    if figure.model == crate::report::DB_WASTE_MODEL_ESTIMATED {
+        return HostTerm::default();
+    }
+    figure.in_totals = true;
+    *slot = Some(gco2);
+    HostTerm {
+        kwh: figure.energy_kwh,
+        gco2,
+        avoidable_gco2: figure.waste_gco2.unwrap_or(0.0),
+    }
+}
+
+/// Fold the database then the broker figure into the carbon report and
+/// return the host kWh they add to `energy_kwh`. `total`, `avoidable`
+/// and `sci_per_trace` are rescaled once, and a window scored with a host
+/// source configured carries the `+hosts` tags, zero included.
+/// `operational_gco2`, `regions` and the per-service maps stay
+/// application-only.
+fn fold_host_terms(
+    carbon: Option<&CarbonContext>,
+    mut co2: Option<&mut carbon::CarbonReport>,
+    [database, messaging]: [Option<&mut WasteFigure>; 2],
+    traces_len: usize,
+) -> f64 {
+    let db = fold_host_term(co2.as_deref_mut().map(|c| &mut c.database_gco2), database);
+    let msg = fold_host_term(co2.as_deref_mut().map(|c| &mut c.messaging_gco2), messaging);
+    let hosts_configured =
+        carbon.is_some_and(|ctx| ctx.db_energy.is_some() || ctx.broker_energy.is_some());
+    if let Some(report) = co2.filter(|_| hosts_configured) {
+        let total = report.total.mid + db.gco2 + msg.gco2;
+        report.total = report.total.rescaled(total);
+        report.total.methodology = carbon::METHODOLOGY_SCI_NUMERATOR_TRANSPORT_HOSTS.to_string();
+        report.avoidable = report
+            .avoidable
+            .rescaled(report.avoidable.mid + db.avoidable_gco2 + msg.avoidable_gco2);
+        report.avoidable.methodology = carbon::METHODOLOGY_OPERATIONAL_RATIO_HOSTS.to_string();
+        #[allow(clippy::cast_precision_loss)] // trace counts, far below 2^53
+        let per_trace = total / traces_len.max(1) as f64;
+        report.sci_per_trace = report.sci_per_trace.as_ref().map(|s| s.rescaled(per_trace));
+    }
+    db.kwh + msg.kwh
 }
 
 /// Measured (or declared) workload energy × its waste ratio.
@@ -456,6 +560,8 @@ fn build_waste_figure(
             region: declared.region.clone(),
             ratio,
             model: declared.model.to_string(),
+            in_totals: false,
+            placement: declared.placement,
         });
     }
     // is_finite too: NaN slips a plain <= 0.0 check.
@@ -472,61 +578,45 @@ fn build_waste_figure(
         region: None,
         ratio,
         model: crate::report::DB_WASTE_MODEL_ESTIMATED.to_string(),
+        in_totals: false,
+        placement: None,
     })
 }
 
-fn build_database_waste(
+fn database_figure(
     carbon: Option<&CarbonContext>,
     outputs: &carbon_compute::CarbonComputeOutputs,
     total_sql_io_ops: usize,
     avoidable_sql_io_ops: usize,
-) -> Option<DatabaseWaste> {
+) -> Option<WasteFigure> {
     let ctx = carbon?;
-    let f = build_waste_figure(
+    build_waste_figure(
         ctx,
         ctx.db_energy.as_ref(),
         outputs.sql_energy_kwh,
         outputs.sql_gco2,
         total_sql_io_ops,
         avoidable_sql_io_ops,
-    )?;
-    Some(DatabaseWaste {
-        energy_kwh: f.energy_kwh,
-        waste_kwh: f.waste_kwh,
-        waste_gco2: f.waste_gco2,
-        energy_gco2: f.energy_gco2,
-        region: f.region,
-        sql_waste_ratio: f.ratio,
-        model: f.model,
-    })
+    )
 }
 
 /// The messaging twin. Its provenance tag rides on the context, since
 /// only the daemon knows whether the energy was measured or declared.
-fn build_messaging_waste(
+fn messaging_figure(
     carbon: Option<&CarbonContext>,
     outputs: &carbon_compute::CarbonComputeOutputs,
     total_messaging_io_ops: usize,
     avoidable_messaging_io_ops: usize,
-) -> Option<crate::report::MessagingWaste> {
+) -> Option<WasteFigure> {
     let ctx = carbon?;
-    let f = build_waste_figure(
+    build_waste_figure(
         ctx,
         ctx.broker_energy.as_ref(),
         outputs.messaging_energy_kwh,
         outputs.messaging_gco2,
         total_messaging_io_ops,
         avoidable_messaging_io_ops,
-    )?;
-    Some(crate::report::MessagingWaste {
-        energy_kwh: f.energy_kwh,
-        waste_kwh: f.waste_kwh,
-        waste_gco2: f.waste_gco2,
-        energy_gco2: f.energy_gco2,
-        region: f.region,
-        messaging_waste_ratio: f.ratio,
-        model: f.model,
-    })
+    )
 }
 
 fn build_iis_map<'a>(

@@ -1,4 +1,4 @@
-//! Wire schema (v1.7) for the periodic disclosure report.
+//! Wire schema (v1.8) for the periodic disclosure report.
 //! See `docs/design/08-PERIODIC-DISCLOSURE.md` for ordering and
 //! determinism invariants that any change here must preserve.
 //!
@@ -23,15 +23,19 @@
 //! same `serde(default)` + `skip_serializing_if` rule, so an older report keeps
 //! its `content_hash` when re-hashed here.
 //!
-//! v1.4 adds `Aggregate.database_waste`: the database-side avoidable energy
-//! and carbon over the period, at both thresholds, with its provenance
-//! models. Informational lower bound, never folded into the aggregate
-//! totals. Same `serde(default)` + `skip_serializing_if` rule, so an older
-//! report keeps its `content_hash` when re-hashed here.
+//! v1.4 adds `Aggregate.database_waste`: the avoidable energy and carbon of
+//! SQL work over the period, at both thresholds, with its provenance
+//! models. A breakdown, never added on top of the aggregate totals: a
+//! measured figure is database host energy, inside them when its window
+//! counted it and beside them otherwise, an estimated figure is the
+//! application-side share of the SQL spans, already inside them. Same
+//! `serde(default)` + `skip_serializing_if` rule, so an older report keeps
+//! its `content_hash` when re-hashed here.
 //!
 //! v1.5 adds messaging support: two `PatternName` values
 //! (`n_plus_one_messaging`, `slow_messaging`) and
-//! `Aggregate.messaging_waste`, the broker-side twin of `database_waste`.
+//! `Aggregate.messaging_waste`, the twin of `database_waste` for publish
+//! work, with the same measured or declared versus estimated reading.
 //! Additive via `serde(default)` plus `skip_serializing_if`, so
 //! re-hashing a v1.4 report still yields its original `content_hash`.
 //!
@@ -52,13 +56,23 @@
 //! `include_network_transport` did both before it was deprecated. Same
 //! `serde(default)` + `skip_serializing_if` rule, so an older report keeps
 //! its `content_hash` when re-hashed here.
+//!
+//! v1.8 adds the grid operator feeds to `CarbonIntensitySource`:
+//! `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
+//! `open_electricity`, `mavir` and `em6`. It also adds
+//! `CarbonBreakdown.database_kgco2eq` and `messaging_kgco2eq`, the database
+//! and broker host carbon a window counted inside its total, and five
+//! `DatabaseWasteAggregate` fields on both waste blocks: the in-total
+//! share (`in_totals_energy_kwh`, `in_totals_windows`), the declared
+//! `placements`, and the CPU-interpolated bucket (`modeled_energy_kwh`,
+//! `modeled_windows`).
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: &str = "perf-sentinel-report/v1.7";
+pub const SCHEMA_VERSION: &str = "perf-sentinel-report/v1.8";
 
 /// Scope fields the operator declares by hand in the org config. These are
 /// unaudited inputs: the binary cannot verify the size of the portfolio they
@@ -308,10 +322,10 @@ impl StandardCrosswalk {
                 CrosswalkEntry {
                     report_field: "aggregate.total_energy_kwh".to_string(),
                     datapoint: "E1-5 Energy consumption and mix".to_string(),
-                    note: "Convert kWh to MWh. Not disaggregated by fossil, nuclear or renewable source.".to_string(),
+                    note: "Convert kWh to MWh. Not disaggregated by fossil, nuclear or renewable source. Includes database and broker host energy when the matching database_waste or messaging_waste in_totals_windows is non-zero.".to_string(),
                 },
                 CrosswalkEntry {
-                    report_field: "aggregate.total_carbon_kgco2eq (operational term)".to_string(),
+                    report_field: "aggregate.total_carbon_kgco2eq (operational, database and broker terms)".to_string(),
                     datapoint: "E1-6 Gross Scope 2 GHG emissions (location-based)".to_string(),
                     note: "Location-based only. ESRS also requires a market-based figure, which SCI excludes.".to_string(),
                 },
@@ -419,13 +433,18 @@ pub struct CalibrationInputs {
     pub embodied_gco2_per_request: Option<f64>,
 }
 
-/// Database-side waste summed over the period's windows that carried a
-/// `database_waste` figure. Informational: a lower bound built from the
-/// database cgroup energy (measured via Alumet, or estimated from the
-/// modeled SQL energy, per `models`) multiplied by the SQL-only waste
-/// ratio. The `canonical_*` figures use the binary-pinned N+1 threshold
-/// so the published number cannot be shrunk by operator config. Never
-/// folded into the aggregate energy or carbon totals.
+/// Database waste summed over the period's windows that carried a
+/// `database_waste` figure: the window energy multiplied by the SQL-only
+/// waste ratio. The energy is the database host's when a source bills it
+/// (measured through Alumet, a CPU-interpolated `SPECpower` figure, or a
+/// declared ceiling), otherwise the application-side share of the SQL
+/// spans, the energy the span scoring gave the emitting services (`models`
+/// says which). The `canonical_*` figures use the binary-pinned N+1
+/// threshold so the published number cannot be shrunk by operator config.
+/// A breakdown of the aggregate totals and of `canonical_waste` and
+/// `operational_waste`, never an addend: `in_totals_energy_kwh` is the
+/// host share already inside them, the estimated share is inside them
+/// too, and the rest sits beside them.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseWasteAggregate {
     /// Energy the figure covered over the period, in kWh.
@@ -434,19 +453,36 @@ pub struct DatabaseWasteAggregate {
     /// agent reading the workload's own power), in kWh.
     #[serde(default)]
     pub measured_energy_kwh: f64,
+    /// Share of `energy_kwh` from windows whose figure was modeled
+    /// (`cloud_specpower`, a `SPECpower` envelope interpolated at the
+    /// host's CPU reading), in kWh. v1.8.
+    #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_f64")]
+    pub modeled_energy_kwh: f64,
     /// Share of `energy_kwh` from windows whose figure was declared
-    /// rather than measured, in kWh. Absent on a database-only report:
-    /// no declared source feeds that figure today.
+    /// rather than measured (`database_specpower` or `broker_specpower`,
+    /// a declared cluster billed at its `SPECpower` ceiling), in kWh.
     #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_f64")]
     pub declared_energy_kwh: f64,
-    /// Distinct provenance tags observed (`alumet_rapl`, `estimated`,
-    /// and `broker_specpower` on the messaging block).
+    /// Share of `energy_kwh` the windows counted inside their totals, in
+    /// kWh: already part of `total_energy_kwh`, never to be added to it.
+    /// v1.8.
+    #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_f64")]
+    pub in_totals_energy_kwh: f64,
+    /// Distinct provenance tags observed (`alumet_rapl`, `cloud_specpower`,
+    /// `database_specpower` or `broker_specpower`, `estimated`).
     pub models: BTreeSet<String>,
+    /// Host placements the operator declared (`dedicated`, `shared`): a
+    /// statement of where the hosts run, not a measurement. v1.8.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub placements: BTreeSet<String>,
     /// Windows that carried the figure (of the period's total).
     pub windows_with_figure: u64,
     /// Windows whose figure came from a measured source.
     #[serde(default)]
     pub measured_windows: u64,
+    /// Windows whose figure was modeled from a CPU reading. v1.8.
+    #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_u64")]
+    pub modeled_windows: u64,
     /// Windows whose figure was declared, not measured: an operator
     /// statement of provisioned infrastructure, which bounds compute
     /// rather than reporting it.
@@ -455,6 +491,9 @@ pub struct DatabaseWasteAggregate {
     /// Windows whose figure was the estimated fallback.
     #[serde(default)]
     pub estimated_windows: u64,
+    /// Windows that counted their host figure inside their totals. v1.8.
+    #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_u64")]
+    pub in_totals_windows: u64,
     /// Windows whose figure carried a carbon conversion. Reads on the
     /// `*_kgco2eq` sums: fewer contributing windows than
     /// `windows_with_figure` means a partial carbon picture.
@@ -470,7 +509,16 @@ pub struct DatabaseWasteAggregate {
     pub canonical_waste_kgco2eq: Option<f64>,
 }
 
-/// Broker-side waste summed over the period. Wire-identical to the
+/// Whether `placement` is one of the two `HostPlacement` spellings.
+#[must_use]
+pub(crate) fn is_known_placement(placement: &str) -> bool {
+    use crate::score::host_static::HostPlacement;
+    [HostPlacement::Dedicated, HostPlacement::Shared]
+        .iter()
+        .any(|p| p.as_str() == placement)
+}
+
+/// Messaging waste summed over the period. Wire-identical to the
 /// database block (one accumulator feeds both), so one struct serves
 /// both fields and the two can never drift.
 pub type MessagingWasteAggregate = DatabaseWasteAggregate;
@@ -533,13 +581,16 @@ impl TemporalCoverage {
     }
 }
 
-/// Split of the published carbon total into its three SCI terms, which
-/// differ in what an operator can act on. `operational` is the only one
-/// carrying an avoidable share, the one the waste tiers quantify.
+/// Split of the published carbon total into its in-total terms, which
+/// differ in what an operator can act on. `operational` carries the
+/// application's avoidable share, the one the waste tiers quantify.
 /// `embodied` amortises manufactured hardware and `transport` covers
 /// cross-region network energy, both irreducible by fixing an
 /// anti-pattern: they belong in the total and not in a savings target.
-/// The three sum to `total_carbon_kgco2eq`, up to rounding. v1.6.
+/// `database` and `messaging` are the measured, modeled or declared
+/// database and broker host carbon counted inside the window totals. On windows tagged
+/// `+transport`, the five sum to `total_carbon_kgco2eq`, up to rounding.
+/// v1.6, the two host terms v1.8.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CarbonBreakdown {
     /// SCI `O = E x I`, running the workload. Contains the avoidable part.
@@ -550,14 +601,23 @@ pub struct CarbonBreakdown {
     /// `[green] embodied_carbon_per_request_gco2`. Absent when zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embodied_kgco2eq: Option<f64>,
-    /// Total carbon of the database and broker over the period when
-    /// measured or declared as an external scope. Estimated fallback
-    /// carbon is already in the service total and stays excluded here.
-    /// **Outside the sum above and outside
-    /// `total_carbon_kgco2eq`**: both cover a different scope from the
-    /// instrumented services, and folding them in would mix perimeters.
-    /// Published here so a reader sees every carbon figure the run
-    /// produced in one place. v1.6.
+    /// Database host carbon counted inside the window totals: a measured,
+    /// modeled or declared figure whose carbon converted. Inside
+    /// `total_carbon_kgco2eq`. Absent when zero. v1.8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_kgco2eq: Option<f64>,
+    /// Broker host carbon counted inside the window totals, the twin of
+    /// `database_kgco2eq`. Absent when zero. v1.8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messaging_kgco2eq: Option<f64>,
+    /// Carbon of the measured, modeled or declared database and broker
+    /// figures that stayed beside the window totals: windows archived before host
+    /// energy entered the totals, or whose figure carried no carbon.
+    /// Estimated fallback carbon is already in the service total and stays
+    /// excluded here, and in-total figures sit in `database_kgco2eq` and
+    /// `messaging_kgco2eq`. **Outside the sum above and outside
+    /// `total_carbon_kgco2eq`**. Published here so a reader sees every
+    /// carbon figure the run produced in one place. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_kgco2eq_out_of_total: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -588,7 +648,7 @@ pub struct Aggregate {
     pub total_requests: u64,
     pub total_energy_kwh: f64,
     pub total_carbon_kgco2eq: f64,
-    /// The three terms `total_carbon_kgco2eq` is made of. Reading the
+    /// The five terms `total_carbon_kgco2eq` is made of. Reading the
     /// total without them mixes what an anti-pattern fix can reduce with
     /// what it cannot. Absent on pre-v1.6 reports. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -637,16 +697,22 @@ pub struct Aggregate {
     /// proxy attribution path.
     #[serde(default)]
     pub fallback_windows_count: u64,
-    /// Database-side waste over the period: the energy the database
-    /// figure covered and its avoidable share at both thresholds. A
-    /// lower bound (CPU-only when measured, modeled otherwise, see
-    /// `models`), excluded from `total_energy_kwh` and
-    /// `total_carbon_kgco2eq`. Absent on pre-v1.4 reports and when no
-    /// window carried the figure.
+    /// Database waste over the period: the energy the database figure
+    /// covered and its avoidable share at both thresholds. Measured
+    /// windows carry database host energy (CPU-only, a lower bound),
+    /// inside `total_energy_kwh` and `total_carbon_kgco2eq` when the
+    /// window counted it and beside them otherwise. Estimated windows
+    /// carry the application-side share of the SQL spans, already inside
+    /// those totals. Never added on top of them. Absent on pre-v1.4
+    /// reports and when no window carried the figure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_waste: Option<DatabaseWasteAggregate>,
-    /// Broker-side waste over the period. Absent when no window carried
-    /// a messaging figure. Since v1.5.
+    /// Messaging waste over the period, the twin of `database_waste`.
+    /// Measured or declared windows carry broker host energy, inside the
+    /// totals when the window counted it and beside them otherwise,
+    /// estimated windows the application-side share of the publish
+    /// spans, already inside them. Never added on top of the totals.
+    /// Absent when no window carried a messaging figure. Since v1.5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messaging_waste: Option<MessagingWasteAggregate>,
     /// Per-service set of distinct energy models observed over the

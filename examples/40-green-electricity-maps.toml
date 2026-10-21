@@ -27,8 +27,8 @@ default_region = "eu-west-3"
 # precedence over this file. There is no "env:VAR" indirection: a value in
 # that shape is used literally.
 api_key = "your-api-key"   # no default, required
-# Default 300. The free tier is about 30 requests per zone per month, so it
-# needs 3600 or more.
+# Default 300. Size it to your plan's quota: one zone polled every 3600 s
+# spends about 720 requests a month. The free tier is for non-commercial use only.
 poll_interval_secs = 3600   # default 300, bounds 60..86400
 # Map your region IDs to Electricity Maps zone IDs.
 region_map = { "eu-west-3" = "FR", "us-east-1" = "US-MIDA-PJM", "ap-southeast-1" = "SG" }   # no default, at least one entry required

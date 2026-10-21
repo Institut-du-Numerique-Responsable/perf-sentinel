@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use sentinel_core::detect::Severity;
 use sentinel_core::report::json::JsonReportSink;
 use sentinel_core::report::{Report, ReportSink};
-use sentinel_core::score::carbon::IntensitySource;
+use sentinel_core::score::carbon::{IntensitySource, RealTimeProvider};
 use sentinel_core::text_safety::{safe_url, sanitize_for_terminal, strip_code_ticks};
 
 use crate::OutputFormat;
@@ -913,16 +913,48 @@ pub(crate) fn fmt_tiny(v: f64) -> String {
     }
 }
 
-/// The fields one waste line needs, borrowed from either twin.
-struct WasteLine<'a> {
-    label: &'a str,
-    ratio_label: &'a str,
-    waste_kwh: f64,
-    energy_kwh: f64,
-    ratio: f64,
-    model: &'a str,
-    region: Option<&'a str>,
-    waste_gco2: Option<f64>,
+/// The fields one waste line needs, borrowed from either twin. Shared
+/// with the monitor TUI.
+pub(crate) struct WasteLine<'a> {
+    pub(crate) label: &'a str,
+    pub(crate) ratio_label: &'a str,
+    pub(crate) waste_kwh: f64,
+    pub(crate) energy_kwh: f64,
+    pub(crate) ratio: f64,
+    pub(crate) model: &'a str,
+    pub(crate) in_totals: bool,
+    pub(crate) region: Option<&'a str>,
+    pub(crate) waste_gco2: Option<f64>,
+}
+
+impl<'a> WasteLine<'a> {
+    pub(crate) fn database(db: &'a sentinel_core::report::DatabaseWaste) -> Self {
+        Self {
+            label: "Database waste:",
+            ratio_label: "SQL",
+            waste_kwh: db.waste_kwh,
+            energy_kwh: db.energy_kwh,
+            ratio: db.sql_waste_ratio,
+            model: &db.model,
+            in_totals: db.in_totals,
+            region: db.region.as_deref(),
+            waste_gco2: db.waste_gco2,
+        }
+    }
+
+    pub(crate) fn messaging(mw: &'a sentinel_core::report::MessagingWaste) -> Self {
+        Self {
+            label: "Broker waste:",
+            ratio_label: "messaging",
+            waste_kwh: mw.waste_kwh,
+            energy_kwh: mw.energy_kwh,
+            ratio: mw.messaging_waste_ratio,
+            model: &mw.model,
+            in_totals: mw.in_totals,
+            region: mw.region.as_deref(),
+            waste_gco2: mw.waste_gco2,
+        }
+    }
 }
 
 /// One waste text line, database or broker. Pure so the sanitization and
@@ -942,16 +974,10 @@ fn format_waste_line(w: &WasteLine<'_>) -> String {
     } else {
         sanitize_for_terminal(w.model)
     };
-    // Only the estimated figure is a re-presented share of the report
-    // totals. Measured and declared models are additional energy.
-    let scope = if w.model == sentinel_core::report::DB_WASTE_MODEL_ESTIMATED {
-        "[within the report totals]"
-    } else {
-        "[excluded from totals]"
-    };
+    let scope = sentinel_core::report::waste_scope_label(w.model, w.in_totals);
     format!(
         // Padded to the same column as the other summary lines.
-        "  {:<19}{} kWh of {} kWh ({:.0}% {} ratio, model {model}){gco2}{region} {scope}",
+        "  {:<19}{} kWh of {} kWh ({:.0}% {} ratio, model {model}){gco2}{region} [{scope}]",
         w.label,
         fmt_tiny(w.waste_kwh),
         fmt_tiny(w.energy_kwh),
@@ -961,29 +987,11 @@ fn format_waste_line(w: &WasteLine<'_>) -> String {
 }
 
 fn format_database_waste_line(db: &sentinel_core::report::DatabaseWaste) -> String {
-    format_waste_line(&WasteLine {
-        label: "Database waste:",
-        ratio_label: "SQL",
-        waste_kwh: db.waste_kwh,
-        energy_kwh: db.energy_kwh,
-        ratio: db.sql_waste_ratio,
-        model: &db.model,
-        region: db.region.as_deref(),
-        waste_gco2: db.waste_gco2,
-    })
+    format_waste_line(&WasteLine::database(db))
 }
 
 fn format_messaging_waste_line(mw: &sentinel_core::report::MessagingWaste) -> String {
-    format_waste_line(&WasteLine {
-        label: "Broker waste:",
-        ratio_label: "messaging",
-        waste_kwh: mw.waste_kwh,
-        energy_kwh: mw.energy_kwh,
-        ratio: mw.messaging_waste_ratio,
-        model: &mw.model,
-        region: mw.region.as_deref(),
-        waste_gco2: mw.waste_gco2,
-    })
+    format_waste_line(&WasteLine::messaging(mw))
 }
 
 /// The `Energy:` line, named by its energy source rather than the window
@@ -992,16 +1000,58 @@ fn format_messaging_waste_line(mw: &sentinel_core::report::MessagingWaste) -> St
 fn format_energy_line(gs: &sentinel_core::report::GreenSummary, dim: &str, reset: &str) -> String {
     gs.energy_source_label().map_or_else(
         || format!("  {dim}Energy:            not computed (no span resolved to a region){reset}"),
-        |src| format!("  {:<19}{} kWh ({src})", "Energy:", fmt_tiny(gs.energy_kwh)),
+        |src| {
+            let split = gs
+                .energy_split_label()
+                .map_or_else(String::new, |split| format!(" = {split}"));
+            format!(
+                "  {:<19}{} kWh ({src}){split}",
+                "Energy:",
+                fmt_tiny(gs.energy_kwh)
+            )
+        },
     )
+}
+
+/// `(label, gCO2, detail)` of the database and broker host carbon terms
+/// counted in `co2.total`, for the text report and the TUI. The model
+/// comes from `--input` JSON, so it is sanitized here.
+pub(crate) fn host_carbon_terms(
+    carbon: &sentinel_core::score::carbon::CarbonReport,
+    gs: &sentinel_core::report::GreenSummary,
+) -> Vec<(&'static str, f64, String)> {
+    let detail = |model: Option<&str>| {
+        model
+            .and_then(sentinel_core::report::display_tag)
+            .map_or_else(
+                || "host energy".to_string(),
+                |m| format!("host energy, model {m}"),
+            )
+    };
+    let db = carbon.database_gco2.map(|g| {
+        let model = gs.database_waste.as_ref().map(|w| w.model.as_str());
+        ("Database:", g, detail(model))
+    });
+    let mw = carbon.messaging_gco2.map(|g| {
+        let model = gs.messaging_waste.as_ref().map(|w| w.model.as_str());
+        ("Broker:", g, detail(model))
+    });
+    db.into_iter().chain(mw).collect()
 }
 
 /// The CO2 block of the `GreenOps` summary. Split out of
 /// [`print_green_summary`] to keep that function's branching shallow.
-fn print_carbon_summary(carbon: &sentinel_core::score::carbon::CarbonReport) {
+fn print_carbon_summary(
+    carbon: &sentinel_core::score::carbon::CarbonReport,
+    gs: &sentinel_core::report::GreenSummary,
+) {
     println!(
-        "  Est. CO\u{2082}:          {:.6} g (low {:.6}, high {:.6}, model {})",
-        carbon.total.mid, carbon.total.low, carbon.total.high, carbon.total.model,
+        "  Est. CO\u{2082}:          {:.6} g (low {:.6}, high {:.6}, model {}{})",
+        carbon.total.mid,
+        carbon.total.low,
+        carbon.total.high,
+        carbon.total.model,
+        gs.host_model_suffix(),
     );
     println!(
         "  Avoidable CO\u{2082}:     {:.6} g (low {:.6}, high {:.6})",
@@ -1014,6 +1064,40 @@ fn print_carbon_summary(carbon: &sentinel_core::score::carbon::CarbonReport) {
     if let Some(transport) = carbon.transport_gco2 {
         println!("  Transport:         {transport:.6} g    (cross-region network bytes)");
     }
+    for (label, gco2, detail) in host_carbon_terms(carbon, gs) {
+        println!("  {label:<19}{gco2:.6} g    ({detail})");
+    }
+}
+
+/// Header naming the grid operator feeds at least one region drew on, in
+/// their fixed order. A configured feed alone proves nothing: batch runs
+/// start no scraper.
+fn grid_scoring_line(summary: &sentinel_core::report::GreenSummary) -> Option<String> {
+    let fingrid_dataset = summary
+        .scoring_config
+        .as_ref()
+        .and_then(|cfg| cfg.fingrid_dataset);
+    let used: Vec<&str> = RealTimeProvider::GRID_OPERATORS
+        .iter()
+        .filter(|p| {
+            summary
+                .regions
+                .iter()
+                .any(|r| r.intensity_provider == Some(**p))
+        })
+        // Fingrid's two datasets differ in basis: name the one scored.
+        .map(|p| match (p, fingrid_dataset) {
+            (RealTimeProvider::Fingrid, Some(265)) => "Fingrid consumption",
+            (RealTimeProvider::Fingrid, Some(_)) => "Fingrid production",
+            _ => p.display_name(),
+        })
+        .collect();
+    (!used.is_empty()).then(|| {
+        format!(
+            "  Carbon scoring: grid operator open data ({}), direct emissions",
+            used.join(", ")
+        )
+    })
 }
 
 /// One `Per-region breakdown` line.
@@ -1033,7 +1117,12 @@ fn format_region_line(region: &sentinel_core::score::carbon::RegionBreakdown) ->
             region.io_ops, region.co2_gco2,
         );
     }
-    let source_str = intensity_source_label(region.intensity_source);
+    let source_str: Cow<'static, str> = match region.intensity_provider {
+        Some(p) if p != RealTimeProvider::ElectricityMaps => {
+            Cow::Owned(format!("real_time, {}", p.as_str()))
+        }
+        _ => Cow::Borrowed(intensity_source_label(region.intensity_source)),
+    };
     let raw_suffix = format_estimation_suffix(
         region.intensity_estimated,
         region.intensity_estimation_method.as_deref(),
@@ -1056,7 +1145,7 @@ fn print_absent_aware_figures(
 ) {
     match summary.co2.as_ref() {
         Some(carbon) => {
-            print_carbon_summary(carbon);
+            print_carbon_summary(carbon, summary);
             println!("{}", format_energy_line(summary, dim, reset));
         }
         // The trace count is the only reliable discriminant: a daemon stamps
@@ -1070,13 +1159,15 @@ fn print_absent_aware_figures(
     match &summary.database_waste {
         Some(db) => println!("{}", format_database_waste_line(db)),
         None => println!(
-            "  {dim}Database waste:    not measured (no SQL activity, a measured reading needs [green.alumet.database]){reset}"
+            "  {dim}Database waste:    {}{reset}",
+            sentinel_core::report::DATABASE_WASTE_ABSENT
         ),
     }
     match &summary.messaging_waste {
         Some(mw) => println!("{}", format_messaging_waste_line(mw)),
         None => println!(
-            "  {dim}Broker waste:      not measured (no broker publish spans, or no broker energy backend){reset}"
+            "  {dim}Broker waste:      {}{reset}",
+            sentinel_core::report::MESSAGING_WASTE_ABSENT
         ),
     }
 }
@@ -1129,6 +1220,12 @@ fn print_green_summary(
     {
         println!();
         println!("{}", format_scoring_config_line(scoring));
+    }
+    // Only when a region used it: batch runs start no scraper, so a
+    // configured section alone says nothing about the figures below.
+    if let Some(line) = grid_scoring_line(summary) {
+        println!();
+        println!("{line}");
     }
 
     // Per-region breakdown whenever at least one region was resolved.

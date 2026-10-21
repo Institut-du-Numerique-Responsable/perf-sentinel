@@ -11,7 +11,8 @@ use super::annex;
 use super::layout::{Face, fit, group4, text_width, wrap};
 use super::{PAGE_HEIGHT, PAGE_WIDTH};
 use crate::report::periodic::schema::{
-    CarbonBreakdown, IntegrityLevel, Period, PeriodType, ReportIntent, SCHEMA_VERSION, WasteTier,
+    Aggregate, CarbonBreakdown, IntegrityLevel, Period, PeriodType, ReportIntent, SCHEMA_VERSION,
+    WasteTier,
 };
 use crate::report::periodic::{Application, AttestationBinding, Confidentiality, PeriodicReport};
 
@@ -923,11 +924,11 @@ fn at_a_glance(w: &mut Writer, report: &PeriodicReport) {
     let aggregate = &report.aggregate;
     w.section("At a glance");
     w.title("Three numbers, and how sure we are of them");
-    w.para(
-        10.5,
-        TEXT_2,
-        "Energy is measured from the work the services did. Carbon applies the carbon intensity of the electricity grid to that energy. Avoidable is what a known class of defects, repeated database and HTTP calls, wasted.",
+    let intro = format!(
+        "Energy is measured from the work the services did. {} Carbon applies the carbon intensity of the electricity grid to that energy. Avoidable is what a known class of defects, repeated database and HTTP calls, wasted.",
+        host_perimeter(aggregate)
     );
+    w.para(10.5, TEXT_2, &intro);
     w.y += 2.0;
     let carbon = aggregate.total_carbon_kgco2eq;
     cards(
@@ -1235,6 +1236,81 @@ fn crosswalk(w: &mut Writer, report: &PeriodicReport) {
     }
 }
 
+/// Which database and broker hosts the totals include, and which stay out.
+fn host_perimeter(aggregate: &Aggregate) -> String {
+    let hosts = [
+        ("database", &aggregate.database_waste),
+        ("broker", &aggregate.messaging_waste),
+    ];
+    let mut inside = Vec::new();
+    let mut outside = Vec::new();
+    for (noun, block) in hosts {
+        // Same predicate as the disclaimers and the preview.
+        match block.as_ref().filter(|b| b.in_totals_windows > 0) {
+            Some(b) if b.in_totals_windows < b.windows_with_figure => inside.push(format!(
+                "{noun} hosts ({} kWh, in {} of {} windows)",
+                host_kwh(b.in_totals_energy_kwh),
+                b.in_totals_windows,
+                b.windows_with_figure
+            )),
+            Some(b) => inside.push(format!(
+                "{noun} hosts ({} kWh)",
+                host_kwh(b.in_totals_energy_kwh)
+            )),
+            None => outside.push(noun),
+        }
+    }
+    let included =
+        (!inside.is_empty()).then(|| format!("The totals include the {}.", inside.join(" and ")));
+    let excluded = match outside.as_slice() {
+        [] => None,
+        [one] => Some(format!("The {one} servers are outside these totals.")),
+        _ => Some("The database and broker servers are outside these totals.".to_string()),
+    };
+    [included, excluded]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Host kWh with two decimals, scientific below 0.005 so a small in-total
+/// host never reads as zero.
+fn host_kwh(v: f64) -> String {
+    if v == 0.0 || v >= 0.005 {
+        format!("{v:.2}")
+    } else {
+        format!("{v:.1e}")
+    }
+}
+
+/// The in-total database and broker host rows of the application table:
+/// label, kWh and kgCO2eq. Their energy is inside `total_energy_kwh` and
+/// in no application row.
+fn host_rows(aggregate: &Aggregate) -> Vec<(&'static str, f64, f64)> {
+    let breakdown = aggregate.carbon_breakdown.as_ref();
+    [
+        (
+            "Database hosts",
+            &aggregate.database_waste,
+            breakdown.and_then(|b| b.database_kgco2eq),
+        ),
+        (
+            "Broker hosts",
+            &aggregate.messaging_waste,
+            breakdown.and_then(|b| b.messaging_kgco2eq),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(label, block, kg)| {
+        block
+            .as_ref()
+            .filter(|b| b.in_totals_windows > 0)
+            .map(|b| (label, b.in_totals_energy_kwh, kg.unwrap_or(0.0)))
+    })
+    .collect()
+}
+
 /// The SCI terms the carbon total is made of, then what stays outside it.
 fn carbon_breakdown(breakdown: &CarbonBreakdown) -> Option<String> {
     let transport = breakdown.transport_kgco2eq.map(|mid| {
@@ -1256,6 +1332,12 @@ fn carbon_breakdown(breakdown: &CarbonBreakdown) -> Option<String> {
             .embodied_kgco2eq
             .map(|v| format!("embodied {v:.2} kg")),
         transport,
+        breakdown
+            .database_kgco2eq
+            .map(|v| format!("database hosts {v:.2} kg")),
+        breakdown
+            .messaging_kgco2eq
+            .map(|v| format!("broker hosts {v:.2} kg")),
     ]
     .into_iter()
     .flatten()
@@ -1274,7 +1356,7 @@ fn carbon_breakdown(breakdown: &CarbonBreakdown) -> Option<String> {
     let made_of = (!inside.is_empty()).then(|| format!("Made of {}.", inside.join(", ")));
     let beside = (!outside.is_empty()).then(|| {
         format!(
-            "Outside this total, as a different scope from the instrumented services: {}.",
+            "Outside this total, from windows that kept the host figure beside it: {}.",
             outside.join(", ")
         )
     });
@@ -1476,6 +1558,24 @@ fn application_table(w: &mut Writer, report: &PeriodicReport) {
         );
         w.y = w.y.max(name_bottom) + 4.0;
         w.rule(MARGIN, w.y, CONTENT_WIDTH);
+    }
+    for (label, energy, carbon) in host_rows(&report.aggregate) {
+        totals.1 = totals.1.map(|sum| sum + carbon);
+        w.ensure(row_height(label));
+        share_bar(
+            w,
+            if total_energy > 0.0 {
+                energy / total_energy
+            } else {
+                0.0
+            },
+        );
+        table_row(
+            w,
+            label,
+            "-",
+            [&host_kwh(energy), &format!("{carbon:.2}"), "-", "-"],
+        );
     }
     w.ensure(row_height("Total"));
     table_row(

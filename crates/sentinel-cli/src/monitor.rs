@@ -251,9 +251,9 @@ struct TrendPoint {
     findings_pct: Option<f64>,
 }
 
-/// Reduce a snapshot to its trend sample. Carbon is the sum of the
-/// per-region operational CO2 (grams), the same window scope as
-/// `energy_kwh`.
+/// Reduce a snapshot to its trend sample. Carbon is the scored carbon
+/// (grams): the per-region operational CO2 plus the in-total database
+/// and broker host terms, the same window scope as `energy_kwh`.
 #[allow(clippy::cast_precision_loss)] // gauge values are far below 2^52
 fn trend_point(s: &Snapshot) -> TrendPoint {
     let gs = &s.green_summary;
@@ -267,7 +267,7 @@ fn trend_point(s: &Snapshot) -> TrendPoint {
     let st = s.status.as_ref();
     TrendPoint {
         energy_kwh: gs.energy_kwh,
-        carbon_gco2: gs.regions.iter().map(|r| r.co2_gco2).sum(),
+        carbon_gco2: gs.scored_carbon_gco2(),
         traces_pct: st.and_then(|st| pct(st.active_traces as f64, st.max_active_traces)),
         queue_pct: st.and_then(|st| {
             // The depth gauge cannot legitimately go negative. Clamp
@@ -1046,34 +1046,23 @@ fn build_advisor_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
     lines
 }
 
-/// One waste line, database or broker. `provenance` bundles the three
-/// daemon-sourced strings so the signature stays under the argument cap.
-fn waste_line(
-    label: &'static str,
-    ratio_label: &str,
-    waste_kwh: f64,
-    energy_kwh: f64,
-    ratio: f64,
-    provenance: (&str, Option<&str>, Option<f64>),
-    dim: Style,
-) -> Line<'static> {
-    let (model, region, waste_gco2) = provenance;
-    let gco2 = waste_gco2.map_or_else(|| "-".to_string(), |g| format!("{} gCO2", fmt_tiny(g)));
+/// One waste line, database or broker.
+fn waste_line(w: &WasteLine<'_>, dim: Style) -> Line<'static> {
+    let gco2 = w
+        .waste_gco2
+        .map_or_else(|| "-".to_string(), |g| format!("{} gCO2", fmt_tiny(g)));
     // Daemon-sourced strings: sanitize + cap like every other cell.
-    let region = truncate_cell(region.unwrap_or("-"), 24);
-    let model_cell = truncate_cell(if model.is_empty() { "-" } else { model }, 24);
-    let scope = if model == sentinel_core::report::DB_WASTE_MODEL_ESTIMATED {
-        "within the report totals"
-    } else {
-        "excluded from totals"
-    };
+    let region = truncate_cell(w.region.unwrap_or("-"), 24);
+    let model_cell = truncate_cell(if w.model.is_empty() { "-" } else { w.model }, 24);
+    let scope = sentinel_core::report::waste_scope_label(w.model, w.in_totals);
     Line::from(vec![
-        Span::styled(label, dim),
+        Span::styled(format!("{:<16}", w.label), dim),
         Span::raw(format!(
-            "{} kWh of {} kWh ({:.0}% {ratio_label} ratio)   {gco2}",
-            fmt_tiny(waste_kwh),
-            fmt_tiny(energy_kwh),
-            ratio * 100.0,
+            "{} kWh of {} kWh ({:.0}% {} ratio)   {gco2}",
+            fmt_tiny(w.waste_kwh),
+            fmt_tiny(w.energy_kwh),
+            w.ratio * 100.0,
+            w.ratio_label,
         )),
         Span::styled(
             format!("   model {model_cell}   region {region}   {scope}"),
@@ -1091,10 +1080,13 @@ fn window_energy_line(gs: &GreenSummary, dim: Style) -> Line<'static> {
             dim,
         ));
     };
+    let split = gs
+        .energy_split_label()
+        .map_or_else(String::new, |split| format!("   = {split}"));
     Line::from(vec![
         Span::styled("Window energy: ", dim),
         Span::raw(format!("{} kWh", fmt_tiny(gs.energy_kwh))),
-        Span::styled(format!("   {src}"), dim),
+        Span::styled(format!("   {src}{split}"), dim),
     ])
 }
 
@@ -1159,26 +1151,10 @@ fn build_energy_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
 
     lines.push(window_energy_line(gs, dim));
     if let Some(db) = &gs.database_waste {
-        lines.push(waste_line(
-            "Database waste: ",
-            "SQL",
-            db.waste_kwh,
-            db.energy_kwh,
-            db.sql_waste_ratio,
-            (&db.model, db.region.as_deref(), db.waste_gco2),
-            dim,
-        ));
+        lines.push(waste_line(&WasteLine::database(db), dim));
     }
     if let Some(mw) = &gs.messaging_waste {
-        lines.push(waste_line(
-            "Broker waste:   ",
-            "messaging",
-            mw.waste_kwh,
-            mw.energy_kwh,
-            mw.messaging_waste_ratio,
-            (&mw.model, mw.region.as_deref(), mw.waste_gco2),
-            dim,
-        ));
+        lines.push(waste_line(&WasteLine::messaging(mw), dim));
     }
     lines.push(Line::from(""));
 
@@ -1217,7 +1193,7 @@ fn build_energy_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
                 "  {:<14} {:>10.1} {:<22} {:<10} {:>8}  {:.6}",
                 truncate_cell(&r.region, 14),
                 r.grid_intensity_gco2_kwh,
-                intensity_source_label(r.intensity_source),
+                intensity_source_label(r.intensity_source, r.intensity_provider),
                 estimated,
                 r.io_ops,
                 r.co2_gco2,
@@ -1281,7 +1257,7 @@ fn build_scrapers_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "electricity_maps has no freshness gauge: its liveness shows as",
+        "electricity_maps and the grid operator feeds have no freshness gauge: their liveness shows as",
         dim,
     )));
     lines.push(Line::from(Span::styled(
@@ -2250,17 +2226,32 @@ fn warning_kind_style(kind: &str) -> Style {
 }
 
 /// Label for a grid-intensity source, tagging cold (embedded reference
-/// data) vs hot (live Electricity Maps real-time).
-fn intensity_source_label(src: IntensitySource) -> &'static str {
-    match src {
-        IntensitySource::RealTime => "RealTime (hot)",
-        IntensitySource::MonthlyHourly => "MonthlyHourly (cold)",
-        IntensitySource::Hourly => "Hourly (cold)",
-        IntensitySource::Annual => "Annual (cold)",
+/// data) vs hot (live Electricity Maps real-time), or naming the grid
+/// operator feed that served a real-time row.
+fn intensity_source_label(
+    src: IntensitySource,
+    provider: Option<sentinel_core::score::carbon::RealTimeProvider>,
+) -> &'static str {
+    use sentinel_core::score::carbon::RealTimeProvider;
+    match (src, provider) {
+        (IntensitySource::RealTime, Some(RealTimeProvider::RteEco2mix)) => "RealTime (rte_eco2mix)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::Neso)) => "RealTime (neso)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::Fingrid)) => "RealTime (fingrid)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::Energinet)) => "RealTime (energinet)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::ReeEsios)) => "RealTime (ree_esios)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::OpenElectricity)) => {
+            "RealTime (open_electricity)"
+        }
+        (IntensitySource::RealTime, Some(RealTimeProvider::Mavir)) => "RealTime (mavir)",
+        (IntensitySource::RealTime, Some(RealTimeProvider::Em6)) => "RealTime (em6)",
+        (IntensitySource::RealTime, _) => "RealTime (hot)",
+        (IntensitySource::MonthlyHourly, _) => "MonthlyHourly (cold)",
+        (IntensitySource::Hourly, _) => "Hourly (cold)",
+        (IntensitySource::Annual, _) => "Annual (cold)",
     }
 }
 
-use crate::render::fmt_tiny;
+use crate::render::{WasteLine, fmt_tiny};
 
 /// Sanitize a daemon-sourced cell value and hard-cap its length (with an
 /// ellipsis) so the fixed-width energy tables stay aligned.

@@ -6,21 +6,7 @@
 use std::collections::HashMap;
 
 use super::state::ServiceEnergy;
-
-/// Build the `chassis_id → Vec<service>` reverse index once at scraper
-/// startup. Avoids walking the full `service_mappings` per chassis per
-/// tick, an O(C × S) cost.
-#[must_use]
-#[allow(clippy::implicit_hasher)]
-pub(crate) fn build_chassis_services(
-    service_mappings: &HashMap<String, String>,
-) -> HashMap<String, Vec<String>> {
-    let mut out: HashMap<String, Vec<String>> = HashMap::new();
-    for (svc, chassis_id) in service_mappings {
-        out.entry(chassis_id.clone()).or_default().push(svc.clone());
-    }
-    out
-}
+use crate::score::energy_state::split_by_ops;
 
 /// Apply one chassis observation to an in-progress next-state table
 /// (caller hoists `state.current_owned()` and `state.publish()` so
@@ -46,41 +32,11 @@ pub(crate) fn apply_chassis_scrape(
     {
         return false;
     }
-    // One walk filters services with positive ops this window and sums
-    // their ops, with one `op_deltas.get(...)` lookup per service and
-    // none in the publish loop.
-    let mut contributors: Vec<(&str, u64)> = Vec::with_capacity(chassis_services.len());
-    let mut total_ops: u64 = 0;
-    for svc in chassis_services {
-        let ops = op_deltas.get(svc.as_str()).copied().unwrap_or(0);
-        if ops > 0 {
-            contributors.push((svc.as_str(), ops));
-            total_ops = total_ops.saturating_add(ops);
-        }
-    }
-    if total_ops == 0 {
-        return false;
-    }
-    // chassis_joules = watts × seconds, kWh = J / 3.6e6.
-    // Per-service contribution is implicitly proportional to its ops
-    // since the published coefficient × service_ops sums back to
-    // chassis_joules across the mapped set.
+    // chassis_joules = watts x seconds, kWh = J / 3.6e6. The shared
+    // coefficient x service_ops sums back to chassis_joules.
     let chassis_kwh = (chassis_watts * scrape_interval_secs) / 3_600_000.0;
-    let energy_per_op = chassis_kwh / total_ops as f64;
-    if !energy_per_op.is_finite() || energy_per_op <= 0.0 {
-        return false;
-    }
-    let row = ServiceEnergy {
-        energy_per_op_kwh: energy_per_op,
-        last_update_ms: now_ms,
-    };
-    for (svc, _) in &contributors {
-        // Steady-state path: update in place to skip the key clone.
-        if let Some(slot) = next.get_mut(*svc) {
-            *slot = row;
-        } else {
-            next.insert((*svc).to_string(), row);
-        }
-    }
-    !contributors.is_empty()
+    split_by_ops(next, chassis_services, op_deltas, now_ms, |total_ops| {
+        let energy_per_op = chassis_kwh / total_ops as f64;
+        (energy_per_op.is_finite() && energy_per_op > 0.0).then_some(energy_per_op)
+    })
 }
