@@ -36,6 +36,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 - `[green.redfish]` accepted one chassis under two endpoint ids, which billed its power once per id. Two ids that resolve the same scheme, host (case ignored), port (the scheme default when absent) and `/redfish/v1/Chassis/<id>` path are now rejected at load, so `/Power` and `/EnvironmentMetrics` URLs of one chassis collide.
 - `perf-sentinel calibrate` gave each service a factor from the whole reading when several services carried an identical energy series in the CSV, which counts that host once per service. It now warns, naming the services.
 
+### Security
+
+- **`rustls-webpki` bumped to 0.103.16 against RUSTSEC-2026-0382, and `webpki-roots` to 1.0.10 against RUSTSEC-2026-0381.** Both advisories concern distrusted intermediates: certificate verification could accept a distrusted intermediate, and the bundled roots let emSign intermediates that are now distrusted be trusted. `rustls-webpki` reaches perf-sentinel through `rustls`, and `webpki-roots` is a direct dependency of the TLS client behind the scrapers, Tempo and Jaeger ingest, and `query`. Patch-level bumps, semver-compatible, `cargo audit` and `cargo deny` green. The fuzz workspace's lock file carries neither crate and is unchanged.
+
 ## [0.31.4] - 2026-10-19
 
 This release is a patch: it adds no API surface, removes nothing, and no public type of `perf-sentinel-core` changes shape. No code outside the tests changes, so no finding appears, disappears or changes signature, acknowledgments keep matching, and the daemon's API, its metrics and the findings it exports do not change. The SQL tokenizer gains a round-trip property test, and the lockfiles move off a yanked `inout` release.
