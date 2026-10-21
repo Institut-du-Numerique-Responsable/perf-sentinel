@@ -435,10 +435,10 @@ seulement "chaque backend est-il configuré, frais, et en succès".
 
 **Paramètres de requête :** aucun.
 
-**Forme de réponse :** un objet avec un tableau `backends` de quatorze
+**Forme de réponse :** un objet avec un tableau `backends` de seize
 entrées dans un ordre fixe suivant la chaîne de précédence de l'énergie
 mesurée (`alumet`, `scaphandre`, `kepler`, `redfish`, `cloud_energy`,
-`electricity_maps`, `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
+`database_cpu`, `broker_cpu`, `electricity_maps`, `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
 `open_electricity`, `mavir`, `em6`), chacune :
 
 | Champ                     | Type    | Description                                                                                                                                                                                      |
@@ -446,7 +446,7 @@ mesurée (`alumet`, `scaphandre`, `kepler`, `redfish`, `cloud_energy`,
 | `backend`                 | string  | Nom stable du backend                                                                                                                                                                            |
 | `configured`              | boolean | Si le backend est configuré, d'après la config `[green]` figée au démarrage du daemon                                                                                                            |
 | `last_scrape_age_seconds` | number  | Secondes depuis le dernier scrape réussi, à la date du dernier tick du scraper (mêmes sémantiques que la gauge `/metrics`). Omis si non configuré ou si le backend n'a pas de gauge de fraîcheur |
-| `scrapes_ok`              | number  | Scrapes réussis depuis le démarrage. Omis si non configuré ou non scrappé (`cloud_energy`, `electricity_maps`, flux réseau)                                                                      |
+| `scrapes_ok`              | number  | Scrapes réussis depuis le démarrage. Omis si non configuré ou non scrappé (`cloud_energy`, `database_cpu`, `broker_cpu`, `electricity_maps`, flux réseau)                                         |
 | `scrapes_failed`          | number  | Scrapes échoués depuis le démarrage. Mêmes règles d'omission que `scrapes_ok`                                                                                                                    |
 
 Les champs optionnels sont omis plutôt que mis à zéro pour les backends
@@ -455,6 +455,12 @@ pré-enregistrées à 0, et un `0` littéral se lirait comme un scrape
 frais. `electricity_maps` et les flux des gestionnaires de réseau n'ont
 pas de gauge de fraîcheur. Leur vivacité se lit dans les entrées `intensity_source = "real_time"` de la ventilation
 par région du rapport.
+
+`database_cpu` et `broker_cpu` sont les requêtes CPU des hôtes de
+`[green.database_static]` et `[green.broker_static]`. Chacune est
+configurée quand sa section renseigne `cpu_query`, et son âge est la
+gauge `perf_sentinel_database_cpu_last_scrape_age_seconds` ou
+`perf_sentinel_broker_cpu_last_scrape_age_seconds`.
 
 Deux précautions de lecture sur l'âge. Un backend configuré lit encore
 `last_scrape_age_seconds = 0.0` pendant son premier intervalle de
@@ -484,6 +490,8 @@ curl -sS http://127.0.0.1:4318/api/energy
     { "backend": "kepler", "configured": false },
     { "backend": "redfish", "configured": false },
     { "backend": "cloud_energy", "configured": false },
+    { "backend": "database_cpu", "configured": false },
+    { "backend": "broker_cpu", "configured": false },
     { "backend": "electricity_maps", "configured": true },
     { "backend": "rte_eco2mix", "configured": false },
     { "backend": "neso", "configured": false },

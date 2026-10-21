@@ -1414,6 +1414,90 @@ async fn in_total_host_figures_reach_the_counters_and_restore_outside_the_totals
     }
 }
 
+/// The six scored counters, energy then carbon: total, database, broker.
+fn scored_counters(metrics: &MetricsState) -> [f64; 6] {
+    [
+        metrics.energy_kwh_total.get(),
+        metrics.scored_database_energy_kwh_total.get(),
+        metrics.scored_broker_energy_kwh_total.get(),
+        metrics.carbon_gco2_total.get(),
+        metrics.scored_database_carbon_gco2_total.get(),
+        metrics.scored_broker_carbon_gco2_total.get(),
+    ]
+}
+
+#[tokio::test]
+async fn host_counters_sum_the_in_total_host_figures() {
+    let host = |window_kwh: f64| score::carbon::DbEnergyContext {
+        window_kwh,
+        region: Some("eu-west-3".to_string()),
+        model: score::carbon::CO2_MODEL_ALUMET,
+        placement: None,
+    };
+    let hosts_ctx = |window_kwh: f64| score::carbon::CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        db_energy: Some(host(window_kwh)),
+        broker_energy: Some(host(window_kwh / 2.0)),
+        ..empty_carbon_ctx()
+    };
+    let no_hosts = score::carbon::CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        ..empty_carbon_ctx()
+    };
+    let (first, idle, second) = (hosts_ctx(2.0), hosts_ctx(0.0), hosts_ctx(0.5));
+    let metrics = MetricsState::new();
+    let store = findings_store::FindingsStore::new(100);
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    let db_sticky: &'static mut Option<(DatabaseWaste, u64)> = Box::leak(Box::new(None));
+    let msg_sticky: &'static mut Option<(MessagingWaste, u64)> = Box::leak(Box::new(None));
+    // In the totals, restored outside them, no host at all, in them again.
+    let mut expected = [0.0; 4];
+    for (trace, ctx) in [
+        ("t1", &first),
+        ("t2", &idle),
+        ("t3", &no_hosts),
+        ("t4", &second),
+    ] {
+        let mut events: Vec<_> = (1..=6)
+            .map(|i| make_normalized(trace, &format!("SELECT * FROM item WHERE id = {i}")))
+            .collect();
+        events.push(make_normalized_messaging(trace, "m1", "s1", "orders"));
+        let mut pctx = test_ctx(&detect_config, ctx, &metrics, &store, true, &cell);
+        pctx.db_waste_sticky = &mut *db_sticky;
+        pctx.msg_waste_sticky = &mut *msg_sticky;
+        pctx.waste_sticky_ttl_ms = 600_000;
+        process_traces(vec![(trace.to_string(), events)], pctx).await;
+
+        let live = cell.read().await.clone();
+        let co2 = live.co2.as_ref().expect("scored window");
+        expected[0] += live.database_in_totals().map_or(0.0, |w| w.energy_kwh);
+        expected[1] += live.messaging_in_totals().map_or(0.0, |w| w.energy_kwh);
+        expected[2] += co2.database_gco2.unwrap_or(0.0);
+        expected[3] += co2.messaging_gco2.unwrap_or(0.0);
+    }
+    let [kwh, db_kwh, mw_kwh, gco2, db_g, mw_g] = scored_counters(&metrics);
+    assert!((db_kwh - 2.5).abs() < 1e-12 && (mw_kwh - 1.25).abs() < 1e-12);
+    for (got, want) in [db_kwh, mw_kwh, db_g, mw_g].into_iter().zip(expected) {
+        assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+    }
+    assert!(db_g > 0.0 && mw_g > 0.0);
+    assert!(db_kwh + mw_kwh <= kwh && db_g + mw_g <= gco2);
+
+    // A NaN total moves neither it nor its host parts.
+    let mut poisoned = cell.read().await.clone();
+    assert!(
+        poisoned.database_in_totals().is_some(),
+        "t4 is in the totals"
+    );
+    poisoned.energy_kwh = f64::NAN;
+    poisoned.regions[0].co2_gco2 = f64::NAN;
+    let before = scored_counters(&metrics);
+    let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
+    emit_findings_and_update_metrics(0, &[], &poisoned, &metrics, &mut meter);
+    assert_eq!(scored_counters(&metrics), before);
+}
+
 #[tokio::test]
 async fn process_traces_publishes_green_summary_to_cell() {
     // Asserts the contract behind /api/export/report: each batch

@@ -1529,3 +1529,17 @@ fn host_cpu_age_gauges_render_from_startup() {
         "each subsystem has its own gauge, got:\n{output}"
     );
 }
+
+#[test]
+fn host_counters_render_without_labels() {
+    let output = MetricsState::new().render();
+    for name in [
+        "perf_sentinel_scored_database_energy_kwh_total",
+        "perf_sentinel_scored_database_carbon_gco2_total",
+        "perf_sentinel_scored_broker_energy_kwh_total",
+        "perf_sentinel_scored_broker_carbon_gco2_total",
+    ] {
+        let samples: Vec<&str> = output.lines().filter(|l| l.starts_with(name)).collect();
+        assert_eq!(samples, [format!("{name} 0")], "{name}");
+    }
+}

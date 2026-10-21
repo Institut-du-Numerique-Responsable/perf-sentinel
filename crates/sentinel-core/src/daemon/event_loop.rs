@@ -1431,6 +1431,23 @@ fn record_slow_durations(
     }
 }
 
+/// Add a window's scored figure to its running counter, and its database
+/// and broker host parts to theirs. The parts move only when the total
+/// does, so each stays a subset of it. `inc_by` panics on a negative
+/// value, and a NaN would poison the sum.
+fn inc_scored(total: &prometheus::Counter, value: f64, parts: [(&prometheus::Counter, f64); 2]) {
+    let counts = |v: f64| v.is_finite() && v > 0.0;
+    if !counts(value) {
+        return;
+    }
+    total.inc_by(value);
+    for (counter, part) in parts {
+        if counts(part) {
+            counter.inc_by(part);
+        }
+    }
+}
+
 /// Update Prometheus counters, gauges, and exemplars, then emit findings
 /// as NDJSON to stdout.
 fn emit_findings_and_update_metrics(
@@ -1462,15 +1479,39 @@ fn emit_findings_and_update_metrics(
     let window_gco2 = green_summary.scored_carbon_gco2();
     metrics.energy_kwh.set(green_summary.energy_kwh);
     metrics.carbon_gco2.set(window_gco2);
-    // inc_by panics on a negative value, and a NaN would poison the sum.
-    for (counter, value) in [
-        (&metrics.energy_kwh_total, green_summary.energy_kwh),
-        (&metrics.carbon_gco2_total, window_gco2),
-    ] {
-        if value.is_finite() && value > 0.0 {
-            counter.inc_by(value);
-        }
-    }
+    let co2 = green_summary.co2.as_ref();
+    inc_scored(
+        &metrics.energy_kwh_total,
+        green_summary.energy_kwh,
+        [
+            (
+                &metrics.scored_database_energy_kwh_total,
+                green_summary
+                    .database_in_totals()
+                    .map_or(0.0, |w| w.energy_kwh),
+            ),
+            (
+                &metrics.scored_broker_energy_kwh_total,
+                green_summary
+                    .messaging_in_totals()
+                    .map_or(0.0, |w| w.energy_kwh),
+            ),
+        ],
+    );
+    inc_scored(
+        &metrics.carbon_gco2_total,
+        window_gco2,
+        [
+            (
+                &metrics.scored_database_carbon_gco2_total,
+                co2.and_then(|c| c.database_gco2).unwrap_or(0.0),
+            ),
+            (
+                &metrics.scored_broker_carbon_gco2_total,
+                co2.and_then(|c| c.messaging_gco2).unwrap_or(0.0),
+            ),
+        ],
+    );
 
     // Per-(service, grouping) avoidable and analysed I/O ops: the two
     // series a per-service waste ratio divides, from the same scoring

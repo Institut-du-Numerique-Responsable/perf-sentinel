@@ -433,13 +433,8 @@ fn build_http_router(
         // energy gauge is pre-registered at zero and a successful scrape
         // sets the staleness gauge to zero too, which makes the two
         // states identical on the wire without this.
-        let energy_backends_configured = query_api::EnergyBackendsConfigured {
-            alumet: config.green.alumet.is_some(),
-            scaphandre: config.green.scaphandre.is_some(),
-            kepler: config.green.kepler.is_some(),
-            redfish: config.green.redfish.is_some(),
-            cloud_energy: config.green.cloud_energy.is_some(),
-        };
+        let energy_backends_configured =
+            query_api::EnergyBackendsConfigured::from_green(&config.green);
         for (backend, configured) in energy_backends_configured.as_labelled() {
             metrics
                 .energy_backend_configured

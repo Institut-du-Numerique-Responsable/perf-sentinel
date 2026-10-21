@@ -422,9 +422,10 @@ configured, fresh, and succeeding".
 
 **Query parameters:** none.
 
-**Response shape:** an object with a `backends` array of fourteen entries in
+**Response shape:** an object with a `backends` array of sixteen entries in
 a fixed order following the measured-energy precedence chain (`alumet`,
-`scaphandre`, `kepler`, `redfish`, `cloud_energy`, `electricity_maps`,
+`scaphandre`, `kepler`, `redfish`, `cloud_energy`, `database_cpu`,
+`broker_cpu`, `electricity_maps`,
 `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
 `open_electricity`, `mavir`, `em6`), each:
 
@@ -433,7 +434,7 @@ a fixed order following the measured-energy precedence chain (`alumet`,
 | `backend`                 | string  | Stable backend name                                                                                                                                                                                    |
 | `configured`              | boolean | Whether the backend is configured, from the `[green]` config frozen at daemon startup                                                                                                                  |
 | `last_scrape_age_seconds` | number  | Seconds since the last successful scrape, as of the backend's most recent scrape tick (same semantics as the `/metrics` gauge). Omitted when not configured or when the backend has no freshness gauge |
-| `scrapes_ok`              | number  | Successful scrapes since daemon start. Omitted when not configured or not scraped (`cloud_energy`, `electricity_maps`, grid feeds)                                                                    |
+| `scrapes_ok`              | number  | Successful scrapes since daemon start. Omitted when not configured or not scraped (`cloud_energy`, `database_cpu`, `broker_cpu`, `electricity_maps`, grid feeds)                                       |
 | `scrapes_failed`          | number  | Failed scrapes since daemon start. Same omission rules as `scrapes_ok`                                                                                                                                 |
 
 The optional fields are omitted rather than zeroed for unconfigured
@@ -442,6 +443,12 @@ a literal `0` would read as a fresh scrape. `electricity_maps` and the
 grid operator feeds carry no freshness gauge. Its liveness shows as
 `intensity_source = "real_time"` entries on the report's region
 breakdown.
+
+`database_cpu` and `broker_cpu` are the host CPU queries of
+`[green.database_static]` and `[green.broker_static]`. Each is
+configured when its section sets `cpu_query`, and its age is the
+`perf_sentinel_database_cpu_last_scrape_age_seconds` or
+`perf_sentinel_broker_cpu_last_scrape_age_seconds` gauge.
 
 Two age-reading caveats. A configured backend still reads
 `last_scrape_age_seconds = 0.0` during its first scrape interval after
@@ -471,6 +478,8 @@ curl -sS http://127.0.0.1:4318/api/energy
     { "backend": "kepler", "configured": false },
     { "backend": "redfish", "configured": false },
     { "backend": "cloud_energy", "configured": false },
+    { "backend": "database_cpu", "configured": false },
+    { "backend": "broker_cpu", "configured": false },
     { "backend": "electricity_maps", "configured": true },
     { "backend": "rte_eco2mix", "configured": false },
     { "backend": "neso", "configured": false },

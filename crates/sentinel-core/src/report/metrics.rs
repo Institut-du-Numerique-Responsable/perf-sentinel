@@ -130,8 +130,10 @@ pub struct MetricsState {
     /// pre-registered at zero whether or not the backend exists, so
     /// "not configured" and "configured and perfectly healthy" are
     /// indistinguishable without this: `last_scrape_age_seconds` is set
-    /// to 0 on every successful scrape. The label set is the five
-    /// compile-time backend names, so cardinality stays bounded.
+    /// to 0 on every successful scrape. The label set is the seven
+    /// compile-time backend names (`alumet`, `scaphandre`, `kepler`,
+    /// `redfish`, `cloud_energy`, `database_cpu`, `broker_cpu`), so
+    /// cardinality stays bounded.
     pub energy_backend_configured: GaugeVec,
     /// Unix timestamp of the last span received for a service, a traffic
     /// signal rather than a liveness one. Cardinality is bounded by the
@@ -160,6 +162,15 @@ pub struct MetricsState {
     pub energy_kwh_total: Counter,
     /// Running sum of `carbon_gco2`, same use as `energy_kwh_total`.
     pub carbon_gco2_total: Counter,
+    /// The database host part of `energy_kwh_total`: the in-total
+    /// database host kWh of every scoring window, a subset of it.
+    pub scored_database_energy_kwh_total: Counter,
+    /// The database host part of `carbon_gco2_total`, grams `CO2e`.
+    pub scored_database_carbon_gco2_total: Counter,
+    /// The broker twin of `scored_database_energy_kwh_total`.
+    pub scored_broker_energy_kwh_total: Counter,
+    /// The broker twin of `scored_database_carbon_gco2_total`.
+    pub scored_broker_carbon_gco2_total: Counter,
     /// Configured cap of the correlation window (`[daemon]
     /// max_active_traces`), set once at startup. Pairs with
     /// `active_traces` for a headroom panel.
@@ -550,6 +561,26 @@ impl MetricsState {
         )
         .expect("metric creation should not fail");
 
+        let host_counter = |name: &str, help: &str| {
+            Counter::new(name, help).expect("metric creation should not fail")
+        };
+        let scored_database_energy_kwh_total = host_counter(
+            "perf_sentinel_scored_database_energy_kwh_total",
+            "Database host energy inside perf_sentinel_scored_energy_kwh_total, kWh",
+        );
+        let scored_database_carbon_gco2_total = host_counter(
+            "perf_sentinel_scored_database_carbon_gco2_total",
+            "Database host carbon inside perf_sentinel_scored_carbon_gco2_total, grams CO2e",
+        );
+        let scored_broker_energy_kwh_total = host_counter(
+            "perf_sentinel_scored_broker_energy_kwh_total",
+            "Broker host energy inside perf_sentinel_scored_energy_kwh_total, kWh",
+        );
+        let scored_broker_carbon_gco2_total = host_counter(
+            "perf_sentinel_scored_broker_carbon_gco2_total",
+            "Broker host carbon inside perf_sentinel_scored_carbon_gco2_total, grams CO2e",
+        );
+
         let max_active_traces = Gauge::new(
             "perf_sentinel_max_active_traces",
             "Configured cap of the correlation window ([daemon] max_active_traces)",
@@ -775,6 +806,16 @@ impl MetricsState {
         registry
             .register(Box::new(carbon_gco2_total.clone()))
             .expect("registration should not fail");
+        for counter in [
+            &scored_database_energy_kwh_total,
+            &scored_database_carbon_gco2_total,
+            &scored_broker_energy_kwh_total,
+            &scored_broker_carbon_gco2_total,
+        ] {
+            registry
+                .register(Box::new(counter.clone()))
+                .expect("registration should not fail");
+        }
         registry
             .register(Box::new(max_active_traces.clone()))
             .expect("registration should not fail");
@@ -1254,6 +1295,10 @@ impl MetricsState {
             carbon_gco2,
             energy_kwh_total,
             carbon_gco2_total,
+            scored_database_energy_kwh_total,
+            scored_database_carbon_gco2_total,
+            scored_broker_energy_kwh_total,
+            scored_broker_carbon_gco2_total,
             max_active_traces,
             analysis_queue_capacity,
             max_retained_findings,
