@@ -4631,6 +4631,14 @@ a.chip {
     margin: 0;
 }
 
+/* A host figure the totals held for part of the period only: a note on its label, so in
+   the label's UI face but not its weight. */
+.disc-host-note {
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
 .disc-panel-sub {
     margin: 0;
     font-size: 13px;

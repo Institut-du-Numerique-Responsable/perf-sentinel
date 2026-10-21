@@ -1533,13 +1533,20 @@
             + 'and the daemon says so above when that happens.',
         energy_source: 'Where the energy figure comes from: the power backends that measured each '
             + 'covered service, and how many services were modeled from I/O counts instead. Calibrated '
-            + 'means calibration factors rescaled that model.',
+            + 'means calibration factors rescaled that model. Database or broker hosts the daemon counts '
+            + 'inside its totals follow, each with its own source.',
         api_version: 'The Electricity Maps API version these figures were scored against.',
         emission_factor_type: 'Lifecycle counts the whole chain behind the electricity, direct counts '
             + 'only what the generation itself emits.',
         temporal_granularity: 'How finely grid intensity is resolved in time.',
-        electricity_maps: 'Whether live grid intensity was fetched. Off means the embedded table was '
-            + 'used, which is a vintage rather than a reading.',
+        electricity_maps: 'Whether Electricity Maps is configured for live grid intensity. Off means each '
+            + 'region took its grid operator\'s feed when one is configured, or the embedded table, which '
+            + 'is a vintage rather than a reading.',
+        grid_feeds: 'The grid operator feeds configured, each giving its regions a live intensity drawn '
+            + 'from its operator\'s data. They count direct emissions only, so they read lower than a '
+            + 'lifecycle figure, and Electricity Maps wins for a region both cover.',
+        fingrid_dataset: 'The Fingrid dataset scored. 266 counts Finnish production, 265 consumption with '
+            + 'imports included, and the two bases give different figures.',
         per_operation_coefficients: 'Whether each operation kind carries its own energy coefficient '
             + 'instead of one average across all I/O.',
         use_hourly_profiles: 'Whether the hour-by-hour shape of the grid is applied rather than a '
@@ -6372,14 +6379,25 @@
 
     function applicationsPanel(report, figures) {
         const applications = report && Array.isArray(report.applications) ? report.applications : [];
-        if (applications.length === 0) return null;
-        const total = applications.reduce(function (sum, app) {
+        const hosts = PSL.hostRows(report);
+        if (applications.length === 0 && hosts.length === 0) return null;
+        // Over the report's total, as the engine's PDF takes them: it holds the hosts, which no
+        // application carries, and energy no service was attributed. The rows only stand in
+        // for a report without one.
+        const reported = Number(report.aggregate && report.aggregate.total_energy_kwh);
+        const total = reported > 0 ? reported : applications.reduce(function (sum, app) {
             return sum + (Number(app.energy_kwh) || 0);
+        }, 0) + hosts.reduce(function (sum, host) {
+            return sum + host.energy_kwh;
         }, 0);
-        const rows = applications.map(function (app) {
-            const share = total > 0 ? (Number(app.energy_kwh) || 0) / total : 0;
+        function shareCell(kwh) {
+            const share = total > 0 ? (Number(kwh) || 0) / total : 0;
             const bar = el('span', {class: 'disc-share-fill'});
             bar.style.width = Math.round(share * 100) + '%';
+            return el('td', {}, [el('span', {class: 'disc-share'}, [el('span', {class: 'disc-share-track'}, [bar]),
+                el('span', {class: 'table-mono', text: Math.round(share * 100) + ' %'})])]);
+        }
+        const rows = applications.map(function (app) {
             return el('tr', {}, [
                 el('td', {class: 'table-strong', text: app.display_name || app.service_name}),
                 el('td', {
@@ -6387,8 +6405,7 @@
                     'data-align': 'right',
                     text: app.total_requests == null ? '' : Number(app.total_requests).toLocaleString('en')
                 }),
-                el('td', {}, [el('span', {class: 'disc-share'}, [el('span', {class: 'disc-share-track'}, [bar]),
-                    el('span', {class: 'table-mono', text: Math.round(share * 100) + ' %'})])]),
+                shareCell(app.energy_kwh),
                 el('td', {class: 'table-mono', 'data-align': 'right', text: fixed(app.energy_kwh, 2)}),
                 el('td', {class: 'table-mono', 'data-align': 'right', text: fixed(app.carbon_kgco2eq, 2)}),
                 el('td', {
@@ -6397,6 +6414,21 @@
                     text: app.anti_patterns_detected_count == null ? '' : String(app.anti_patterns_detected_count)
                 })
             ]);
+        });
+        hosts.forEach(function (host) {
+            rows.push(el('tr', {}, [
+                el('td', {class: 'table-strong'}, [document.createTextNode(host.label),
+                    host.partial ? document.createTextNode(' ') : null,
+                    host.partial ? el('span', {
+                        class: 'disc-host-note',
+                        text: 'in ' + host.partial.windows + ' of ' + host.partial.of + ' windows'
+                    }) : null]),
+                el('td', {}),
+                shareCell(host.energy_kwh),
+                el('td', {class: 'table-mono', 'data-align': 'right', text: PSL.hostKwh(host.energy_kwh)}),
+                el('td', {class: 'table-mono', 'data-align': 'right', text: fixed(host.carbon_kgco2eq, 2)}),
+                el('td', {})
+            ]));
         });
         const excluded = report.scope_manifest && Array.isArray(report.scope_manifest.applications_excluded)
             ? report.scope_manifest.applications_excluded : [];
@@ -6416,8 +6448,14 @@
         });
         const declared = figures && figures.applications_declared;
         const measured = figures && figures.applications_measured;
-        return detailPanel('// applications',
-            declared != null && measured != null ? measured + ' of ' + declared + ' declared applications were measured.' : null,
+        const coverage = declared != null && measured != null
+            ? measured + ' of ' + declared + ' declared applications were measured.' : null;
+        const hostNote = hosts.length === 0 ? null : 'The '
+            + hosts.map(function (host) {
+                return host.label.toLowerCase();
+            }).join(' and ').replace('database hosts and broker hosts', 'database and broker hosts')
+            + ' count in the total and in no application.';
+        return detailPanel('// applications', [coverage, hostNote].filter(Boolean).join(' ') || null,
             [simpleTable(['Application', 'Requests', 'Energy share', 'kWh', 'kgCO₂eq', 'Anti-patterns'], rows,
                 ['Requests', 'kWh', 'kgCO₂eq', 'Anti-patterns'])]);
     }

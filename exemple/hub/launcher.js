@@ -1799,6 +1799,37 @@
         ];
     }
 
+    /**
+     * The database and broker hosts a disclosure counts inside its total energy, which no
+     * application carries: the rows that make the applications table add up to the total.
+     * A block with no in-total window gives none, and so does a report older than v1.8.
+     */
+    function hostRows(report) {
+        const aggregate = (report && report.aggregate) || {};
+        const breakdown = aggregate.carbon_breakdown || {};
+        return [
+            ['Database hosts', aggregate.database_waste, breakdown.database_kgco2eq],
+            ['Broker hosts', aggregate.messaging_waste, breakdown.messaging_kgco2eq]
+        ].filter(function (row) {
+            return row[1] && Number(row[1].in_totals_windows) > 0;
+        }).map(function (row) {
+            const inTotals = Number(row[1].in_totals_windows);
+            const windows = Number(row[1].windows_with_figure);
+            return {
+                label: row[0],
+                energy_kwh: Number(row[1].in_totals_energy_kwh) || 0,
+                carbon_kgco2eq: Number(row[2]) || 0,
+                // The figure was inside the totals for part of the period only.
+                partial: windows > inTotals ? {windows: inTotals, of: windows} : null
+            };
+        });
+    }
+
+    /** Host kWh with two decimals, scientific below 0.005 so a small in-total host never reads as zero. */
+    function hostKwh(value) {
+        return value === 0 || value >= 0.005 ? value.toFixed(2) : value.toExponential(1);
+    }
+
     /** verify-hash on the downloaded PDF, with this Hub's expected signer when it has one. */
     function verifyCommand(detail) {
         const lines = ['perf-sentinel verify-hash --report report.pdf'];
@@ -2224,6 +2255,8 @@
         periodRail,
         coverageNotch,
         checkRows,
+        hostRows,
+        hostKwh,
         verifyCommand,
         publishCommand,
         downloadAs,
