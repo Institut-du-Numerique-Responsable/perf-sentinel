@@ -209,9 +209,9 @@ Embodied:
 embodied_gco2 = traces.len() × embodied_per_request_gco2
 ```
 
-Total CO₂ midpoint:
+Total CO₂ midpoint, `transport_gco2` and the host terms counting zero when absent (see "Database and broker host terms" below):
 ```
-total.mid = operational_gco2 + embodied_gco2
+total.mid = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
 ```
 
 Avoidable CO₂ (via ratio, see "Avoidable via ratio" below):
@@ -249,11 +249,13 @@ co2.sci_per_trace.mid = co2.total.mid / traces_analyzed
 
 `co2.total` is a **footprint** (absolute gCO₂eq), `co2.sci_per_trace` is the **intensity** score per functional unit. The functional unit is declared on `co2.functional_unit` (`"trace"`, which maps to the SCI spec's Transaction / database read-or-write functional unit). The SCI spec permits average grid intensity for `I` (it requires location-based, not market-based, and explicitly allows the average), so the figure is SCI-conformant.
 
-To tag this semantic distinction at the data layer, `CarbonEstimate` carries a `methodology` field with three possible values:
+To tag this semantic distinction at the data layer, `CarbonEstimate` carries a `methodology` field with five possible values:
 
 - `"sci_v1_numerator+transport"`: used on `co2.total`. The `(E × I) + M + T` footprint summed over traces, including when `T` is zero.
+- `"sci_v1_numerator+transport+hosts"`: used on `co2.total` instead when a database or broker host source is configured. The same footprint plus the in-total host terms `G_db + G_msg`, zero included.
 - `"sci_v1_intensity"`: used on `co2.sci_per_trace`. The per-R intensity `((E × I) + M) / R`, R = 1 trace.
 - `"sci_v1_operational_ratio"`: used on `co2.avoidable`. The region-blind global ratio `operational × (avoidable/accounted)`, excluding embodied carbon.
+- `"sci_v1_operational_ratio+hosts"`: used on `co2.avoidable` on the same windows. The same ratio plus each in-total host term times its own SQL or messaging waste ratio.
 
 The distinct values on `total` and `avoidable` signal to downstream consumers that the two are computed differently and should not be compared as if they were homogeneous quantities.
 
@@ -272,6 +274,20 @@ This preserves the **relative scale** (a 50% waste reduction yields a 50% drop i
 **The ratio counts operations, not their energy.** The same op-count ratio scales `co2.avoidable` and both disclosure waste tiers (operational and canonical). An avoidable SELECT weighs one operation although its proxy verb weight is 0.5x, every operation of a service shares one energy per op on a measured backend, and a slow query weighs one operation because `duration_us` is never read. Avoidable carbon is therefore overstated when the avoidable operations are cheaper than the accounted mix, and understated when they are heavier.
 
 **Embodied carbon is excluded from avoidable.** You can't optimize away manufactured silicon by fixing N+1 queries: embodied emissions are fixed per request regardless of how efficient the application is. The avoidable estimate only considers the operational term.
+
+### Database and broker host terms
+
+A measured or declared database or broker figure (`[green.alumet.database]`, `[green.alumet.broker]`, `[green.broker_static]`) enters the numerator as host terms beside transport, `G_db` and `G_msg`, and its kWh joins `energy_kwh`. `fold_host_terms` in `score/mod.rs` runs once per window after the region loop. A figure enters when its model is not `estimated`, its `energy_gco2` converted and `co2` is `Some`, so the energy and carbon perimeters always agree. It then sets `in_totals` on the figure and writes `co2.database_gco2` or `co2.messaging_gco2`. `total`, `avoidable` and `sci_per_trace` are rescaled once, keeping the 2x bracket:
+
+```
+energy_kwh    = Σ per-service energy + D + B
+total.mid     = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
+avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops) + G_db × r_sql + G_msg × r_msg
+```
+
+`r_sql` and `r_msg` are the SQL and messaging waste ratios, so each host is priced at the ratio of the operations it serves, never at the all-operations ratio. `compute_disclosure_waste` follows the same split: the application pool takes the all-operations ratio, each in-total host block adds its own canonical and operational legs, and the canonical legs keep the binary-pinned threshold. `operational_gco2`, `regions[]` and the per-service maps stay application-only, since a host is never a service. A window scored with a host source configured carries `sci_v1_numerator+transport+hosts` on `total` and `sci_v1_operational_ratio+hosts` on `avoidable`, zero included, like the transport tag. The estimated figure is already a share of the services' energy and never enters a second time.
+
+The live cell (`publish_live_summary` in `daemon/event_loop.rs`) restores the last database and broker figures through `sticky_waste_figure` so `/api/export/report` does not flap between scrapes. A restored copy belongs to an earlier batch, whose totals the current cell does not hold, so it gets `in_totals = false`. `perf_sentinel_scored_carbon_gco2_total` and the `carbon_gco2` gauge add `GreenSummary::scored_carbon_gco2()`, the regions' operational carbon plus the in-total host carbon, embodied and transport out.
 
 ### Multi-region resolution
 
@@ -297,7 +313,7 @@ pub struct CarbonEstimate {
     pub mid: f64,           // best estimate
     pub high: f64,          // mid × 2.0
     pub model: &'static str,       // "io_proxy_v1"
-    pub methodology: &'static str, // "sci_v1_numerator+transport", "sci_v1_intensity" or "sci_v1_operational_ratio"
+    pub methodology: &'static str, // "sci_v1_numerator+transport[+hosts]", "sci_v1_intensity" or "sci_v1_operational_ratio[+hosts]"
 }
 ```
 
@@ -517,7 +533,7 @@ Past the division this is Scaphandre's formula verbatim, and it inherits the sam
 
 ## Broker energy attribution
 
-A broker poses the database's problem twice over: it burns the energy of an N+1 publish loop, it emits no span of its own, and it is very often managed, so there is no host to run an agent on. Perf Sentinel reuses the `database_waste` shape with the messaging-only ratio, `broker energy × (avoidable publish ops / total publish ops)`, reported as `green_summary.messaging_waste`. A measured or declared figure is broker host energy beside the totals. With neither source, the figure is the estimated form: the application-side share of the publish spans, the energy span scoring gave the publishing services, already inside the totals and holding no broker host energy. None of the three is ever added to a total.
+A broker poses the database's problem twice over: it burns the energy of an N+1 publish loop, it emits no span of its own, and it is very often managed, so there is no host to run an agent on. Perf Sentinel reuses the `database_waste` shape with the messaging-only ratio, `broker energy × (avoidable publish ops / total publish ops)`, reported as `green_summary.messaging_waste`. A measured or declared figure is broker host energy, which enters the totals as the `G_msg` host term once its carbon converts (see "Database and broker host terms" above). With neither source, the figure is the estimated form: the application-side share of the publish spans, the energy span scoring gave the publishing services, already inside the totals and holding no broker host energy, so it never enters them a second time.
 
 **Why not a per-publish coefficient.** Covered below under "Why no per-publish coefficient can be a measurement". Broker power stops tracking throughput past roughly 20 % of capacity, so marginal energy is not a constant, and the three determinants (utilisation point, replication factor, topology) are invisible from a producer span. The figure is a workload-level measurement split by a count-based ratio, never a coefficient.
 

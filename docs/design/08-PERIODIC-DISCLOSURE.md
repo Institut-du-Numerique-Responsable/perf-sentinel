@@ -291,7 +291,7 @@ v1.3 adds two interpretive mapping fields, neither of which is a gate. `methodol
 
 ## Workload waste blocks (v1.4, v1.5)
 
-v1.4 adds `aggregate.database_waste` and v1.5 its messaging twin `aggregate.messaging_waste`, alongside the three messaging `PatternName` values. Both are informational and stay outside every total, so no existing figure changes meaning.
+v1.4 adds `aggregate.database_waste` and v1.5 its messaging twin `aggregate.messaging_waste`, alongside the three messaging `PatternName` values. Both are informational breakdowns, never added on top of a total: their estimated part is already a share of the totals, and their measured or declared part is inside them when the window counted it (`in_totals`), beside them under `*_kgco2eq_out_of_total` otherwise. Adding the blocks changed the meaning of no existing figure.
 
 **One type, two fields.** `MessagingWasteAggregate` is a type alias of `DatabaseWasteAggregate`, not a copy: the two blocks are wire-identical, so a single struct removes the possibility of drift. The JSON Schema mirrors this with a `$ref` rather than a duplicated `$def`, since a hand-copied definition in the file consumers validate against would reintroduce the drift the alias prevents. The name `DatabaseWasteAggregate` is kept for v1.4 readers.
 

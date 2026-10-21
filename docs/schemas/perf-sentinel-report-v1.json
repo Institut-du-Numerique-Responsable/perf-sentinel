@@ -352,7 +352,7 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1, "maxLength": 64 },
           "uniqueItems": true,
-          "description": "SCI methodology tags observed across the period's windows. Current windows use sci_v1_numerator+transport because network transport is part of the numerator, including when its value is zero. The legacy sci_v1_numerator tag can appear when a period spans older windows (v1.6+)."
+          "description": "SCI methodology tags observed across the period's windows. Current windows use sci_v1_numerator+transport because network transport is part of the numerator, including when its value is zero. A daemon window scored with a database or broker host source configured carries the sci_v1_numerator+transport+hosts and sci_v1_operational_ratio+hosts pair instead, its in-total host carbon joining the numerator, zero included. The legacy sci_v1_numerator tag can appear when a period spans older windows (v1.6+)."
         },
         "embodied_gco2_total": {
           "type": "number",
@@ -397,7 +397,7 @@
       "additionalProperties": false,
       "properties": {
         "energy_kwh": { "type": "number", "minimum": 0 },
-        "measured_energy_kwh": { "type": "number", "minimum": 0, "description": "Share of energy_kwh from windows with a genuinely measured figure (an agent reading the database or broker host's own power), host energy beside the totals." },
+        "measured_energy_kwh": { "type": "number", "minimum": 0, "description": "Share of energy_kwh from windows with a genuinely measured figure (an agent reading the database or broker host's own power), host energy inside the totals when the window counted it (in_totals), beside them otherwise." },
         "declared_energy_kwh": { "type": "number", "minimum": 0, "description": "Share of energy_kwh from windows whose figure was declared rather than measured. Absent when no declared source fed the figure." },
         "models": {
           "type": "array",
@@ -528,11 +528,11 @@
         },
         "database_waste": {
           "$ref": "#/$defs/DatabaseWasteAggregate",
-          "description": "Since v1.4. Avoidable energy and carbon of SQL work over the period at both thresholds, with provenance models. A measured figure is database host energy beside the totals (a CPU-only lower bound), an estimated figure is the application-side share of the SQL spans, already inside them. An informational breakdown, never added to total_energy_kwh, total_carbon_kgco2eq, canonical_waste or operational_waste. Absent on pre-v1.4 reports and when no window carried the figure."
+          "description": "Since v1.4. Avoidable energy and carbon of SQL work over the period at both thresholds, with provenance models. A measured figure is database host energy (a CPU-only lower bound), inside the totals and both waste tiers when the window counted it, beside them under carbon_breakdown.database_kgco2eq_out_of_total otherwise. An estimated figure is the application-side share of the SQL spans, already inside them. An informational breakdown, never added on top of total_energy_kwh, total_carbon_kgco2eq, canonical_waste or operational_waste. Absent on pre-v1.4 reports and when no window carried the figure."
         },
         "messaging_waste": {
           "$ref": "#/$defs/DatabaseWasteAggregate",
-          "description": "Since v1.5. Avoidable energy and carbon of publish work over the period at both thresholds, the messaging twin of database_waste. A measured or declared figure is broker host energy beside the totals, an estimated figure is the application-side share of the publish spans, already inside them. Same informational status, never added to the totals. Absent on pre-v1.5 reports and when no window carried the figure."
+          "description": "Since v1.5. Avoidable energy and carbon of publish work over the period at both thresholds, the messaging twin of database_waste. A measured or declared figure is broker host energy, inside the totals when the window counted it, beside them under carbon_breakdown.messaging_kgco2eq_out_of_total otherwise. An estimated figure is the application-side share of the publish spans, already inside them. Same informational status, never added on top of the totals. Absent on pre-v1.5 reports and when no window carried the figure."
         },
         "per_service_energy_models": {
           "type": "object",

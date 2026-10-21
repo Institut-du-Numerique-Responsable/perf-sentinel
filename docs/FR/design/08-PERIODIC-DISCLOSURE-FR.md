@@ -291,7 +291,7 @@ La v1.3 ajoute deux champs de correspondance interprétative, dont aucun n'est u
 
 ## Blocs de gaspillage par workload (v1.4, v1.5)
 
-La v1.4 ajoute `aggregate.database_waste` et la v1.5 son jumeau messaging `aggregate.messaging_waste`, aux côtés des trois valeurs messaging de `PatternName`. Les deux sont informatifs et restent hors de tous les totaux, aucun chiffre existant ne change donc de sens.
+La v1.4 ajoute `aggregate.database_waste` et la v1.5 son jumeau messaging `aggregate.messaging_waste`, aux côtés des trois valeurs messaging de `PatternName`. Les deux sont des ventilations informatives, jamais ajoutées par-dessus un total : leur part estimée est déjà une part des totaux, et leur part mesurée ou déclarée est comprise dedans quand la fenêtre l'a comptée (`in_totals`), à côté d'eux sous `*_kgco2eq_out_of_total` sinon. L'ajout des blocs n'a changé le sens d'aucun chiffre existant.
 
 **Un type, deux champs.** `MessagingWasteAggregate` est un alias de type de `DatabaseWasteAggregate`, pas une copie : les deux blocs sont identiques sur le fil, une seule structure supprime donc la possibilité d'une dérive. Le schéma JSON reflète cela par un `$ref` plutôt qu'une `$def` dupliquée, car une définition recopiée à la main dans le fichier que les consommateurs valident réintroduirait la dérive que l'alias empêche. Le nom `DatabaseWasteAggregate` est conservé pour les lecteurs v1.4.
 

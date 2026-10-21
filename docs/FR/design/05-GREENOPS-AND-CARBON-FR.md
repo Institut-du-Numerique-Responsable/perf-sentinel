@@ -209,9 +209,9 @@ Embarqué :
 embodied_gco2 = traces.len() × embodied_per_request_gco2
 ```
 
-Point médian du CO₂ total :
+Point médian du CO₂ total, `transport_gco2` et les termes d'hôte comptant zéro quand ils sont absents (voir "Termes d'hôte de base de données et de broker" ci-dessous) :
 ```
-total.mid = operational_gco2 + embodied_gco2
+total.mid = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
 ```
 
 CO₂ évitable (via ratio, voir "Évitable via ratio" ci-dessous) :
@@ -249,11 +249,13 @@ co2.sci_per_trace.mid = co2.total.mid / traces_analyzed
 
 `co2.total` est une **empreinte** (gCO₂eq absolus), `co2.sci_per_trace` est le score d'**intensité** par unité fonctionnelle. L'unité fonctionnelle est déclarée sur `co2.functional_unit` (`"trace"`, qui correspond à l'unité fonctionnelle Transaction / lecture-ou-écriture base de données de la spec SCI). La spec SCI autorise l'intensité réseau moyenne pour `I` (elle exige le location-based, pas le market-based, et admet explicitement la moyenne), donc le chiffre est conforme SCI.
 
-Pour étiqueter cette distinction sémantique au niveau des données, `CarbonEstimate` porte un champ `methodology` avec trois valeurs possibles :
+Pour étiqueter cette distinction sémantique au niveau des données, `CarbonEstimate` porte un champ `methodology` avec cinq valeurs possibles :
 
 - `"sci_v1_numerator+transport"` : utilisé sur `co2.total`. L'empreinte `(E × I) + M + T` sommée sur les traces, y compris quand `T` vaut zéro.
+- `"sci_v1_numerator+transport+hosts"` : utilisé à la place sur `co2.total` quand une source d'hôte de base de données ou de broker est configurée. La même empreinte plus les termes d'hôte comptés dans les totaux `G_db + G_msg`, zéro compris.
 - `"sci_v1_intensity"` : utilisé sur `co2.sci_per_trace`. L'intensité par R `((E × I) + M) / R`, R = 1 trace.
 - `"sci_v1_operational_ratio"` : utilisé sur `co2.avoidable`. Le ratio global aveugle à la région `operational × (avoidable/accounted)`, excluant le carbone embarqué.
+- `"sci_v1_operational_ratio+hosts"` : utilisé sur `co2.avoidable` sur ces mêmes fenêtres. Le même ratio plus chaque terme d'hôte compté dans les totaux multiplié par son propre ratio de gaspillage SQL ou messaging.
 
 Les valeurs distinctes de `total` et `avoidable` signalent aux consommateurs en aval que les deux sont calculés différemment et ne doivent pas être comparés comme s'ils étaient des quantités homogènes.
 
@@ -272,6 +274,20 @@ Cela préserve l'**échelle relative** (une réduction de 50% du gaspillage donn
 **Le ratio compte des opérations, pas leur énergie.** Le même ratio par comptage met à l'échelle `co2.avoidable` et les deux paliers de gaspillage de la divulgation (opérationnel et canonique). Un SELECT évitable pèse une opération bien que son poids de verbe proxy soit 0,5x, toutes les opérations d'un service partagent une même énergie par op sur un backend mesuré, et une requête lente pèse une opération puisque `duration_us` n'est jamais lu. Le carbone évitable est donc surestimé quand les opérations évitables coûtent moins que le mélange comptabilisé, et sous-estimé quand elles coûtent plus.
 
 **Le carbone embarqué est exclu de l'évitable.** Vous ne pouvez pas faire disparaître le silicium fabriqué en corrigeant des requêtes N+1 : les émissions embarquées sont fixes par requête peu importe l'efficacité de l'application. L'estimation évitable ne considère que le terme opérationnel.
+
+### Termes d'hôte de base de données et de broker
+
+Un chiffre de base de données ou de broker mesuré ou déclaré (`[green.alumet.database]`, `[green.alumet.broker]`, `[green.broker_static]`) entre dans le numérateur comme termes d'hôte à côté du transport, `G_db` et `G_msg`, et ses kWh rejoignent `energy_kwh`. `fold_host_terms` dans `score/mod.rs` s'exécute une fois par fenêtre après la boucle des régions. Un chiffre entre quand son modèle n'est pas `estimated`, que son `energy_gco2` a été converti et que `co2` vaut `Some`, si bien que les périmètres d'énergie et de carbone concordent toujours. Il pose alors `in_totals` sur le chiffre et écrit `co2.database_gco2` ou `co2.messaging_gco2`. `total`, `avoidable` et `sci_per_trace` sont remis à l'échelle une seule fois, en gardant l'encadrement 2x :
+
+```
+energy_kwh    = Σ énergie par service + D + B
+total.mid     = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
+avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops) + G_db × r_sql + G_msg × r_msg
+```
+
+`r_sql` et `r_msg` sont les ratios de gaspillage SQL et messaging : chaque hôte est chiffré au ratio des opérations qu'il sert, jamais au ratio de toutes les opérations. `compute_disclosure_waste` suit le même découpage : le réservoir applicatif prend le ratio de toutes les opérations, chaque bloc d'hôte compté dans les totaux ajoute ses propres parts canonique et opérationnelle, et les parts canoniques gardent le seuil figé dans le binaire. `operational_gco2`, `regions[]` et les maps par service restent purement applicatifs, puisqu'un hôte n'est jamais un service. Une fenêtre scorée avec une source d'hôte configurée porte `sci_v1_numerator+transport+hosts` sur `total` et `sci_v1_operational_ratio+hosts` sur `avoidable`, zéro compris, comme l'étiquette du transport. Le chiffre estimé est déjà une part de l'énergie des services et n'entre jamais une seconde fois.
+
+La cellule live (`publish_live_summary` dans `daemon/event_loop.rs`) restaure les derniers chiffres de base de données et de broker via `sticky_waste_figure`, pour que `/api/export/report` ne clignote pas entre deux scrapes. Une copie restaurée appartient à un lot antérieur, dont la cellule courante ne porte pas les totaux, elle reçoit donc `in_totals = false`. `perf_sentinel_scored_carbon_gco2_total` et la jauge `carbon_gco2` ajoutent `GreenSummary::scored_carbon_gco2()`, le carbone opérationnel des régions plus le carbone d'hôte compté dans les totaux, embarqué et transport exclus.
 
 ### Résolution multi-région
 
@@ -297,7 +313,7 @@ pub struct CarbonEstimate {
     pub mid: f64,           // meilleure estimation
     pub high: f64,          // mid × 2,0
     pub model: &'static str,       // "io_proxy_v1"
-    pub methodology: &'static str, // "sci_v1_numerator+transport", "sci_v1_intensity" ou "sci_v1_operational_ratio"
+    pub methodology: &'static str, // "sci_v1_numerator+transport[+hosts]", "sci_v1_intensity" ou "sci_v1_operational_ratio[+hosts]"
 }
 ```
 
@@ -517,7 +533,7 @@ Passée la division, c'est la formule de Scaphandre mot pour mot, et elle hérit
 
 ## Attribution de l'énergie du broker
 
-Un broker pose le problème de la base de données en double : il brûle l'énergie d'une boucle de publication N+1, il n'émet aucun span à lui, et il est très souvent managé, donc il n'existe aucun hôte où faire tourner un agent de mesure. Perf Sentinel reprend la forme de `database_waste` avec le ratio messaging seul, `broker energy × (avoidable publish ops / total publish ops)`, rapportée en `green_summary.messaging_waste`. Un chiffre mesuré ou déclaré est une énergie d'hôte de broker posée à côté des totaux. Sans aucune des deux sources, le chiffre prend la forme estimée : la part côté application des spans de publication, l'énergie que le scoring des spans a donnée aux services qui publient, déjà comprise dans les totaux et sans aucune énergie d'hôte de broker. Aucune des trois n'est jamais ajoutée à un total.
+Un broker pose le problème de la base de données en double : il brûle l'énergie d'une boucle de publication N+1, il n'émet aucun span à lui, et il est très souvent managé, donc il n'existe aucun hôte où faire tourner un agent de mesure. Perf Sentinel reprend la forme de `database_waste` avec le ratio messaging seul, `broker energy × (avoidable publish ops / total publish ops)`, rapportée en `green_summary.messaging_waste`. Un chiffre mesuré ou déclaré est une énergie d'hôte de broker, qui entre dans les totaux comme terme d'hôte `G_msg` dès que son carbone est converti (voir "Termes d'hôte de base de données et de broker" plus haut). Sans aucune des deux sources, le chiffre prend la forme estimée : la part côté application des spans de publication, l'énergie que le scoring des spans a donnée aux services qui publient, déjà comprise dans les totaux et sans aucune énergie d'hôte de broker, si bien qu'il n'y entre jamais une seconde fois.
 
 **Pourquoi pas un coefficient par publication.** Traité plus bas sous "Pourquoi aucun coefficient par publication ne peut être une mesure". La puissance d'un broker cesse de suivre le débit au-delà d'environ 20 % de sa capacité, l'énergie marginale n'est donc pas une constante, et les trois éléments qui la détermineraient (taux d'utilisation, facteur de réplication, topologie) sont invisibles depuis un span producteur. Le chiffre est une mesure au niveau du workload répartie par un ratio de comptage, jamais un coefficient.
 
