@@ -442,6 +442,20 @@ fn ungrounded_names_stay_unknown() {
 }
 
 #[test]
+fn a_case_variant_names_the_spelling_that_resolves() {
+    for (typed, canonical) in [
+        ("standard_d4s_v5", "Standard_D4s_v5"),
+        ("Standard_D4s_V5", "Standard_D4s_v5"),
+        ("M5.LARGE", "m5.large"),
+        ("Kafka.m5.large", "kafka.m5.large"),
+    ] {
+        assert_eq!(case_variant(typed).as_deref(), Some(canonical), "{typed}");
+    }
+    assert_eq!(case_variant("m5.large"), None);
+    assert_eq!(case_variant("m5zn.large"), None);
+}
+
+#[test]
 fn exact_rows_are_never_rewritten() {
     for name in ["m5.large", "c7g.large", "Standard_D2ads_v6"] {
         assert_eq!(resolve_instance_class(name), row_class(name), "{name}");

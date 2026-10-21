@@ -226,9 +226,11 @@ pub struct GreenConfig {
     /// `cpu_query`, and a shared one bills its pod's share of its node.
     pub database_static: Option<StaticHostsConfig>,
     /// Declared broker hosts (`[green.broker_static]`, daemon only).
-    /// Needs no agent, so it covers managed brokers. Only a dedicated
-    /// declaration with `nodes` and `instance_type` bills, see
-    /// [`crate::score::host_static::StaticHostsConfig::ceiling`].
+    /// Needs no agent, so it covers provisioned managed brokers (not
+    /// serverless ones). A dedicated declaration bills its ceiling
+    /// ([`crate::score::host_static::StaticHostsConfig::ceiling`]), or
+    /// prices its hosts from its `cpu_query`, and a shared one bills its
+    /// pod's share of its node.
     pub broker_static: Option<StaticHostsConfig>,
     /// Whether to use per-operation energy coefficients (SQL verb weighting,
     /// HTTP payload size tiers) in the proxy model. Default: `true`.

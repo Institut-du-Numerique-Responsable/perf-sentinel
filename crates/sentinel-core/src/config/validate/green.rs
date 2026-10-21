@@ -205,7 +205,7 @@ fn validate_host_counts(section: &str, cfg: &StaticHostsConfig) -> Result<(), St
 /// Rule B3: the instance type resolves to an embedded row. Runs after
 /// [`validate_host_counts`], so the type is printable.
 fn validate_host_class(section: &str, cfg: &StaticHostsConfig) -> Result<(), String> {
-    use crate::score::cloud_energy::table::{InstanceClass, resolve_instance_class};
+    use crate::score::cloud_energy::table::{InstanceClass, case_variant, resolve_instance_class};
     let Some(instance_type) = cfg.instance_type.as_deref() else {
         return Ok(());
     };
@@ -214,11 +214,17 @@ fn validate_host_class(section: &str, cfg: &StaticHostsConfig) -> Result<(), Str
         InstanceClass::Unsupported(reason) => Err(format!(
             "{section} instance_type '{instance_type}' cannot be priced: {reason}"
         )),
-        InstanceClass::Unknown => Err(format!(
-            "{section} instance_type '{instance_type}' is neither an embedded row nor a \
-             managed class that resolves to one. Use a listed type or managed class, see \
-             docs/INSTANCE-TYPES.md#managed-service-classes"
-        )),
+        InstanceClass::Unknown => Err(match case_variant(instance_type) {
+            Some(canonical) => format!(
+                "{section} instance_type '{instance_type}' is unknown, names match case \
+                 exactly: did you mean '{canonical}'?"
+            ),
+            None => format!(
+                "{section} instance_type '{instance_type}' is neither an embedded row nor a \
+                 managed class that resolves to one. Use a listed type or managed class, see \
+                 docs/INSTANCE-TYPES.md#managed-service-classes"
+            ),
+        }),
     }
 }
 
@@ -250,9 +256,23 @@ fn validate_dedicated_hosts(
     }
 }
 
-/// Rule B5: a shared host is one application node read by its own query.
-fn validate_shared_host(subsystem: Subsystem, cfg: &StaticHostsConfig) -> Result<(), String> {
+/// Rule B5: a shared host is one application node read by its own query,
+/// which the subsystem's Alumet workload leaves no room for.
+fn validate_shared_host(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    alumet_present: bool,
+) -> Result<(), String> {
     let section = subsystem.section();
+    if alumet_present {
+        return Err(format!(
+            "{section} placement = 'shared' cannot sit next to {alumet}: Alumet already \
+             measures the {} hosts. Use placement = 'dedicated' (placement alone is enough \
+             next to {alumet}) or remove {alumet}",
+            subsystem.noun(),
+            alumet = subsystem.alumet_section(),
+        ));
+    }
     if cfg.cpu_query.is_none() {
         return Err(format!(
             "{section} placement = 'shared' needs cpu_query, the {}'s CPU as a percent \
@@ -647,7 +667,7 @@ impl Config {
                 HostPlacement::Dedicated => {
                     validate_dedicated_hosts(subsystem, cfg, alumet.is_some())?;
                 }
-                HostPlacement::Shared => validate_shared_host(subsystem, cfg)?,
+                HostPlacement::Shared => validate_shared_host(subsystem, cfg, alumet.is_some())?,
             }
             validate_host_cpu_query(subsystem, cfg, &self.green)?;
             validate_shared_with(subsystem, cfg, &self.green)?;

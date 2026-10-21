@@ -4170,6 +4170,10 @@ fn broker_static_rejections_name_their_rule() {
             "kafka.zz9.large",
         ),
         (
+            format!("{dedicated}nodes = 3\ninstance_type = \"M5.LARGE\"\n"),
+            "did you mean 'm5.large'?",
+        ),
+        (
             format!("{dedicated}nodes = 3\ninstance_type = \"db.serverless\"\n"),
             "cannot be priced",
         ),
@@ -4534,6 +4538,25 @@ fn host_cpu_query_rejections_name_their_rule() {
                     "cpu_query cannot sit next to {}",
                     subsystem.alumet_section()
                 ),
+            ),
+            // A shared host next to Alumet gets one way out, with or
+            // without cpu_query.
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{}\n\
+                     {section}\nplacement = \"shared\"\ninstance_type = \"m5.large\"\n\
+                     {HOST_QUERY}\n",
+                    alumet_workload(subsystem)
+                ),
+                "Use placement = 'dedicated'".to_string(),
+            ),
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{}\n\
+                     {section}\nplacement = \"shared\"\ninstance_type = \"m5.large\"\n",
+                    alumet_workload(subsystem)
+                ),
+                "Use placement = 'dedicated'".to_string(),
             ),
         ];
         for (toml, expected) in cases {

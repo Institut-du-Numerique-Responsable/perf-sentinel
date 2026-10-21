@@ -298,6 +298,26 @@ pub fn resolve_instance_class(name: &str) -> InstanceClass {
         .map_or(InstanceClass::Unknown, known)
 }
 
+/// The spelling that resolves when `name` only differs from it by case:
+/// the row name ignoring case, or the lowercase form for AWS and managed
+/// classes. `None` when no case variant resolves.
+#[must_use]
+pub(crate) fn case_variant(name: &str) -> Option<String> {
+    let row = INSTANCE_POWER
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case(name))
+        .map(|key| (*key).to_string());
+    row.into_iter()
+        .chain(std::iter::once(name.to_ascii_lowercase()))
+        .find(|candidate| {
+            candidate != name
+                && matches!(
+                    resolve_instance_class(candidate),
+                    InstanceClass::Known { .. }
+                )
+        })
+}
+
 fn known((idle_watts, max_watts): (f64, f64)) -> InstanceClass {
     InstanceClass::Known {
         idle_watts,

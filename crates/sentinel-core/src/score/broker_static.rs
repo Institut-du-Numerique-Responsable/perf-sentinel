@@ -2,9 +2,11 @@
 //!
 //! A provisioned broker or database cluster with a typed instance class
 //! (a managed Kafka, MQ or database cluster, or self-managed VMs) may
-//! offer no host to run an agent on, so neither Alumet nor a CPU scrape is
-//! available. The operator declares the cluster instead, and the embedded
-//! `SPECpower` table turns that declaration into watts. The same ceiling
+//! offer no host to run an agent on. The operator declares the cluster
+//! instead, and the embedded `SPECpower` table turns that declaration into
+//! watts. This ceiling is the source when no Alumet agent and no
+//! `cpu_query` is configured, and the fallback when a dedicated
+//! declaration's `cpu_query` probe has no fresh reading. The same ceiling
 //! bills a declared broker and a declared database. Serverless and
 //! capacity-unit services have no provisioned node and cannot be declared.
 //!
