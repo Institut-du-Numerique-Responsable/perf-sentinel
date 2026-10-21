@@ -1647,8 +1647,8 @@ fn build_tick_ctx_database_energy_forces_owned_then_consumes() {
     let now = score::scaphandre::monotonic_ms();
     db.add_window_kwh(2e-6, now);
     let mut sources = no_scrapers(&base);
-    sources.alumet_db_state = Some(&db);
-    sources.alumet_staleness_ms = 60_000;
+    sources.database.live = Some(&db);
+    sources.database.live_staleness_ms = 60_000;
 
     // Fresh DB energy alone must force the owned path and patch it in.
     let ctx = build_tick_ctx(&sources, score::scaphandre::monotonic_ms());
@@ -1680,8 +1680,8 @@ fn build_tick_ctx_broker_only_energy_forces_owned() {
     let broker = DbEnergyState::new();
     broker.add_window_kwh(3e-6, 10_000);
     let mut sources = no_scrapers(&base);
-    sources.alumet_broker_state = Some(&broker);
-    sources.alumet_staleness_ms = 60_000;
+    sources.broker.live = Some(&broker);
+    sources.broker.live_staleness_ms = 60_000;
 
     let ctx = build_tick_ctx(&sources, 10_000);
     assert!(
@@ -1867,47 +1867,229 @@ fn the_declared_marker_advances_while_alumet_owns_the_timeline() {
 }
 
 #[test]
-fn a_fallback_window_carries_the_declared_tag_and_region() {
-    // Base built as if [green.alumet.broker] were configured: alumet
-    // tag and alumet-declared region.
+fn a_fallback_window_carries_the_declared_tag_and_keeps_the_region() {
+    // Base built as if [green.alumet.broker] were configured: alumet tag
+    // and the subsystem's effective region.
     let mut broker = score::carbon::DbEnergyContext {
         window_kwh: 0.0,
         region: Some("eu-west-1".to_string()),
         model: score::carbon::CO2_MODEL_ALUMET,
         placement: None,
     };
-    let cfg = declared_cfg(1);
 
-    patch_broker_energy(&mut broker, None, Some((4.2e-6, &cfg)));
+    patch_host_energy(
+        &mut broker,
+        None,
+        Some(4.2e-6),
+        crate::report::BROKER_WASTE_MODEL_SPECPOWER,
+    );
     assert_eq!(
         broker.model,
         crate::report::BROKER_WASTE_MODEL_SPECPOWER,
         "a fallback window must not be published as a measurement"
     );
-    assert_eq!(broker.region.as_deref(), Some("eu-west-3"));
+    assert_eq!(
+        broker.region.as_deref(),
+        Some("eu-west-1"),
+        "one region per subsystem, a declared tick never switches it"
+    );
     assert!((broker.window_kwh - 4.2e-6).abs() < 1e-18);
 }
 
 #[test]
-fn a_measured_window_keeps_its_tag_when_both_sources_deliver() {
-    let mut broker = score::carbon::DbEnergyContext {
-        window_kwh: 0.0,
-        region: Some("eu-west-1".to_string()),
-        model: crate::report::BROKER_WASTE_MODEL_SPECPOWER,
-        placement: None,
-    };
-    let cfg = declared_cfg(1);
+fn a_live_window_keeps_its_base_tag_when_both_sources_deliver() {
+    for base_tag in [
+        score::carbon::CO2_MODEL_ALUMET,
+        score::carbon::CO2_MODEL_CLOUD_SPECPOWER,
+    ] {
+        let mut host = score::carbon::DbEnergyContext {
+            window_kwh: 0.0,
+            region: Some("eu-west-1".to_string()),
+            model: base_tag,
+            placement: None,
+        };
 
-    patch_broker_energy(&mut broker, Some(5e-6), Some((9e-6, &cfg)));
-    assert_eq!(broker.model, score::carbon::CO2_MODEL_ALUMET);
-    assert_eq!(broker.region.as_deref(), Some("eu-west-1"));
-    assert!((broker.window_kwh - 5e-6).abs() < 1e-18);
+        patch_host_energy(
+            &mut host,
+            Some(5e-6),
+            Some(9e-6),
+            crate::report::DB_WASTE_MODEL_SPECPOWER,
+        );
+        assert_eq!(host.model, base_tag);
+        assert_eq!(host.region.as_deref(), Some("eu-west-1"));
+        assert!((host.window_kwh - 5e-6).abs() < 1e-18);
+    }
+}
+
+fn database_cfg(nodes: u32) -> score::broker_static::StaticBrokerConfig {
+    score::broker_static::StaticBrokerConfig {
+        nodes,
+        instance_type: "db.r6i.large".to_string(),
+        provider: "generic".to_string(),
+        region: Some("eu-west-3".to_string()),
+    }
+}
+
+/// A base context as the daemon builds it for a declared database.
+fn database_base(model: &'static str) -> Arc<score::carbon::CarbonContext> {
+    Arc::new(score::carbon::CarbonContext {
+        db_energy: Some(score::carbon::DbEnergyContext {
+            window_kwh: 0.0,
+            region: Some("eu-west-3".to_string()),
+            model,
+            placement: Some(score::host_static::HostPlacement::Dedicated),
+        }),
+        ..score::carbon::CarbonContext::default()
+    })
+}
+
+/// kWh a ceiling of `watts` bills over `ms`.
+fn ceiling_kwh(watts: f64, ms: u64) -> f64 {
+    watts * ms as f64 / 3_600_000.0 / 1000.0
+}
+
+#[test]
+fn a_database_ceiling_alone_bills_nodes_times_p_max_over_elapsed() {
+    let cfg = database_cfg(2);
+    let (_idle, p_max) =
+        score::cloud_energy::table::lookup_instance_power("db.r6i.large", "generic");
+    assert!((cfg.cluster_watts() - 2.0 * p_max).abs() < 1e-9);
+    let state = score::broker_static::StaticBrokerState::new(0, &cfg);
+    let base = database_base(crate::report::DB_WASTE_MODEL_SPECPOWER);
+    let mut sources = no_scrapers(&base);
+    sources.database.declared = Some(&state);
+
+    // Sub-second takes accrue on the borrowed fast path.
+    for now in [300_u64, 600, 900] {
+        let ctx = build_tick_ctx(&sources, now);
+        assert!(matches!(ctx, std::borrow::Cow::Borrowed(_)), "t={now}");
+    }
+    let mut total = 0.0;
+    for now in [5_000_u64, 65_000, 125_000] {
+        let ctx = build_tick_ctx(&sources, now);
+        let db = ctx.db_energy.as_ref().expect("database context");
+        assert_eq!(db.model, crate::report::DB_WASTE_MODEL_SPECPOWER);
+        assert_eq!(db.region.as_deref(), Some("eu-west-3"));
+        total += db.window_kwh;
+    }
+    let expected = ceiling_kwh(2.0 * p_max, 125_000);
+    assert!(
+        (total - expected).abs() < 1e-12,
+        "billed {total} kWh, expected {expected}"
+    );
+
+    // A 10 h gap bills the one-hour cap.
+    let ctx = build_tick_ctx(&sources, 125_000 + 36_000_000);
+    let gap = ctx.db_energy.as_ref().expect("database context").window_kwh;
+    assert!((gap - ceiling_kwh(2.0 * p_max, 3_600_000)).abs() < 1e-12);
+}
+
+#[test]
+fn a_database_ceiling_covers_only_the_alumet_outage() {
+    let cfg = database_cfg(2);
+    let state = score::broker_static::StaticBrokerState::new(0, &cfg);
+    let live = DbEnergyState::new();
+    let base = database_base(score::carbon::CO2_MODEL_ALUMET);
+    let mut sources = no_scrapers(&base);
+    sources.database = SubsystemSources {
+        live: Some(&live),
+        live_staleness_ms: 10_000,
+        declared: Some(&state),
+    };
+
+    // Fresh Alumet owns the timeline: the ceiling stays silent.
+    live.add_window_kwh(2e-6, 5_000);
+    let ctx = build_tick_ctx(&sources, 5_000);
+    let db = ctx.db_energy.as_ref().expect("database context");
+    assert_eq!(db.model, score::carbon::CO2_MODEL_ALUMET);
+    assert!((db.window_kwh - 2e-6).abs() < 1e-18);
+
+    // Stale Alumet: the ceiling bills the 45 s outage alone, under the
+    // declared tag, and marks it.
+    let ctx = build_tick_ctx(&sources, 50_000);
+    let db = ctx.db_energy.as_ref().expect("database context");
+    assert_eq!(db.model, crate::report::DB_WASTE_MODEL_SPECPOWER);
+    assert_eq!(db.region.as_deref(), Some("eu-west-3"));
+    assert!((db.window_kwh - ceiling_kwh(cfg.cluster_watts(), 45_000)).abs() < 1e-12);
+    assert!(state.outage_billed());
+
+    // Recovery: the first delta reaches back over the billed outage and
+    // is dropped, once.
+    live.add_window_kwh(3e-6, 51_000);
+    let ctx = build_tick_ctx(&sources, 51_000);
+    assert!(matches!(ctx, std::borrow::Cow::Borrowed(_)));
+    assert!(!state.outage_billed());
+    live.add_window_kwh(4e-6, 52_000);
+    let ctx = build_tick_ctx(&sources, 52_000);
+    let db = ctx.db_energy.as_ref().expect("database context");
+    assert_eq!(db.model, score::carbon::CO2_MODEL_ALUMET);
+    assert!((db.window_kwh - 4e-6).abs() < 1e-18);
+}
+
+#[test]
+fn each_subsystem_is_gated_by_its_own_staleness() {
+    let base = Arc::new(score::carbon::CarbonContext {
+        db_energy: Some(score::carbon::DbEnergyContext {
+            model: score::carbon::CO2_MODEL_ALUMET,
+            ..Default::default()
+        }),
+        broker_energy: Some(score::carbon::DbEnergyContext {
+            model: score::carbon::CO2_MODEL_ALUMET,
+            ..Default::default()
+        }),
+        ..score::carbon::CarbonContext::default()
+    });
+    let db_live = DbEnergyState::new();
+    let broker_live = DbEnergyState::new();
+    let db_cfg = database_cfg(1);
+    let broker_cfg = declared_cfg(1);
+    let db_state = score::broker_static::StaticBrokerState::new(0, &db_cfg);
+    let broker_state = score::broker_static::StaticBrokerState::new(0, &broker_cfg);
+    let mut sources = no_scrapers(&base);
+    sources.database = SubsystemSources {
+        live: Some(&db_live),
+        live_staleness_ms: 60_000,
+        declared: Some(&db_state),
+    };
+    sources.broker = SubsystemSources {
+        live: Some(&broker_live),
+        live_staleness_ms: 5_000,
+        declared: Some(&broker_state),
+    };
+    db_live.add_window_kwh(1e-6, 1_000);
+    broker_live.add_window_kwh(2e-6, 1_000);
+    build_tick_ctx(&sources, 1_000);
+
+    // 19 s later the database series is still fresh, the broker one is not.
+    let ctx = build_tick_ctx(&sources, 20_000);
+    let db = ctx.db_energy.as_ref().expect("database context");
+    assert_eq!(db.model, score::carbon::CO2_MODEL_ALUMET);
+    assert!(db.window_kwh.abs() < f64::EPSILON, "nothing new measured");
+    let broker = ctx.broker_energy.as_ref().expect("broker context");
+    assert_eq!(broker.model, crate::report::BROKER_WASTE_MODEL_SPECPOWER);
+    assert!((broker.window_kwh - ceiling_kwh(broker_cfg.cluster_watts(), 19_000)).abs() < 1e-12);
+    assert!(!db_state.outage_billed());
+}
+
+#[test]
+fn a_ceiling_only_figure_survives_sub_second_batches_in_the_live_cell() {
+    // A sub-second batch takes nothing from the ceiling, so the live cell
+    // must bridge it with the batch-cadence TTL rather than blank.
+    let mut sticky = None;
+    let mut fresh = waste_fixture(0.3);
+    fresh.model = crate::report::DB_WASTE_MODEL_SPECPOWER.to_string();
+    let ttl = 30_000;
+    assert!(sticky_waste_figure(Some(&fresh), &mut sticky, 1_000, ttl).is_some());
+    for now in [1_300_u64, 1_600, 1_900] {
+        let out = sticky_waste_figure(None, &mut sticky, now, ttl);
+        assert_eq!(out.as_ref(), Some(&fresh), "t={now}");
+    }
 }
 
 #[test]
 fn build_tick_ctx_falls_back_to_the_declared_cluster() {
     // Covers the wiring, not the arbitration: a declared cluster alone
-    // must leave the borrowed fast path and reach patch_broker_energy.
+    // must leave the borrowed fast path and reach patch_host_energy.
     let base = Arc::new(score::carbon::CarbonContext {
         broker_energy: Some(score::carbon::DbEnergyContext {
             window_kwh: 0.0,
@@ -1919,7 +2101,7 @@ fn build_tick_ctx_falls_back_to_the_declared_cluster() {
     let declared = declared_cfg(3);
     let declared_state = score::broker_static::StaticBrokerState::new(0, &declared);
     let mut sources = no_scrapers(&base);
-    sources.static_broker = Some((&declared, &declared_state));
+    sources.broker.declared = Some(&declared_state);
 
     let ctx = build_tick_ctx(&sources, 60_000);
     assert!(
@@ -1942,7 +2124,7 @@ fn build_tick_ctx_keeps_the_fast_path_on_a_sub_second_tick() {
     let declared = declared_cfg(3);
     let declared_state = score::broker_static::StaticBrokerState::new(0, &declared);
     let mut sources = no_scrapers(&base);
-    sources.static_broker = Some((&declared, &declared_state));
+    sources.broker.declared = Some(&declared_state);
 
     let ctx = build_tick_ctx(&sources, 200);
     assert!(matches!(ctx, std::borrow::Cow::Borrowed(_)));
@@ -2054,9 +2236,8 @@ fn no_scrapers(base: &Arc<score::carbon::CarbonContext>) -> EnergySources<'_> {
     EnergySources {
         base_carbon_ctx: base.clone(),
         alumet_state: None,
-        alumet_db_state: None,
-        alumet_broker_state: None,
-        static_broker: None,
+        database: SubsystemSources::default(),
+        broker: SubsystemSources::default(),
         alumet_staleness_ms: 0,
         scaphandre_state: None,
         scaphandre_staleness_ms: 0,

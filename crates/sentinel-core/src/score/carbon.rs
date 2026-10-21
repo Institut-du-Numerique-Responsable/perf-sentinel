@@ -137,8 +137,9 @@ pub fn co2_model_label(tag: &str) -> Option<&'static str> {
         CO2_MODEL_CLOUD_SPECPOWER => "Cloud SPECpower table",
         CO2_MODEL_EMAPS => "Electricity Maps, live grid intensity",
         CO2_MODEL_GRID_OPERATOR => "Grid operator open data, live grid intensity",
-        // A declared broker figure inside the totals lists its tag among
+        // A declared host figure inside the totals lists its tag among
         // the energy sources.
+        crate::report::DB_WASTE_MODEL_SPECPOWER => "Declared database hosts, SPECpower ceiling",
         crate::report::BROKER_WASTE_MODEL_SPECPOWER => "Declared broker hosts, SPECpower ceiling",
         _ => return None,
     })

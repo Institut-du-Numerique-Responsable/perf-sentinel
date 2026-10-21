@@ -38,11 +38,11 @@ use crate::detect::DetectConfig;
 use crate::event::SpanEvent;
 use crate::report::GreenSummary;
 use crate::report::metrics::MetricsState;
-use crate::score::host_static::{StaticHostsConfig, Subsystem};
+use crate::score::host_static::Subsystem;
 
 use event_loop::{
     EnergyScraperHandles, EnergySources, EventLoopConfig, ListenerHandles, ShutdownTargets,
-    run_event_loop,
+    SubsystemSources, run_event_loop,
 };
 use listeners::{
     init_ack_resources, setup_alumet_scraper, setup_cloud_scraper, setup_correlator,
@@ -319,26 +319,8 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     .await?;
 
     let (alumet, alumet_db, alumet_broker) = setup_alumet_scraper(&config, &metrics);
-    let broker_region = config.green.host_region(Subsystem::Broker);
-    // Only a dedicated declaration with nodes and instance_type bills. Its
-    // region is the subsystem's, so a declared tick keeps the Alumet one.
-    let broker_ceiling = config
-        .green
-        .broker_static
-        .as_ref()
-        .and_then(StaticHostsConfig::ceiling)
-        .map(|mut ceiling| {
-            ceiling.region = broker_region.map(str::to_string);
-            ceiling
-        });
-    // No scraper: the declared cluster only needs a start marker to bill
-    // elapsed time from.
-    let static_broker_state = broker_ceiling.as_ref().map(|cfg| {
-        crate::score::broker_static::StaticBrokerState::new(
-            crate::score::scaphandre::monotonic_ms(),
-            cfg,
-        )
-    });
+    let database_ceiling = declared_ceiling(&config, Subsystem::Database);
+    let broker_ceiling = declared_ceiling(&config, Subsystem::Broker);
     let scaphandre = setup_scaphandre_scraper(&config, &metrics);
     let kepler = setup_kepler_scraper(&config, &metrics);
     let redfish = setup_redfish_scraper(&config, &metrics);
@@ -366,19 +348,22 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         ctx
     });
     let detect_config = DetectConfig::from(&config);
-    // Green scoring off means score_green never runs: the loop must not
-    // consume (and thus destroy) the accumulated database energy. The
-    // three fields go through `then` rather than three `if`/`else` arms,
-    // so the gate adds no branch to this function.
     let green_on = config.green.enabled;
     let energy_sources = EnergySources {
         base_carbon_ctx,
         alumet_state: alumet.state.as_deref(),
-        alumet_db_state: green_on.then_some(alumet_db.as_deref()).flatten(),
-        alumet_broker_state: green_on.then_some(alumet_broker.as_deref()).flatten(),
-        static_broker: green_on
-            .then(|| broker_ceiling.as_ref().zip(static_broker_state.as_ref()))
-            .flatten(),
+        database: host_sources(
+            green_on,
+            alumet_db.as_deref(),
+            alumet.staleness_ms,
+            database_ceiling.as_ref(),
+        ),
+        broker: host_sources(
+            green_on,
+            alumet_broker.as_deref(),
+            alumet.staleness_ms,
+            broker_ceiling.as_ref(),
+        ),
         alumet_staleness_ms: alumet.staleness_ms,
         scaphandre_state: scaphandre.state.as_deref(),
         scaphandre_staleness_ms: scaphandre.staleness_ms,
@@ -435,18 +420,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             analysis_queue_capacity: config.daemon.analysis_queue_capacity,
             per_service_labels: config.daemon.per_service_labels,
             per_grouping_labels: config.daemon.per_grouping_labels,
-            // 2x the scraper staleness window: flap-free between scrapes,
-            // aged out shortly after a dead scraper's last reading. A
-            // declared cluster has no scraper, so it falls back to the
-            // batch cadence: its figure is skipped on sub-second takes
-            // and would otherwise flap with nothing to bridge it.
-            waste_sticky_ttl_ms: alumet.staleness_ms.saturating_mul(2).max(
-                if broker_ceiling.is_some() {
-                    config.daemon.trace_ttl_ms
-                } else {
-                    0
-                },
-            ),
+            waste_sticky_ttl_ms: waste_sticky_ttl_ms(&config, alumet.staleness_ms),
         },
         green_summary_cell,
         archive_handle.as_ref().map(|h| h.tx.clone()),
@@ -479,11 +453,72 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     loop_result
 }
 
+/// The billing state of one subsystem's declared ceiling: a dedicated
+/// declaration with `nodes` and `instance_type`. No scraper, the state
+/// only needs a start marker to bill elapsed time from. Its region is
+/// the subsystem's effective one.
+fn declared_ceiling(
+    config: &Config,
+    subsystem: Subsystem,
+) -> Option<crate::score::broker_static::StaticBrokerState> {
+    let mut ceiling = config.green.static_hosts(subsystem)?.ceiling()?;
+    ceiling.region = config.green.host_region(subsystem).map(str::to_string);
+    Some(crate::score::broker_static::StaticBrokerState::new(
+        crate::score::scaphandre::monotonic_ms(),
+        &ceiling,
+    ))
+}
+
+/// One subsystem's host sources, each live state with its own staleness.
+/// Green scoring off means `score_green` never runs: the loop must not
+/// consume (and thus destroy) the accumulated host energy, so the bundle
+/// is empty.
+fn host_sources<'a>(
+    green_on: bool,
+    live: Option<&'a crate::score::alumet::DbEnergyState>,
+    live_staleness_ms: u64,
+    declared: Option<&'a crate::score::broker_static::StaticBrokerState>,
+) -> SubsystemSources<'a> {
+    if !green_on {
+        return SubsystemSources::default();
+    }
+    SubsystemSources {
+        live,
+        live_staleness_ms,
+        declared,
+    }
+}
+
+/// Lifetime of the live cell's last host waste figure. 2x the scraper
+/// staleness window: flap-free between scrapes, aged out shortly after a
+/// dead scraper's last reading. A declared ceiling (database or broker)
+/// has no scraper, so it falls back to the batch cadence: its figure is
+/// skipped on sub-second takes and would otherwise flap with nothing to
+/// bridge it.
+fn waste_sticky_ttl_ms(config: &Config, alumet_staleness_ms: u64) -> u64 {
+    let any_ceiling = [Subsystem::Database, Subsystem::Broker]
+        .into_iter()
+        .any(|s| {
+            config
+                .green
+                .static_hosts(s)
+                .and_then(crate::score::host_static::StaticHostsConfig::ceiling)
+                .is_some()
+        });
+    let ceiling_ttl = if any_ceiling {
+        config.daemon.trace_ttl_ms
+    } else {
+        0
+    };
+    alumet_staleness_ms.saturating_mul(2).max(ceiling_ttl)
+}
+
 /// The host context of one subsystem, built only when it has a source the
-/// daemon bills: its Alumet workload, or for the broker a dedicated
-/// declaration with a `SPECpower` ceiling. A shared or ceiling-less
-/// declaration builds none, so the estimated figure stays. `model` is the
-/// base tag, which a declared tick replaces, and `region` the
+/// daemon bills: its Alumet workload, or a dedicated declaration with a
+/// `SPECpower` ceiling. A shared or ceiling-less declaration builds none,
+/// so the estimated figure stays. `model` is the base tag, which a
+/// declared tick replaces: the declared tag, or `cloud_specpower` when the
+/// declaration has a `cpu_query` (its live source). `region` is the
 /// subsystem's effective region.
 fn host_energy_context(
     config: &Config,
@@ -493,12 +528,13 @@ fn host_energy_context(
     let declared = green.static_hosts(subsystem);
     let model = if green.alumet_host(subsystem).is_some() {
         crate::score::carbon::CO2_MODEL_ALUMET
-    } else if subsystem == Subsystem::Broker
-        && declared.and_then(StaticHostsConfig::ceiling).is_some()
-    {
-        crate::report::BROKER_WASTE_MODEL_SPECPOWER
     } else {
-        return None;
+        let cfg = declared.filter(|cfg| cfg.ceiling().is_some())?;
+        if cfg.cpu_query.is_some() {
+            crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER
+        } else {
+            subsystem.declared_tag()
+        }
     };
     Some(crate::score::carbon::DbEnergyContext {
         window_kwh: 0.0,
@@ -642,6 +678,57 @@ mod tests {
         assert_eq!(ctx.placement, None, "no declared-hosts section");
         assert!(host_energy_context(&alumet, Subsystem::Broker).is_none());
         assert!(host_energy_context(&Config::default(), Subsystem::Broker).is_none());
+    }
+
+    const DATABASE_CEILING: &str = "[green]\ndefault_region = \"eu-west-3\"\n\
+        [green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+        instance_type = \"db.r6i.large\"\n";
+
+    #[test]
+    fn a_database_ceiling_builds_a_context_tagged_by_its_live_source() {
+        let load = |toml: &str| crate::config::load_from_str(toml).expect("config loads");
+        let ceiling = load(DATABASE_CEILING);
+        let ctx = host_energy_context(&ceiling, Subsystem::Database).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::report::DB_WASTE_MODEL_SPECPOWER);
+        assert_eq!(ctx.placement, Some(HostPlacement::Dedicated));
+        assert_eq!(ctx.region.as_deref(), Some("eu-west-3"));
+        assert!(declared_ceiling(&ceiling, Subsystem::Database).is_some());
+        assert!(declared_ceiling(&ceiling, Subsystem::Broker).is_none());
+
+        // A cpu_query is the live source: the base tag is its model, and
+        // only a declared tick takes the declared tag.
+        let probed = load(&format!(
+            "{DATABASE_CEILING}cpu_query = 'avg(db_cpu)'\n\
+             [green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n"
+        ));
+        let ctx = host_energy_context(&probed, Subsystem::Database).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+    }
+
+    #[test]
+    fn a_database_ceiling_alone_keeps_the_live_cell_across_batches() {
+        let mut config = crate::config::load_from_str(DATABASE_CEILING).expect("config loads");
+        config.daemon.trace_ttl_ms = 30_000;
+        assert_eq!(waste_sticky_ttl_ms(&config, 0), 30_000);
+        assert_eq!(waste_sticky_ttl_ms(&Config::default(), 0), 0);
+        assert_eq!(waste_sticky_ttl_ms(&config, 20_000), 40_000);
+    }
+
+    #[test]
+    fn green_disabled_hands_the_loop_no_host_source() {
+        let live = crate::score::alumet::DbEnergyState::new();
+        let cfg = crate::score::broker_static::StaticBrokerConfig {
+            nodes: 1,
+            instance_type: "m5.large".to_string(),
+            provider: "generic".to_string(),
+            region: None,
+        };
+        let declared = crate::score::broker_static::StaticBrokerState::new(0, &cfg);
+        let off = host_sources(false, Some(&live), 60_000, Some(&declared));
+        assert!(off.live.is_none() && off.declared.is_none());
+        let on = host_sources(true, Some(&live), 60_000, Some(&declared));
+        assert!(on.live.is_some() && on.declared.is_some());
+        assert_eq!(on.live_staleness_ms, 60_000);
     }
 
     #[tokio::test]

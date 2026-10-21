@@ -324,7 +324,7 @@ fn fold_waste_block(acc: &mut DbWasteAccumulator, block: &crate::report::Disclos
 fn fold_provenance(acc: &mut DbWasteAccumulator, model: &str, energy: f64) {
     if model == crate::report::DB_WASTE_MODEL_ESTIMATED {
         acc.estimated_windows = acc.estimated_windows.saturating_add(1);
-    } else if model == crate::report::BROKER_WASTE_MODEL_SPECPOWER {
+    } else if crate::report::is_declared_model(model) {
         acc.declared_windows = acc.declared_windows.saturating_add(1);
         acc.declared_energy_kwh += energy;
     } else {

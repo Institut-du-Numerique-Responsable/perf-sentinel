@@ -856,6 +856,34 @@ fn aggregator_surfaces_both_waste_tiers() {
 }
 
 #[test]
+fn a_declared_database_window_lands_in_the_declared_bucket() {
+    let ts = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+    let tier = crate::report::AvoidableTier {
+        n_plus_one_threshold: 2,
+        avoidable_io_ops: 10,
+        avoidable_kwh: 0.1,
+        avoidable_gco2: 1.0,
+    };
+    let mut r = make_report(100, 1_000, 50, &[("svc-a", "/api", 1_000)], vec![]);
+    r.disclosure_waste = Some(crate::report::DisclosureWaste {
+        canonical: tier.clone(),
+        operational: tier,
+        database: Some(waste_block(1.5, crate::report::DB_WASTE_MODEL_SPECPOWER)),
+        messaging: None,
+    });
+
+    let (_dir, path) = write_archive(&[(ts, r)]);
+    let agg = aggregate_from_paths(&[path], &q1_2026(), false)
+        .unwrap()
+        .aggregate;
+    let dw = agg.database_waste.expect("database block emitted");
+    assert_eq!(dw.declared_windows, 1);
+    assert!((dw.declared_energy_kwh - 1.5).abs() < 1e-12);
+    assert_eq!(dw.measured_windows, 0);
+    assert!(dw.measured_energy_kwh.abs() < 1e-12);
+}
+
+#[test]
 fn aggregator_sums_messaging_waste_and_splits_provenance() {
     let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
     let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();

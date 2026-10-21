@@ -1,11 +1,12 @@
-//! Provisioned-cluster broker energy, declared rather than measured.
+//! Provisioned-cluster host energy, declared rather than measured.
 //!
-//! A provisioned broker cluster with a typed instance class (a managed
-//! Kafka or MQ cluster, or self-managed VMs) may offer no host to run an
-//! agent on, so neither Alumet nor a CPU scrape is available. The operator
-//! declares the cluster instead, and the embedded `SPECpower` table turns
-//! that declaration into watts. Serverless and capacity-unit brokers have
-//! no provisioned node and cannot be declared.
+//! A provisioned broker or database cluster with a typed instance class
+//! (a managed Kafka, MQ or database cluster, or self-managed VMs) may
+//! offer no host to run an agent on, so neither Alumet nor a CPU scrape is
+//! available. The operator declares the cluster instead, and the embedded
+//! `SPECpower` table turns that declaration into watts. The same ceiling
+//! bills a declared broker and a declared database. Serverless and
+//! capacity-unit services have no provisioned node and cannot be declared.
 //!
 //! The model is `E(n) = n * P_max`, provisioned nodes times their power
 //! ceiling. What it bounds is narrower than it reads, and it errs in both

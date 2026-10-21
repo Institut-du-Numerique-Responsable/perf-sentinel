@@ -3,11 +3,10 @@
 //!
 //! A section declares where the hosts run (`placement`): on hosts of their
 //! own, or on an application node a cloud CPU query already reads. Only a
-//! dedicated declaration with `nodes` and `instance_type` gives a ceiling.
-//! The daemon bills the broker one through
-//! [`crate::score::broker_static::StaticBrokerState`] and does not read
-//! the database section. The model
-//! and its bounds are in `docs/design/05-GREENOPS-AND-CARBON.md` and
+//! dedicated declaration with `nodes` and `instance_type` gives a ceiling,
+//! which the daemon bills for either subsystem through
+//! [`crate::score::broker_static::StaticBrokerState`]. The model and its
+//! bounds are in `docs/design/05-GREENOPS-AND-CARBON.md` and
 //! `docs/LIMITATIONS.md`.
 
 use serde::{Deserialize, Serialize};
@@ -68,6 +67,15 @@ impl Subsystem {
         match self {
             Self::Database => "database",
             Self::Broker => "broker",
+        }
+    }
+
+    /// The waste model tag of a window the declared ceiling billed.
+    #[must_use]
+    pub const fn declared_tag(self) -> &'static str {
+        match self {
+            Self::Database => crate::report::DB_WASTE_MODEL_SPECPOWER,
+            Self::Broker => crate::report::BROKER_WASTE_MODEL_SPECPOWER,
         }
     }
 }

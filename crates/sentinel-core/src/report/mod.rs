@@ -486,6 +486,18 @@ pub const DB_WASTE_MODEL_ESTIMATED: &str = "estimated";
 /// which means a CPU scrape rather than a declaration.
 pub const BROKER_WASTE_MODEL_SPECPOWER: &str = "broker_specpower";
 
+/// Provenance tag of a database figure built from a declared cluster
+/// and the embedded `SPECpower` table, the database twin of
+/// [`BROKER_WASTE_MODEL_SPECPOWER`].
+pub const DB_WASTE_MODEL_SPECPOWER: &str = "database_specpower";
+
+/// Whether a waste model tag names a declared ceiling (database or
+/// broker) rather than a reading or the estimated share.
+#[must_use]
+pub fn is_declared_model(model: &str) -> bool {
+    model == DB_WASTE_MODEL_SPECPOWER || model == BROKER_WASTE_MODEL_SPECPOWER
+}
+
 /// Where a database or broker waste figure sits against the report
 /// totals, for the text report, the monitor and the HTML dashboard
 /// (`wasteScope` mirrors it): host energy counted in them, the estimated

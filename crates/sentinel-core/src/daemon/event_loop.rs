@@ -17,6 +17,7 @@ use crate::score;
 use crate::score::alumet::{AlumetState, DbEnergyState};
 use crate::score::cloud_energy::CloudEnergyState;
 use crate::score::electricity_maps::ElectricityMapsState;
+use crate::score::host_static::Subsystem;
 use crate::score::kepler::KeplerState;
 use crate::score::redfish::RedfishState;
 use crate::score::scaphandre::ScaphandreState;
@@ -82,19 +83,25 @@ pub(super) struct ListenerHandles<'a> {
     pub(super) json_socket: Option<&'a tokio::task::JoinHandle<()>>,
 }
 
+/// The host energy sources of one subsystem (database or broker), each
+/// live state paired with its own staleness window.
+#[derive(Clone, Copy, Default)]
+pub(super) struct SubsystemSources<'a> {
+    /// The live series: the Alumet workload.
+    pub(super) live: Option<&'a DbEnergyState>,
+    pub(super) live_staleness_ms: u64,
+    /// Declared cluster fallback, used only while the live series is
+    /// stale: a reading always outranks a declaration.
+    pub(super) declared: Option<&'a score::broker_static::StaticBrokerState>,
+}
+
 /// Lifetime-bound bundle of energy/intensity scraper state used to build
 /// the per-tick `CarbonContext`. Borrowed by `enqueue_for_analysis`.
 pub(super) struct EnergySources<'a> {
     pub(super) base_carbon_ctx: Arc<score::carbon::CarbonContext>,
     pub(super) alumet_state: Option<&'a AlumetState>,
-    pub(super) alumet_db_state: Option<&'a DbEnergyState>,
-    pub(super) alumet_broker_state: Option<&'a DbEnergyState>,
-    /// Declared cluster fallback, used only while the Alumet broker
-    /// scraper is stale: a measurement always outranks a declaration.
-    pub(super) static_broker: Option<(
-        &'a score::broker_static::StaticBrokerConfig,
-        &'a score::broker_static::StaticBrokerState,
-    )>,
+    pub(super) database: SubsystemSources<'a>,
+    pub(super) broker: SubsystemSources<'a>,
     pub(super) alumet_staleness_ms: u64,
     pub(super) scaphandre_state: Option<&'a ScaphandreState>,
     pub(super) scaphandre_staleness_ms: u64,
@@ -1191,9 +1198,8 @@ fn build_tick_ctx<'s>(
     let base = &*sources.base_carbon_ctx;
     let EnergySources {
         alumet_state,
-        alumet_db_state,
-        alumet_broker_state,
-        static_broker,
+        database,
+        broker,
         alumet_staleness_ms,
         scaphandre_state,
         scaphandre_staleness_ms,
@@ -1227,16 +1233,11 @@ fn build_tick_ctx<'s>(
         .map(|s| s.snapshot(now, alumet_staleness_ms))
         .unwrap_or_default();
     let realtime_snap = realtime_snapshot(sources, now);
-    // Database energy accumulated since the previous scored batch.
+    // Host energy accumulated since the previous scored batch.
     // Consuming here (once per built batch) keeps shed batches from
     // losing energy: they never build a context.
-    let db_window_kwh = alumet_db_state.and_then(|db| db.take_window_kwh(now, alumet_staleness_ms));
-    let (measured_broker_kwh, declared_broker_kwh) = take_broker_energy(
-        alumet_broker_state,
-        static_broker.map(|(_, state)| state),
-        now,
-        alumet_staleness_ms,
-    );
+    let database_kwh = take_host_energy(&database, now);
+    let broker_kwh = take_host_energy(&broker, now);
 
     // Fast path: with nothing fresh this tick, borrow base instead of cloning.
     if cloud_snap.is_empty()
@@ -1245,9 +1246,8 @@ fn build_tick_ctx<'s>(
         && scaph_snap.is_empty()
         && alumet_snap.is_empty()
         && realtime_snap.is_empty()
-        && db_window_kwh.is_none()
-        && measured_broker_kwh.is_none()
-        && declared_broker_kwh.is_none()
+        && database_kwh == (None, None)
+        && broker_kwh == (None, None)
     {
         return std::borrow::Cow::Borrowed(base);
     }
@@ -1285,48 +1285,58 @@ fn build_tick_ctx<'s>(
     if !realtime_snap.is_empty() {
         ctx.real_time_intensity = Some(realtime_snap);
     }
-    if let (Some(kwh), Some(db)) = (db_window_kwh, ctx.db_energy.as_mut()) {
-        db.window_kwh = kwh;
+    if let Some(db) = ctx.db_energy.as_mut() {
+        let (live, declared) = database_kwh;
+        patch_host_energy(db, live, declared, Subsystem::Database.declared_tag());
     }
     if let Some(broker) = ctx.broker_energy.as_mut() {
-        patch_broker_energy(
-            broker,
-            measured_broker_kwh,
-            declared_broker_kwh.zip(static_broker.map(|(cfg, _)| cfg)),
-        );
+        let (live, declared) = broker_kwh;
+        patch_host_energy(broker, live, declared, Subsystem::Broker.declared_tag());
     }
 
     std::borrow::Cow::Owned(ctx)
 }
 
-/// Resolve the two broker energy sources for one tick, measured first.
+/// The live and declared energy of one subsystem for one tick, live
+/// first. A subsystem with no source yields `(None, None)`.
+fn take_host_energy(sources: &SubsystemSources<'_>, now: u64) -> (Option<f64>, Option<f64>) {
+    take_broker_energy(
+        sources.live,
+        sources.declared,
+        now,
+        sources.live_staleness_ms,
+    )
+}
+
+/// Resolve the two host energy sources of a subsystem (database or
+/// broker) for one tick, live first.
 ///
 /// The arbitration rules and why each is needed are in
 /// `docs/design/05-GREENOPS-AND-CARBON.md`, "Broker energy attribution".
 /// They are not obvious, so change this against that section, not
 /// against intuition.
 fn take_broker_energy(
-    alumet_state: Option<&DbEnergyState>,
+    live: Option<&DbEnergyState>,
     declared: Option<&score::broker_static::StaticBrokerState>,
     now: u64,
-    alumet_staleness_ms: u64,
+    live_staleness_ms: u64,
 ) -> (Option<f64>, Option<f64>) {
-    // The series, not the endpoint: a scrape answering without the broker
-    // label measures nothing.
+    // The series, not the endpoint: a scrape answering without the
+    // workload label measures nothing.
     let measured_owns_the_timeline =
-        alumet_state.is_some_and(|b| b.has_recent_sample(now, alumet_staleness_ms));
+        live.is_some_and(|b| b.has_recent_sample(now, live_staleness_ms));
     if !measured_owns_the_timeline {
-        return take_broker_energy_stale(alumet_state, declared, now, alumet_staleness_ms);
+        return take_broker_energy_stale(live, declared, now, live_staleness_ms);
     }
     if declared.is_some_and(score::broker_static::StaticBrokerState::clear_outage_billed)
-        && let Some(state) = alumet_state
+        && let Some(state) = live
     {
         // Drop the recovery delta: it reaches back over wall clock the
         // declaration billed. The stale branch above drops for the same
         // reason, so both sites are gated on the same marker.
         state.discard_pending();
     }
-    let measured = alumet_state.and_then(|b| b.take_window_kwh(now, alumet_staleness_ms));
+    let measured = live.and_then(|b| b.take_window_kwh(now, live_staleness_ms));
     // Advance the declared marker without publishing it, so a later
     // fallback bills only time the measurement missed.
     if let Some(state) = declared {
@@ -1339,10 +1349,10 @@ fn take_broker_energy(
 /// the declaration may bill, unless the series banked joules while it was
 /// still live. Same arbitration section as the caller.
 fn take_broker_energy_stale(
-    alumet_state: Option<&DbEnergyState>,
+    live: Option<&DbEnergyState>,
     declared: Option<&score::broker_static::StaticBrokerState>,
     now: u64,
-    alumet_staleness_ms: u64,
+    live_staleness_ms: u64,
 ) -> (Option<f64>, Option<f64>) {
     // Read, never consume: a sub-second stale tick bills nothing (see
     // MIN_BILLABLE_MS) and would otherwise erase the marker before the
@@ -1350,11 +1360,10 @@ fn take_broker_energy_stale(
     if declared.is_some_and(score::broker_static::StaticBrokerState::outage_billed) {
         // The declaration already billed this stretch, so whatever the
         // series banked since covers time someone else paid for.
-        if let Some(state) = alumet_state {
+        if let Some(state) = live {
             state.discard_pending();
         }
-    } else if let Some(kwh) = alumet_state.and_then(|b| b.take_window_kwh(now, alumet_staleness_ms))
-    {
+    } else if let Some(kwh) = live.and_then(|b| b.take_window_kwh(now, live_staleness_ms)) {
         // Joules banked while the series was live are real, and nothing
         // else billed that stretch, so the declared marker may advance
         // over it. A label never seen banks nothing, so a typo still
@@ -1373,20 +1382,22 @@ fn take_broker_energy_stale(
     (None, declared_kwh)
 }
 
-/// The tag and region follow the source that filled the window, so a
-/// fallback tick is never published as a measurement.
-fn patch_broker_energy(
-    broker: &mut score::carbon::DbEnergyContext,
-    measured_kwh: Option<f64>,
-    declared: Option<(f64, &score::broker_static::StaticBrokerConfig)>,
+/// The tag follows the source that filled the window, so a fallback tick
+/// is never published as a reading: a live reading keeps the base tag
+/// (`alumet_rapl`, `cloud_specpower`), a declared one takes
+/// `declared_tag`. The region is the subsystem's either way and is never
+/// touched.
+fn patch_host_energy(
+    host: &mut score::carbon::DbEnergyContext,
+    live_kwh: Option<f64>,
+    declared_kwh: Option<f64>,
+    declared_tag: &'static str,
 ) {
-    if let Some(kwh) = measured_kwh {
-        broker.window_kwh = kwh;
-        broker.model = score::carbon::CO2_MODEL_ALUMET;
-    } else if let Some((kwh, cfg)) = declared {
-        broker.window_kwh = kwh;
-        broker.model = crate::report::BROKER_WASTE_MODEL_SPECPOWER;
-        broker.region.clone_from(&cfg.region);
+    if let Some(kwh) = live_kwh {
+        host.window_kwh = kwh;
+    } else if let Some(kwh) = declared_kwh {
+        host.window_kwh = kwh;
+        host.model = declared_tag;
     }
 }
 
