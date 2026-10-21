@@ -658,3 +658,25 @@ v0.31.3	2ce2f95	2026-10-18	PASS
 # ci-e2e-* and energy families. The release changes no code outside the
 # tests.
 v0.31.4	164bf0f	2026-10-19	PASS
+# v0.32.0, 2026-10-21. Targeted pass on the final release tree. Daemon image
+# perf-sentinel:0.32.0-81beb345 built from
+# feat/disclose-specpower-auto-total-requests (database and broker host
+# energy in the totals, one count per energy source across services, the
+# managed instance resolver, the grid operator feeds, the cumulative energy
+# and carbon counters). Self-contained: alumet-db-waste, broker-messaging-waste,
+# alumet-conformance, config-fragments, archive-integrity-chain, disclose,
+# disclose-temporal, disclose-archive-family-baseline, esrs-e1-crosswalk,
+# rgesn-crosswalk, verify-hash-fail-closed, non-sql-datastore-metering,
+# batch-otlp-file and appsec-hardening, all green after the lab moved its
+# scenarios to the in-totals semantics, the placement key and a disclose
+# period clear of the archive start. On the cluster: validate-findings 12/12,
+# multiformat-input, chart-prometheusrule-pdb, grafana-dashboard (lab copy of
+# the dashboard resynced with the example), query-monitor-api,
+# measured-energy-chain, scaphandre-mock-validation, hybrid-daemon-batch,
+# ci-shift-left and output-formats-coverage, all green. archive-window-drops
+# fails, and fails the same way on the published 0.31.4 binary: a lab-side
+# issue predating this release, not a regression. The lab ran at 96fd3cd on a
+# cluster rebuilt from scratch, with a local, uncommitted image pin in the
+# daemon manifest. Not run: the hub-*, limit-*, failure-mode-*, template-*
+# and ci-e2e-* families, pg-stat, mysql-stat and sql-backtick-redaction.
+v0.32.0	96fd3cd	2026-10-21	PASS
