@@ -530,7 +530,108 @@ pub(crate) fn unlisted_shared_host_warnings(green: &GreenConfig) -> Vec<String> 
         .collect()
 }
 
+/// Rules A1/BA1 and A2/BA2: an Alumet database or broker workload reads
+/// hosts that no node-level application reading already covers.
+fn validate_alumet_workload_scope(subsystem: Subsystem, green: &GreenConfig) -> Result<(), String> {
+    let Some(alumet) = green
+        .alumet
+        .as_ref()
+        .filter(|_| green.alumet_host(subsystem).is_some())
+    else {
+        return Ok(());
+    };
+    let (section, noun) = (subsystem.alumet_section(), subsystem.noun());
+    if alumet.label_key == "domain" && !alumet.service_mappings.is_empty() {
+        return Err(format!(
+            "{section} cannot sit next to [green.alumet] service_mappings under label_key = \
+             'domain': a RAPL domain covers a whole node, so the {noun} and the services on \
+             it would count the same joules. Measure per cgroup with another label_key, or \
+             drop one of the two"
+        ));
+    }
+    if green.static_hosts(subsystem).is_some() {
+        return Ok(());
+    }
+    let backend = if green
+        .cloud_energy
+        .as_ref()
+        .is_some_and(|cfg| !cfg.services.is_empty())
+    {
+        "[green.cloud.services]"
+    } else if green
+        .redfish
+        .as_ref()
+        .is_some_and(|cfg| !cfg.service_mappings.is_empty())
+    {
+        "[green.redfish] service_mappings"
+    } else {
+        return Ok(());
+    };
+    Err(format!(
+        "{section} sits next to {backend} without {static_section}: if the {noun} runs on \
+         hosts {backend} reads, remove {section}, its energy is already in their readings. \
+         If it runs on separate hosts, add {static_section} with placement = 'dedicated'",
+        static_section = subsystem.section()
+    ))
+}
+
+/// The database and broker sources configured, as their section names.
+fn host_source_sections(green: &GreenConfig) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for subsystem in [Subsystem::Database, Subsystem::Broker] {
+        if green.static_hosts(subsystem).is_some() {
+            out.push(subsystem.section());
+        }
+        if green.alumet_host(subsystem).is_some() {
+            out.push(subsystem.alumet_section());
+        }
+    }
+    out
+}
+
+/// Rules W1 and W3, once a database or broker source is configured: an
+/// unfiltered provider default CPU query reads the first series of a
+/// fleet, possibly that host, and calibrated readings may include it.
+pub(crate) fn host_source_warnings(green: &GreenConfig) -> Vec<String> {
+    let sources = host_source_sections(green);
+    if sources.is_empty() {
+        return Vec::new();
+    }
+    let sources = sources.join(", ");
+    let mut out = Vec::new();
+    if let Some(cloud) = green.cloud_energy.as_ref() {
+        for (query, services) in cloud.cpu_query_groups() {
+            if DEFAULT_CPU_QUERIES.contains(&query.as_str()) {
+                out.push(format!(
+                    "[green.cloud.services] {} read the unfiltered provider default CPU query \
+                     '{query}', which returns the first series of the fleet, possibly a host \
+                     declared in {sources}. Give them a cpu_query filtered to their nodes",
+                    services.join(", ")
+                ));
+            }
+        }
+    }
+    if green.calibration_file.is_some() {
+        out.push(format!(
+            "[green] calibration_file is set next to {sources}: the calibrated readings must \
+             exclude those hosts, whose energy is reported on its own, or it counts twice"
+        ));
+    }
+    out
+}
+
 impl Config {
+    fn validate_alumet_workload_scopes(&self) -> Result<(), String> {
+        validate_alumet_workload_scope(Subsystem::Database, &self.green)?;
+        validate_alumet_workload_scope(Subsystem::Broker, &self.green)
+    }
+
+    fn warn_host_sources(&self) {
+        for message in host_source_warnings(&self.green) {
+            tracing::warn!("{message}");
+        }
+    }
+
     /// Rules D2 to D8/D9 (database), B2 to B8/B9 (broker) for one
     /// subsystem's declared hosts.
     fn validate_static_hosts(&self, subsystem: Subsystem) -> Result<(), String> {
@@ -630,6 +731,7 @@ impl Config {
         if let Some(cfg) = &self.green.alumet {
             Self::validate_alumet(cfg)?;
         }
+        self.validate_alumet_workload_scopes()?;
         if let Some(cfg) = &self.green.redfish {
             Self::validate_redfish(cfg)?;
         }
@@ -640,6 +742,7 @@ impl Config {
         self.validate_static_hosts(Subsystem::Broker)?;
         self.validate_distinct_host_queries()?;
         self.warn_unlisted_shared_hosts();
+        self.warn_host_sources();
         self.validate_hourly_profiles_file()?;
         if let Some(cfg) = &self.green.electricity_maps {
             Self::validate_electricity_maps(cfg)?;

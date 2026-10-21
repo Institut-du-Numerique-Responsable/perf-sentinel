@@ -4526,10 +4526,7 @@ fn database_and_broker_hosts_need_their_own_cpu_query() {
 
 #[test]
 fn shared_with_rejections_name_their_rule() {
-    let redfish = "\n[green.redfish.endpoints.rack1]\n\
-                   url = \"https://bmc.local/redfish/v1/Chassis/1/Power\"\n\
-                   schema = \"legacy_power\"\n\n[green.redfish.service_mappings]\n\
-                   orders = \"rack1\"\n";
+    let redfish = REDFISH_ORDERS;
     let alumet_domain = "\n[green.alumet]\nendpoint = \"http://localhost:9091/metrics\"\n\
                          metric_name = \"rapl_consumed_energy_alumet\"\nlabel_key = \"domain\"\n\n\
                          [green.alumet.service_mappings]\nbilling = \"package-0\"\n";
@@ -4649,6 +4646,133 @@ fn shared_host_with_an_empty_shared_with_warns_and_loads() {
             Vec::<String>::new()
         );
     }
+}
+
+const REDFISH_ORDERS: &str = "\n[green.redfish.endpoints.rack1]\n\
+                              url = \"https://bmc.local/redfish/v1/Chassis/1/Power\"\n\
+                              schema = \"legacy_power\"\n\n[green.redfish.service_mappings]\n\
+                              orders = \"rack1\"\n";
+
+#[test]
+fn alumet_workload_scope_rejections_name_their_rule() {
+    for subsystem in SUBSYSTEMS {
+        let section = subsystem.alumet_section();
+        let domain = alumet_workload(subsystem)
+            .replace("label_key = \"name\"", "label_key = \"domain\"")
+            .replace(
+                &format!("\n{section}"),
+                &format!("\n[green.alumet.service_mappings]\norders = \"package-0\"\n\n{section}"),
+            );
+        let cases = [
+            (
+                format!("[green]\ndefault_region = \"eu-west-3\"\n{domain}"),
+                "cannot sit next to [green.alumet] service_mappings under label_key = 'domain'"
+                    .to_string(),
+            ),
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{}",
+                    alumet_workload(subsystem)
+                ),
+                format!(
+                    "sits next to [green.cloud.services] without {}",
+                    subsystem.section()
+                ),
+            ),
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{REDFISH_ORDERS}\n{}",
+                    alumet_workload(subsystem)
+                ),
+                format!(
+                    "sits next to [green.redfish] service_mappings without {}",
+                    subsystem.section()
+                ),
+            ),
+        ];
+        for (toml, expected) in cases {
+            let err = load_from_str(&toml)
+                .expect_err("the Alumet workload must be rejected")
+                .to_string();
+            assert!(err.contains(section), "{toml}\n=> {err}");
+            assert!(err.contains(&expected), "{toml}\n=> {err}");
+        }
+    }
+}
+
+#[test]
+fn alumet_workload_on_hosts_of_its_own_loads() {
+    let kepler = "\n[green.kepler]\nendpoint = \"http://kepler:9102/metrics\"\n\n\
+                  [green.kepler.service_mappings]\norders = \"orders-pod\"\n";
+    for subsystem in SUBSYSTEMS {
+        let workload = alumet_workload(subsystem);
+        let dedicated = format!("{}\nplacement = \"dedicated\"\n", subsystem.section());
+        for toml in [
+            format!("[green]\ndefault_region = \"eu-west-3\"\n{kepler}\n{workload}"),
+            format!(
+                "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{workload}\n{dedicated}"
+            ),
+            format!(
+                "[green]\ndefault_region = \"eu-west-3\"\n{REDFISH_ORDERS}\n{workload}\n{dedicated}"
+            ),
+        ] {
+            load_from_str(&toml).unwrap_or_else(|err| panic!("{toml}\n=> {err}"));
+        }
+    }
+}
+
+#[test]
+fn host_sources_warn_on_default_queries_and_calibration() {
+    for subsystem in SUBSYSTEMS {
+        let toml = format!(
+            "[green]\ndefault_region = \"eu-west-3\"\n\
+             calibration_file = \"missing-calibration.toml\"\n{CLOUD_NODES}\n{}\n\
+             placement = \"dedicated\"\nnodes = 2\ninstance_type = \"m5.large\"\n",
+            subsystem.section()
+        );
+        let cfg = load_from_str(&toml).expect("W1 and W3 warn, they do not reject");
+        let warnings = validate::green::host_source_warnings(&cfg.green);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[0].contains(
+                "[green.cloud.services] api, search read the unfiltered provider default CPU \
+                 query 'aws_ec2_cpuutilization_average'"
+            ),
+            "{}",
+            warnings[0]
+        );
+        assert!(warnings[0].contains(subsystem.section()), "{}", warnings[0]);
+        assert!(
+            warnings[1].contains(&format!(
+                "[green] calibration_file is set next to {}",
+                subsystem.section()
+            )),
+            "{}",
+            warnings[1]
+        );
+        let alumet = format!(
+            "[green]\ndefault_region = \"eu-west-3\"\n\
+             calibration_file = \"missing-calibration.toml\"\n{}",
+            alumet_workload(subsystem)
+        );
+        let warnings =
+            validate::green::host_source_warnings(&load_from_str(&alumet).expect("loads").green);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains(subsystem.alumet_section()),
+            "{}",
+            warnings[0]
+        );
+    }
+    // No database or broker source: nothing to count twice.
+    let alone = load_from_str(&format!(
+        "[green]\ncalibration_file = \"missing-calibration.toml\"\n{CLOUD_NODES}"
+    ))
+    .expect("loads");
+    assert_eq!(
+        validate::green::host_source_warnings(&alone.green),
+        Vec::<String>::new()
+    );
 }
 
 #[test]

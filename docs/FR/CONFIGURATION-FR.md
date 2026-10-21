@@ -473,6 +473,8 @@ region = "eu-west-3"           # sinon [green] default_region, l'un des deux est
 
 `label_value` est obligatoire, apparié exactement comme une valeur de `service_mappings`. L'énergie de l'hôte de la base a besoin d'une région pour être convertie en gCO2, avec les mêmes identifiants de région que `[green.service_regions]` : ce `region`, celui de `[green.database_static]`, ou `[green] default_region`. Sans aucun d'eux, la config ne se charge pas, et quand cette section et `[green.database_static]` déclarent toutes deux une région, elles doivent concorder. Une base par configuration, déclarez le cgroup qui sert votre trafic SQL.
 
+**Périmètre.** La charge doit tourner sur des hôtes qu'aucune lecture applicative au niveau du nœud ne couvre. Sous `label_key = "domain"` avec des `service_mappings` non vides, la section est refusée : un domaine RAPL couvre un nœud entier, la base et les services qui y tournent compteraient donc les mêmes joules. Mesurez par cgroup avec un autre `label_key`, ou retirez l'un des deux. À côté de `[green.cloud.services]` ou de `[green.redfish] service_mappings` non vides, la section exige aussi `[green.database_static]`. Si la base tourne sur des hôtes que ces backends lisent, retirez cette section, son énergie est déjà dans leurs lectures. Si elle tourne sur des hôtes à part, ajoutez `[green.database_static]` avec `placement = "dedicated"`. Un service cloud laissé sur la requête CPU par défaut de son fournisseur émet un avertissement au chargement, car cette requête renvoie la première série de la flotte, qui peut être l'hôte de la base.
+
 ##### `[green.alumet.broker]` (optionnel)
 
 Le jumeau messaging de la section ci-dessus. Déclare un broker de messages mesuré par Alumet : un broker n'émet pas de spans propres non plus, donc son énergie de fenêtre est multipliée par le ratio de gaspillage messaging (`avoidable_messaging_io_ops / total_messaging_io_ops`) et rapportée en `green_summary.messaging_waste`, une énergie d'hôte tenue à côté des totaux et publiée dans la divulgation en `aggregate.messaging_waste`.
@@ -483,7 +485,7 @@ label_value = "kafka-pod"      # valeur portée par label_key pour le cgroup du 
 region = "eu-west-3"           # sinon [green] default_region, l'un des deux est requis
 ```
 
-L'énergie de l'hôte du broker a besoin d'une région pour être convertie en gCO2 : ce `region`, celui de `[green.broker_static]`, ou `[green] default_region`. Sans aucun d'eux, la config ne se charge pas, et quand cette section et `[green.broker_static]` déclarent toutes deux une région, elles doivent concorder.
+L'énergie de l'hôte du broker a besoin d'une région pour être convertie en gCO2 : ce `region`, celui de `[green.broker_static]`, ou `[green] default_region`. Sans aucun d'eux, la config ne se charge pas, et quand cette section et `[green.broker_static]` déclarent toutes deux une région, elles doivent concorder. Les règles de périmètre de `[green.alumet.database]` s'appliquent aussi, avec `[green.broker_static]` comme section qui place le broker sur des hôtes à part.
 
 Un même cgroup ne peut pas alimenter deux chiffres : un `label_value` qui apparaît aussi dans `service_mappings`, ou qui correspond à la déclaration de base de données, est rejeté au chargement de la config. Exige un agent sur l'hôte du broker, donc inapplicable à un broker managé. Pour un cluster provisionné, voir `[green.broker_static]`.
 
@@ -740,7 +742,7 @@ Perf Sentinel est un logiciel AGPL-3.0, et les divulgations qu'il produit sont p
 
 #### `[green] calibration_file` (optionnel)
 
-Chemin vers un fichier TOML de calibration généré par `perf-sentinel calibrate`. Quand il est présent, les facteurs de calibration par service sont chargés avec la configuration et multiplient l'énergie du modèle proxy par opération. Sans effet sur l'énergie de n'importe quel backend mesuré.
+Chemin vers un fichier TOML de calibration généré par `perf-sentinel calibrate`. Quand il est présent, les facteurs de calibration par service sont chargés avec la configuration et multiplient l'énergie du modèle proxy par opération. Sans effet sur l'énergie de n'importe quel backend mesuré. À côté d'une source de base ou de broker (`[green.database_static]`, `[green.broker_static]`, `[green.alumet.database]` ou `[green.alumet.broker]`), le chargement émet un avertissement : les lectures fournies à `calibrate` doivent exclure ces hôtes, dont l'énergie est publiée à part, sinon elle compte deux fois.
 
 ```toml
 [green]
