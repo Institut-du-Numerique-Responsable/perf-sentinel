@@ -356,42 +356,13 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         None => None,
     };
 
-    // Inject the database declaration here (not in `carbon_context()`):
-    // only the daemon can deliver measured window energy, batch keeps
-    // `db_energy: None` and falls back to the estimated figure.
+    // Inject the host contexts here (not in `carbon_context()`): only the
+    // daemon can deliver measured or declared window energy, batch keeps
+    // both `None` and falls back to the estimated figures.
     let base_carbon_ctx = Arc::new({
         let mut ctx = config.carbon_context();
-        ctx.db_energy = config
-            .green
-            .alumet
-            .as_ref()
-            .and_then(|a| a.database.as_ref())
-            .map(|_| crate::score::carbon::DbEnergyContext {
-                window_kwh: 0.0,
-                region: config
-                    .green
-                    .host_region(Subsystem::Database)
-                    .map(str::to_string),
-                model: crate::score::carbon::CO2_MODEL_ALUMET,
-            });
-        ctx.broker_energy = config
-            .green
-            .alumet
-            .as_ref()
-            .and_then(|a| a.broker.as_ref())
-            .map(|_| crate::score::carbon::CO2_MODEL_ALUMET)
-            // A shared or ceiling-less declaration has no source to bill, so
-            // it builds no context and the estimated figure stays.
-            .or_else(|| {
-                broker_ceiling
-                    .as_ref()
-                    .map(|_| crate::report::BROKER_WASTE_MODEL_SPECPOWER)
-            })
-            .map(|model| crate::score::carbon::DbEnergyContext {
-                window_kwh: 0.0,
-                region: broker_region.map(str::to_string),
-                model,
-            });
+        ctx.db_energy = host_energy_context(&config, Subsystem::Database);
+        ctx.broker_energy = host_energy_context(&config, Subsystem::Broker);
         ctx
     });
     let detect_config = DetectConfig::from(&config);
@@ -508,6 +479,35 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     loop_result
 }
 
+/// The host context of one subsystem, built only when it has a source the
+/// daemon bills: its Alumet workload, or for the broker a dedicated
+/// declaration with a `SPECpower` ceiling. A shared or ceiling-less
+/// declaration builds none, so the estimated figure stays. `model` is the
+/// base tag, which a declared tick replaces, and `region` the
+/// subsystem's effective region.
+fn host_energy_context(
+    config: &Config,
+    subsystem: Subsystem,
+) -> Option<crate::score::carbon::DbEnergyContext> {
+    let green = &config.green;
+    let declared = green.static_hosts(subsystem);
+    let model = if green.alumet_host(subsystem).is_some() {
+        crate::score::carbon::CO2_MODEL_ALUMET
+    } else if subsystem == Subsystem::Broker
+        && declared.and_then(StaticHostsConfig::ceiling).is_some()
+    {
+        crate::report::BROKER_WASTE_MODEL_SPECPOWER
+    } else {
+        return None;
+    };
+    Some(crate::score::carbon::DbEnergyContext {
+        window_kwh: 0.0,
+        region: green.host_region(subsystem).map(str::to_string),
+        model,
+        placement: declared.map(|cfg| cfg.placement),
+    })
+}
+
 /// The incident archive writer, when `[daemon.incidents]` is enabled and
 /// names a path. Opened before the listeners so a bad path fails the
 /// daemon rather than the first incident, and drained after the loop like
@@ -615,7 +615,34 @@ fn validate_official_reporting(config: &Config) -> Result<(), DaemonError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::score::host_static::HostPlacement;
     use core::assert_matches;
+
+    #[test]
+    fn host_context_exists_only_for_a_billable_source() {
+        let load = |toml: &str| crate::config::load_from_str(toml).expect("config loads");
+        let ceiling = load(
+            "[green]\ndefault_region = \"eu-west-3\"\n[green.broker_static]\n\
+             placement = \"dedicated\"\nnodes = 3\ninstance_type = \"m5.large\"\n",
+        );
+        let ctx = host_energy_context(&ceiling, Subsystem::Broker).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::report::BROKER_WASTE_MODEL_SPECPOWER);
+        assert_eq!(ctx.placement, Some(HostPlacement::Dedicated));
+        assert_eq!(ctx.region.as_deref(), Some("eu-west-3"));
+        assert!(host_energy_context(&ceiling, Subsystem::Database).is_none());
+
+        let alumet = load(
+            "[green]\ndefault_region = \"eu-west-3\"\n[green.alumet]\n\
+             endpoint = \"http://localhost:9091/metrics\"\n\
+             metric_name = \"attributed_energy_cpu_alumet\"\nlabel_key = \"name\"\n\
+             [green.alumet.database]\nlabel_value = \"pg-pod\"\n",
+        );
+        let ctx = host_energy_context(&alumet, Subsystem::Database).expect("Alumet bills");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_ALUMET);
+        assert_eq!(ctx.placement, None, "no declared-hosts section");
+        assert!(host_energy_context(&alumet, Subsystem::Broker).is_none());
+        assert!(host_energy_context(&Config::default(), Subsystem::Broker).is_none());
+    }
 
     #[tokio::test]
     async fn daemon_run_rejects_invalid_listen_address() {

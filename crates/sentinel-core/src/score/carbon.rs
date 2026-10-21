@@ -137,6 +137,9 @@ pub fn co2_model_label(tag: &str) -> Option<&'static str> {
         CO2_MODEL_CLOUD_SPECPOWER => "Cloud SPECpower table",
         CO2_MODEL_EMAPS => "Electricity Maps, live grid intensity",
         CO2_MODEL_GRID_OPERATOR => "Grid operator open data, live grid intensity",
+        // A declared broker figure inside the totals lists its tag among
+        // the energy sources.
+        crate::report::BROKER_WASTE_MODEL_SPECPOWER => "Declared broker hosts, SPECpower ceiling",
         _ => return None,
     })
 }
@@ -161,6 +164,17 @@ pub const METHODOLOGY_SCI_NUMERATOR_TRANSPORT: &str = "sci_v1_numerator+transpor
 /// Methodology tag: avoidable CO2 via `operational * (avoidable_ops / accounted_ops)`.
 /// Region-blind, excludes embodied.
 pub const METHODOLOGY_OPERATIONAL_RATIO: &str = "sci_v1_operational_ratio";
+
+/// Methodology tag: [`METHODOLOGY_SCI_NUMERATOR_TRANSPORT`] with the
+/// database and broker host terms `G_db + G_msg` added. Applies on every
+/// window scored with a host source configured, zero included, like the
+/// transport tag.
+pub const METHODOLOGY_SCI_NUMERATOR_TRANSPORT_HOSTS: &str = "sci_v1_numerator+transport+hosts";
+
+/// Methodology tag: [`METHODOLOGY_OPERATIONAL_RATIO`] plus each in-total
+/// host term times its own subsystem waste ratio. Same scope as
+/// [`METHODOLOGY_SCI_NUMERATOR_TRANSPORT_HOSTS`].
+pub const METHODOLOGY_OPERATIONAL_RATIO_HOSTS: &str = "sci_v1_operational_ratio+hosts";
 
 /// Methodology tag: SCI v1.0 per-R intensity `((E x I) + M) / R`, R = 1 trace.
 /// The SCI score proper (an intensity), distinct from the numerator footprint.
@@ -281,6 +295,18 @@ impl CarbonEstimate {
             high: mid * CO2_HIGH_FACTOR,
             model: model.to_string(),
             methodology: methodology.to_string(),
+        }
+    }
+
+    /// Same model and methodology at a new midpoint, with the bracket
+    /// rebuilt from the same factors.
+    pub(crate) fn rescaled(&self, mid: f64) -> Self {
+        Self {
+            low: mid * CO2_LOW_FACTOR,
+            mid,
+            high: mid * CO2_HIGH_FACTOR,
+            model: self.model.clone(),
+            methodology: self.methodology.clone(),
         }
     }
 
@@ -555,6 +581,9 @@ pub struct DbEnergyContext {
     /// Provenance of `window_kwh`, carried here because only the caller
     /// that fills it knows whether it was measured or declared.
     pub model: &'static str,
+    /// Placement from the subsystem's declared-hosts section, `None`
+    /// without one (an Alumet workload alone).
+    pub placement: Option<crate::score::host_static::HostPlacement>,
 }
 
 impl Default for DbEnergyContext {
@@ -565,6 +594,7 @@ impl Default for DbEnergyContext {
             // Weakest of the three tags: a caller that forgets to state its
             // provenance must not claim a measurement.
             model: crate::report::DB_WASTE_MODEL_ESTIMATED,
+            placement: None,
         }
     }
 }

@@ -1446,7 +1446,8 @@ fn emit_findings_and_update_metrics(
     // Window-scoped energy/carbon scalars for the Grafana Trends panels.
     // Per-service/region breakdown stays off /metrics (cardinality). The
     // totals are bounded and safe to expose as gauges.
-    let window_gco2: f64 = green_summary.regions.iter().map(|r| r.co2_gco2).sum();
+    // Regions plus the in-total host terms. Embodied and transport stay out.
+    let window_gco2 = green_summary.scored_carbon_gco2();
     metrics.energy_kwh.set(green_summary.energy_kwh);
     metrics.carbon_gco2.set(window_gco2);
     // inc_by panics on a negative value, and a NaN would poison the sum.
@@ -1618,18 +1619,30 @@ struct ProcessTracesCtx<'a> {
 /// batch-scoped truth. Only the live cell gets the TTL-bounded figures.
 async fn publish_live_summary(green_summary: &GreenSummary, ctx: &mut ProcessTracesCtx<'_>) {
     let now_ms = current_time_ms();
-    let restored = sticky_waste_figure(
+    let mut restored = sticky_waste_figure(
         green_summary.database_waste.as_ref(),
         ctx.db_waste_sticky,
         now_ms,
         ctx.waste_sticky_ttl_ms,
     );
-    let restored_msg = sticky_waste_figure(
+    let mut restored_msg = sticky_waste_figure(
         green_summary.messaging_waste.as_ref(),
         ctx.msg_waste_sticky,
         now_ms,
         ctx.waste_sticky_ttl_ms,
     );
+    // A copy restored from an earlier batch is not inside this batch's
+    // totals, so it must not claim to be.
+    if green_summary.database_waste.is_none()
+        && let Some(w) = restored.as_mut()
+    {
+        w.in_totals = false;
+    }
+    if green_summary.messaging_waste.is_none()
+        && let Some(w) = restored_msg.as_mut()
+    {
+        w.in_totals = false;
+    }
     let mut cell = ctx.green_summary_cell.write().await;
     cell.clone_from(green_summary);
     cell.database_waste = restored;

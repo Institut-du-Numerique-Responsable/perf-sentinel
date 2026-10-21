@@ -197,9 +197,10 @@ pub struct DisclosureDbWaste {
     pub canonical_waste_kwh: f64,
     /// Total carbon of the subsystem for the window, not just its waste.
     /// `None` when the window energy had no carbon conversion. On the
-    /// measured path this is host carbon reported beside the totals. On
-    /// the estimated path it is a share of the services' own carbon,
-    /// already inside the totals, so never add it to them.
+    /// measured path this is host carbon, inside the totals when
+    /// `in_totals` is set and beside them otherwise. On the estimated
+    /// path it is a share of the services' own carbon, already inside
+    /// the totals, so never add it to them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_gco2: Option<f64>,
     /// Window `energy_gco2` scaled by the canonical SQL ratio. `None`
@@ -372,10 +373,13 @@ pub struct GreenSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scoring_config: Option<ScoringConfig>,
     /// Total energy consumed by the workload during the scoring window
-    /// in kWh, runtime-calibrated. Sum of per-service energy when
-    /// service-level measurement is available, falls back to the
-    /// operational proxy (`total_io_ops × ENERGY_PER_IO_OP_KWH`) when
-    /// not. `0.0` on pre-carbon-attribution baselines via `serde(default)`.
+    /// in kWh, runtime-calibrated: the sum of the per-service energy
+    /// (measured when service-level measurement is available, the
+    /// operational proxy `total_io_ops × ENERGY_PER_IO_OP_KWH` when not),
+    /// plus the database and broker host energy of the waste figures
+    /// flagged `in_totals`. [`GreenSummary::application_energy_kwh`] gives
+    /// the per-service part alone. `0.0` on pre-carbon-attribution
+    /// baselines via `serde(default)`.
     #[serde(default)]
     pub energy_kwh: f64,
     /// Energy model used to compute `energy_kwh`. One of
@@ -407,9 +411,10 @@ pub struct GreenSummary {
     /// Operational energy per service in kWh. Built at scoring time
     /// using the runtime-resolved energy entries (Scaphandre per-process
     /// RAPL when available, cloud `SPECpower` interpolation otherwise,
-    /// proxy fallback). Sum is approximately `energy_kwh` up to
-    /// floating-point rounding. Empty on pre-carbon-attribution
-    /// baselines.
+    /// proxy fallback). Holds no database or broker host energy, so its
+    /// sum is approximately `energy_kwh` minus the in-total host energy
+    /// ([`GreenSummary::application_energy_kwh`]) up to floating-point
+    /// rounding. Empty on pre-carbon-attribution baselines.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_service_energy_kwh: BTreeMap<String, f64>,
     /// Per-service region attribution snapshot at scoring time. Surfaces
@@ -448,8 +453,10 @@ pub struct GreenSummary {
     /// Database waste figure, on every run, in one of two forms that
     /// `model` names. Measured (`alumet_rapl`): the energy of the declared
     /// `[green.alumet.database]` cgroup when a reading landed (daemon),
-    /// host energy reported beside `energy_kwh`/`co2`, never summed into
-    /// them. Estimated (`estimated`): the application-side share of the
+    /// host energy counted inside `energy_kwh` and `co2.total` (as
+    /// `co2.database_gco2`) once its carbon converts, which `in_totals`
+    /// records. Without a carbon conversion it stays beside them.
+    /// Estimated (`estimated`): the application-side share of the
     /// window's SQL spans, the energy the span scoring gave the emitting
     /// services, already inside `energy_kwh`/`co2` and never added to
     /// them again. Published in the disclosure as the separate
@@ -457,11 +464,12 @@ pub struct GreenSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_waste: Option<DatabaseWaste>,
     /// Messaging twin of `database_waste`. Measured (`alumet_rapl`) or
-    /// declared (`broker_specpower`): broker host energy beside the
-    /// totals. Estimated: the application-side share of the window's
-    /// publish spans, already inside the totals. `None` when a declared
-    /// broker delivered no reading, or when the window has no publish
-    /// energy.
+    /// declared (`broker_specpower`): broker host energy inside the
+    /// totals (as `co2.messaging_gco2`) once its carbon converts, beside
+    /// them otherwise, `in_totals` says which. Estimated: the
+    /// application-side share of the window's publish spans, already
+    /// inside the totals. `None` when a declared broker delivered no
+    /// reading, or when the window has no publish energy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messaging_waste: Option<MessagingWaste>,
 }
@@ -478,10 +486,27 @@ pub const DB_WASTE_MODEL_ESTIMATED: &str = "estimated";
 /// which means a CPU scrape rather than a declaration.
 pub const BROKER_WASTE_MODEL_SPECPOWER: &str = "broker_specpower";
 
-/// Database window energy × the SQL-only waste ratio. Informational, a
-/// breakdown never added to the report totals: on the measured path the
-/// energy sits beside them, on the estimated path it is already a share
-/// of them.
+/// Where a database or broker waste figure sits against the report
+/// totals, for the text report, the monitor and the HTML dashboard
+/// (`wasteScope` mirrors it): host energy counted in them, the estimated
+/// application-side share already within them, or a host figure left
+/// outside (no carbon conversion, or a window archived before host
+/// energy entered the totals).
+#[must_use]
+pub fn waste_scope_label(model: &str, in_totals: bool) -> &'static str {
+    if in_totals {
+        "host energy, in the report totals"
+    } else if model == DB_WASTE_MODEL_ESTIMATED {
+        "application-side share, within the report totals"
+    } else {
+        "outside these totals"
+    }
+}
+
+/// Database window energy × the SQL-only waste ratio. On the measured
+/// path the host energy is inside the report totals when `in_totals` is
+/// set, beside them otherwise. On the estimated path it is already a
+/// share of them, never added again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseWaste {
     /// Window energy in kWh. Measured path: the database cgroup (CPU
@@ -525,8 +550,8 @@ pub struct DatabaseWaste {
 }
 
 /// Messaging avoidable energy for the window, the twin of
-/// [`DatabaseWaste`]. Informational, a breakdown never added to the
-/// report totals. Which way it errs depends on `model`, since the three
+/// [`DatabaseWaste`], inside the report totals under the same rule
+/// (`in_totals`). Which way it errs depends on `model`, since the three
 /// sources do not agree: `alumet_rapl` reads CPU only and so
 /// under-counts, `broker_specpower` bounds the declared vCPUs at full
 /// load without storage or network, `estimated` is the application-side

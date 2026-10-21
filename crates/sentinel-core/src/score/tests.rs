@@ -512,13 +512,17 @@ fn database_waste_multiplies_window_energy_by_sql_ratio() {
             // Stated, not defaulted: only the caller that fills the
             // window knows it was measured.
             model: CO2_MODEL_ALUMET,
+            placement: None,
         }),
         ..CarbonContext::default()
     };
 
     let (_, summary, _) = score_green(&[trace], vec![finding], Some(&ctx));
 
-    let db = summary.database_waste.expect("database waste emitted");
+    let db = summary
+        .database_waste
+        .clone()
+        .expect("database waste emitted");
     assert!((db.energy_kwh - 2.0).abs() < 1e-12);
     assert!((db.sql_waste_ratio - 5.0 / 6.0).abs() < 1e-12);
     assert!((db.waste_kwh - 2.0 * 5.0 / 6.0).abs() < 1e-12);
@@ -527,13 +531,14 @@ fn database_waste_multiplies_window_energy_by_sql_ratio() {
         db.model, "alumet_rapl",
         "measured path carries the RAPL tag"
     );
-    // No producer puts host energy in the totals yet.
-    assert!(!db.in_totals);
-    assert_eq!(db.placement, None);
     // eu-west-3 is a known region, so the carbon conversion must land.
     assert!(db.waste_gco2.expect("gco2 for a known region") > 0.0);
-    // Excluded from the totals: the report's energy stays proxy-based.
-    assert!(summary.energy_kwh < 1.0);
+    // Converted, so the host energy is inside the totals, next to the
+    // proxy-based application energy.
+    assert!(db.in_totals);
+    assert_eq!(db.placement, None);
+    assert!((summary.application_energy_kwh() - (summary.energy_kwh - 2.0)).abs() < 1e-12);
+    assert!(summary.application_energy_kwh() < 1.0);
 }
 
 #[test]
@@ -600,6 +605,7 @@ fn messaging_waste_measured_from_a_declared_broker() {
             window_kwh: 2.0,
             region: Some("eu-west-3".to_string()),
             model: CO2_MODEL_ALUMET,
+            placement: None,
         }),
         ..CarbonContext::default()
     };
@@ -627,6 +633,7 @@ fn messaging_waste_carries_the_declared_cluster_tag() {
             window_kwh: 1.0,
             region: None,
             model: crate::report::BROKER_WASTE_MODEL_SPECPOWER,
+            placement: None,
         }),
         ..CarbonContext::default()
     };
@@ -725,6 +732,209 @@ fn database_waste_estimated_carries_regional_gco2() {
     // The ratio-independent carbon base is present for the disclosure.
     assert!(db.energy_gco2.expect("energy gco2 base") > 0.0);
     assert_eq!(db.model, "estimated");
+}
+
+/// Six SQL spans with one N+1 (5 avoidable) and four publish spans with
+/// one N+1 (3 avoidable), all in one trace.
+fn host_totals_fixture() -> (Vec<Trace>, Vec<Finding>) {
+    let mut events: Vec<SpanEvent> = (1..=6)
+        .map(|i| {
+            make_sql_event(
+                "trace-1",
+                &format!("span-{i}"),
+                &format!("SELECT * FROM order_item WHERE order_id = {i}"),
+                &format!("2025-07-10T14:32:01.{:03}Z", i * 50),
+            )
+        })
+        .collect();
+    events.extend((1..=4).map(|i| {
+        let mut e = make_http_event(
+            "trace-1",
+            &format!("span-m{i}"),
+            "orders",
+            &format!("2025-07-10T14:32:02.{:03}Z", i * 50),
+        );
+        e.event_type = EventType::Messaging;
+        e.operation = "kafka".to_string();
+        e
+    }));
+    let mut sql = crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning);
+    sql.pattern.template = "SELECT * FROM order_item WHERE order_id = ?".to_string();
+    let mut publish =
+        crate::test_helpers::make_finding(FindingType::NPlusOneMessaging, Severity::Warning);
+    publish.pattern.template = "kafka orders".to_string();
+    publish.pattern.occurrences = 4;
+    (vec![make_trace(events)], vec![sql, publish])
+}
+
+fn host_ctx(
+    db: Option<(f64, &'static str)>,
+    broker: Option<(f64, &'static str)>,
+    region: &str,
+) -> CarbonContext {
+    let host = |(window_kwh, model): (f64, &'static str)| DbEnergyContext {
+        window_kwh,
+        region: Some(region.to_string()),
+        model,
+        placement: Some(crate::score::host_static::HostPlacement::Dedicated),
+    };
+    CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        db_energy: db.map(host),
+        broker_energy: broker.map(host),
+        ..CarbonContext::default()
+    }
+}
+
+fn score_with(ctx: &CarbonContext) -> GreenSummary {
+    let (traces, findings) = host_totals_fixture();
+    score_green(&traces, findings, Some(ctx)).1
+}
+
+fn assert_bracket(e: &carbon::CarbonEstimate) {
+    assert!((e.low - e.mid * 0.5).abs() < 1e-12, "{e:?}");
+    assert!((e.high - e.mid * 2.0).abs() < 1e-12, "{e:?}");
+}
+
+#[test]
+fn measured_hosts_enter_the_window_totals() {
+    let hosted = score_with(&host_ctx(
+        Some((2.0, CO2_MODEL_ALUMET)),
+        Some((1.0, CO2_MODEL_ALUMET)),
+        "eu-west-3",
+    ));
+    // Same window with no host source at all: the estimated path.
+    let bare = score_with(&CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        ..CarbonContext::default()
+    });
+
+    let db = hosted.database_waste.as_ref().unwrap();
+    let mw = hosted.messaging_waste.as_ref().unwrap();
+    assert!(db.in_totals && mw.in_totals);
+    assert_eq!(
+        db.placement,
+        Some(crate::score::host_static::HostPlacement::Dedicated)
+    );
+    let g_db = db.energy_gco2.unwrap();
+    let g_msg = mw.energy_gco2.unwrap();
+
+    let services: f64 = hosted.per_service_energy_kwh.values().sum();
+    assert!((hosted.energy_kwh - (services + 3.0)).abs() < 1e-12);
+    assert!((hosted.application_energy_kwh() - services).abs() < 1e-12);
+
+    let co2 = hosted.co2.as_ref().unwrap();
+    assert_eq!(co2.database_gco2, Some(g_db));
+    assert_eq!(co2.messaging_gco2, Some(g_msg));
+    let transport = co2.transport_gco2.unwrap_or(0.0);
+    let expected_total = co2.operational_gco2 + co2.embodied_gco2 + transport + g_db + g_msg;
+    assert!((co2.total.mid - expected_total).abs() < 1e-12);
+    assert_bracket(&co2.total);
+    let r_sql = 5.0 / 6.0;
+    let r_msg = 3.0 / 4.0;
+    let bare_co2 = bare.co2.as_ref().unwrap();
+    let expected_avoidable = bare_co2.avoidable.mid + g_db * r_sql + g_msg * r_msg;
+    assert!((co2.avoidable.mid - expected_avoidable).abs() < 1e-12);
+    assert_bracket(&co2.avoidable);
+    let sci = co2.sci_per_trace.as_ref().unwrap();
+    assert!((sci.mid - co2.total.mid).abs() < 1e-12, "one trace");
+    assert_bracket(sci);
+    assert_eq!(co2.total.methodology, "sci_v1_numerator+transport+hosts");
+    assert_eq!(co2.avoidable.methodology, "sci_v1_operational_ratio+hosts");
+    assert_eq!(sci.methodology, "sci_v1_intensity");
+
+    // Regions, operational carbon and the per-service maps stay
+    // application-only.
+    let regions: f64 = hosted.regions.iter().map(|r| r.co2_gco2).sum();
+    assert!((regions - co2.operational_gco2).abs() < 1e-12);
+    assert!((co2.operational_gco2 - bare_co2.operational_gco2).abs() < 1e-15);
+    assert_eq!(hosted.per_service_energy_kwh, bare.per_service_energy_kwh);
+    assert_eq!(
+        hosted.per_service_carbon_kgco2eq,
+        bare.per_service_carbon_kgco2eq
+    );
+    assert_eq!(hosted.per_service_region, bare.per_service_region);
+    assert!((hosted.scored_carbon_gco2() - (regions + g_db + g_msg)).abs() < 1e-12);
+}
+
+#[test]
+fn a_declared_broker_ceiling_enters_the_totals() {
+    let summary = score_with(&host_ctx(
+        None,
+        Some((1.0, crate::report::BROKER_WASTE_MODEL_SPECPOWER)),
+        "eu-west-3",
+    ));
+    let mw = summary
+        .messaging_in_totals()
+        .expect("declared figure in totals");
+    assert_eq!(mw.model, "broker_specpower");
+    let co2 = summary.co2.as_ref().unwrap();
+    assert_eq!(co2.messaging_gco2, mw.energy_gco2);
+    assert_eq!(co2.database_gco2, None);
+    // The database figure is the estimated share, never a host term.
+    assert!(!summary.database_waste.as_ref().unwrap().in_totals);
+    assert_eq!(co2.total.methodology, "sci_v1_numerator+transport+hosts");
+}
+
+#[test]
+fn a_host_region_without_intensity_stays_outside_the_totals() {
+    let summary = score_with(&host_ctx(Some((2.0, CO2_MODEL_ALUMET)), None, "nowhere-9"));
+    let db = summary.database_waste.as_ref().unwrap();
+    assert!(db.energy_gco2.is_none());
+    assert!(!db.in_totals, "energy and carbon perimeters must agree");
+    let services: f64 = summary.per_service_energy_kwh.values().sum();
+    assert!((summary.energy_kwh - services).abs() < 1e-12);
+    assert_eq!(summary.co2.as_ref().unwrap().database_gco2, None);
+}
+
+#[test]
+fn a_host_context_without_a_reading_tags_the_window_and_adds_nothing() {
+    let bare = score_with(&CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        ..CarbonContext::default()
+    });
+    let summary = score_with(&host_ctx(
+        Some((0.0, CO2_MODEL_ALUMET)),
+        Some((0.0, crate::report::BROKER_WASTE_MODEL_SPECPOWER)),
+        "eu-west-3",
+    ));
+    assert!(summary.database_waste.is_none());
+    assert!(summary.messaging_waste.is_none());
+    let (co2, bare_co2) = (summary.co2.unwrap(), bare.co2.unwrap());
+    assert_eq!(co2.total.methodology, "sci_v1_numerator+transport+hosts");
+    assert_eq!(co2.avoidable.methodology, "sci_v1_operational_ratio+hosts");
+    assert!((co2.total.mid - bare_co2.total.mid).abs() < 1e-15);
+    assert!((co2.avoidable.mid - bare_co2.avoidable.mid).abs() < 1e-15);
+    assert!((summary.energy_kwh - bare.energy_kwh).abs() < 1e-15);
+}
+
+#[test]
+fn the_estimated_path_keeps_its_totals_and_tags() {
+    let bare = score_with(&CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        ..CarbonContext::default()
+    });
+    let co2 = bare.co2.as_ref().unwrap();
+    assert_eq!(co2.total.methodology, "sci_v1_numerator+transport");
+    assert_eq!(co2.avoidable.methodology, "sci_v1_operational_ratio");
+    assert_eq!(co2.database_gco2, None);
+    assert_eq!(co2.messaging_gco2, None);
+    let expected = co2.operational_gco2 + co2.embodied_gco2 + co2.transport_gco2.unwrap_or(0.0);
+    assert!((co2.total.mid - expected).abs() < 1e-15);
+    let services: f64 = bare.per_service_energy_kwh.values().sum();
+    assert!((bare.energy_kwh - services).abs() < 1e-15);
+    for w in [
+        bare.database_waste
+            .as_ref()
+            .map(|w| (&w.model, w.in_totals)),
+        bare.messaging_waste
+            .as_ref()
+            .map(|w| (&w.model, w.in_totals)),
+    ] {
+        let (model, in_totals) = w.expect("estimated figure");
+        assert_eq!(model, "estimated");
+        assert!(!in_totals);
+    }
 }
 
 #[test]

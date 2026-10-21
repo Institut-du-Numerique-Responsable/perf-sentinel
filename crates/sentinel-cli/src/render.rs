@@ -921,6 +921,7 @@ struct WasteLine<'a> {
     energy_kwh: f64,
     ratio: f64,
     model: &'a str,
+    in_totals: bool,
     region: Option<&'a str>,
     waste_gco2: Option<f64>,
 }
@@ -942,16 +943,10 @@ fn format_waste_line(w: &WasteLine<'_>) -> String {
     } else {
         sanitize_for_terminal(w.model)
     };
-    // Only the estimated figure is a re-presented share of the report
-    // totals. Measured and declared models are additional energy.
-    let scope = if w.model == sentinel_core::report::DB_WASTE_MODEL_ESTIMATED {
-        "[within the report totals]"
-    } else {
-        "[excluded from totals]"
-    };
+    let scope = sentinel_core::report::waste_scope_label(w.model, w.in_totals);
     format!(
         // Padded to the same column as the other summary lines.
-        "  {:<19}{} kWh of {} kWh ({:.0}% {} ratio, model {model}){gco2}{region} {scope}",
+        "  {:<19}{} kWh of {} kWh ({:.0}% {} ratio, model {model}){gco2}{region} [{scope}]",
         w.label,
         fmt_tiny(w.waste_kwh),
         fmt_tiny(w.energy_kwh),
@@ -968,6 +963,7 @@ fn format_database_waste_line(db: &sentinel_core::report::DatabaseWaste) -> Stri
         energy_kwh: db.energy_kwh,
         ratio: db.sql_waste_ratio,
         model: &db.model,
+        in_totals: db.in_totals,
         region: db.region.as_deref(),
         waste_gco2: db.waste_gco2,
     })
@@ -981,6 +977,7 @@ fn format_messaging_waste_line(mw: &sentinel_core::report::MessagingWaste) -> St
         energy_kwh: mw.energy_kwh,
         ratio: mw.messaging_waste_ratio,
         model: &mw.model,
+        in_totals: mw.in_totals,
         region: mw.region.as_deref(),
         waste_gco2: mw.waste_gco2,
     })

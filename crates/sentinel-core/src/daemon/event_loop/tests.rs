@@ -1356,6 +1356,65 @@ async fn energy_and_carbon_counters_sum_every_window() {
 }
 
 #[tokio::test]
+async fn in_total_host_figures_reach_the_counters_and_restore_outside_the_totals() {
+    let host = |window_kwh: f64| score::carbon::DbEnergyContext {
+        window_kwh,
+        region: Some("eu-west-3".to_string()),
+        model: score::carbon::CO2_MODEL_ALUMET,
+        placement: None,
+    };
+    let hosts_ctx = |window_kwh: f64| score::carbon::CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        db_energy: Some(host(window_kwh)),
+        broker_energy: Some(host(window_kwh / 2.0)),
+        ..empty_carbon_ctx()
+    };
+    let (delivered, idle) = (hosts_ctx(2.0), hosts_ctx(0.0));
+    let metrics = MetricsState::new();
+    let store = findings_store::FindingsStore::new(100);
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    let db_sticky: &'static mut Option<(DatabaseWaste, u64)> = Box::leak(Box::new(None));
+    let msg_sticky: &'static mut Option<(MessagingWaste, u64)> = Box::leak(Box::new(None));
+    for (trace, ctx) in [("t1", &delivered), ("t2", &idle)] {
+        let mut events: Vec<_> = (1..=6)
+            .map(|i| make_normalized(trace, &format!("SELECT * FROM item WHERE id = {i}")))
+            .collect();
+        events.push(make_normalized_messaging(trace, "m1", "s1", "orders"));
+        let mut pctx = test_ctx(&detect_config, ctx, &metrics, &store, true, &cell);
+        pctx.db_waste_sticky = &mut *db_sticky;
+        pctx.msg_waste_sticky = &mut *msg_sticky;
+        pctx.waste_sticky_ttl_ms = 600_000;
+        process_traces(vec![(trace.to_string(), events)], pctx).await;
+
+        let live = cell.read().await.clone();
+        let (db, mw) = (
+            live.database_waste
+                .as_ref()
+                .expect("figure or restored copy"),
+            live.messaging_waste
+                .as_ref()
+                .expect("figure or restored copy"),
+        );
+        if trace == "t1" {
+            assert!(db.in_totals && mw.in_totals);
+            let co2 = live.co2.as_ref().unwrap();
+            let regions: f64 = live.regions.iter().map(|r| r.co2_gco2).sum();
+            let hosts = co2.database_gco2.unwrap() + co2.messaging_gco2.unwrap();
+            assert!(hosts > 0.0);
+            assert!((metrics.carbon_gco2.get() - (regions + hosts)).abs() < 1e-12);
+            assert!((metrics.energy_kwh.get() - live.energy_kwh).abs() < 1e-12);
+            assert!(live.energy_kwh > 3.0, "both hosts inside energy_kwh");
+        } else {
+            // Restored from the first batch, not inside this one's totals.
+            assert!(!db.in_totals && !mw.in_totals);
+            assert!((db.energy_kwh - 2.0).abs() < 1e-12);
+            assert_eq!(live.co2.as_ref().unwrap().database_gco2, None);
+        }
+    }
+}
+
+#[tokio::test]
 async fn process_traces_publishes_green_summary_to_cell() {
     // Asserts the contract behind /api/export/report: each batch
     // overwrites the shared cell so live snapshots pick up the
@@ -1815,6 +1874,7 @@ fn a_fallback_window_carries_the_declared_tag_and_region() {
         window_kwh: 0.0,
         region: Some("eu-west-1".to_string()),
         model: score::carbon::CO2_MODEL_ALUMET,
+        placement: None,
     };
     let cfg = declared_cfg(1);
 
@@ -1834,6 +1894,7 @@ fn a_measured_window_keeps_its_tag_when_both_sources_deliver() {
         window_kwh: 0.0,
         region: Some("eu-west-1".to_string()),
         model: crate::report::BROKER_WASTE_MODEL_SPECPOWER,
+        placement: None,
     };
     let cfg = declared_cfg(1);
 

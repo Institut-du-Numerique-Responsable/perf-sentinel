@@ -142,13 +142,17 @@ pub struct MetricsState {
     /// Use Prometheus `rate()` on `total_io_ops` and `avoidable_io_ops` for windowed ratios.
     pub io_waste_ratio: Gauge,
     /// Energy attributed to the workload in the most recent scoring
-    /// window, kWh. Scalar (no per-service/region labels, which stay
+    /// window, kWh, the report's `energy_kwh`: the services' energy plus
+    /// the in-total database and broker host energy when a host source
+    /// is configured. Scalar (no per-service/region labels, which stay
     /// off `/metrics` for cardinality), the Grafana counterpart of the
     /// monitor's Energy/Trends total.
     pub energy_kwh: Gauge,
-    /// Operational carbon of the most recent scoring window, grams
-    /// `CO2e`, summed across regions. Scalar, same rationale as
-    /// `energy_kwh`.
+    /// Scored carbon of the most recent scoring window, grams `CO2e`:
+    /// operational carbon summed across regions, plus the in-total
+    /// database and broker host carbon when a host source is configured
+    /// ([`crate::report::GreenSummary::scored_carbon_gco2`]). Embodied and
+    /// transport excluded. Scalar, same rationale as `energy_kwh`.
     pub carbon_gco2: Gauge,
     /// Running sum of `energy_kwh` over every scoring window since
     /// start. `increase()` over it gives the energy of any time range,
@@ -516,25 +520,25 @@ impl MetricsState {
 
         let energy_kwh = Gauge::new(
             "perf_sentinel_energy_kwh",
-            "Workload energy of the most recent scoring window, kWh",
+            "Workload energy of the most recent scoring window, kWh (includes database and broker host energy when a host source is configured)",
         )
         .expect("metric creation should not fail");
 
         let carbon_gco2 = Gauge::new(
             "perf_sentinel_carbon_gco2",
-            "Operational carbon of the most recent scoring window, grams CO2e (excludes embodied and network transport)",
+            "Operational carbon of the most recent scoring window, grams CO2e (includes database and broker host carbon when a host source is configured, excludes embodied and network transport)",
         )
         .expect("metric creation should not fail");
 
         let energy_kwh_total = Counter::new(
             "perf_sentinel_scored_energy_kwh_total",
-            "Workload energy summed over every scoring window since start, kWh",
+            "Workload energy summed over every scoring window since start, kWh (includes database and broker host energy when a host source is configured)",
         )
         .expect("metric creation should not fail");
 
         let carbon_gco2_total = Counter::new(
             "perf_sentinel_scored_carbon_gco2_total",
-            "Operational carbon summed over every scoring window since start, grams CO2e (excludes embodied and network transport)",
+            "Operational carbon summed over every scoring window since start, grams CO2e (includes database and broker host carbon when a host source is configured, excludes embodied and network transport)",
         )
         .expect("metric creation should not fail");
 

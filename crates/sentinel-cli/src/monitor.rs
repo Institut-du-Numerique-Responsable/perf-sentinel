@@ -251,9 +251,9 @@ struct TrendPoint {
     findings_pct: Option<f64>,
 }
 
-/// Reduce a snapshot to its trend sample. Carbon is the sum of the
-/// per-region operational CO2 (grams), the same window scope as
-/// `energy_kwh`.
+/// Reduce a snapshot to its trend sample. Carbon is the scored carbon
+/// (grams): the per-region operational CO2 plus the in-total database
+/// and broker host terms, the same window scope as `energy_kwh`.
 #[allow(clippy::cast_precision_loss)] // gauge values are far below 2^52
 fn trend_point(s: &Snapshot) -> TrendPoint {
     let gs = &s.green_summary;
@@ -267,7 +267,7 @@ fn trend_point(s: &Snapshot) -> TrendPoint {
     let st = s.status.as_ref();
     TrendPoint {
         energy_kwh: gs.energy_kwh,
-        carbon_gco2: gs.regions.iter().map(|r| r.co2_gco2).sum(),
+        carbon_gco2: gs.scored_carbon_gco2(),
         traces_pct: st.and_then(|st| pct(st.active_traces as f64, st.max_active_traces)),
         queue_pct: st.and_then(|st| {
             // The depth gauge cannot legitimately go negative. Clamp
@@ -1046,27 +1046,23 @@ fn build_advisor_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
     lines
 }
 
-/// One waste line, database or broker. `provenance` bundles the three
-/// daemon-sourced strings so the signature stays under the argument cap.
+/// One waste line, database or broker. `provenance` bundles the
+/// daemon-sourced fields so the signature stays under the argument cap.
 fn waste_line(
     label: &'static str,
     ratio_label: &str,
     waste_kwh: f64,
     energy_kwh: f64,
     ratio: f64,
-    provenance: (&str, Option<&str>, Option<f64>),
+    provenance: (&str, bool, Option<&str>, Option<f64>),
     dim: Style,
 ) -> Line<'static> {
-    let (model, region, waste_gco2) = provenance;
+    let (model, in_totals, region, waste_gco2) = provenance;
     let gco2 = waste_gco2.map_or_else(|| "-".to_string(), |g| format!("{} gCO2", fmt_tiny(g)));
     // Daemon-sourced strings: sanitize + cap like every other cell.
     let region = truncate_cell(region.unwrap_or("-"), 24);
     let model_cell = truncate_cell(if model.is_empty() { "-" } else { model }, 24);
-    let scope = if model == sentinel_core::report::DB_WASTE_MODEL_ESTIMATED {
-        "within the report totals"
-    } else {
-        "excluded from totals"
-    };
+    let scope = sentinel_core::report::waste_scope_label(model, in_totals);
     Line::from(vec![
         Span::styled(label, dim),
         Span::raw(format!(
@@ -1165,7 +1161,7 @@ fn build_energy_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
             db.waste_kwh,
             db.energy_kwh,
             db.sql_waste_ratio,
-            (&db.model, db.region.as_deref(), db.waste_gco2),
+            (&db.model, db.in_totals, db.region.as_deref(), db.waste_gco2),
             dim,
         ));
     }
@@ -1176,7 +1172,7 @@ fn build_energy_lines(latest: Option<&Snapshot>) -> Vec<Line<'static>> {
             mw.waste_kwh,
             mw.energy_kwh,
             mw.messaging_waste_ratio,
-            (&mw.model, mw.region.as_deref(), mw.waste_gco2),
+            (&mw.model, mw.in_totals, mw.region.as_deref(), mw.waste_gco2),
             dim,
         ));
     }

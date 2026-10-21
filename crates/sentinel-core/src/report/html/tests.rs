@@ -191,15 +191,25 @@ fn no_js_notice_is_removed_by_a_script_that_follows_it() {
 fn green_panel_carries_database_waste_card() {
     let report = minimal_report(vec![]);
     let (html, _) = render(&report, &[], &opts("traces.json", None));
-    // Pins the Database waste card block and its exclusion label in the
-    // green panel JS, and the SQL-share subtitle on the ratio card.
+    // Pins the Database waste card block and its three scope labels in
+    // the green panel JS, and the SQL-share subtitle on the ratio card.
     assert!(
         html.contains("greenSummary.database_waste"),
         "green panel must read database_waste"
     );
+    for scope in [
+        "host energy, in the report totals",
+        "application-side share, within the report totals",
+        "outside these totals",
+    ] {
+        assert!(
+            html.contains(scope),
+            "the card must state its scope: {scope}"
+        );
+    }
     assert!(
-        html.contains("excluded from totals"),
-        "the card must state the exclusion from totals"
+        html.contains("wasteScope(dbw)") && html.contains("wasteScope(mw)"),
+        "both waste cards must take their scope from the shared helper"
     );
     assert!(
         html.contains("avoidable / total ops"),

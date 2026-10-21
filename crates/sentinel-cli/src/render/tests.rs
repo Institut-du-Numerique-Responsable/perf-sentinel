@@ -991,7 +991,17 @@ fn broker_waste_line_sanitizes_and_labels_its_source() {
     assert!(line.contains("Broker waste"), "{line}");
     assert!(line.contains("40% messaging ratio"), "{line}");
     assert!(line.contains("model broker_specpower"), "{line}");
-    assert!(line.contains("excluded from totals"), "{line}");
+    assert!(line.contains("[outside these totals]"), "{line}");
+
+    let in_totals = MessagingWaste {
+        in_totals: true,
+        ..declared.clone()
+    };
+    let line = format_messaging_waste_line(&in_totals);
+    assert!(
+        line.contains("[host energy, in the report totals]"),
+        "{line}"
+    );
 
     let estimated = MessagingWaste {
         model: sentinel_core::report::DB_WASTE_MODEL_ESTIMATED.to_string(),
@@ -1000,7 +1010,10 @@ fn broker_waste_line_sanitizes_and_labels_its_source() {
         ..declared
     };
     let line = format_messaging_waste_line(&estimated);
-    assert!(line.contains("within the report totals"), "{line}");
+    assert!(
+        line.contains("[application-side share, within the report totals]"),
+        "{line}"
+    );
     assert!(
         !line.contains("region"),
         "absent region must drop out: {line}"
@@ -1025,8 +1038,13 @@ fn green_summary_prints_sql_share_and_database_waste() {
     let line = format_database_waste_line(&measured);
     assert!(!line.contains('\u{1b}'), "escape reached the sink: {line}");
     assert!(line.contains("model alumet_rapl"), "{line}");
-    assert!(line.contains("excluded from totals"), "{line}");
+    assert!(line.contains("outside these totals"), "{line}");
     assert!(line.contains("4.000e-7 gCO"), "{line}");
+    let line = format_database_waste_line(&DatabaseWaste {
+        in_totals: true,
+        ..measured.clone()
+    });
+    assert!(line.contains("host energy, in the report totals"), "{line}");
     // Estimated path: within-totals label, optional suffixes drop out.
     let estimated = DatabaseWaste {
         energy_kwh: 5.5e-7,
@@ -1044,14 +1062,14 @@ fn green_summary_prints_sql_share_and_database_waste() {
     assert!(line.contains("5.500e-7 kWh"), "{line}");
     assert!(!line.contains("region"), "{line}");
     // Empty model (a legacy baseline) renders the dash placeholder and
-    // the non-estimated "excluded" scope.
+    // the non-estimated "outside" scope.
     let legacy = DatabaseWaste {
         model: String::new(),
         ..estimated.clone()
     };
     let line = format_database_waste_line(&legacy);
     assert!(line.contains("model -"), "{line}");
-    assert!(line.contains("excluded from totals"), "{line}");
+    assert!(line.contains("outside these totals"), "{line}");
     // Smoke the full print path with the SQL share visible.
     let mut summary = GreenSummary::disabled(10);
     summary.total_sql_io_ops = 6;
