@@ -498,7 +498,7 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # Same for the message broker, feeding messaging waste.
 # [green.alumet.broker]
 # label_value = "kafka-pod"      # no default
-# region = "eu-west-3"           # no default, without a region the figure is in kWh only
+# region = "eu-west-3"           # else [green] default_region, one of them is required
 
 # --- Kepler energy scraper (opt-in, no default egress) ---------------------
 # Kepler 0.10+ reads RAPL through sysfs (hwmon as an experimental fallback
@@ -584,10 +584,16 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # is never published as a measurement. Prefer [green.alumet.broker] when an
 # agent can reach the broker cgroup.
 # [green.broker_static]
+# placement = "dedicated"        # required once any key is set: "dedicated" or "shared"
 # nodes = 3                      # no default, cluster size
-# instance_type = "m5.large"     # no default, looked up in the SPECpower table
-# provider = "aws"               # no default
-# region = "eu-west-3"           # no default, without a region the figure is in kWh only
+# instance_type = "kafka.m5.large"  # an embedded row or a managed class, an unknown type fails the load
+# region = "eu-west-3"           # else [green.alumet.broker] region, else [green] default_region, one is required
+# A broker pod on an application node instead: placement = "shared", its
+# CPU as a percent of that node, and the [green.cloud.services] entries
+# reading that node. A shared declaration bills no host energy, the
+# messaging figure stays the estimated one.
+# # cpu_query = 'avg(rate(container_cpu_usage_seconds_total{container="kafka"}[5m])) * 100'
+# # shared_with = ["orders"]
 
 # --- Carbon: per-service regions -------------------------------------------
 # Region override when the OTel `cloud.region` resource attribute is absent.

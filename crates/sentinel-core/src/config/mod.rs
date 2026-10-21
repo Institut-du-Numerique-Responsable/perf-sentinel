@@ -12,6 +12,7 @@ use crate::detect::Confidence;
 use crate::score::alumet::AlumetConfig;
 use crate::score::carbon::DEFAULT_EMBODIED_CARBON_PER_REQUEST_GCO2;
 use crate::score::cloud_energy::config::CloudEnergyConfig;
+use crate::score::host_static::{StaticHostsConfig, Subsystem};
 use crate::score::kepler::KeplerConfig;
 use crate::score::redfish::RedfishConfig;
 #[cfg(test)]
@@ -219,9 +220,11 @@ pub struct GreenConfig {
     pub redfish: Option<RedfishConfig>,
     /// Cloud CPU% + `SPECpower` config (daemon only).
     pub cloud_energy: Option<CloudEnergyConfig>,
-    /// Declared broker cluster (`[green.broker_static]`, daemon only).
-    /// Needs no agent, so it covers managed brokers.
-    pub broker_static: Option<crate::score::broker_static::StaticBrokerConfig>,
+    /// Declared broker hosts (`[green.broker_static]`, daemon only).
+    /// Needs no agent, so it covers managed brokers. Only a dedicated
+    /// declaration with `nodes` and `instance_type` bills, see
+    /// [`crate::score::host_static::StaticHostsConfig::ceiling`].
+    pub broker_static: Option<StaticHostsConfig>,
     /// Whether to use per-operation energy coefficients (SQL verb weighting,
     /// HTTP payload size tiers) in the proxy model. Default: `true`.
     pub per_operation_coefficients: bool,
@@ -584,6 +587,43 @@ impl Default for GreenConfig {
             calibration: None,
             electricity_maps: None,
             grid_feeds: Vec::new(),
+        }
+    }
+}
+
+impl GreenConfig {
+    /// Effective region of a subsystem's hosts: its declared section's,
+    /// else its Alumet workload's, else `default_region`. Validation
+    /// refuses two declared regions that differ, so every source of one
+    /// subsystem reads this one region.
+    #[must_use]
+    pub fn host_region(&self, subsystem: Subsystem) -> Option<&str> {
+        self.static_hosts(subsystem)
+            .and_then(|cfg| cfg.region.as_deref())
+            .or_else(|| self.alumet_host(subsystem).and_then(|(_, region)| region))
+            .or(self.default_region.as_deref())
+    }
+
+    /// The subsystem's declared-hosts section.
+    pub(crate) fn static_hosts(&self, subsystem: Subsystem) -> Option<&StaticHostsConfig> {
+        match subsystem {
+            Subsystem::Database => None,
+            Subsystem::Broker => self.broker_static.as_ref(),
+        }
+    }
+
+    /// The subsystem's Alumet workload, as its label value and region.
+    pub(crate) fn alumet_host(&self, subsystem: Subsystem) -> Option<(&str, Option<&str>)> {
+        let alumet = self.alumet.as_ref()?;
+        match subsystem {
+            Subsystem::Database => alumet
+                .database
+                .as_ref()
+                .map(|w| (w.label_value.as_str(), w.region.as_deref())),
+            Subsystem::Broker => alumet
+                .broker
+                .as_ref()
+                .map(|w| (w.label_value.as_str(), w.region.as_deref())),
         }
     }
 }

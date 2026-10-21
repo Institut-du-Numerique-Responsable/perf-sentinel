@@ -90,8 +90,9 @@ strip is approximate where a modifier changes the CPU generation: `c5n`
 is a Skylake part while the `c5` rows are Cascade Lake, a gap inside the
 2x bracket. A class whose base family has no row stays unknown.
 
-Not modeled. The startup warning names the reason for the first three
-rows, the others warn as unknown types:
+Not modeled. The startup warning, or the load error in
+`[green.broker_static]`, names the reason for the first three rows, the
+others are reported as unknown types:
 
 | Class | Reason |
 |---|---|
@@ -139,8 +140,9 @@ alors que les lignes `c5` sont Cascade Lake, un écart qui reste dans la
 fourchette 2x. Une classe dont la famille de base n'a pas de ligne reste
 inconnue.
 
-Non modélisées. L'avertissement de démarrage donne la raison pour les
-trois premières lignes, les autres sont signalées comme types inconnus :
+Non modélisées. L'avertissement de démarrage, ou l'erreur de chargement
+dans `[green.broker_static]`, donne la raison pour les trois premières
+lignes, les autres sont signalées comme types inconnus :
 
 | Classe | Raison |
 |---|---|
@@ -173,13 +175,15 @@ model interpolates between. {len(rows)} entries, table vintage
 accepted too: each resolves to the row of the VM family it runs on, see
 [Managed service classes](#managed-service-classes).
 
-**An unlisted type is not an error.** Perf Sentinel warns once at startup,
-naming the type, and the reason when it is a managed class the model
-leaves out, then falls back to a provider-level average, so the
-figure gets coarser. That warning is also how you check your own
-type without reading this page. When your hardware is absent and you know
-its draw, declare it directly instead, which is exact rather than
-approximated:
+**An unlisted type is not an error in `[green.cloud.services]`.** Perf
+Sentinel warns once at startup, naming the type, and the reason when it
+is a managed class the model leaves out, then falls back to a
+provider-level average, so the figure gets coarser. That warning is also
+how you check your own type without reading this page. In
+`[green.broker_static]` the same type is an error that stops the load,
+since a declared broker has no other source to fall back on. When your
+hardware is absent and you know its draw, declare it directly instead,
+which is exact rather than approximated:
 
 ```toml
 [green.cloud.services]
@@ -245,14 +249,16 @@ de cache, de broker et de recherche sont acceptés aussi : chacun se résout
 sur la ligne de la famille de VM qui l'héberge, voir
 [Classes de services managés](#classes-de-services-managés).
 
-**Un type absent n'est pas une erreur.** Perf Sentinel avertit une seule
-fois au démarrage en nommant le type, et la raison quand il s'agit d'une
-classe managée que le modèle laisse de côté, puis se rabat sur une moyenne du
-fournisseur, ce qui rend la valeur plus grossière. Cet
-avertissement est aussi la façon de vérifier votre propre type sans lire
-cette page. Quand votre matériel est absent et que vous connaissez sa
-consommation, déclarez-la directement, ce qui donne une valeur exacte
-plutôt qu'approchée :
+**Un type absent n'est pas une erreur dans `[green.cloud.services]`.** Perf
+Sentinel avertit une seule fois au démarrage en nommant le type, et la
+raison quand il s'agit d'une classe managée que le modèle laisse de côté,
+puis se rabat sur une moyenne du fournisseur, ce qui rend la valeur plus
+grossière. Cet avertissement est aussi la façon de vérifier votre propre
+type sans lire cette page. Dans `[green.broker_static]`, le même type est
+une erreur qui arrête le chargement, puisqu'un broker déclaré n'a aucune
+autre source sur laquelle se rabattre. Quand votre matériel est absent et
+que vous connaissez sa consommation, déclarez-la directement, ce qui donne
+une valeur exacte plutôt qu'approchée :
 
 ```toml
 [green.cloud.services]

@@ -91,7 +91,8 @@ pub struct AlumetBrokerConfig {
     /// `label_key`, matched verbatim like a `service_mappings` value.
     pub label_value: String,
     /// Declared region of the broker host, used to convert the waste
-    /// energy to gCO2. `None` reports the waste in kWh only.
+    /// energy to gCO2. `None` falls back to `[green] default_region`, see
+    /// [`crate::config::GreenConfig::host_region`]. One of them is required.
     pub region: Option<String>,
 }
 

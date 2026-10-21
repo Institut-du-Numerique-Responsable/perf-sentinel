@@ -465,8 +465,10 @@ The messaging twin of the section above. Declares one message broker measured by
 ```toml
 [green.alumet.broker]
 label_value = "kafka-pod"      # value carried by label_key for the broker cgroup, verbatim
-region = "eu-west-3"           # optional, enables the gCO2 conversion
+region = "eu-west-3"           # else [green] default_region, one of them is required
 ```
+
+The broker host energy needs a region to convert to gCO2: this `region`, the `[green.broker_static]` one, or `[green] default_region`. With none of them the config fails to load, and when this section and `[green.broker_static]` both set a region they must agree.
 
 The same cgroup cannot feed two figures: a `label_value` that also appears in `service_mappings`, or that matches the database declaration, is rejected at config load. Requires an agent on the broker host, so it does not apply to a managed broker. For a provisioned cluster, see `[green.broker_static]`.
 
@@ -476,11 +478,20 @@ Declares a **provisioned** broker cluster, with no agent and no metric. This is 
 
 ```toml
 [green.broker_static]
-nodes = 3                      # provisioned broker nodes, required
-instance_type = "m5.2xlarge"   # looked up in the embedded SPECpower table, required
-provider = "aws"               # optional: aws, gcp, azure, scaleway or generic (default)
-region = "eu-west-3"           # optional, enables the gCO2 conversion
+placement = "dedicated"        # required once any key is set: "dedicated" or "shared"
+nodes = 3                      # provisioned broker nodes, 1 to 10000
+instance_type = "kafka.m5.large"  # an embedded row or a managed class that resolves to one
+region = "eu-west-3"           # else [green.alumet.broker] region, else [green] default_region
 ```
+
+`placement` says where the brokers run, and every other key is checked against it at load, for every subcommand, `analyze` included:
+
+- **`dedicated`**: hosts of their own. `nodes` and `instance_type` go together. Both may be left out only next to `[green.alumet.broker]` and without `cpu_query`, the shape for an Alumet-measured broker that declares its placement. `shared_with` is refused.
+- **`shared`**: a broker pod on one application node. `cpu_query` is required (the pod's CPU as a percent of that node), `nodes` is absent or 1, and `instance_type` is required when `shared_with` (the `[green.cloud.services]` entries reading that node) is empty. A shared declaration has no ceiling and bills no host energy, so the messaging figure stays the estimated one. A broker spread over several application nodes cannot be declared shared.
+
+`instance_type` accepts the embedded rows and the managed class names listed in [Managed service classes](./INSTANCE-TYPES.md#managed-service-classes) (`kafka.m5.large`, `mq.m5.large`). A type that resolves to no row fails the load, naming the type and the reason when it is a class left out on purpose. The broker host energy needs a region: this section's, else `[green.alumet.broker]`'s, else `[green] default_region`. Without one the load fails, and two declared regions that differ are refused. `provider` is still accepted (`aws`, `gcp`, `azure`, `scaleway` or `generic`, anything else is refused), but it no longer prices anything since an unresolved type is refused, so it warns at load. A section left without `placement` fails with a message naming both placements.
+
+Only a dedicated declaration with `nodes` and `instance_type` bills energy, and the daemon does not read `cpu_query`.
 
 The energy is `nodes × max_watts × window duration`, following `E(n) = n × P_max`: provisioned nodes times their power ceiling. Three properties to accept before relying on it:
 
@@ -488,7 +499,7 @@ The energy is `nodes × max_watts × window duration`, following `E(n) = n × P_
 - **It counts provisioned infrastructure, not consumed.** A three-node cluster is immobilized whether it runs at 10 % or 60 %. In the other direction, a stretch with no traffic bills at most one hour, so a mostly-idle cluster is under-counted.
 - **It does not react to application changes.** Batching your publishes will not move this number, because nothing about it depends on traffic. If you want a figure that responds to remediation, you need the measured path.
 
-An unknown `instance_type` warns and falls back to a provider default rather than failing: the figure stays coarser, and the warning says so. An unrecognised `provider` is rejected outright, because it would silently resolve to the generic on-prem watts. Daemon only, like every measured path, since a window duration is needed. When both this section and `[green.alumet.broker]` are configured, **the measurement wins**. Precedence follows the broker's own Alumet series, not the scrape endpoint: a scrape that answers without carrying the declared `label_value` measures nothing, so the declaration takes over rather than being suppressed by a working endpoint. Energy the series already banked is delivered first, and the delta that lands when it recovers is dropped once, since it reaches back over wall clock the declaration billed.
+Daemon only, like every measured path, since a window duration is needed. When both this section and `[green.alumet.broker]` are configured, **the measurement wins**. Precedence follows the broker's own Alumet series, not the scrape endpoint: a scrape that answers without carrying the declared `label_value` measures nothing, so the declaration takes over rather than being suppressed by a working endpoint. Energy the series already banked is delivered first, and the delta that lands when it recovers is dropped once, since it reaches back over wall clock the declaration billed.
 
 #### `[green.redfish]` (optional, opt-in)
 

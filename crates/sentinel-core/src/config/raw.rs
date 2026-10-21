@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::score::alumet::config::DEFAULT_ENERGY_INTERVAL_SECS;
 use crate::score::alumet::{AlumetBrokerConfig, AlumetConfig, AlumetDatabaseConfig};
 use crate::score::cloud_energy::config::{CloudEnergyConfig, ServiceCloudConfig};
+use crate::score::host_static::{HostPlacement, StaticHostsConfig};
 use crate::score::kepler::{KeplerConfig, KeplerMetricKind};
 use crate::score::redfish::{RedfishConfig, RedfishEndpoint};
 use crate::score::scaphandre::{ProcessMatcher, ScaphandreConfig};
@@ -1054,32 +1055,32 @@ pub(super) fn convert_kepler_section_with_env(
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct BrokerStaticSection {
+    pub(super) placement: Option<HostPlacement>,
     pub(super) nodes: Option<u32>,
     pub(super) instance_type: Option<String>,
     pub(super) provider: Option<String>,
     pub(super) region: Option<String>,
+    pub(super) cpu_query: Option<String>,
+    pub(super) shared_with: Option<Vec<String>>,
 }
 
-/// Convert `[green.broker_static]` into a typed config. `None` unless
-/// both `nodes` and `instance_type` are set, the two fields with no
-/// defensible default.
-fn convert_broker_static_section(
-    raw: &BrokerStaticSection,
-) -> Option<crate::score::broker_static::StaticBrokerConfig> {
-    let nodes = raw.nodes?;
-    let instance_type = raw.instance_type.as_ref()?.trim().to_string();
-    Some(crate::score::broker_static::StaticBrokerConfig {
-        nodes,
-        instance_type,
-        // An explicitly empty value reads as "unset", the same as an
-        // absent key, rather than failing the provider allow-list.
-        provider: raw
-            .provider
-            .as_deref()
-            .map(|p| p.trim().to_ascii_lowercase())
-            .filter(|p| !p.is_empty())
-            .unwrap_or_else(|| "generic".to_string()),
-        region: raw.region.clone(),
+/// Convert `[green.broker_static]` into a typed config, strings trimmed.
+/// `None` without a `placement`, which `validate_broker_static_raw` only
+/// allows for an empty section.
+fn convert_broker_static_section(raw: &BrokerStaticSection) -> Option<StaticHostsConfig> {
+    let trimmed = |value: &Option<String>| value.as_deref().map(|v| v.trim().to_string());
+    Some(StaticHostsConfig {
+        placement: raw.placement?,
+        nodes: raw.nodes,
+        instance_type: trimmed(&raw.instance_type),
+        region: trimmed(&raw.region),
+        cpu_query: trimmed(&raw.cpu_query),
+        shared_with: raw
+            .shared_with
+            .iter()
+            .flatten()
+            .map(|name| name.trim().to_string())
+            .collect(),
     })
 }
 
@@ -1152,26 +1153,49 @@ fn reject_case_colliding_keys(section: &str, map: &HashMap<String, String>) -> R
     Ok(())
 }
 
-/// Reject a half-declared `[green.broker_static]`: `nodes` and
-/// `instance_type` are both required and have no defensible default, so
-/// one without the other must be a loud error, not a silently inert
-/// section.
+/// Rule B1: once any `[green.broker_static]` key is set, `placement` is
+/// required, so a section written for the old shape fails loudly rather
+/// than billing hosts it cannot place. Also keeps the `provider`
+/// allow-list, and warns that the key no longer prices anything.
 pub(super) fn validate_broker_static_raw(raw: &BrokerStaticSection) -> Result<(), String> {
-    match (raw.nodes.is_some(), raw.instance_type.is_some()) {
-        (true, false) => Err(
-            "[green.broker_static] instance_type is required when nodes is set; \
-             without it the section is silently inert and the messaging waste \
-             figure never appears"
+    let any_key = raw.nodes.is_some()
+        || raw.instance_type.is_some()
+        || raw.provider.is_some()
+        || raw.region.is_some()
+        || raw.cpu_query.is_some()
+        || raw.shared_with.is_some();
+    if raw.placement.is_none() && any_key {
+        return Err(
+            "[green.broker_static] placement is required: set placement = 'dedicated' \
+             when the broker runs on hosts of its own, or placement = 'shared' with \
+             cpu_query and shared_with when it runs on an application node"
                 .to_string(),
-        ),
-        (false, true) => Err(
-            "[green.broker_static] nodes is required when instance_type is set; \
-             without it the section is silently inert and the messaging waste \
-             figure never appears"
-                .to_string(),
-        ),
-        _ => Ok(()),
+        );
     }
+    let Some(provider) = raw
+        .provider
+        .as_deref()
+        .map(|p| p.trim().to_ascii_lowercase())
+        .filter(|p| !p.is_empty())
+    else {
+        return Ok(());
+    };
+    // A typo still fails, as it did while the key priced unknown types.
+    if !matches!(
+        provider.as_str(),
+        "aws" | "gcp" | "azure" | "scaleway" | "generic"
+    ) {
+        return Err(format!(
+            "[green.broker_static] provider must be 'aws', 'gcp', 'azure', \
+             'scaleway' or 'generic', got '{provider}'"
+        ));
+    }
+    tracing::warn!(
+        "[green.broker_static] provider no longer prices anything: an instance_type \
+         the embedded table does not resolve is refused, so no provider default is \
+         ever read. Remove the key"
+    );
+    Ok(())
 }
 
 /// Validate the raw `[green.alumet]` section before the lossy

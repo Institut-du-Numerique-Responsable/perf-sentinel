@@ -17,6 +17,7 @@ pub mod electricity_maps;
 #[cfg(feature = "daemon")]
 pub(crate) mod energy_state;
 pub mod grid_feed;
+pub mod host_static;
 pub mod kepler;
 // Shared per-service ops-delta tracker for every measured-energy
 // scraper. Daemon-gated for the same reason as `energy_state`.

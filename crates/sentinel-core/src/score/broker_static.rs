@@ -27,19 +27,19 @@ const MAX_BILLABLE_MS: u64 = 3_600_000;
 /// take, keeping a sub-second tick on the borrowed fast path.
 const MIN_BILLABLE_MS: u64 = 1_000;
 
-/// Operator declaration of a provisioned broker cluster.
+/// The provisioned ceiling of a broker cluster, built from a dedicated
+/// declaration by [`crate::score::host_static::StaticHostsConfig::ceiling`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StaticBrokerConfig {
     /// Number of provisioned broker nodes.
     pub nodes: u32,
     /// Instance type looked up in the embedded `SPECpower` table.
     pub instance_type: String,
-    /// `aws`, `gcp`, `azure`, or `generic` for an on-prem default.
-    /// Validation rejects anything else because an unrecognised value
-    /// would silently resolve to the generic watts.
+    /// Fallback of the table lookup. A declaration that passed validation
+    /// resolves to a row, so the ceiling sets `generic` and it is unread.
     pub provider: String,
-    /// Declared region, used to convert the waste energy to gCO2.
-    /// `None` reports the waste in kWh only.
+    /// Region used to convert the waste energy to gCO2. The daemon sets
+    /// the subsystem's effective region, `None` reports kWh only.
     pub region: Option<String>,
 }
 

@@ -4037,88 +4037,188 @@ label_value = "shared-pod"
     );
 }
 
+const ALUMET_BROKER: &str = r#"
+[green.alumet]
+endpoint = "http://localhost:9091/metrics"
+metric_name = "attributed_energy_cpu_alumet"
+label_key = "name"
+
+[green.alumet.broker]
+label_value = "kafka-pod"
+"#;
+
+fn broker_static_error(toml: &str) -> String {
+    load_from_str(toml)
+        .expect_err("the broker declaration must be rejected")
+        .to_string()
+}
+
 #[test]
-fn broker_static_is_parsed() {
+fn broker_static_dedicated_managed_cluster_is_parsed() {
     let toml = r#"
 [green.broker_static]
+placement = "dedicated"
 nodes = 3
-instance_type = "m5.2xlarge"
-provider = "AWS"
+instance_type = " kafka.m5.large "
 region = "eu-west-3"
 "#;
     let cfg = load_from_str(toml).expect("valid broker_static section");
     let b = cfg.green.broker_static.as_ref().expect("declared");
-    assert_eq!(b.nodes, 3);
-    assert_eq!(b.instance_type, "m5.2xlarge");
-    assert_eq!(b.provider, "aws", "provider is lowercased");
-    assert!(b.cluster_watts() > 0.0);
-}
-
-#[test]
-fn broker_static_provider_allow_list() {
-    let with = |line: &str| {
-        load_from_str(&format!(
-            "[green.broker_static]\nnodes = 1\ninstance_type = \"m5.2xlarge\"\n{line}\n"
-        ))
-    };
-    // An unrecognised provider would silently resolve to the generic
-    // on-prem watts, so it is rejected rather than guessed.
-    assert!(with("provider = \"asw\"").is_err());
-    assert!(with("provider = \"on-prem\"").is_err());
-    for accepted in ["aws", "gcp", "azure", "generic"] {
-        assert!(
-            with(&format!("provider = \"{accepted}\"")).is_ok(),
-            "{accepted} must be accepted"
-        );
-    }
-    // Omitted and explicitly blank both mean "unset", not "invalid".
-    for unset in ["", "provider = \"\"", "provider = \"  \""] {
-        let cfg = with(unset).expect("an unset provider must load");
-        let b = cfg.green.broker_static.as_ref().expect("declared");
-        assert_eq!(b.provider, "generic");
-    }
-}
-
-#[test]
-fn broker_static_without_instance_type_is_rejected() {
-    let toml = "
-[green.broker_static]
-nodes = 3
-";
-    assert!(
-        load_from_str(toml).is_err(),
-        "a half-declared cluster must fail loudly, not stay silently inert"
+    assert_eq!(
+        b.placement,
+        crate::score::host_static::HostPlacement::Dedicated
+    );
+    assert_eq!(b.nodes, Some(3));
+    assert_eq!(
+        b.instance_type.as_deref(),
+        Some("kafka.m5.large"),
+        "trimmed"
+    );
+    let ceiling = b.ceiling().expect("dedicated with hosts bills a ceiling");
+    assert!(ceiling.cluster_watts() > 0.0);
+    assert_eq!(
+        cfg.green
+            .host_region(crate::score::host_static::Subsystem::Broker),
+        Some("eu-west-3")
     );
 }
 
 #[test]
-fn broker_static_without_nodes_is_rejected() {
-    let toml = r#"
-[green.broker_static]
-instance_type = "m5.2xlarge"
-"#;
-    assert!(load_from_str(toml).is_err());
+fn broker_static_placement_alone_next_to_alumet_is_accepted() {
+    let toml = format!(
+        "[green]\ndefault_region = \"eu-west-3\"\n{ALUMET_BROKER}\n\
+         [green.broker_static]\nplacement = \"dedicated\"\n"
+    );
+    let cfg = load_from_str(&toml).expect("placement alone next to Alumet loads");
+    let b = cfg.green.broker_static.as_ref().expect("declared");
+    assert_eq!(b.ceiling(), None, "no hosts declared, nothing to bill");
 }
 
 #[test]
-fn broker_static_zero_nodes_is_rejected() {
+fn broker_static_shared_with_cpu_query_is_accepted() {
     let toml = r#"
 [green.broker_static]
-nodes = 0
-instance_type = "m5.2xlarge"
+placement = "shared"
+instance_type = "m5.large"
+cpu_query = "avg(broker_cpu)"
+shared_with = []
+region = "eu-west-3"
 "#;
-    assert!(load_from_str(toml).is_err());
+    let cfg = load_from_str(toml).expect("a shared broker loads");
+    let b = cfg.green.broker_static.as_ref().expect("declared");
+    assert_eq!(b.cpu_query.as_deref(), Some("avg(broker_cpu)"));
+    assert_eq!(b.ceiling(), None, "a shared host has no ceiling");
 }
 
 #[test]
-fn broker_static_unknown_key_is_rejected() {
+fn broker_static_provider_warns_and_loads() {
+    let with = |line: &str| {
+        load_from_str(&format!(
+            "[green.broker_static]\nplacement = \"dedicated\"\nnodes = 1\n\
+             instance_type = \"m5.2xlarge\"\nregion = \"eu-west-3\"\n{line}\n"
+        ))
+    };
+    // A typo still fails rather than reading as a valid provider.
+    assert!(with("provider = \"asw\"").is_err());
+    for accepted in ["aws", "gcp", "azure", "generic", "AWS", "", "  "] {
+        assert!(
+            with(&format!("provider = \"{accepted}\"")).is_ok(),
+            "'{accepted}' must be accepted"
+        );
+    }
+}
+
+#[test]
+fn broker_static_rejections_name_their_rule() {
+    let dedicated = "[green.broker_static]\nplacement = \"dedicated\"\nregion = \"eu-west-3\"\n";
+    let shared = "[green.broker_static]\nplacement = \"shared\"\nregion = \"eu-west-3\"\n";
+    let cases = [
+        (
+            "[green.broker_static]\nnodes = 3\ninstance_type = \"m5.large\"\n".to_string(),
+            "placement is required",
+        ),
+        (
+            format!("{dedicated}nodes = 3\ninstance_type = \"kafka.zz9.large\"\n"),
+            "kafka.zz9.large",
+        ),
+        (
+            format!("{dedicated}nodes = 3\ninstance_type = \"db.serverless\"\n"),
+            "cannot be priced",
+        ),
+        (
+            format!("{dedicated}nodes = 0\ninstance_type = \"m5.large\"\n"),
+            "must be 1 to 10000",
+        ),
+        (format!("{dedicated}nodes = 3\n"), "go together"),
+        (
+            format!("{dedicated}instance_type = \"m5.large\"\n"),
+            "go together",
+        ),
+        (dedicated.to_string(), "needs nodes and instance_type"),
+        (
+            format!(
+                "{dedicated}nodes = 3\ninstance_type = \"m5.large\"\nshared_with = [\"api\"]\n"
+            ),
+            "shared_with applies to placement = 'shared' only",
+        ),
+        (
+            format!("{shared}instance_type = \"m5.large\"\n"),
+            "needs cpu_query",
+        ),
+        (
+            format!("{shared}nodes = 2\ninstance_type = \"m5.large\"\ncpu_query = \"q\"\n"),
+            "is one node",
+        ),
+        (
+            format!("{shared}cpu_query = \"q\"\n"),
+            "needs instance_type when shared_with is empty",
+        ),
+        (
+            format!("{dedicated}nodes = 3\ninstance_type = \"m5.large\"\nnode_count = 4\n"),
+            "node_count",
+        ),
+        (
+            "[green.broker_static]\nplacement = \"elsewhere\"\n".to_string(),
+            "elsewhere",
+        ),
+    ];
+    for (toml, expected) in cases {
+        let err = broker_static_error(&toml);
+        assert!(err.contains(expected), "{toml}\n=> {err}");
+    }
+}
+
+#[test]
+fn broker_static_without_any_region_is_rejected() {
     let toml = r#"
 [green.broker_static]
+placement = "dedicated"
 nodes = 3
-instance_type = "m5.2xlarge"
-node_count = 4
+instance_type = "m5.large"
 "#;
-    assert!(load_from_str(toml).is_err());
+    let err = broker_static_error(toml);
+    assert!(err.contains("needs a region"), "{err}");
+    // [green] default_region is enough.
+    load_from_str(&format!("[green]\ndefault_region = \"eu-west-3\"\n{toml}"))
+        .expect("the default region applies");
+}
+
+#[test]
+fn alumet_broker_without_any_region_is_rejected() {
+    let err = broker_static_error(ALUMET_BROKER);
+    assert!(err.contains("needs a region"), "{err}");
+}
+
+#[test]
+fn broker_static_and_alumet_regions_must_agree() {
+    let toml = format!(
+        "{ALUMET_BROKER}region = \"eu-west-3\"\n\n[green.broker_static]\n\
+         placement = \"dedicated\"\nnodes = 3\ninstance_type = \"m5.large\"\n\
+         region = \"us-east-1\"\n"
+    );
+    let err = broker_static_error(&toml);
+    assert!(err.contains("differ"), "{err}");
+    load_from_str(&toml.replace("us-east-1", "eu-west-3")).expect("one region loads");
 }
 
 #[test]

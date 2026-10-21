@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::score::alumet::AlumetConfig;
 use crate::score::cloud_energy::config::{CloudEnergyConfig, ServiceCloudConfig};
+use crate::score::host_static::{HostPlacement, StaticHostsConfig, Subsystem};
 use crate::score::kepler::{KeplerConfig, KeplerMetricKind};
 use crate::score::redfish::{RedfishConfig, RedfishEndpoint};
 use crate::score::scaphandre::ScaphandreConfig;
@@ -25,8 +26,6 @@ pub(crate) fn unpriced_instance_suffix(instance_type: &str) -> Option<String> {
     }
 }
 
-/// Validate `[green.broker_static]`: a declared cluster must be
-/// countable and its instance type nameable.
 /// One message per CPU query read by services whose resolved power
 /// envelopes differ (rule C1), naming the first conflicting pair in
 /// sorted order. Such a query names no single node, so the scraper
@@ -181,59 +180,156 @@ fn push_overlaps(lower: &[NodeGroup], higher: &[NodeGroup], out: &mut Vec<String
     }
 }
 
-pub(super) fn validate_broker_static(
-    cfg: &crate::score::broker_static::StaticBrokerConfig,
-) -> Result<(), String> {
-    if cfg.nodes == 0 {
-        return Err("[green.broker_static] nodes must be at least 1".to_string());
-    }
-    if cfg.nodes > 10_000 {
-        return Err(format!(
-            "[green.broker_static] nodes = {} is implausible, cap is 10000",
-            cfg.nodes
-        ));
-    }
-    if cfg.instance_type.is_empty()
-        || cfg.instance_type.len() > 256
-        || has_control_char(&cfg.instance_type)
+/// Rule B2: host count and instance type within bounds.
+fn validate_host_counts(section: &str, cfg: &StaticHostsConfig) -> Result<(), String> {
+    if let Some(nodes) = cfg.nodes
+        && !(1..=10_000).contains(&nodes)
     {
-        return Err(
-            "[green.broker_static] instance_type must be 1-256 chars and free of \
-             control characters"
-                .to_string(),
-        );
+        return Err(format!("{section} nodes = {nodes} must be 1 to 10000"));
     }
-    // Same allow-list as [green.cloud.services]: an unrecognised provider
-    // would silently resolve to the generic on-prem watts, a very
-    // different number from the AWS default, under a typo.
-    if !matches!(
-        cfg.provider.as_str(),
-        "aws" | "gcp" | "azure" | "scaleway" | "generic"
-    ) {
-        return Err(format!(
-            "[green.broker_static] provider must be 'aws', 'gcp', 'azure', \
-             'scaleway' or 'generic', got '{}'",
-            cfg.provider
-        ));
-    }
-    if let Some(region) = cfg.region.as_deref()
-        && (region.is_empty() || !crate::score::carbon::is_valid_region_id(region))
+    if let Some(instance_type) = cfg.instance_type.as_deref()
+        && (instance_type.is_empty()
+            || instance_type.len() > 256
+            || has_control_char(instance_type))
     {
         return Err(format!(
-            "[green.broker_static] region '{region}' is not a valid region id"
+            "{section} instance_type must be 1-256 chars and free of control characters"
         ));
-    }
-    warn_unknown_region("[green.broker_static]", cfg.region.as_deref());
-    // An unknown type still yields a provider default, so warn rather
-    // than reject: the figure stays sound, just coarser.
-    if let Some(why) = unpriced_instance_suffix(&cfg.instance_type) {
-        tracing::warn!(
-            instance_type = %cfg.instance_type,
-            "[green.broker_static] instance_type is absent from the embedded \
-             SPECpower table, falling back to the provider default watts{why}"
-        );
     }
     Ok(())
+}
+
+/// Rule B3: the instance type resolves to an embedded row. Runs after
+/// [`validate_host_counts`], so the type is printable.
+fn validate_host_class(section: &str, cfg: &StaticHostsConfig) -> Result<(), String> {
+    use crate::score::cloud_energy::table::{InstanceClass, resolve_instance_class};
+    let Some(instance_type) = cfg.instance_type.as_deref() else {
+        return Ok(());
+    };
+    match resolve_instance_class(instance_type) {
+        InstanceClass::Known { .. } => Ok(()),
+        InstanceClass::Unsupported(reason) => Err(format!(
+            "{section} instance_type '{instance_type}' cannot be priced: {reason}"
+        )),
+        InstanceClass::Unknown => Err(format!(
+            "{section} instance_type '{instance_type}' is neither an embedded row nor a \
+             managed class that resolves to one. Use a listed type or managed class, see \
+             docs/INSTANCE-TYPES.md#managed-service-classes"
+        )),
+    }
+}
+
+/// Rule B4: a dedicated declaration names its hosts as a pair, or only
+/// its placement next to the Alumet workload.
+fn validate_dedicated_hosts(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    alumet_present: bool,
+) -> Result<(), String> {
+    let section = subsystem.section();
+    if !cfg.shared_with.is_empty() {
+        return Err(format!(
+            "{section} shared_with applies to placement = 'shared' only: dedicated hosts \
+             share no application node"
+        ));
+    }
+    match (cfg.nodes.is_some(), cfg.instance_type.is_some()) {
+        (true, true) => Ok(()),
+        (false, false) if alumet_present && cfg.cpu_query.is_none() => Ok(()),
+        (false, false) => Err(format!(
+            "{section} placement = 'dedicated' needs nodes and instance_type. Placement \
+             alone is accepted only next to {} and without cpu_query",
+            subsystem.alumet_section()
+        )),
+        _ => Err(format!(
+            "{section} nodes and instance_type go together: set both, or neither"
+        )),
+    }
+}
+
+/// Rule B5: a shared host is one application node read by its own query.
+fn validate_shared_host(subsystem: Subsystem, cfg: &StaticHostsConfig) -> Result<(), String> {
+    let section = subsystem.section();
+    if cfg.cpu_query.is_none() {
+        return Err(format!(
+            "{section} placement = 'shared' needs cpu_query, the {}'s CPU as a percent \
+             of the node it shares",
+            subsystem.noun()
+        ));
+    }
+    if cfg.nodes.is_some_and(|nodes| nodes != 1) {
+        return Err(format!(
+            "{section} placement = 'shared' is one node: drop nodes or set it to 1. A \
+             workload spread over several application nodes cannot be declared shared"
+        ));
+    }
+    if cfg.instance_type.is_none() && cfg.shared_with.is_empty() {
+        return Err(format!(
+            "{section} placement = 'shared' needs instance_type when shared_with is \
+             empty: no cloud service gives the node's power envelope"
+        ));
+    }
+    Ok(())
+}
+
+impl Config {
+    /// Rules B2 to B5 and B8/B9 for one subsystem's declared hosts.
+    fn validate_static_hosts(&self, subsystem: Subsystem) -> Result<(), String> {
+        let alumet = self.green.alumet_host(subsystem);
+        if let Some(cfg) = self.green.static_hosts(subsystem) {
+            let section = subsystem.section();
+            validate_host_counts(section, cfg)?;
+            validate_host_class(section, cfg)?;
+            match cfg.placement {
+                HostPlacement::Dedicated => {
+                    validate_dedicated_hosts(subsystem, cfg, alumet.is_some())?;
+                }
+                HostPlacement::Shared => validate_shared_host(subsystem, cfg)?,
+            }
+        }
+        self.validate_host_region(subsystem)
+    }
+
+    /// Rules B8 and B9: a valid declared region, one region per
+    /// subsystem, and an effective one whenever a source is configured.
+    fn validate_host_region(&self, subsystem: Subsystem) -> Result<(), String> {
+        let declared = self
+            .green
+            .static_hosts(subsystem)
+            .map(|cfg| cfg.region.as_deref());
+        let alumet = self.green.alumet_host(subsystem);
+        if declared.is_none() && alumet.is_none() {
+            return Ok(());
+        }
+        let section = subsystem.section();
+        if let Some(region) = declared.flatten() {
+            if region.is_empty() || !crate::score::carbon::is_valid_region_id(region) {
+                return Err(format!(
+                    "{section} region '{region}' is not a valid region id"
+                ));
+            }
+            warn_unknown_region(section, Some(region));
+        }
+        if let (Some(region), Some((_, Some(alumet_region)))) = (declared.flatten(), alumet)
+            && !region.eq_ignore_ascii_case(alumet_region)
+        {
+            return Err(format!(
+                "{section} region '{region}' and {} region '{alumet_region}' differ: the \
+                 {} hosts have one region, keep one of the two",
+                subsystem.alumet_section(),
+                subsystem.noun()
+            ));
+        }
+        if self.green.host_region(subsystem).is_none() {
+            return Err(format!(
+                "the {} host energy needs a region to convert to gCO2: set region in {section} \
+                 or {}, or [green] default_region",
+                subsystem.noun(),
+                subsystem.alumet_section()
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Config {
@@ -256,9 +352,7 @@ impl Config {
         if let Some(cfg) = &self.green.cloud_energy {
             Self::validate_cloud_energy(cfg)?;
         }
-        if let Some(cfg) = &self.green.broker_static {
-            validate_broker_static(cfg)?;
-        }
+        self.validate_static_hosts(Subsystem::Broker)?;
         self.validate_hourly_profiles_file()?;
         if let Some(cfg) = &self.green.electricity_maps {
             Self::validate_electricity_maps(cfg)?;

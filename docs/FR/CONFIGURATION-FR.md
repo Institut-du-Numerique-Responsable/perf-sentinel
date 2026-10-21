@@ -480,8 +480,10 @@ Le jumeau messaging de la section ci-dessus. Déclare un broker de messages mesu
 ```toml
 [green.alumet.broker]
 label_value = "kafka-pod"      # valeur portée par label_key pour le cgroup du broker, telle quelle
-region = "eu-west-3"           # optionnel, active la conversion gCO2
+region = "eu-west-3"           # sinon [green] default_region, l'un des deux est requis
 ```
+
+L'énergie de l'hôte du broker a besoin d'une région pour être convertie en gCO2 : ce `region`, celui de `[green.broker_static]`, ou `[green] default_region`. Sans aucun d'eux, la config ne se charge pas, et quand cette section et `[green.broker_static]` déclarent toutes deux une région, elles doivent concorder.
 
 Un même cgroup ne peut pas alimenter deux chiffres : un `label_value` qui apparaît aussi dans `service_mappings`, ou qui correspond à la déclaration de base de données, est rejeté au chargement de la config. Exige un agent sur l'hôte du broker, donc inapplicable à un broker managé. Pour un cluster provisionné, voir `[green.broker_static]`.
 
@@ -491,11 +493,20 @@ Déclare un cluster de brokers **provisionné**, sans agent ni métrique. C'est 
 
 ```toml
 [green.broker_static]
-nodes = 3                      # nœuds de broker provisionnés, requis
-instance_type = "m5.2xlarge"   # cherché dans la table SPECpower embarquée, requis
-provider = "aws"               # optionnel : aws, gcp, azure, scaleway ou generic (défaut)
-region = "eu-west-3"           # optionnel, active la conversion gCO2
+placement = "dedicated"        # requis dès qu'une clé est posée : "dedicated" ou "shared"
+nodes = 3                      # nœuds de broker provisionnés, de 1 à 10000
+instance_type = "kafka.m5.large"  # une ligne embarquée ou une classe managée qui s'y résout
+region = "eu-west-3"           # sinon la région de [green.alumet.broker], sinon [green] default_region
 ```
+
+`placement` dit où tournent les brokers, et chaque autre clé est vérifiée contre lui au chargement, pour toutes les sous-commandes, `analyze` compris :
+
+- **`dedicated`** : des hôtes à eux. `nodes` et `instance_type` vont ensemble. Les deux ne peuvent être omis qu'à côté de `[green.alumet.broker]` et sans `cpu_query`, la forme d'un broker mesuré par Alumet qui déclare son placement. `shared_with` est refusé.
+- **`shared`** : un pod de broker sur un nœud applicatif. `cpu_query` est requis (le CPU du pod en pourcentage de ce nœud), `nodes` est absent ou vaut 1, et `instance_type` est requis quand `shared_with` (les entrées de `[green.cloud.services]` qui lisent ce nœud) est vide. Une déclaration partagée n'a pas de plafond et ne facture aucune énergie d'hôte, le chiffre messaging reste donc l'estimé. Un broker réparti sur plusieurs nœuds applicatifs ne peut pas être déclaré partagé.
+
+`instance_type` accepte les lignes embarquées et les noms de classes managées listés dans [Classes de services managés](./INSTANCE-TYPES-FR.md#classes-de-services-managés) (`kafka.m5.large`, `mq.m5.large`). Un type qui ne se résout sur aucune ligne fait échouer le chargement, en nommant le type, et la raison quand il s'agit d'une classe laissée de côté exprès. L'énergie de l'hôte du broker a besoin d'une région : celle de cette section, sinon celle de `[green.alumet.broker]`, sinon `[green] default_region`. Sans aucune, le chargement échoue, et deux régions déclarées qui diffèrent sont refusées. `provider` est encore accepté (`aws`, `gcp`, `azure`, `scaleway` ou `generic`, toute autre valeur est refusée), mais il ne chiffre plus rien puisqu'un type non résolu est refusé : il émet donc un avertissement au chargement. Une section sans `placement` échoue avec un message qui nomme les deux placements.
+
+Seule une déclaration dédiée avec `nodes` et `instance_type` facture de l'énergie, et le daemon ne lit pas `cpu_query`.
 
 L'énergie vaut `nodes × max_watts × durée de la fenêtre`, suivant `E(n) = n × P_max` : les nœuds provisionnés multipliés par leur plafond de puissance. Trois propriétés à accepter avant de s'appuyer dessus :
 
@@ -503,7 +514,7 @@ L'énergie vaut `nodes × max_watts × durée de la fenêtre`, suivant `E(n) = n
 - **Il compte l'infrastructure provisionnée, pas consommée.** Un cluster de trois nœuds est immobilisé qu'il tourne à 10 % ou à 60 %. Dans l'autre sens, une période sans trafic facture au plus une heure, donc un cluster majoritairement inactif est sous-compté.
 - **Le chiffre ne réagit à aucun changement applicatif.** Grouper vos publications ne le fera pas bouger, puisque rien dedans ne dépend du trafic. Si vous voulez un chiffre qui répond à une remédiation, il faut la voie mesurée.
 
-Un `instance_type` inconnu émet un avertissement et se rabat sur un défaut fournisseur plutôt que d'échouer : le chiffre devient plus grossier, et l'avertissement le dit. Un `provider` non reconnu est rejeté d'emblée, car il se résoudrait silencieusement aux watts génériques on-premise. Daemon uniquement, comme toute voie mesurée, puisqu'une durée de fenêtre est nécessaire. Quand cette section et `[green.alumet.broker]` sont toutes deux configurées, **la mesure gagne**. La précédence suit la série Alumet du broker, pas l'endpoint de scrape : un scrape qui répond sans porter le `label_value` déclaré ne mesure rien, la déclaration prend donc le relais au lieu d'être supprimée par un endpoint qui fonctionne. L'énergie déjà mise de côté par la série est livrée d'abord, et le delta qui arrive à la reprise est jeté une fois, puisqu'il remonte sur du temps déjà facturé par la déclaration.
+Daemon uniquement, comme toute voie mesurée, puisqu'une durée de fenêtre est nécessaire. Quand cette section et `[green.alumet.broker]` sont toutes deux configurées, **la mesure gagne**. La précédence suit la série Alumet du broker, pas l'endpoint de scrape : un scrape qui répond sans porter le `label_value` déclaré ne mesure rien, la déclaration prend donc le relais au lieu d'être supprimée par un endpoint qui fonctionne. L'énergie déjà mise de côté par la série est livrée d'abord, et le delta qui arrive à la reprise est jeté une fois, puisqu'il remonte sur du temps déjà facturé par la déclaration.
 
 #### `[green.redfish]` (optionnel, opt-in)
 

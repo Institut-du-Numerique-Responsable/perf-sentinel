@@ -38,6 +38,7 @@ use crate::detect::DetectConfig;
 use crate::event::SpanEvent;
 use crate::report::GreenSummary;
 use crate::report::metrics::MetricsState;
+use crate::score::host_static::{StaticHostsConfig, Subsystem};
 
 use event_loop::{
     EnergyScraperHandles, EnergySources, EventLoopConfig, ListenerHandles, ShutdownTargets,
@@ -318,9 +319,21 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     .await?;
 
     let (alumet, alumet_db, alumet_broker) = setup_alumet_scraper(&config, &metrics);
+    let broker_region = config.green.host_region(Subsystem::Broker);
+    // Only a dedicated declaration with nodes and instance_type bills. Its
+    // region is the subsystem's, so a declared tick keeps the Alumet one.
+    let broker_ceiling = config
+        .green
+        .broker_static
+        .as_ref()
+        .and_then(StaticHostsConfig::ceiling)
+        .map(|mut ceiling| {
+            ceiling.region = broker_region.map(str::to_string);
+            ceiling
+        });
     // No scraper: the declared cluster only needs a start marker to bill
     // elapsed time from.
-    let static_broker_state = config.green.broker_static.as_ref().map(|cfg| {
+    let static_broker_state = broker_ceiling.as_ref().map(|cfg| {
         crate::score::broker_static::StaticBrokerState::new(
             crate::score::scaphandre::monotonic_ms(),
             cfg,
@@ -358,26 +371,24 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
                 region: db.region.clone(),
                 model: crate::score::carbon::CO2_MODEL_ALUMET,
             });
-        ctx.broker_energy =
-            config
-                .green
-                .alumet
-                .as_ref()
-                .and_then(|a| a.broker.as_ref())
-                .map(|b| crate::score::carbon::DbEnergyContext {
-                    window_kwh: 0.0,
-                    region: b.region.clone(),
-                    model: crate::score::carbon::CO2_MODEL_ALUMET,
-                })
-                .or_else(|| {
-                    config.green.broker_static.as_ref().map(|b| {
-                        crate::score::carbon::DbEnergyContext {
-                            window_kwh: 0.0,
-                            region: b.region.clone(),
-                            model: crate::report::BROKER_WASTE_MODEL_SPECPOWER,
-                        }
-                    })
-                });
+        ctx.broker_energy = config
+            .green
+            .alumet
+            .as_ref()
+            .and_then(|a| a.broker.as_ref())
+            .map(|_| crate::score::carbon::CO2_MODEL_ALUMET)
+            // A shared or ceiling-less declaration has no source to bill, so
+            // it builds no context and the estimated figure stays.
+            .or_else(|| {
+                broker_ceiling
+                    .as_ref()
+                    .map(|_| crate::report::BROKER_WASTE_MODEL_SPECPOWER)
+            })
+            .map(|model| crate::score::carbon::DbEnergyContext {
+                window_kwh: 0.0,
+                region: broker_region.map(str::to_string),
+                model,
+            });
         ctx
     });
     let detect_config = DetectConfig::from(&config);
@@ -392,13 +403,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         alumet_db_state: green_on.then_some(alumet_db.as_deref()).flatten(),
         alumet_broker_state: green_on.then_some(alumet_broker.as_deref()).flatten(),
         static_broker: green_on
-            .then(|| {
-                config
-                    .green
-                    .broker_static
-                    .as_ref()
-                    .zip(static_broker_state.as_ref())
-            })
+            .then(|| broker_ceiling.as_ref().zip(static_broker_state.as_ref()))
             .flatten(),
         alumet_staleness_ms: alumet.staleness_ms,
         scaphandre_state: scaphandre.state.as_deref(),
@@ -462,7 +467,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             // batch cadence: its figure is skipped on sub-second takes
             // and would otherwise flap with nothing to bridge it.
             waste_sticky_ttl_ms: alumet.staleness_ms.saturating_mul(2).max(
-                if config.green.broker_static.is_some() {
+                if broker_ceiling.is_some() {
                     config.daemon.trace_ttl_ms
                 } else {
                     0

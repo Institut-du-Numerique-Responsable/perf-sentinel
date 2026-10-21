@@ -8,14 +8,16 @@ de cache, de broker et de recherche sont acceptés aussi : chacun se résout
 sur la ligne de la famille de VM qui l'héberge, voir
 [Classes de services managés](#classes-de-services-managés).
 
-**Un type absent n'est pas une erreur.** Perf Sentinel avertit une seule
-fois au démarrage en nommant le type, et la raison quand il s'agit d'une
-classe managée que le modèle laisse de côté, puis se rabat sur une moyenne du
-fournisseur, ce qui rend la valeur plus grossière. Cet
-avertissement est aussi la façon de vérifier votre propre type sans lire
-cette page. Quand votre matériel est absent et que vous connaissez sa
-consommation, déclarez-la directement, ce qui donne une valeur exacte
-plutôt qu'approchée :
+**Un type absent n'est pas une erreur dans `[green.cloud.services]`.** Perf
+Sentinel avertit une seule fois au démarrage en nommant le type, et la
+raison quand il s'agit d'une classe managée que le modèle laisse de côté,
+puis se rabat sur une moyenne du fournisseur, ce qui rend la valeur plus
+grossière. Cet avertissement est aussi la façon de vérifier votre propre
+type sans lire cette page. Dans `[green.broker_static]`, le même type est
+une erreur qui arrête le chargement, puisqu'un broker déclaré n'a aucune
+autre source sur laquelle se rabattre. Quand votre matériel est absent et
+que vous connaissez sa consommation, déclarez-la directement, ce qui donne
+une valeur exacte plutôt qu'approchée :
 
 ```toml
 [green.cloud.services]
@@ -98,8 +100,9 @@ alors que les lignes `c5` sont Cascade Lake, un écart qui reste dans la
 fourchette 2x. Une classe dont la famille de base n'a pas de ligne reste
 inconnue.
 
-Non modélisées. L'avertissement de démarrage donne la raison pour les
-trois premières lignes, les autres sont signalées comme types inconnus :
+Non modélisées. L'avertissement de démarrage, ou l'erreur de chargement
+dans `[green.broker_static]`, donne la raison pour les trois premières
+lignes, les autres sont signalées comme types inconnus :
 
 | Classe | Raison |
 |---|---|
