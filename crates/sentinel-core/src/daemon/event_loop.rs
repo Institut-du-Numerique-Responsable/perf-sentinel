@@ -1125,7 +1125,8 @@ async fn drain_to_worker_and_join(
     let _ = worker.await;
 }
 
-/// RTE `éCO2mix` first, then Electricity Maps overrides the regions both cover.
+/// The grid operator feeds first, then Electricity Maps overrides the
+/// regions both cover.
 fn realtime_snapshot(
     sources: &EnergySources<'_>,
     now: u64,

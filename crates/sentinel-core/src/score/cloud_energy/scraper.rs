@@ -589,7 +589,7 @@ async fn run_cloud_scraper_loop(
     let mut unreachable_warned = false;
 
     let groups = cloud_groups(&cfg);
-    let interval_secs = cfg.scrape_interval.as_secs_f64();
+    let mut last_tick = std::time::Instant::now();
     let mut multi_series_warned: HashSet<String> = HashSet::new();
 
     tracing::info!(
@@ -603,6 +603,12 @@ async fn run_cloud_scraper_loop(
 
     loop {
         ticker.tick().await;
+        // A tick's energy covers the time since the previous tick, which a
+        // slow tick (missed-tick Delay) stretches past the interval, as the
+        // ops delta below does.
+        let tick_at = std::time::Instant::now();
+        let elapsed_secs = tick_at.duration_since(last_tick).as_secs_f64();
+        last_tick = tick_at;
 
         let current_ops = metrics.snapshot_service_io_ops();
         let deltas = snapshot_diff.delta_and_advance(current_ops);
@@ -641,8 +647,7 @@ async fn run_cloud_scraper_loop(
         let now_ms = monotonic_ms();
         // Whether or not a service reading landed: the hosts are billed on
         // their own query, and a shared one's watts leave its node first.
-        let deductions =
-            bill_host_probes(&probes, &probe_cpu, &cpu_readings, interval_secs, now_ms);
+        let deductions = bill_host_probes(&probes, &probe_cpu, &cpu_readings, elapsed_secs, now_ms);
 
         if any_success {
             first_failure_warned = false;
@@ -652,7 +657,7 @@ async fn run_cloud_scraper_loop(
                 &groups,
                 &cpu_readings,
                 &deltas,
-                interval_secs,
+                elapsed_secs,
                 now_ms,
                 &deductions,
             );

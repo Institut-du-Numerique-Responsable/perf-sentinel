@@ -55,6 +55,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 - `[green.kepler]` and `[green.alumet]` counted a label value once per service mapped to it, and `[green.scaphandre]` counted a process once per `process_map` matcher selecting it, so services sharing a container, a RAPL domain or a JVM each received the whole reading. The reading is now counted once and split between those services by operation count. A source read by one service gives the same coefficient as before.
 - `[green.redfish]` accepted one chassis under two endpoint ids, which billed its power once per id. Two ids that resolve the same scheme, host (case ignored), port (the scheme default when absent) and `/redfish/v1/Chassis/<id>` path are now rejected at load, so `/Power` and `/EnvironmentMetrics` URLs of one chassis collide. Such a config now fails to load for every subcommand, `analyze` included: keep one endpoint id per chassis.
 - `perf-sentinel calibrate` gave each service a factor from the whole reading when several services carried an identical energy series in the CSV, which counts that host once per service. It now warns, naming the services.
+- `[green.cloud]` priced each tick, and each declared host's `cpu_query`, over the configured `scrape_interval_secs` while its ops delta covered the time since the previous tick, so a tick that a slow Prometheus answer delayed (missed ticks are delayed, not skipped) under-counted the cloud SPECpower energy of its services and hosts. Both now cover the elapsed time.
 
 ### Security
 

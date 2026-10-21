@@ -730,8 +730,10 @@ Le modèle proxy utilise une constante d'énergie fixe pour toutes les opératio
 
 ```
 watts = idle_watts + (max_watts - idle_watts) * (cpu_percent / 100)
-energy_per_op_kwh = (watts / 1000) * (interval_secs / 3600) / ops_in_window
+energy_per_op_kwh = (watts / 1000) * (elapsed_secs / 3600) / ops_in_window
 ```
+
+`elapsed_secs` est la durée écoulée depuis le tick de scrape précédent : l'intervalle de scrape, ou plus quand un tick lent retarde le suivant.
 
 Cela capture la variation de puissance proportionnelle à la charge, ce que la constante proxy fixe ne peut pas faire.
 

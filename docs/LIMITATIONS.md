@@ -721,8 +721,10 @@ The proxy model uses a fixed energy constant for all I/O operations. Cloud SPECp
 
 ```
 watts = idle_watts + (max_watts - idle_watts) * (cpu_percent / 100)
-energy_per_op_kwh = (watts / 1000) * (interval_secs / 3600) / ops_in_window
+energy_per_op_kwh = (watts / 1000) * (elapsed_secs / 3600) / ops_in_window
 ```
+
+`elapsed_secs` is the time since the previous scrape tick: the scrape interval, or longer when a slow tick delays the next one.
 
 This captures workload-proportional power scaling, which the fixed proxy constant cannot.
 
