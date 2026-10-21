@@ -41,6 +41,7 @@ use crate::detect::Finding;
 use crate::detect::correlate_cross::CrossTraceCorrelation;
 use crate::report::interpret::InterpretationLevel;
 use crate::score::carbon::{CO2_MODEL_CAL_SUFFIX, CarbonReport, RegionBreakdown, ScoringConfig};
+use crate::score::host_static::HostPlacement;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -205,6 +206,14 @@ pub struct DisclosureDbWaste {
     /// when the window energy had no carbon conversion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canonical_waste_gco2: Option<f64>,
+    /// Copied from the window figure: its host energy and carbon are
+    /// inside the report totals. Omitted when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_totals: bool,
+    /// Copied from the window figure: where the declared or measured
+    /// hosts run. Omitted on the estimated path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<HostPlacement>,
 }
 
 /// Window messaging waste at both thresholds. Wire-identical to the
@@ -503,6 +512,16 @@ pub struct DatabaseWaste {
     /// baselines predating the field.
     #[serde(default)]
     pub model: String,
+    /// The host energy and carbon of this figure are inside the report
+    /// totals (`energy_kwh`, `co2.total`, `co2.database_gco2`). Never set on
+    /// the estimated path, which is already a share of them. Omitted
+    /// when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_totals: bool,
+    /// Where the hosts behind a measured or declared figure run, from
+    /// the operator's declaration. `None` on the estimated path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<HostPlacement>,
 }
 
 /// Messaging avoidable energy for the window, the twin of
@@ -537,6 +556,16 @@ pub struct MessagingWaste {
     /// application-side share of the window's publish spans.
     #[serde(default)]
     pub model: String,
+    /// The host energy and carbon of this figure are inside the report
+    /// totals (`energy_kwh`, `co2.total`, `co2.messaging_gco2`). Never set on
+    /// the estimated path, which is already a share of them. Omitted
+    /// when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_totals: bool,
+    /// Where the hosts behind a measured or declared figure run, from
+    /// the operator's declaration. `None` on the estimated path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<HostPlacement>,
 }
 
 /// Raw I/O operation count for a single `(service, endpoint)` pair.
@@ -617,6 +646,43 @@ impl GreenSummary {
             database_waste: None,
             messaging_waste: None,
         }
+    }
+
+    /// The database figure when its host energy is inside the totals.
+    #[must_use]
+    pub fn database_in_totals(&self) -> Option<&DatabaseWaste> {
+        self.database_waste.as_ref().filter(|w| w.in_totals)
+    }
+
+    /// The broker figure when its host energy is inside the totals.
+    #[must_use]
+    pub fn messaging_in_totals(&self) -> Option<&MessagingWaste> {
+        self.messaging_waste.as_ref().filter(|w| w.in_totals)
+    }
+
+    /// Database and broker host kWh counted inside `energy_kwh`.
+    #[must_use]
+    pub fn host_energy_in_totals_kwh(&self) -> f64 {
+        self.database_in_totals().map_or(0.0, |w| w.energy_kwh)
+            + self.messaging_in_totals().map_or(0.0, |w| w.energy_kwh)
+    }
+
+    /// `energy_kwh` without the in-total host energy: the applications'
+    /// own share, floored at 0 against rounding.
+    #[must_use]
+    pub fn application_energy_kwh(&self) -> f64 {
+        (self.energy_kwh - self.host_energy_in_totals_kwh()).max(0.0)
+    }
+
+    /// Scored carbon: the regions' operational gCO₂ plus the in-total
+    /// database and broker host terms. Embodied and transport stay out.
+    #[must_use]
+    pub fn scored_carbon_gco2(&self) -> f64 {
+        let operational: f64 = self.regions.iter().map(|r| r.co2_gco2).sum();
+        let hosts = self.co2.as_ref().map_or(0.0, |c| {
+            c.database_gco2.unwrap_or(0.0) + c.messaging_gco2.unwrap_or(0.0)
+        });
+        operational + hosts
     }
 
     /// Plain-text source of `energy_kwh` for display: `"source <tags>"`,
@@ -745,6 +811,7 @@ pub trait ReportSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::score::carbon::CarbonEstimate;
 
     #[test]
     fn green_summary_pre_0512_baseline_loads_without_scoring_config() {
@@ -1068,5 +1135,133 @@ mod tests {
             only_hostile.energy_source_label().as_deref(),
             Some("source unknown on 1 of 2 services \u{b7} rest modeled from I/O counts")
         );
+    }
+
+    /// A database or broker figure as a pre-in-totals window wrote it.
+    const LEGACY_WASTE: &str =
+        r#"{"energy_kwh":2.0,"waste_kwh":1.0,"sql_waste_ratio":0.5,"model":"alumet_rapl"}"#;
+
+    fn waste_summary(db_in_totals: bool, msg_in_totals: bool) -> GreenSummary {
+        let mut db: DatabaseWaste = serde_json::from_str(LEGACY_WASTE).expect("db figure");
+        db.in_totals = db_in_totals;
+        db.placement = Some(HostPlacement::Dedicated);
+        let mut mw: MessagingWaste = serde_json::from_str(
+            r#"{"energy_kwh":0.5,"waste_kwh":0.1,"messaging_waste_ratio":0.2,"model":"broker_specpower"}"#,
+        )
+        .expect("broker figure");
+        mw.in_totals = msg_in_totals;
+        let mut gs = GreenSummary::disabled(10);
+        gs.energy_kwh = 3.0;
+        gs.database_waste = Some(db);
+        gs.messaging_waste = Some(mw);
+        gs.regions = serde_json::from_value(serde_json::json!([{
+            "status": "known", "region": "eu-west-3", "grid_intensity_gco2_kwh": 50.0,
+            "pue": 1.1, "io_ops": 10, "co2_gco2": 4.0
+        }]))
+        .expect("region row");
+        gs
+    }
+
+    #[test]
+    fn window_written_before_the_host_fields_deserializes_with_defaults() {
+        let db: DatabaseWaste = serde_json::from_str(LEGACY_WASTE).expect("legacy db");
+        assert!(!db.in_totals);
+        assert_eq!(db.placement, None);
+        let block: DisclosureDbWaste = serde_json::from_str(
+            r#"{"energy_kwh":1.0,"model":"estimated","operational_waste_kwh":0.0,"canonical_waste_kwh":0.0}"#,
+        )
+        .expect("legacy block");
+        assert!(!block.in_totals);
+        assert_eq!(block.placement, None);
+        let co2: CarbonReport = serde_json::from_value(serde_json::json!({
+            "total": CarbonEstimate::sci_numerator(1.0),
+            "avoidable": CarbonEstimate::operational_ratio(0.0),
+            "operational_gco2": 1.0,
+            "embodied_gco2": 0.0
+        }))
+        .expect("legacy co2");
+        assert_eq!((co2.database_gco2, co2.messaging_gco2), (None, None));
+    }
+
+    #[test]
+    fn host_fields_are_skipped_at_their_defaults_and_round_trip_when_set() {
+        let db: DatabaseWaste = serde_json::from_str(LEGACY_WASTE).expect("db");
+        let json = serde_json::to_value(&db).expect("serialize");
+        assert!(json.get("in_totals").is_none() && json.get("placement").is_none());
+        let json = serde_json::to_value(DisclosureDbWaste::default()).expect("serialize");
+        assert!(json.get("in_totals").is_none() && json.get("placement").is_none());
+
+        let set = waste_summary(true, true);
+        let json = serde_json::to_value(&set).expect("serialize");
+        assert_eq!(json["database_waste"]["in_totals"], true);
+        assert_eq!(json["database_waste"]["placement"], "dedicated");
+        let back: GreenSummary = serde_json::from_value(json).expect("round trip");
+        assert_eq!(back.database_waste, set.database_waste);
+        assert_eq!(back.messaging_waste, set.messaging_waste);
+
+        let mut co2: CarbonReport = serde_json::from_value(serde_json::json!({
+            "total": CarbonEstimate::sci_numerator(1.0),
+            "avoidable": CarbonEstimate::operational_ratio(0.0),
+            "operational_gco2": 1.0,
+            "embodied_gco2": 0.0
+        }))
+        .expect("co2");
+        assert!(
+            serde_json::to_value(&co2)
+                .unwrap()
+                .get("database_gco2")
+                .is_none()
+        );
+        co2.database_gco2 = Some(2.5);
+        co2.messaging_gco2 = Some(0.5);
+        let back: CarbonReport =
+            serde_json::from_value(serde_json::to_value(&co2).unwrap()).expect("round trip");
+        assert_eq!(back, co2);
+    }
+
+    #[test]
+    fn in_total_helpers_count_only_flagged_host_figures() {
+        let none = waste_summary(false, false);
+        assert!(none.database_in_totals().is_none() && none.messaging_in_totals().is_none());
+        assert!(none.host_energy_in_totals_kwh().abs() < 1e-12);
+        assert!((none.application_energy_kwh() - 3.0).abs() < 1e-12);
+
+        let both = waste_summary(true, true);
+        assert!(both.database_in_totals().is_some() && both.messaging_in_totals().is_some());
+        assert!((both.host_energy_in_totals_kwh() - 2.5).abs() < 1e-12);
+        assert!((both.application_energy_kwh() - 0.5).abs() < 1e-12);
+
+        let db_only = waste_summary(true, false);
+        assert!((db_only.application_energy_kwh() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn application_energy_floors_at_zero() {
+        let mut gs = waste_summary(true, true);
+        gs.energy_kwh = 2.0;
+        assert!(gs.application_energy_kwh().abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn scored_carbon_sums_regions_and_host_terms() {
+        let mut gs = waste_summary(true, true);
+        assert!(
+            (gs.scored_carbon_gco2() - 4.0).abs() < 1e-12,
+            "no co2: regions only"
+        );
+        gs.co2 = Some(
+            serde_json::from_value(serde_json::json!({
+                "total": CarbonEstimate::sci_numerator(9.0),
+                "avoidable": CarbonEstimate::operational_ratio(0.0),
+                "operational_gco2": 4.0,
+                "embodied_gco2": 3.0,
+                "transport_gco2": 1.0,
+                "database_gco2": 1.5,
+                "messaging_gco2": 0.25
+            }))
+            .expect("co2"),
+        );
+        // Embodied and transport stay out.
+        assert!((gs.scored_carbon_gco2() - 5.75).abs() < 1e-12);
     }
 }

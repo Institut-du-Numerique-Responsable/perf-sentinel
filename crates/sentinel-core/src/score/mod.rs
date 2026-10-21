@@ -500,6 +500,8 @@ fn build_database_waste(
         region: f.region,
         sql_waste_ratio: f.ratio,
         model: f.model,
+        in_totals: false,
+        placement: None,
     })
 }
 
@@ -528,6 +530,8 @@ fn build_messaging_waste(
         region: f.region,
         messaging_waste_ratio: f.ratio,
         model: f.model,
+        in_totals: false,
+        placement: None,
     })
 }
 

@@ -387,6 +387,8 @@ pub(super) fn finalize_carbon_report(
         operational_gco2,
         embodied_gco2,
         transport_gco2,
+        database_gco2: None,
+        messaging_gco2: None,
         sci_per_trace,
         functional_unit: "trace".to_string(),
     }

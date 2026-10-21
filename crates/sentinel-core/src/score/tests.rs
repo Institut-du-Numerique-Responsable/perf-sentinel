@@ -527,6 +527,9 @@ fn database_waste_multiplies_window_energy_by_sql_ratio() {
         db.model, "alumet_rapl",
         "measured path carries the RAPL tag"
     );
+    // No producer puts host energy in the totals yet.
+    assert!(!db.in_totals);
+    assert_eq!(db.placement, None);
     // eu-west-3 is a known region, so the carbon conversion must land.
     assert!(db.waste_gco2.expect("gco2 for a known region") > 0.0);
     // Excluded from the totals: the report's energy stays proxy-based.
@@ -677,6 +680,11 @@ fn database_waste_estimated_when_no_database_declared() {
     assert!((db.sql_waste_ratio - 0.0).abs() < f64::EPSILON);
     assert_eq!(db.region, None);
     assert_eq!(db.model, "estimated", "estimated path carries its own tag");
+    assert!(
+        !db.in_totals,
+        "the estimated share is already in the totals"
+    );
+    assert_eq!(db.placement, None);
 
     // Unknown-bucket spans are outside the accounted totals, so they
     // feed no estimate either: the figure stays a true subset.

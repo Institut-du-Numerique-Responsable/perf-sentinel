@@ -61,6 +61,8 @@ fn make_report(
         operational_gco2: 0.8,
         embodied_gco2: 0.2,
         transport_gco2: None,
+        database_gco2: None,
+        messaging_gco2: None,
         sci_per_trace: None,
         functional_unit: String::new(),
     };
@@ -681,6 +683,8 @@ fn transport_bracket_needs_every_window_to_declare_the_fixed_coefficient() {
         operational_gco2: 0.0,
         embodied_gco2: 0.0,
         transport_gco2: Some(gco2),
+        database_gco2: None,
+        messaging_gco2: None,
         sci_per_trace: None,
         functional_unit: String::new(),
     };
@@ -1829,6 +1833,7 @@ fn waste_block(energy: f64, model: &str) -> crate::report::DisclosureDbWaste {
         canonical_waste_kwh: energy * 0.8,
         canonical_waste_gco2: Some(energy * 80.0),
         energy_gco2: Some(energy * 100.0),
+        ..Default::default()
     }
 }
 

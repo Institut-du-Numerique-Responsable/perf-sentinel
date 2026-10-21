@@ -272,6 +272,9 @@ fn fold_waste_block(acc: &mut DbWasteAccumulator, block: &crate::report::Disclos
         canonical_waste_kwh: canonical_kwh,
         canonical_waste_gco2: canonical_gco2,
         energy_gco2,
+        // Folded by the period aggregate once the host terms enter it.
+        in_totals: _,
+        placement: _,
     } = block;
     let (energy_kwh, operational_kwh, canonical_kwh) =
         (*energy_kwh, *operational_kwh, *canonical_kwh);

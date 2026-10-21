@@ -334,6 +334,16 @@ pub struct CarbonReport {
     /// `[green] include_network_transport` is deprecated and ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_gco2: Option<f64>,
+    /// Database host carbon (gCO₂eq) counted inside `total`, an SCI-style
+    /// host term next to `operational_gco2`. Present only when the
+    /// window's database figure is in the totals
+    /// (`DatabaseWaste.in_totals`), absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_gco2: Option<f64>,
+    /// Broker host carbon (gCO₂eq) counted inside `total`, the messaging
+    /// twin of `database_gco2` (`MessagingWaste.in_totals`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messaging_gco2: Option<f64>,
     /// SCI v1.0 per-functional-unit intensity: `total / R`, R = 1 trace.
     /// The SCI score proper (an intensity), distinct from `total` (the
     /// numerator footprint). Methodology tag `sci_v1_intensity`. Optional

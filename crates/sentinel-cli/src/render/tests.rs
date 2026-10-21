@@ -983,6 +983,8 @@ fn broker_waste_line_sanitizes_and_labels_its_source() {
         region: Some("eu\u{1b}[2Jwest".to_string()),
         messaging_waste_ratio: 0.4,
         model: "broker_specpower".to_string(),
+        in_totals: false,
+        placement: None,
     };
     let line = format_messaging_waste_line(&declared);
     assert!(!line.contains('\u{1b}'), "escape reached the sink: {line}");
@@ -1017,6 +1019,8 @@ fn green_summary_prints_sql_share_and_database_waste() {
         region: Some("eu\u{1b}[2Jwest".to_string()),
         sql_waste_ratio: 5.0 / 6.0,
         model: "alumet_rapl".to_string(),
+        in_totals: false,
+        placement: None,
     };
     let line = format_database_waste_line(&measured);
     assert!(!line.contains('\u{1b}'), "escape reached the sink: {line}");
@@ -1032,6 +1036,8 @@ fn green_summary_prints_sql_share_and_database_waste() {
         region: None,
         sql_waste_ratio: 0.0,
         model: "estimated".to_string(),
+        in_totals: false,
+        placement: None,
     };
     let line = format_database_waste_line(&estimated);
     assert!(line.contains("within the report totals"), "{line}");

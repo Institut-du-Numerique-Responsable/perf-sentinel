@@ -12,6 +12,7 @@
 use crate::correlate::Trace;
 use crate::detect::{DISCLOSURE_N_PLUS_ONE_THRESHOLD, DetectConfig, n_plus_one, redundant};
 use crate::report::{AvoidableTier, DisclosureDbWaste, DisclosureWaste, GreenSummary};
+use crate::score::host_static::HostPlacement;
 
 use super::AvoidableIoOps;
 use super::dedup_avoidable_io_ops_by_service;
@@ -78,13 +79,15 @@ pub(crate) fn compute_disclosure_waste(
     }
 }
 
-/// The five figure fields both waste twins share, borrowed from either.
+/// The figure fields both waste twins share, borrowed from either.
 struct WasteTierInput<'a> {
     energy_kwh: f64,
     model: &'a str,
     waste_kwh: f64,
     waste_gco2: Option<f64>,
     energy_gco2: Option<f64>,
+    in_totals: bool,
+    placement: Option<HostPlacement>,
 }
 
 /// Both tiers from one window figure. The canonical tier reuses the same
@@ -111,6 +114,8 @@ fn build_waste_tiers(
         canonical_waste_kwh: figure.energy_kwh * canonical_ratio,
         energy_gco2: figure.energy_gco2,
         canonical_waste_gco2: figure.energy_gco2.map(|g| g * canonical_ratio),
+        in_totals: figure.in_totals,
+        placement: figure.placement,
     }
 }
 
@@ -126,6 +131,8 @@ fn build_db_waste_tiers(
             waste_kwh: db.waste_kwh,
             waste_gco2: db.waste_gco2,
             energy_gco2: db.energy_gco2,
+            in_totals: db.in_totals,
+            placement: db.placement,
         },
         canonical_sql_avoidable,
         operational.total_sql_io_ops,
@@ -144,6 +151,8 @@ fn build_msg_waste_tiers(
             waste_kwh: mw.waste_kwh,
             waste_gco2: mw.waste_gco2,
             energy_gco2: mw.energy_gco2,
+            in_totals: mw.in_totals,
+            placement: mw.placement,
         },
         canonical_messaging_avoidable,
         operational.total_messaging_io_ops,
@@ -199,6 +208,8 @@ mod tests {
                 operational_gco2: 12.0,
                 embodied_gco2: 0.0,
                 transport_gco2: None,
+                database_gco2: None,
+                messaging_gco2: None,
                 sci_per_trace: None,
                 functional_unit: String::new(),
             }),
@@ -241,12 +252,17 @@ mod tests {
             region: None,
             sql_waste_ratio: 0.0,
             model: "alumet_rapl".to_string(),
+            in_totals: true,
+            placement: Some(HostPlacement::Dedicated),
         });
 
         let waste = compute_disclosure_waste(&traces, &operational, &detect_config(50));
 
         let db = waste.database.expect("database tiers");
         assert_eq!(db.model, "alumet_rapl");
+        // The host flags ride along unchanged.
+        assert!(db.in_totals);
+        assert_eq!(db.placement, Some(HostPlacement::Dedicated));
         assert!((db.energy_kwh - 1.2).abs() < 1e-12);
         // Operator threshold 50 finds nothing: operational waste is zero.
         assert!(db.operational_waste_kwh.abs() < 1e-12);
@@ -271,6 +287,8 @@ mod tests {
             region: None,
             sql_waste_ratio: 0.0,
             model: "estimated".to_string(),
+            in_totals: false,
+            placement: None,
         });
         let db = build_db_waste_tiers(&operational, 0).expect("tiers");
         assert!(db.canonical_waste_kwh.abs() < 1e-12);

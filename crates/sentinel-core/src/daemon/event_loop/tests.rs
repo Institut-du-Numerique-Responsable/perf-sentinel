@@ -1545,6 +1545,8 @@ fn waste_fixture(ratio: f64) -> DatabaseWaste {
         region: None,
         sql_waste_ratio: ratio,
         model: "alumet_rapl".to_string(),
+        in_totals: false,
+        placement: None,
     }
 }
 
