@@ -553,14 +553,21 @@ jobs:
         # The wire assertions above already prove the parser would
         # match. Here we confirm the daemon side wires the scrape AND
         # that the three schemas (legacy_power, environment_metrics,
-        # sensor) parse without error from a single config. Three
-        # chassis-ids on the same mockup, one per schema, exercise the
-        # per-endpoint schema dispatch.
+        # sensor) parse without error. All three read the same mockup
+        # chassis, and the daemon rejects one chassis declared under
+        # two endpoints (it would bill the chassis twice), so each
+        # schema runs in its own daemon with a single endpoint.
         env:
           SENSOR_PATH: ${{ steps.sensor.outputs.sensor }}
         run: |
           chassis="${{ steps.chassis.outputs.first_chassis }}"
-          cat > /tmp/perf-sentinel.toml <<EOF
+          fail=0
+
+          run_schema() {
+            schema="$1"
+            url="$2"
+            log="/tmp/perf-sentinel-${schema}.log"
+            cat > "/tmp/perf-sentinel-${schema}.toml" <<EOF
           [daemon]
           listen_address = "127.0.0.1"
           listen_port_http = 14318
@@ -571,52 +578,45 @@ jobs:
           [green.redfish]
           scrape_interval_secs = 15
 
-          [green.redfish.endpoints."chassis-legacy"]
-          url = "http://localhost:8000${chassis}/Power"
-          schema = "legacy_power"
-
-          [green.redfish.endpoints."chassis-modern"]
-          url = "http://localhost:8000${chassis}/EnvironmentMetrics"
-          schema = "environment_metrics"
-
-          [green.redfish.endpoints."chassis-sensor"]
-          url = "http://localhost:8000${SENSOR_PATH}"
-          schema = "sensor"
+          [green.redfish.endpoints."chassis-${schema}"]
+          url = "${url}"
+          schema = "${schema}"
 
           [green.redfish.service_mappings]
-          "wire-conformance-svc-legacy" = "chassis-legacy"
-          "wire-conformance-svc-modern" = "chassis-modern"
-          "wire-conformance-svc-sensor" = "chassis-sensor"
+          "wire-conformance-svc-${schema}" = "chassis-${schema}"
           EOF
 
-          ./target/release/perf-sentinel watch --config /tmp/perf-sentinel.toml \
-            > /tmp/perf-sentinel.log 2>&1 &
-          PID=$!
+            ./target/release/perf-sentinel watch --config "/tmp/perf-sentinel-${schema}.toml" \
+              > "${log}" 2>&1 &
+            PID=$!
 
-          # 1 tick at 15s (min interval) + margin to see at least one
-          # successful scrape.
-          sleep 22
-          kill "${PID}" 2>/dev/null || true
-          wait "${PID}" 2>/dev/null || true
+            # 1 tick at 15s (min interval) + margin to see at least one
+            # successful scrape.
+            sleep 22
+            kill "${PID}" 2>/dev/null || true
+            wait "${PID}" 2>/dev/null || true
 
-          echo "--- perf-sentinel daemon log (tail)"
-          tail -80 /tmp/perf-sentinel.log
-          echo "---"
+            echo "--- perf-sentinel daemon log, ${schema} (tail)"
+            tail -80 "${log}"
+            echo "---"
 
-          fail=0
+            if grep -qF "Redfish scraper started" "${log}"; then
+              echo "::notice::Redfish scraper started cleanly with the ${schema} schema"
+            else
+              echo "::error::Redfish scraper did not start with the ${schema} schema. End-to-end assertion failed."
+              fail=1
+            fi
 
-          if grep -qF "Redfish scraper started" /tmp/perf-sentinel.log; then
-            echo "::notice::Redfish scraper started cleanly"
-          else
-            echo "::error::Redfish scraper did not start. End-to-end assertion failed."
-            fail=1
-          fi
+            if grep -qiE "redfish.*(error|panic|fatal)" "${log}"; then
+              echo "::error::Redfish scraper logged an error or panic with the ${schema} schema."
+              grep -iE "redfish.*(error|panic|fatal)" "${log}"
+              fail=1
+            fi
+          }
 
-          if grep -qiE "redfish.*(error|panic|fatal)" /tmp/perf-sentinel.log; then
-            echo "::error::Redfish scraper logged an error or panic during the test window."
-            grep -iE "redfish.*(error|panic|fatal)" /tmp/perf-sentinel.log
-            fail=1
-          fi
+          run_schema legacy_power "http://localhost:8000${chassis}/Power"
+          run_schema environment_metrics "http://localhost:8000${chassis}/EnvironmentMetrics"
+          run_schema sensor "http://localhost:8000${SENSOR_PATH}"
 
           exit "${fail}"
 
@@ -627,8 +627,10 @@ jobs:
           cat /tmp/chassis.json 2>/dev/null || true
           echo "--- Power resource"
           cat /tmp/power.json 2>/dev/null || true
-          echo "--- perf-sentinel log"
-          tail -200 /tmp/perf-sentinel.log 2>/dev/null || true
+          for log in /tmp/perf-sentinel-*.log; do
+            echo "--- ${log}"
+            tail -200 "${log}" 2>/dev/null || true
+          done
 
   scaphandre-wire-conformance:
     name: scaphandre-wire-conformance
