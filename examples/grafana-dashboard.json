@@ -1741,7 +1741,7 @@
     },
     {
       "title": "Energy per scoring window (kWh)",
-      "description": "Electricity attributed to the analysed workload for the most recent scoring window. Depending on configuration it is measured (an agent reading real power) or modelled from operation counts, the energy source line of `query monitor` and the HTML report says which.\n\nPer-service and per-region detail is kept off /metrics and lives in the query monitor.",
+      "description": "Electricity attributed to the analysed workload for the most recent scoring window. Depending on configuration it is measured (an agent reading real power) or modelled from operation counts, the energy source line of `query monitor` and the HTML report says which. When a database or broker host source is configured, it includes their host energy counted in the totals.\n\nPer-service and per-region detail is kept off /metrics and lives in the query monitor.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1775,7 +1775,7 @@
     },
     {
       "title": "Carbon per scoring window (gCO2e)",
-      "description": "Operational emissions for the same window, summed across regions: energy multiplied by the local grid intensity.\n\nIt moves with the grid as well as the workload, so a drop can be a cleaner hour rather than an optimisation. Manufacturing emissions are excluded.",
+      "description": "Operational emissions for the same window, summed across regions: energy multiplied by the local grid intensity. When a database or broker host source is configured, it includes their host carbon counted in the totals.\n\nIt moves with the grid as well as the workload, so a drop can be a cleaner hour rather than an optimisation. Manufacturing emissions are excluded.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1809,7 +1809,7 @@
     },
     {
       "title": "Energy over the selected range (kWh)",
-      "description": "Electricity attributed to the analysed workload. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window panel above would count a window once per scrape. No data on a range that predates the counter.",
+      "description": "Electricity attributed to the analysed workload. When a database or broker host source is configured, it includes their host energy counted in the totals. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window panel above would count a window once per scrape. No data on a range that predates the counter.",
       "type": "stat",
       "gridPos": {
         "h": 6,
@@ -1837,7 +1837,7 @@
     },
     {
       "title": "Carbon over the selected range (gCO2e)",
-      "description": "Operational carbon of the analysed workload, embodied and network transport excluded. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window panel above would count a window once per scrape. No data on a range that predates the counter.",
+      "description": "Operational carbon of the analysed workload, embodied and network transport excluded. When a database or broker host source is configured, it includes their host carbon counted in the totals. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window panel above would count a window once per scrape. No data on a range that predates the counter.",
       "type": "stat",
       "gridPos": {
         "h": 6,

@@ -221,7 +221,9 @@ pub struct GreenConfig {
     /// Cloud CPU% + `SPECpower` config (daemon only).
     pub cloud_energy: Option<CloudEnergyConfig>,
     /// Declared database hosts (`[green.database_static]`, daemon only).
-    /// Validated at load, the daemon does not read it yet.
+    /// Needs no agent, so it covers managed databases. A dedicated
+    /// declaration bills its ceiling, or prices its hosts from its
+    /// `cpu_query`, and a shared one bills its pod's share of its node.
     pub database_static: Option<StaticHostsConfig>,
     /// Declared broker hosts (`[green.broker_static]`, daemon only).
     /// Needs no agent, so it covers managed brokers. Only a dedicated

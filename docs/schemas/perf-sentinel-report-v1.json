@@ -352,7 +352,7 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1, "maxLength": 64 },
           "uniqueItems": true,
-          "description": "SCI methodology tags observed across the period's windows. Current windows use sci_v1_numerator+transport because network transport is part of the numerator, including when its value is zero. A daemon window scored with a database or broker host source configured carries the sci_v1_numerator+transport+hosts and sci_v1_operational_ratio+hosts pair instead, its in-total host carbon joining the numerator, zero included. The legacy sci_v1_numerator tag can appear when a period spans older windows (v1.6+)."
+          "description": "SCI methodology tags observed across the period's windows. Current windows use sci_v1_numerator+transport because network transport is part of the numerator, including when its value is zero. A daemon window scored with a database or broker host source configured carries sci_v1_numerator+transport+hosts instead, its in-total host carbon joining the numerator, zero included. Its avoidable figure is tagged sci_v1_operational_ratio+hosts on the window, a tag this field does not collect. The legacy sci_v1_numerator tag can appear when a period spans older windows (v1.6+)."
         },
         "embodied_gco2_total": {
           "type": "number",

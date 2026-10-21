@@ -167,12 +167,12 @@ pub struct AvoidableTier {
 pub struct DisclosureWaste {
     pub canonical: AvoidableTier,
     pub operational: AvoidableTier,
-    /// Database-side waste for the window, both tiers. `None` when the
+    /// Database waste for the window, both tiers. `None` when the
     /// window produced no [`DatabaseWaste`] figure. Absent on archives
     /// predating the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<DisclosureDbWaste>,
-    /// Broker-side waste for the window, both tiers. `None` when the
+    /// Messaging waste for the window, both tiers. `None` when the
     /// window produced no messaging figure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messaging: Option<DisclosureMsgWaste>,
@@ -471,8 +471,9 @@ pub struct GreenSummary {
     /// totals (as `co2.messaging_gco2`) once its carbon converts, beside
     /// them otherwise, `in_totals` says which. Estimated: the
     /// application-side share of the window's publish spans, already
-    /// inside the totals. `None` when a declared broker delivered no
-    /// reading, or when the window has no publish energy.
+    /// inside the totals. `None` when a configured broker source (Alumet
+    /// or `[green.broker_static]`) delivered no reading, or when the
+    /// window has no publish energy or ops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messaging_waste: Option<MessagingWaste>,
 }
@@ -723,6 +724,9 @@ impl GreenSummary {
 
     /// Scored carbon: the regions' operational gCO₂ plus the in-total
     /// database and broker host terms. Embodied and transport stay out.
+    /// Reads the host terms without their `in_totals` flag: it relies on
+    /// the producer setting `co2.database_gco2` and `co2.messaging_gco2`
+    /// exactly when the matching figure is in the totals.
     #[must_use]
     pub fn scored_carbon_gco2(&self) -> f64 {
         let operational: f64 = self.regions.iter().map(|r| r.co2_gco2).sum();

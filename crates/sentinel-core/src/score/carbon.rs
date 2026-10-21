@@ -22,11 +22,12 @@ pub(crate) use super::carbon_profiles::HourlyProfileRef;
 /// Estimated energy consumed per I/O operation in kWh.
 ///
 /// This is a rough order-of-magnitude approximation (~0.1 mWh per I/O op).
-/// Every rung of the ladder, the I/O proxy included, prices the emitting
-/// service's own host for each operation it issues: CPU, memory and
-/// network stack on that host. The callee (database server, broker,
-/// downstream service) is never in it. Database and broker host energy
-/// enters a report only through a declared or measured source:
+/// Every rung of the fidelity ladder (`docs/ENERGY.md`), the I/O proxy
+/// included, prices the emitting service's own host for each operation
+/// it issues: CPU, memory and network stack on that host. The callee
+/// (database server, broker, downstream service) is never in it.
+/// Database and broker host energy enters a report only through a
+/// declared or measured source:
 /// `[green.alumet.database]`, `[green.database_static]`,
 /// `[green.alumet.broker]` or `[green.broker_static]`.
 ///
@@ -36,7 +37,7 @@ pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1;
 // Per-operation energy multipliers (proxy model only).
 // SQL verb weights and HTTP tiers are relative weights that rank operation
 // classes on the emitting service. Their ratios come from database-server
-// benchmarks, but they bill no database host and carry no host share.
+// benchmarks, but they bill no database host.
 // See docs/design/05-GREENOPS-AND-CARBON.md for sources and rationale.
 
 const SQL_SELECT_COEFF: f64 = 0.5; // read-only index lookup
@@ -560,14 +561,15 @@ pub struct CarbonContext {
     /// verify which carbon model produced the numbers without reading
     /// the operator's TOML. `None` when green scoring is disabled.
     pub scoring_config: Option<ScoringConfig>,
-    /// Declared database measured by Alumet (`[green.alumet.database]`).
+    /// Database host energy from `[green.alumet.database]` or
+    /// `[green.database_static]` (its ceiling or its `cpu_query`).
     /// Daemon-only: `Config::carbon_context` leaves this `None`, and only
     /// the daemon patches in a `Some` per tick with the energy accumulated
     /// since the previous scored batch. A batch run starts no scraper, so
     /// it emits no database figure and falls back to the estimated one.
     pub db_energy: Option<DbEnergyContext>,
-    /// Declared broker measured by Alumet (`[green.alumet.broker]`),
-    /// same lifecycle as [`Self::db_energy`].
+    /// Broker host energy from `[green.alumet.broker]` or
+    /// `[green.broker_static]`, same lifecycle as [`Self::db_energy`].
     pub broker_energy: Option<DbEnergyContext>,
 }
 
@@ -577,7 +579,8 @@ pub struct CarbonContext {
 pub struct DbEnergyContext {
     /// kWh since the previous scored batch, `0.0` = no reading.
     pub window_kwh: f64,
-    /// Operator-declared region, `None` skips the carbon conversion.
+    /// The subsystem's effective region (`GreenConfig::host_region`),
+    /// `None` skips the carbon conversion.
     pub region: Option<String>,
     /// Provenance of `window_kwh`, carried here because only the caller
     /// that fills it knows whether it was measured or declared.

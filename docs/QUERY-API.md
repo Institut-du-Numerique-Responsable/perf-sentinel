@@ -409,9 +409,10 @@ set listed under **Response shape**.)
 
 ### GET /api/energy
 
-Live health of the fourteen energy/intensity backends (since 0.8.8):
+Live health of the sixteen energy/intensity backends (since 0.8.8):
 the five scraped measured-energy sources (Alumet, Scaphandre, Kepler,
-Redfish, cloud SPECpower) and the nine real-time intensity APIs,
+Redfish, cloud SPECpower), the two host CPU queries (`database_cpu`,
+`broker_cpu`) and the nine real-time intensity APIs,
 Electricity Maps and the grid operator feeds (RTE éCO2mix, NESO,
 Fingrid, Energinet, REE e·sios, Open Electricity, MAVIR, em6).
 Backs the Scrapers tab of `perf-sentinel query monitor`. The effective

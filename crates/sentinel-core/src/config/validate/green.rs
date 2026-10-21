@@ -614,7 +614,8 @@ pub(crate) fn host_source_warnings(green: &GreenConfig) -> Vec<String> {
     if green.calibration_file.is_some() {
         out.push(format!(
             "[green] calibration_file is set next to {sources}: the calibrated readings must \
-             exclude those hosts, whose energy is reported on its own, or it counts twice"
+             exclude those hosts, whose energy already enters the totals as a host term, or it \
+             counts twice"
         ));
     }
     out

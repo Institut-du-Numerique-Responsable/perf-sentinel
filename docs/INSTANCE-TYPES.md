@@ -87,7 +87,7 @@ scaling a row per vCore.
 | Azure `Standard_<series><size><features>_v<k>`, features holding `d` | the same name without the `d`: `Standard_D4ds_v5` to `Standard_D4s_v5`, `Standard_D4ads_v5` to `Standard_D4as_v5` |
 | `db-n1-standard-N`, `db-n1-highmem-N` (Cloud SQL) | `n1-standard-N`, `n1-highmem-N` |
 | `db-perf-optimized-N-V` (Cloud SQL Enterprise Plus, N2 series) | `n2-highmem-V` |
-| `GP_Gen5_N`, `BC_Gen5_N`, `HS_Gen5_N`, serverless `GP_S_Gen5_N` (Azure SQL vCore, standard-series) | N times the per-vCPU rate of `Standard_D64s_v3`, N from 1 to 1024 |
+| `GP_Gen5_N`, `BC_Gen5_N`, `HS_Gen5_N`, serverless `GP_S_Gen5_N` and `HS_S_Gen5_N` (Azure SQL vCore, standard-series) | N times the per-vCPU rate of `Standard_D64s_v3`, N from 1 to 1024 |
 
 The AWS letters `d` (local instance store), `n` (network) and `b` (block
 storage), and the Azure `d` (local temp disk), leave the processor
@@ -126,7 +126,7 @@ for the first five rows, the others are reported as unknown types:
 | `db-custom-V-MiB` (Cloud SQL dedicated core) | Cloud SQL names no machine series or processor behind it |
 | `GP_Fsv2_N` and the other Azure SQL Fsv2 objectives | the hardware was retired on October 1, 2026 |
 | Azure SQL DTU objectives (`S0`, `P1`), premium-series (`HS_PRMS_N`), DC-series (`GP_DC_N`) | no published processor mapping for the objective |
-| AWS `x`, `z`, `i` and `im` families, OpenSearch `or1` | 16 to 32 GiB per vCPU, beyond the binary DRAM premium rule, or an undisclosed platform |
+| AWS `x`, `z`, `i` and `im` families, OpenSearch `or1` | no row for the family: 16 to 32 GiB per vCPU beyond the binary DRAM premium rule, an undisclosed platform, or a storage-optimized or high-frequency family the table does not carry |
 | ElastiCache, MSK and OpenSearch Serverless, Azure Cache for Redis, Event Hubs, Service Bus | billed in capacity units, no instance to declare |
 
 Rule sources: the AWS [instance type naming

@@ -648,7 +648,7 @@ pub struct Aggregate {
     pub total_requests: u64,
     pub total_energy_kwh: f64,
     pub total_carbon_kgco2eq: f64,
-    /// The three terms `total_carbon_kgco2eq` is made of. Reading the
+    /// The five terms `total_carbon_kgco2eq` is made of. Reading the
     /// total without them mixes what an anti-pattern fix can reduce with
     /// what it cannot. Absent on pre-v1.6 reports. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]

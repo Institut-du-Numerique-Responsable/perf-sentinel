@@ -489,8 +489,8 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # auth_header = "Authorization: Bearer TOKEN"    # default unset, prefer PERF_SENTINEL_ALUMET_AUTH_HEADER
 #
 # Attribute the database cgroup, which replaces the estimated database waste
-# figure (the application-side share of the SQL spans) with a measured one. `label_value` is the series label of that
-# cgroup on your endpoint.
+# figure (the application-side share of the SQL spans) with a measured one.
+# `label_value` is the series label of that cgroup on your endpoint.
 # [green.alumet.database]
 # label_value = "postgres-pod"   # no default
 # region = "eu-west-3"           # else [green] default_region, one of them is required

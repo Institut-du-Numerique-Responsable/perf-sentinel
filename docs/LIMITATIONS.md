@@ -730,7 +730,7 @@ This captures workload-proportional power scaling, which the fixed proxy constan
 
 1. **Per-finding attribution:** like Scaphandre, this is a per-service coefficient. It covers the emitting service's node, never the database or broker it calls.
 2. **Memory or I/O power:** the SPECpower data captures CPU and baseboard, not storage or network.
-3. **One node per CPU query:** the services that read one CPU query split its node's watts by operation count when the response holds one series. A query returning several series keeps a figure per service, each reading the first series, with a warning. Services on one node read through different queries are not recognised as neighbours, so each is priced as if it owned the node. Untraced tenants of the node are not seen either: the node's full power is attributed to the traced services. A database or broker declared `placement = "shared"` on the node is the exception: its dynamic share is billed to the host and taken out of the node's watts before the split, so the node is counted once. Four limits apply to that share:
+3. **One node per CPU query:** the services that read one CPU query split its node's watts by operation count when the response holds one series and the services resolve one idle and max envelope. Services with different envelopes keep a figure per service, with a load-time warning. A query returning several series keeps a figure per service, each reading the first series, with a warning. Services on one node read through different queries are not recognised as neighbours, so each is priced as if it owned the node. Untraced tenants of the node are not seen either: the node's full power is attributed to the traced services. A database or broker declared `placement = "shared"` on the node is the exception: its dynamic share is billed to the host and taken out of the node's watts before the split, so the node is counted once. Four limits apply to that share:
    - **Sampling skew.** The host's query and the node's query are two series Prometheus does not sample at the same instant, often over different rate windows, so a burst can land in one before the other and the share skews for that tick. Totals over a period are close, a single tick is not.
    - **A stale shared host bills nothing.** A shared host has no ceiling to fall back on, so a tick without a host reading, or without a single-series reading of the node's query, bills the host nothing, and the node's services keep its watts that tick.
    - **Dynamic share only.** The host bills `(max - idle) × cpu / 100`, never a share of the node's idle, which stays with the services. A host that is most of a quiet node is under-counted by its share of idle.
@@ -754,7 +754,7 @@ GCP `n1` runs on Skylake, Broadwell, Haswell, Ivy Bridge or Sandy Bridge hosts, 
 
 #### Serverless Azure SQL objectives are priced at their max vCores.
 
-A `GP_S_Gen5_N` objective is priced as N provisioned vCores, a ceiling. Auto-pause, the min vCores and the autoscaling between them are not modeled, and neither is the memory a serverless database can grow to beyond the 5.1 GB per vCore of provisioned Gen5, so no DRAM premium applies.
+A serverless `GP_S_Gen5_N` or `HS_S_Gen5_N` objective is priced as N provisioned vCores, a ceiling. Auto-pause, the min vCores and the autoscaling between them are not modeled, and neither is the memory a serverless database can grow to beyond the 5.1 GB per vCore of provisioned Gen5, so no DRAM premium applies.
 
 #### Burstable families count their full vCPU.
 

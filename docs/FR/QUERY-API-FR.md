@@ -423,9 +423,10 @@ l'ensemble complet listé sous **Forme de réponse**.)
 
 ### GET /api/energy
 
-Santé live des quatorze backends énergie/intensité (depuis 0.8.8) : les
+Santé live des seize backends énergie/intensité (depuis 0.8.8) : les
 cinq sources d'énergie mesurée scrappées (Alumet, Scaphandre, Kepler,
-Redfish, SPECpower cloud) et les neuf API d'intensité temps réel,
+Redfish, SPECpower cloud), les deux requêtes CPU d'hôte (`database_cpu`,
+`broker_cpu`) et les neuf API d'intensité temps réel,
 Electricity Maps et les flux des gestionnaires de réseau (RTE éCO2mix,
 NESO, Fingrid, Energinet, REE e·sios, Open Electricity, MAVIR, em6). Alimente l'onglet Scrapers de `perf-sentinel query monitor`. Le
 mix effectif lui-même (quelle source a gagné la chaîne de précédence

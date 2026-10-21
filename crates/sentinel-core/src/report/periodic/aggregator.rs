@@ -111,7 +111,8 @@ pub struct AggregateInputs {
     /// Later than the period's first day means the archive does not reach
     /// back to it, see [`archive_reaches_period_start`].
     pub earliest_archived_window: Option<DateTime<Utc>>,
-    /// The three terms whose sum is the published total, in gCO2eq.
+    /// Three of the five terms of the published total, in gCO2eq. The
+    /// in-total database and broker host terms are in `carbon_breakdown`.
     /// Only `operational` carries an avoidable share: embodied hardware
     /// and network transport are irreducible by fixing an anti-pattern.
     pub embodied_gco2_total: f64,
@@ -442,7 +443,8 @@ pub(crate) struct PeriodState {
     /// Set once a window contributed transport under a coefficient that
     /// is not the fixed one, or under none this binary can read.
     transport_coefficient_uncertain: bool,
-    /// Running sums of the three terms of the published total, in gCO2eq.
+    /// Running sums of the first three terms of the published total, in
+    /// gCO2eq.
     embodied_gco2_total: f64,
     operational_gco2_total: f64,
     transport_gco2_total: f64,
