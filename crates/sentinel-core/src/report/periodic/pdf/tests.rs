@@ -460,7 +460,70 @@ mod layout_and_pages {
         assert!(all.contains("embodied 0.20 kg"), "{all}");
         assert!(all.contains("network transport 0.04 kg"), "{all}");
         assert!(all.contains("database 0.12 kg"), "{all}");
-        assert!(!all.contains("broker"), "{all}");
+        // No broker figure, only the at-a-glance perimeter sentence.
+        assert!(!all.contains("broker 0."), "{all}");
+        assert!(!all.contains("broker hosts"), "{all}");
+    }
+
+    fn at_a_glance_text(report: &PeriodicReport) -> String {
+        texts(&layout_pages(&PageContext::for_report(report)))
+            .into_iter()
+            .find(|page| page.contains("Three numbers"))
+            .expect("at a glance page")
+    }
+
+    fn in_total_block(kwh: f64) -> crate::report::periodic::schema::DatabaseWasteAggregate {
+        crate::report::periodic::schema::DatabaseWasteAggregate {
+            energy_kwh: kwh,
+            in_totals_energy_kwh: kwh,
+            windows_with_figure: 1,
+            declared_windows: 1,
+            in_totals_windows: 1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn at_a_glance_states_the_host_perimeter() {
+        let (mut report, _) = baked_report();
+        report.aggregate.database_waste = None;
+        report.aggregate.messaging_waste = None;
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains("The database and broker servers are outside these totals."),
+            "{text}"
+        );
+        report.aggregate.database_waste = Some(in_total_block(0.42));
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains("The totals include the database hosts (0.42 kWh)."),
+            "{text}"
+        );
+        assert!(
+            text.contains("The broker servers are outside these totals."),
+            "{text}"
+        );
+        report.aggregate.messaging_waste = Some(in_total_block(0.07));
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains(
+                "The totals include the database hosts (0.42 kWh) and broker hosts (0.07 kWh)."
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("outside these totals"), "{text}");
+        // A block whose figure stayed beside the totals leaves its hosts out.
+        report.aggregate.messaging_waste =
+            Some(crate::report::periodic::schema::DatabaseWasteAggregate {
+                in_totals_energy_kwh: 0.0,
+                in_totals_windows: 0,
+                ..in_total_block(0.07)
+            });
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains("The broker servers are outside these totals."),
+            "{text}"
+        );
     }
 
     #[test]

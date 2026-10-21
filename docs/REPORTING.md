@@ -88,6 +88,7 @@ Only `--input` and `--org-config` stay required. The period, intent, and confide
 - `←` / `→` (or `h` / `l`) step the period one unit at a time. In `custom` they move the active edge by a day, `[` and `]` move it by a month, and `Tab` switches between the `from` and `to` edge.
 - `i` toggles the intent (internal or official), `c` toggles the confidentiality (G1 internal or G2 public).
 - The summary reports the window count, period coverage against the official threshold, measured and excluded services, totals (requests, carbon, energy, waste ratio), and the official-validator verdict when the intent is official.
+- Under Totals, a `Database:` and a `Broker:` line give each host perimeter: the in-total host kWh and how many of the windows with a figure counted it (`1.2500 kWh in the totals (3 of 5 windows)`), or `outside the totals`. See [Host perimeter](#host-perimeter-v18).
 - The footer prints the exact `disclose` command for the current settings. Copy it to produce the hashed report.
 
 The preview needs an interactive terminal. Piping its output (no TTY) exits with a clear error rather than rendering.
@@ -107,12 +108,24 @@ Publishing both lets a reader compare the two and see how much avoidable waste a
 
 ![disclose preview, official intent: the validator reports why the report is not yet publishable](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/official.png)
 
+## Host perimeter (v1.8)
+
+`total_energy_kwh` and `total_carbon_kgco2eq` cover the application services, plus the database and broker hosts in the windows that counted them. A window counts a host when a measured (`alumet_rapl`), modeled (`cloud_specpower`) or declared (`database_specpower`, `broker_specpower`) figure carried a carbon conversion. The estimated figure is the application-side share of the SQL or publish spans and stays inside the application figures. A host figure archived before host energy entered the totals, or without carbon, stays beside them under `carbon_breakdown.*_kgco2eq_out_of_total`.
+
+Every report states this perimeter three times:
+
+- `notes.disclaimers` ends with one line per subsystem, database then broker, appended after the custom or default disclaimers. It says the hosts are inside the totals in all N windows that carried a figure (with their models and placements), in K of N windows (naming the estimated windows and the ones kept beside the totals), or that the totals hold none of that subsystem's host energy. When a host is inside, the line adds that its carbon is in `total_carbon_kgco2eq` and in no application's figures.
+- The PDF at-a-glance page names the database and broker hosts whose `in_totals_energy_kwh` is above zero, and says the others are outside the totals.
+- `carbon_breakdown.database_kgco2eq` and `messaging_kgco2eq` carry the in-total host carbon, and `database_waste.in_totals_energy_kwh` and `messaging_waste.in_totals_energy_kwh` the in-total host energy.
+
+For `intent = official`, the validator checks the perimeter: the two host carbon terms are finite and >= 0, the five breakdown terms add up to `total_carbon_kgco2eq` within 1e-6 relative (skipped when `carbon_methodologies` holds the legacy `sci_v1_numerator` tag), and the applications' `energy_kwh` plus both in-total host shares fit in `total_energy_kwh`.
+
 ## ESRS E1 crosswalk (v1.3)
 
 Every report carries `methodology.standard_crosswalk`, an interpretive map from its figures to the EU climate-reporting standard ESRS E1 (Delegated Regulation (EU) 2023/5303):
 
-- `aggregate.total_energy_kwh` feeds **E1-5** (energy consumption and mix), to be converted to MWh. Perf Sentinel does not split the figure by fossil, nuclear or renewable source.
-- the operational carbon term feeds **E1-6 Scope 2** on a location-based basis. ESRS also requires a market-based Scope 2 figure, which SCI excludes, so this is a partial input.
+- `aggregate.total_energy_kwh` feeds **E1-5** (energy consumption and mix), to be converted to MWh. Perf Sentinel does not split the figure by fossil, nuclear or renewable source. It includes database and broker host energy when the matching `in_totals_windows` is non-zero.
+- the operational, database and broker carbon terms feed **E1-6 Scope 2** on a location-based basis. ESRS also requires a market-based Scope 2 figure, which SCI excludes, so this is a partial input.
 - embodied carbon (the SCI `M` term, aggregate only) feeds **E1-6 Scope 3** (categories 1 and 2). ESRS admits estimates and proxy data for Scope 3.
 
 This is a **mapping aid, not a certification**. It does not make a report a CSRD submission: the figures keep their 2x directional uncertainty bracket, the scope is IT compute only, and an audited inventory by a qualified body is still required. The same caveats ship in-band under `standard_crosswalk.caveats` and in `notes.disclaimers`.

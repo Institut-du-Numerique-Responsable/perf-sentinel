@@ -322,10 +322,10 @@ impl StandardCrosswalk {
                 CrosswalkEntry {
                     report_field: "aggregate.total_energy_kwh".to_string(),
                     datapoint: "E1-5 Energy consumption and mix".to_string(),
-                    note: "Convert kWh to MWh. Not disaggregated by fossil, nuclear or renewable source.".to_string(),
+                    note: "Convert kWh to MWh. Not disaggregated by fossil, nuclear or renewable source. Includes database and broker host energy when the matching database_waste or messaging_waste in_totals_windows is non-zero.".to_string(),
                 },
                 CrosswalkEntry {
-                    report_field: "aggregate.total_carbon_kgco2eq (operational term)".to_string(),
+                    report_field: "aggregate.total_carbon_kgco2eq (operational, database and broker terms)".to_string(),
                     datapoint: "E1-6 Gross Scope 2 GHG emissions (location-based)".to_string(),
                     note: "Location-based only. ESRS also requires a market-based figure, which SCI excludes.".to_string(),
                 },

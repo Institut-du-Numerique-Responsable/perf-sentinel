@@ -11,7 +11,8 @@ use super::annex;
 use super::layout::{Face, fit, group4, text_width, wrap};
 use super::{PAGE_HEIGHT, PAGE_WIDTH};
 use crate::report::periodic::schema::{
-    CarbonBreakdown, IntegrityLevel, Period, PeriodType, ReportIntent, SCHEMA_VERSION, WasteTier,
+    Aggregate, CarbonBreakdown, IntegrityLevel, Period, PeriodType, ReportIntent, SCHEMA_VERSION,
+    WasteTier,
 };
 use crate::report::periodic::{Application, AttestationBinding, Confidentiality, PeriodicReport};
 
@@ -923,11 +924,11 @@ fn at_a_glance(w: &mut Writer, report: &PeriodicReport) {
     let aggregate = &report.aggregate;
     w.section("At a glance");
     w.title("Three numbers, and how sure we are of them");
-    w.para(
-        10.5,
-        TEXT_2,
-        "Energy is measured from the work the services did. Carbon applies the carbon intensity of the electricity grid to that energy. Avoidable is what a known class of defects, repeated database and HTTP calls, wasted.",
+    let intro = format!(
+        "Energy is measured from the work the services did. {} Carbon applies the carbon intensity of the electricity grid to that energy. Avoidable is what a known class of defects, repeated database and HTTP calls, wasted.",
+        host_perimeter(aggregate)
     );
+    w.para(10.5, TEXT_2, &intro);
     w.y += 2.0;
     let carbon = aggregate.total_carbon_kgco2eq;
     cards(
@@ -1233,6 +1234,34 @@ fn crosswalk(w: &mut Writer, report: &PeriodicReport) {
             ),
         );
     }
+}
+
+/// Which database and broker hosts the totals include, and which stay out.
+fn host_perimeter(aggregate: &Aggregate) -> String {
+    let hosts = [
+        ("database", &aggregate.database_waste),
+        ("broker", &aggregate.messaging_waste),
+    ];
+    let mut inside = Vec::new();
+    let mut outside = Vec::new();
+    for (noun, block) in hosts {
+        match block.as_ref().filter(|b| b.in_totals_energy_kwh > 0.0) {
+            Some(b) => inside.push(format!("{noun} hosts ({:.2} kWh)", b.in_totals_energy_kwh)),
+            None => outside.push(noun),
+        }
+    }
+    let included =
+        (!inside.is_empty()).then(|| format!("The totals include the {}.", inside.join(" and ")));
+    let excluded = match outside.as_slice() {
+        [] => None,
+        [one] => Some(format!("The {one} servers are outside these totals.")),
+        _ => Some("The database and broker servers are outside these totals.".to_string()),
+    };
+    [included, excluded]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The SCI terms the carbon total is made of, then what stays outside it.

@@ -88,6 +88,7 @@ Seuls `--input` et `--org-config` restent requis. La période, l'intent et la co
 - `←` / `→` (ou `h` / `l`) déplacent la période d'une unité à la fois. En `custom` elles déplacent la borne active d'un jour, `[` et `]` la déplacent d'un mois, et `Tab` bascule entre la borne `from` et la borne `to`.
 - `i` bascule l'intent (internal ou official), `c` bascule la confidentialité (G1 internal ou G2 public).
 - Le résumé indique le nombre de fenêtres, la couverture de période face au seuil officiel, les services mesurés et exclus, les totaux (requêtes, carbone, énergie, ratio de gaspillage), et le verdict du validateur officiel quand l'intent est official.
+- Sous Totals, une ligne `Database:` et une ligne `Broker:` donnent le périmètre de chaque hôte : les kWh d'hôte inclus et combien des fenêtres portant un chiffre les ont comptés (`1.2500 kWh in the totals (3 of 5 windows)`), ou `outside the totals`. Voir [Périmètre des hôtes](#périmètre-des-hôtes-v18).
 - Le pied de page affiche la commande `disclose` exacte pour les réglages courants. Copiez-la pour produire le rapport haché.
 
 La prévisualisation nécessite un terminal interactif. Rediriger sa sortie (pas de TTY) se termine sur une erreur claire au lieu d'afficher quoi que ce soit.
@@ -107,12 +108,24 @@ Publier les deux permet à un lecteur de les comparer et de voir combien de gasp
 
 ![prévisualisation disclose, intent official : le validateur explique pourquoi le rapport n'est pas encore publiable](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/disclose/official.png)
 
+## Périmètre des hôtes (v1.8)
+
+`total_energy_kwh` et `total_carbon_kgco2eq` couvrent les services applicatifs, plus les hôtes de base de données et de broker dans les fenêtres qui les ont comptés. Une fenêtre compte un hôte quand un chiffre mesuré (`alumet_rapl`), modélisé (`cloud_specpower`) ou déclaré (`database_specpower`, `broker_specpower`) portait une conversion carbone. Le chiffre estimé est la part applicative des spans SQL ou de publication et reste dans les chiffres des applications. Un chiffre d'hôte archivé avant que l'énergie des hôtes n'entre dans les totaux, ou sans carbone, reste à côté d'eux sous `carbon_breakdown.*_kgco2eq_out_of_total`.
+
+Chaque rapport énonce ce périmètre trois fois :
+
+- `notes.disclaimers` se termine par une ligne par sous-système, base de données puis broker, ajoutée après les avertissements personnalisés ou par défaut. Elle dit que les hôtes sont dans les totaux sur les N fenêtres qui portaient un chiffre (avec leurs modèles et placements), sur K fenêtres sur N (en nommant les fenêtres estimées et celles gardées à côté des totaux), ou que les totaux ne contiennent aucune énergie des hôtes de ce sous-système. Quand un hôte est inclus, la ligne ajoute que son carbone est dans `total_carbon_kgco2eq` et dans les chiffres d'aucune application.
+- La page « At a glance » du PDF nomme les hôtes de base de données et de broker dont le `in_totals_energy_kwh` dépasse zéro, et dit que les autres sont hors des totaux.
+- `carbon_breakdown.database_kgco2eq` et `messaging_kgco2eq` portent le carbone des hôtes inclus, `database_waste.in_totals_energy_kwh` et `messaging_waste.in_totals_energy_kwh` leur énergie.
+
+Pour `intent = official`, le validateur contrôle ce périmètre : les deux termes carbone des hôtes sont finis et >= 0, les cinq termes de la ventilation s'additionnent en `total_carbon_kgco2eq` à 1e-6 près en relatif (contrôle sauté quand `carbon_methodologies` contient l'étiquette ancienne `sci_v1_numerator`), et le `energy_kwh` des applications plus les deux parts d'hôtes incluses tiennent dans `total_energy_kwh`.
+
 ## Correspondance ESRS E1 (v1.3)
 
 Chaque rapport porte `methodology.standard_crosswalk`, une correspondance interprétative de ses chiffres vers la norme européenne de reporting climat ESRS E1 (règlement délégué (UE) 2023/5303) :
 
-- `aggregate.total_energy_kwh` alimente **E1-5** (consommation et mix énergétiques), à convertir en MWh. Perf Sentinel ne ventile pas ce chiffre par source fossile, nucléaire ou renouvelable.
-- le terme carbone opérationnel alimente **E1-6 Scope 2** en base location-based. ESRS exige aussi un Scope 2 market-based, que SCI exclut, c'est donc une entrée partielle.
+- `aggregate.total_energy_kwh` alimente **E1-5** (consommation et mix énergétiques), à convertir en MWh. Perf Sentinel ne ventile pas ce chiffre par source fossile, nucléaire ou renouvelable. Il inclut l'énergie des hôtes de base de données et de broker quand le `in_totals_windows` correspondant n'est pas nul.
+- les termes carbone opérationnel, base de données et broker alimentent **E1-6 Scope 2** en base location-based. ESRS exige aussi un Scope 2 market-based, que SCI exclut, c'est donc une entrée partielle.
 - le carbone embarqué (le terme SCI `M`, agrégat seulement) alimente **E1-6 Scope 3** (catégories 1 et 2). ESRS admet les estimations et données proxy pour le Scope 3.
 
 C'est une **aide à la correspondance, pas une certification**. Elle ne transforme pas un rapport en déclaration CSRD : les chiffres gardent leur intervalle d'incertitude directionnel 2x, le périmètre est l'IT compute uniquement, et un inventaire audité par un organisme qualifié reste requis. Les mêmes mises en garde figurent dans le rapport lui-même, sous `standard_crosswalk.caveats` et dans `notes.disclaimers`.

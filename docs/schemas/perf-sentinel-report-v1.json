@@ -274,7 +274,7 @@
         "calibration_inputs": { "$ref": "#/$defs/CalibrationInputs" },
         "standard_crosswalk": {
           "$ref": "#/$defs/StandardCrosswalk",
-          "description": "Since v1.3. Interpretive crosswalk from this report's figures to a recognized reporting standard (ESRS E1). Constant per schema version, NOT a certification. Absent on pre-v1.3 reports."
+          "description": "Since v1.3. Interpretive crosswalk from this report's figures to a recognized reporting standard (ESRS E1). Constant per schema version, NOT a certification. Since v1.8 the energy mapping includes database and broker host energy when the matching in_totals_windows is non-zero, and the Scope 2 mapping reads the operational, database and broker terms of total_carbon_kgco2eq. Absent on pre-v1.3 reports."
         }
       }
     },

@@ -4,12 +4,13 @@
 //! the rationale for collecting every error in one pass.
 
 use crate::detect::DISCLOSURE_N_PLUS_ONE_THRESHOLD;
+use crate::score::carbon::METHODOLOGY_SCI_NUMERATOR;
 
 use super::errors::ValidationError;
 use super::hasher::compute_content_hash;
 use super::schema::{
-    Aggregate, Application, ApplicationG1, ApplicationG2, Confidentiality, Conformance,
-    Methodology, Organisation, Period, PeriodicReport, ReportIntent, ScopeManifest,
+    Aggregate, Application, ApplicationG1, ApplicationG2, CarbonBreakdown, Confidentiality,
+    Conformance, Methodology, Organisation, Period, PeriodicReport, ReportIntent, ScopeManifest,
     TemporalCoverage, WasteTier,
 };
 
@@ -83,6 +84,7 @@ pub fn validate_official(report: &PeriodicReport) -> Result<(), Vec<ValidationEr
     validate_scope_manifest(&report.scope_manifest, &mut errors);
     validate_methodology(&report.methodology, &mut errors);
     validate_aggregate(&report.aggregate, &mut errors);
+    validate_host_perimeter(report, &mut errors);
     validate_temporal_coverage(
         &report.aggregate.temporal_coverage,
         &report.period,
@@ -634,6 +636,106 @@ fn validate_waste_in_totals(
                 "exceeds windows_with_figure or measured + modeled + declared windows \
                  ({} > {bound})",
                 block.in_totals_windows
+            ),
+        });
+    }
+}
+
+/// The v1.8 host perimeter: the database and broker carbon terms are
+/// sane, the five breakdown terms add up to the published total, and
+/// the in-total host energy leaves room for the applications inside
+/// `total_energy_kwh`. Only a hand-edited or forged report trips these.
+fn validate_host_perimeter(report: &PeriodicReport, errors: &mut Vec<ValidationError>) {
+    let agg = &report.aggregate;
+    if let Some(breakdown) = &agg.carbon_breakdown {
+        let legacy = report
+            .methodology
+            .calibration_inputs
+            .carbon_methodologies
+            .contains(METHODOLOGY_SCI_NUMERATOR);
+        validate_host_carbon_terms(breakdown, agg.total_carbon_kgco2eq, legacy, errors);
+    }
+    validate_host_energy_room(agg, &report.applications, errors);
+}
+
+fn validate_host_carbon_terms(
+    b: &CarbonBreakdown,
+    total: f64,
+    legacy: bool,
+    errors: &mut Vec<ValidationError>,
+) {
+    let hosts = [
+        ("carbon_breakdown.database_kgco2eq", b.database_kgco2eq),
+        ("carbon_breakdown.messaging_kgco2eq", b.messaging_kgco2eq),
+    ];
+    let mut sane = true;
+    for (field, value) in hosts {
+        let Some(value) = value else { continue };
+        if !value.is_finite() || value < 0.0 {
+            sane = false;
+            errors.push(ValidationError::Aggregate {
+                field,
+                reason: format!("must be a finite number >= 0, got {value}"),
+            });
+        }
+    }
+    // A legacy window may carry transport outside its total, so the
+    // terms of a period holding one need not add up.
+    let present = hosts.iter().any(|(_, v)| v.is_some());
+    if !present || !sane || legacy || !total.is_finite() {
+        return;
+    }
+    let sum: f64 = [
+        b.operational_kgco2eq,
+        b.embodied_kgco2eq,
+        b.transport_kgco2eq,
+        b.database_kgco2eq,
+        b.messaging_kgco2eq,
+    ]
+    .into_iter()
+    .map(|v| v.unwrap_or(0.0))
+    .sum();
+    if (sum - total).abs() > 1e-6 * total.abs().max(sum.abs()) + 1e-12 {
+        errors.push(ValidationError::Aggregate {
+            field: "carbon_breakdown",
+            reason: format!(
+                "operational + embodied + transport + database + messaging ({sum}) != \
+                 total_carbon_kgco2eq ({total})"
+            ),
+        });
+    }
+}
+
+/// Host energy inside the totals is never an application's: the
+/// applications plus both in-total shares fit in `total_energy_kwh`.
+fn validate_host_energy_room(
+    agg: &Aggregate,
+    apps: &[Application],
+    errors: &mut Vec<ValidationError>,
+) {
+    let in_totals = [&agg.database_waste, &agg.messaging_waste]
+        .into_iter()
+        .flatten()
+        .map(|block| block.in_totals_energy_kwh)
+        .sum::<f64>();
+    if in_totals <= 0.0 {
+        return;
+    }
+    let applications: f64 = apps
+        .iter()
+        .map(|app| match app {
+            Application::G1(g1) => g1.energy_kwh,
+            Application::G2(g2) => g2.energy_kwh,
+        })
+        .sum();
+    let used = applications + in_totals;
+    if used > agg.total_energy_kwh * (1.0 + 1e-6) + 1e-12 {
+        errors.push(ValidationError::Aggregate {
+            field: "total_energy_kwh",
+            reason: format!(
+                "applications energy plus in-total database and broker host energy \
+                 ({used}) exceeds total_energy_kwh ({})",
+                agg.total_energy_kwh
             ),
         });
     }
@@ -1584,5 +1686,101 @@ mod tests {
         let mut db = in_total_db_waste();
         db.modeled_windows = 2;
         assert!(rejects(db, "database_waste.measured_windows"));
+    }
+
+    /// An official report whose carbon total is operational 0.03 +
+    /// embodied 0.005 + transport 0.001 + database 0.01 + broker 0.004.
+    fn host_perimeter_report() -> PeriodicReport {
+        let mut r = good_report(ReportIntent::Official, Confidentiality::Public);
+        r.aggregate.total_carbon_kgco2eq = 0.05;
+        r.aggregate.carbon_breakdown = Some(CarbonBreakdown {
+            operational_kgco2eq: Some(0.03),
+            embodied_kgco2eq: Some(0.005),
+            transport_kgco2eq: Some(0.001),
+            database_kgco2eq: Some(0.01),
+            messaging_kgco2eq: Some(0.004),
+            ..Default::default()
+        });
+        r.methodology.calibration_inputs.carbon_methodologies =
+            ["sci_v1_numerator+transport".to_string()].into();
+        r
+    }
+
+    fn perimeter_errors(report: &PeriodicReport) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        validate_host_perimeter(report, &mut errors);
+        errors
+    }
+
+    fn rejects_at(report: &PeriodicReport, at: &str) -> bool {
+        perimeter_errors(report)
+            .iter()
+            .any(|e| matches!(e, ValidationError::Aggregate { field, .. } if *field == at))
+    }
+
+    #[test]
+    fn a_consistent_host_breakdown_passes() {
+        let report = host_perimeter_report();
+        assert!(perimeter_errors(&report).is_empty());
+        assert!(validate_official(&report).is_ok());
+    }
+
+    #[test]
+    fn a_forged_host_breakdown_is_rejected() {
+        let mut report = host_perimeter_report();
+        if let Some(b) = report.aggregate.carbon_breakdown.as_mut() {
+            b.database_kgco2eq = Some(0.02);
+        }
+        assert!(rejects_at(&report, "carbon_breakdown"));
+        for bad in [f64::NAN, -0.01] {
+            let mut report = host_perimeter_report();
+            if let Some(b) = report.aggregate.carbon_breakdown.as_mut() {
+                b.messaging_kgco2eq = Some(bad);
+            }
+            assert!(rejects_at(&report, "carbon_breakdown.messaging_kgco2eq"));
+            assert!(!rejects_at(&report, "carbon_breakdown"));
+        }
+    }
+
+    #[test]
+    fn the_sum_check_is_skipped_on_a_legacy_period_or_without_host_terms() {
+        let mut report = host_perimeter_report();
+        report.aggregate.total_carbon_kgco2eq = 0.06;
+        assert!(rejects_at(&report, "carbon_breakdown"));
+        report
+            .methodology
+            .calibration_inputs
+            .carbon_methodologies
+            .insert(METHODOLOGY_SCI_NUMERATOR.to_string());
+        assert!(perimeter_errors(&report).is_empty());
+        let mut report = host_perimeter_report();
+        report.aggregate.total_carbon_kgco2eq = 0.06;
+        if let Some(b) = report.aggregate.carbon_breakdown.as_mut() {
+            b.database_kgco2eq = None;
+            b.messaging_kgco2eq = None;
+        }
+        assert!(perimeter_errors(&report).is_empty());
+    }
+
+    #[test]
+    fn in_total_host_energy_leaves_room_for_the_applications() {
+        // The G2 application holds 0.5 kWh, the database block 0.3 kWh.
+        let mut report = host_perimeter_report();
+        report.aggregate.database_waste =
+            Some(crate::report::periodic::schema::DatabaseWasteAggregate {
+                energy_kwh: 0.3,
+                in_totals_energy_kwh: 0.3,
+                ..in_total_db_waste()
+            });
+        report.aggregate.total_energy_kwh = 0.8;
+        assert!(!rejects_at(&report, "total_energy_kwh"));
+        report.aggregate.total_energy_kwh = 0.7;
+        assert!(rejects_at(&report, "total_energy_kwh"));
+        // Without an in-total share the bound is not checked.
+        if let Some(db) = report.aggregate.database_waste.as_mut() {
+            db.in_totals_energy_kwh = 0.0;
+        }
+        report.aggregate.total_energy_kwh = 0.1;
+        assert!(!rejects_at(&report, "total_energy_kwh"));
     }
 }

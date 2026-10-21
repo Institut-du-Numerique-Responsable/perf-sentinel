@@ -4,7 +4,9 @@ use chrono::{DateTime, Datelike, Days, Months, NaiveDate, Utc};
 use sentinel_core::report::periodic::AggregationError;
 use sentinel_core::report::periodic::aggregator::aggregate_from_paths;
 use sentinel_core::report::periodic::org_config::OrgConfig;
-use sentinel_core::report::periodic::schema::{Confidentiality, Period, PeriodType, ReportIntent};
+use sentinel_core::report::periodic::schema::{
+    Confidentiality, DatabaseWasteAggregate, Period, PeriodType, ReportIntent,
+};
 use sentinel_core::report::periodic::{MIN_PERIOD_COVERAGE_FOR_OFFICIAL, validate_official};
 use sentinel_core::text_safety::sanitize_for_terminal;
 
@@ -202,6 +204,9 @@ pub(crate) struct PreviewSummary {
     pub fallback_windows: u64,
     pub malformed_lines: u64,
     pub validator: ValidatorStatus,
+    /// The host perimeters of the totals, database then broker.
+    pub database_waste: Option<DatabaseWasteAggregate>,
+    pub messaging_waste: Option<DatabaseWasteAggregate>,
 }
 
 /// Read-only outcome of a preview re-aggregation.
@@ -275,7 +280,24 @@ pub(crate) fn compute_preview(
         fallback_windows,
         malformed_lines,
         validator,
+        database_waste: report.aggregate.database_waste,
+        messaging_waste: report.aggregate.messaging_waste,
     }))
+}
+
+/// One host perimeter under Totals: the in-total kWh and its windows, or
+/// that the hosts are outside the totals.
+fn host_perimeter_line(label: &str, block: Option<&DatabaseWasteAggregate>) -> PreviewLine {
+    match block.filter(|b| b.in_totals_windows > 0) {
+        Some(b) => PreviewLine::new(
+            Tone::Normal,
+            format!(
+                "{label}{:.4} kWh in the totals ({} of {} windows)",
+                b.in_totals_energy_kwh, b.in_totals_windows, b.windows_with_figure
+            ),
+        ),
+        None => PreviewLine::new(Tone::Dim, format!("{label}outside the totals")),
+    }
 }
 
 /// Which custom-period edge `step`/`step_month` move while editing a
@@ -640,6 +662,14 @@ impl DiscloseState {
             Tone::Normal,
             format!("  Energy:              {:.4} kWh", s.total_energy_kwh),
         ));
+        lines.push(host_perimeter_line(
+            "  Database:            ",
+            s.database_waste.as_ref(),
+        ));
+        lines.push(host_perimeter_line(
+            "  Broker:              ",
+            s.messaging_waste.as_ref(),
+        ));
         lines.push(PreviewLine::new(
             Tone::Normal,
             format!("  Waste ratio:         {:.1}%", s.waste_ratio * 100.0),
@@ -956,7 +986,46 @@ mod tests {
             fallback_windows: 6,
             malformed_lines: 0,
             validator,
+            database_waste: None,
+            messaging_waste: None,
         }
+    }
+
+    #[test]
+    fn totals_state_each_host_perimeter() {
+        let mut s = summary(0.9, ValidatorStatus::NotApplicable);
+        let lines = DiscloseState::ready_lines(&s);
+        for label in ["Database:", "Broker:"] {
+            let line = lines
+                .iter()
+                .find(|l| l.text.contains(label))
+                .expect("host line");
+            assert!(line.text.ends_with("outside the totals"), "{}", line.text);
+        }
+        s.database_waste = Some(DatabaseWasteAggregate {
+            in_totals_energy_kwh: 1.25,
+            windows_with_figure: 5,
+            in_totals_windows: 3,
+            ..Default::default()
+        });
+        s.messaging_waste = Some(DatabaseWasteAggregate {
+            windows_with_figure: 2,
+            estimated_windows: 2,
+            ..Default::default()
+        });
+        let lines = DiscloseState::ready_lines(&s);
+        let text = |label: &str| {
+            lines
+                .iter()
+                .find(|l| l.text.contains(label))
+                .map(|l| l.text.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            text("Database:"),
+            "  Database:            1.2500 kWh in the totals (3 of 5 windows)"
+        );
+        assert_eq!(text("Broker:"), "  Broker:              outside the totals");
     }
 
     #[test]
