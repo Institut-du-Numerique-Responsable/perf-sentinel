@@ -750,7 +750,11 @@ An AWS family carrying the `d` (instance store), `n` (network) or `b` (block sto
 
 #### Mixed-platform series take their highest-drawing published platform.
 
-GCP `n1` runs on Skylake, Broadwell, Haswell, Ivy Bridge or Sandy Bridge hosts, and Azure `Standard_B*` (Bv1) on Ice Lake, Cascade Lake, Skylake, Broadwell or Haswell hosts, and the VM does not choose. Their rows take the architecture with the highest max W/vCPU among those the vendor lists and the provider CSV publishes: Skylake for `n1`, since the GCP CSV publishes only Skylake and Broadwell of the five, and Haswell for `Standard_B*`. `Standard_E*as_v5` (Milan or Genoa hosts) takes EPYC 3rd Gen, the only one of the two in the Azure CSV. The figure is an upper bound for the newer hosts of a series: on a Cascade Lake host, a `Standard_B*` row reads about 1.5 times the Cascade Lake max. Families added before this rule keep their single mapping, for example `Standard_D*s_v5` on Cascade Lake.
+GCP `n1` runs on Skylake, Broadwell, Haswell, Ivy Bridge or Sandy Bridge hosts, and Azure `Standard_B*` (Bv1) on Ice Lake, Cascade Lake, Skylake, Broadwell or Haswell hosts, and the VM does not choose. Their rows take the architecture with the highest max W/vCPU among those the vendor lists and the provider CSV publishes: Skylake for `n1`, since the GCP CSV publishes only Skylake and Broadwell of the five, and Haswell for `Standard_B*`. `Standard_E*as_v5` (Milan or Genoa hosts) takes EPYC 3rd Gen, the only one of the two in the Azure CSV. The figure is an upper bound for the newer hosts of a series: on a Cascade Lake host, a `Standard_B*` row reads about 1.5 times the Cascade Lake max. Families added before this rule keep their single mapping, for example `Standard_D*s_v5` on Cascade Lake. Azure SQL standard-series (Gen5) objectives follow the same rule: of the seven processors Microsoft lists, the Azure CSV publishes Broadwell, Skylake, Cascade Lake and EPYC 3rd Gen, and they take Skylake through `Standard_D64s_v3`, scaled per vCore.
+
+#### Serverless Azure SQL objectives are priced at their max vCores.
+
+A `GP_S_Gen5_N` objective is priced as N provisioned vCores, a ceiling. Auto-pause, the min vCores and the autoscaling between them are not modeled, and neither is the memory a serverless database can grow to beyond the 5.1 GB per vCore of provisioned Gen5, so no DRAM premium applies.
 
 #### Burstable families count their full vCPU.
 

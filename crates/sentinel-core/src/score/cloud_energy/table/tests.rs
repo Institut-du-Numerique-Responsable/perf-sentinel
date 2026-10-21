@@ -419,6 +419,8 @@ fn left_out_classes_carry_their_reason() {
         ("db-f1-micro", "shared"),
         ("db-g1-small", "shared"),
         ("redis-highmem-medium", "machine series"),
+        ("GP_Fsv2_8", "retired"),
+        ("db-custom-4-15360", "dedicated-core"),
     ] {
         match resolve_instance_class(name) {
             InstanceClass::Unsupported(text) => assert!(text.contains(reason), "{name}: {text}"),
@@ -499,4 +501,66 @@ fn equal_vcpu_rows_of_one_platform_are_equal() {
     // sits below the 8 GiB per vCPU DRAM threshold.
     assert_eq!(row("t4g.nano"), row("t4g.large"));
     assert_eq!(row("n1-highmem-8"), row("n1-standard-8"));
+}
+
+#[test]
+fn cloud_sql_tiers_resolve_to_their_machine_type_row() {
+    for (tier, row) in [
+        ("db-n1-standard-4", "n1-standard-4"),
+        ("db-n1-highmem-8", "n1-highmem-8"),
+        ("db-perf-optimized-N-8", "n2-highmem-8"),
+        ("db-perf-optimized-N-128", "n2-highmem-128"),
+    ] {
+        assert_eq!(resolve_instance_class(tier), row_class(row), "{tier}");
+    }
+    for name in [
+        "db-perf-optimized-N-6",
+        "db-n2-standard-4",
+        "db-custom-N4-4-16384",
+    ] {
+        assert_eq!(
+            resolve_instance_class(name),
+            InstanceClass::Unknown,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn azure_sql_gen5_scales_the_reference_row_per_vcore() {
+    assert_eq!(
+        resolve_instance_class("GP_Gen5_64"),
+        row_class("Standard_D64s_v3")
+    );
+    let InstanceClass::Known {
+        idle_watts,
+        max_watts,
+    } = resolve_instance_class("GP_Gen5_4")
+    else {
+        panic!("GP_Gen5_4 must resolve");
+    };
+    let (idle, max) = row("Standard_D4s_v3");
+    assert_within_step(idle_watts, idle, "idle");
+    assert_within_step(max_watts, max, "max");
+    for same in ["BC_Gen5_4", "HS_Gen5_4", "GP_S_Gen5_4"] {
+        assert_eq!(
+            resolve_instance_class(same),
+            resolve_instance_class("GP_Gen5_4"),
+            "{same}"
+        );
+    }
+    for name in [
+        "GP_Gen5_0",
+        "GP_Gen5_1025",
+        "GP_Gen5_+4",
+        "GP_DC_2",
+        "HS_PRMS_4",
+        "XX_Gen5_4",
+    ] {
+        assert_eq!(
+            resolve_instance_class(name),
+            InstanceClass::Unknown,
+            "{name}"
+        );
+    }
 }

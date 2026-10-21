@@ -52,7 +52,8 @@
 //!
 //! Managed database, cache, broker and search class names, and AWS or
 //! Azure names carrying a storage or network modifier, resolve to the
-//! VM row they run on through [`resolve_instance_class`].
+//! VM row they run on through [`resolve_instance_class`], and Azure SQL
+//! Gen5 vCore objectives scale the largest Skylake Azure row per vCore.
 //!
 //! Full methodology, uncertainty bounds, and per-architecture caveats
 //! are in `docs/LIMITATIONS.md` "Cloud `SPECpower` precision bounds".
@@ -275,8 +276,9 @@ pub enum InstanceClass {
 /// purpose, a managed wrapper (`db.`, `cache.`, `kafka.`, `express.`,
 /// `mq.`, `.search`, `.elasticsearch`) around a row, an AWS family
 /// carrying `d`, `n` or `b` modifiers, an Azure size carrying the
-/// `d` temp-disk feature. A rule only ever lands on an existing row,
-/// so no wattage is derived here.
+/// `d` temp-disk feature, a Cloud SQL tier named after its machine
+/// type, an Azure SQL Gen5 vCore objective. Every rule but the last
+/// lands on an existing row, the last scales one per vCore.
 #[must_use]
 pub fn resolve_instance_class(name: &str) -> InstanceClass {
     if let Some(&power) = INSTANCE_POWER.get(name) {
@@ -291,6 +293,8 @@ pub fn resolve_instance_class(name: &str) -> InstanceClass {
         .copied()
         .or_else(|| aws_base_family(base))
         .or_else(|| azure_without_temp_disk(base))
+        .or_else(|| cloud_sql_tier(base))
+        .or_else(|| azure_sql_vcore(base))
         .map_or(InstanceClass::Unknown, known)
 }
 
@@ -319,6 +323,21 @@ fn unsupported_reason(name: &str) -> Option<&'static str> {
             "Memorystore node types publish a vCPU count but not the machine series \
              behind it",
         ),
+        // https://learn.microsoft.com/azure/azure-sql/database/service-tiers-sql-database-vcore
+        _ if name.contains("_Fsv2_") => {
+            Some("Azure SQL retired its Fsv2-series hardware on October 1, 2026")
+        }
+        // https://docs.cloud.google.com/sql/docs/mysql/machine-series-overview
+        // says x86-based and names no series. db-custom-N4-* names its series.
+        _ if name
+            .strip_prefix("db-custom-")
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit())) =>
+        {
+            Some(
+                "Cloud SQL names no machine series or processor behind its dedicated-core \
+                 custom tiers",
+            )
+        }
         _ => None,
     }
 }
@@ -369,6 +388,51 @@ fn azure_without_temp_disk(name: &str) -> Option<(f64, f64)> {
     INSTANCE_POWER
         .get(format!("Standard_{series_size}{features}_v{version}").as_str())
         .copied()
+}
+
+/// Cloud SQL tiers named after the Compute Engine type they run on:
+/// `db-n1-standard-N`, `db-n1-highmem-N`, and Enterprise Plus
+/// `db-perf-optimized-N-V`, on the N2 series at 8 GB per vCPU, hence
+/// `n2-highmem-V` (the 128 vCPU size carries 6.75 GB like
+/// `n2-highmem-128`).
+fn cloud_sql_tier(name: &str) -> Option<(f64, f64)> {
+    let row = match name.strip_prefix("db-perf-optimized-N-") {
+        Some(vcpu) => format!("n2-highmem-{vcpu}"),
+        None => name
+            .strip_prefix("db-")
+            .filter(|n| n.starts_with("n1-"))?
+            .to_owned(),
+    };
+    INSTANCE_POWER.get(row.as_str()).copied()
+}
+
+/// Azure SQL Database and Managed Instance vCore objectives on
+/// standard-series (Gen5) hardware, `{GP|BC|HS}_[S_]Gen5_N`: N vCores at
+/// the per-vCPU rate of `Standard_D64s_v3`. Microsoft lists Broadwell,
+/// Skylake, Cascade Lake, Ice Lake, Milan, Genoa and Emerald Rapids for
+/// Gen5, the Azure CSV publishes Broadwell, Skylake, Cascade Lake and
+/// EPYC 3rd Gen, and Skylake has the highest max W/vCPU among them
+/// (mixed-platform rule), so the largest Skylake row is the reference.
+/// Gen5 carries 5.1 GB per vCore, below the DRAM premium threshold. The
+/// serverless `S_` form takes N as its max vCores, a ceiling. Unrounded.
+fn azure_sql_vcore(name: &str) -> Option<(f64, f64)> {
+    const REFERENCE: &str = "Standard_D64s_v3";
+    const REFERENCE_VCPU: f64 = 64.0;
+    let (tier, rest) = name.split_once('_')?;
+    if !matches!(tier, "GP" | "BC" | "HS") {
+        return None;
+    }
+    let vcores = rest
+        .strip_prefix("S_")
+        .unwrap_or(rest)
+        .strip_prefix("Gen5_")?;
+    if !vcores.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let vcores: u32 = vcores.parse().ok().filter(|n| (1..=1024).contains(n))?;
+    let &(idle, max) = INSTANCE_POWER.get(REFERENCE)?;
+    let scale = f64::from(vcores) / REFERENCE_VCPU;
+    Some((idle * scale, max * scale))
 }
 
 /// Linearly interpolate watts from CPU utilization percentage.

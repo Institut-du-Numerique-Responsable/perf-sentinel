@@ -70,7 +70,8 @@ MANAGED_EN = """## Managed service classes
 A managed database, cache, broker or search class runs on a VM family
 the table prices, so its name resolves to that family's row. The rules
 apply in order and stop at the first row. An exact row is never
-rewritten, and no rule derives a wattage of its own.
+rewritten, and only the Azure SQL vCore rule derives a wattage, by
+scaling a row per vCore.
 
 | Name shape | Resolves to |
 |---|---|
@@ -81,6 +82,9 @@ rewritten, and no rule derives a wattage of its own.
 | `<type>.search`, `<type>.elasticsearch` (OpenSearch) | `<type>` |
 | AWS `<family>.<size>`, family ending in up to two of `d`, `n`, `b` | the family without them: `db.r6idn.large` to `r6i.large`, `c7gn.large` to `c7g.large` |
 | Azure `Standard_<series><size><features>_v<k>`, features holding `d` | the same name without the `d`: `Standard_D4ds_v5` to `Standard_D4s_v5`, `Standard_D4ads_v5` to `Standard_D4as_v5` |
+| `db-n1-standard-N`, `db-n1-highmem-N` (Cloud SQL) | `n1-standard-N`, `n1-highmem-N` |
+| `db-perf-optimized-N-V` (Cloud SQL Enterprise Plus, N2 series) | `n2-highmem-V` |
+| `GP_Gen5_N`, `BC_Gen5_N`, `HS_Gen5_N`, serverless `GP_S_Gen5_N` (Azure SQL vCore, standard-series) | N times the per-vCPU rate of `Standard_D64s_v3`, N from 1 to 1024 |
 
 The AWS letters `d` (local instance store), `n` (network) and `b` (block
 storage), and the Azure `d` (local temp disk), leave the processor
@@ -96,15 +100,29 @@ Graviton 2 (`m6g`, `c6g`, `r6g`, `t4g`) and memory-optimized Graviton
 the `Standard_B*` rows themselves, priced at their full vCPU since burst
 credit is not modeled.
 
+Enterprise Plus runs on the N2 series at 8 GB per vCPU, the shape of
+`n2-highmem`. Azure SQL standard-series (Gen5) runs on several
+processors (Broadwell, Skylake, Cascade Lake, Ice Lake, Milan, Genoa,
+Emerald Rapids). Among those the Azure CSV publishes, Skylake has the
+highest max W/vCPU, so the reference is the largest Skylake row,
+`Standard_D64s_v3`: `GP_Gen5_64` equals it and a smaller objective
+scales it per vCore, unrounded. Gen5 carries 5.1 GB per vCore, below the
+DRAM premium threshold. A serverless objective is priced at its max
+vCores, a ceiling. Replicas are nodes: Multi-AZ standbys, Aurora
+readers and the Business Critical replicas count in `nodes`.
+
 Not modeled. The startup warning, or the load error in
 `[green.database_static]` and `[green.broker_static]`, names the reason
-for the first three rows, the others are reported as unknown types:
+for the first five rows, the others are reported as unknown types:
 
 | Class | Reason |
 |---|---|
 | `db.serverless` (Aurora Serverless v2) | sized in ACUs, each about 2 GiB of memory with corresponding CPU and networking, no published vCPU equivalence |
 | `db-f1-micro`, `db-g1-small` (Cloud SQL shared core) | a shared vCPU, excluded like every shared-vCPU offer |
 | `redis-*` (Memorystore node types) | the vCPU count is published, the machine series is not |
+| `db-custom-V-MiB` (Cloud SQL dedicated core) | Cloud SQL names no machine series or processor behind it |
+| `GP_Fsv2_N` and the other Azure SQL Fsv2 objectives | the hardware was retired on October 1, 2026 |
+| Azure SQL DTU objectives (`S0`, `P1`), premium-series (`HS_PRMS_N`), DC-series (`GP_DC_N`) | no published processor mapping for the objective |
 | AWS `x`, `z`, `i` and `im` families, OpenSearch `or1` | 16 to 32 GiB per vCPU, beyond the binary DRAM premium rule, or an undisclosed platform |
 | ElastiCache, MSK and OpenSearch Serverless, Azure Cache for Redis, Event Hubs, Service Bus | billed in capacity units, no instance to declare |
 
@@ -114,8 +132,11 @@ the Azure [VM naming
 conventions](https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions),
 the [Aurora Serverless v2
 capacity](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.how-it-works.html)
-definition, and the shared-vCPU exclusion of
-`scripts/refresh-instance-power.py`.
+definition, the Cloud SQL [machine
+series](https://docs.cloud.google.com/sql/docs/mysql/machine-series-overview),
+the Azure SQL [vCore hardware
+configurations](https://learn.microsoft.com/en-us/azure/azure-sql/database/service-tiers-sql-database-vcore),
+and the shared-vCPU exclusion of `scripts/refresh-instance-power.py`.
 """
 
 MANAGED_FR = """## Classes de services managés
@@ -124,7 +145,8 @@ Une classe managée de base de données, de cache, de broker ou de
 recherche tourne sur une famille de VM que la table valorise, donc son
 nom se résout sur la ligne de cette famille. Les règles s'appliquent dans
 l'ordre et s'arrêtent à la première ligne trouvée. Une ligne exacte n'est
-jamais réécrite, et aucune règle ne calcule de puissance propre.
+jamais réécrite, et seule la règle vCore Azure SQL calcule une
+puissance, en mettant une ligne à l'échelle par vCore.
 
 | Forme du nom | Se résout sur |
 |---|---|
@@ -135,6 +157,9 @@ jamais réécrite, et aucune règle ne calcule de puissance propre.
 | `<type>.search`, `<type>.elasticsearch` (OpenSearch) | `<type>` |
 | AWS `<famille>.<taille>`, famille finissant par au plus deux lettres parmi `d`, `n`, `b` | la famille sans elles : `db.r6idn.large` vers `r6i.large`, `c7gn.large` vers `c7g.large` |
 | Azure `Standard_<série><taille><options>_v<k>`, options contenant `d` | le même nom sans le `d` : `Standard_D4ds_v5` vers `Standard_D4s_v5`, `Standard_D4ads_v5` vers `Standard_D4as_v5` |
+| `db-n1-standard-N`, `db-n1-highmem-N` (Cloud SQL) | `n1-standard-N`, `n1-highmem-N` |
+| `db-perf-optimized-N-V` (Cloud SQL Enterprise Plus, série N2) | `n2-highmem-V` |
+| `GP_Gen5_N`, `BC_Gen5_N`, `HS_Gen5_N`, serverless `GP_S_Gen5_N` (Azure SQL vCore, série standard) | N fois le taux par vCPU de `Standard_D64s_v3`, N de 1 à 1024 |
 
 Les lettres AWS `d` (stockage d'instance local), `n` (réseau) et `b`
 (stockage bloc), et le `d` Azure (disque temporaire local), ne changent
@@ -153,9 +178,21 @@ des serveurs flexibles Azure sont les lignes `Standard_B*` elles-mêmes,
 valorisées à leurs vCPU complets puisque le crédit de rafale n'est pas
 modélisé.
 
+Enterprise Plus tourne sur la série N2 à 8 Go par vCPU, la forme de
+`n2-highmem`. La série standard (Gen5) d'Azure SQL tourne sur plusieurs
+processeurs (Broadwell, Skylake, Cascade Lake, Ice Lake, Milan, Genoa,
+Emerald Rapids). Parmi ceux que le CSV Azure publie, Skylake a le plus
+haut max W/vCPU, donc la référence est la plus grande ligne Skylake,
+`Standard_D64s_v3` : `GP_Gen5_64` lui est égal et un objectif plus petit
+la met à l'échelle par vCore, sans arrondi. Gen5 porte 5,1 Go par vCore,
+sous le seuil de la prime DRAM. Un objectif serverless est valorisé à
+son maximum de vCores, un plafond. Les réplicas sont des nœuds : les
+standbys Multi-AZ, les lecteurs Aurora et les réplicas Business Critical
+comptent dans `nodes`.
+
 Non modélisées. L'avertissement de démarrage, ou l'erreur de chargement
 dans `[green.database_static]` et `[green.broker_static]`, donne la raison
-pour les trois premières lignes, les autres sont signalées comme types
+pour les cinq premières lignes, les autres sont signalées comme types
 inconnus :
 
 | Classe | Raison |
@@ -163,6 +200,9 @@ inconnus :
 | `db.serverless` (Aurora Serverless v2) | dimensionnée en ACU, chacune d'environ 2 Gio de mémoire avec le CPU et le réseau correspondants, sans équivalence vCPU publiée |
 | `db-f1-micro`, `db-g1-small` (Cloud SQL à cœur partagé) | un vCPU partagé, exclu comme toute offre à vCPU partagés |
 | `redis-*` (types de nœud Memorystore) | le nombre de vCPU est publié, la série de machine ne l'est pas |
+| `db-custom-V-MiB` (Cloud SQL à cœur dédié) | Cloud SQL ne nomme ni la série de machine ni le processeur |
+| `GP_Fsv2_N` et les autres objectifs Azure SQL Fsv2 | le matériel a été retiré le 1er octobre 2026 |
+| Objectifs Azure SQL DTU (`S0`, `P1`), série premium (`HS_PRMS_N`), série DC (`GP_DC_N`) | aucune correspondance de processeur publiée pour l'objectif |
 | Familles AWS `x`, `z`, `i` et `im`, OpenSearch `or1` | 16 à 32 Gio par vCPU, au-delà de la règle binaire de prime DRAM, ou une plateforme non publiée |
 | ElastiCache, MSK et OpenSearch Serverless, Azure Cache for Redis, Event Hubs, Service Bus | facturés en unités de capacité, aucune instance à déclarer |
 
@@ -172,7 +212,11 @@ AWS, les [conventions de nommage des
 VM](https://learn.microsoft.com/fr-fr/azure/virtual-machines/vm-naming-conventions)
 Azure, la définition de la [capacité Aurora Serverless
 v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.how-it-works.html),
-et l'exclusion des vCPU partagés de `scripts/refresh-instance-power.py`.
+les [séries de machine](https://docs.cloud.google.com/sql/docs/mysql/machine-series-overview)
+Cloud SQL, les [configurations matérielles
+vCore](https://learn.microsoft.com/fr-fr/azure/azure-sql/database/service-tiers-sql-database-vcore)
+Azure SQL, et l'exclusion des vCPU partagés de
+`scripts/refresh-instance-power.py`.
 """
 
 

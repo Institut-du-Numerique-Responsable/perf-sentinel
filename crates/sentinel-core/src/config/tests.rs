@@ -4265,6 +4265,17 @@ region = "eu-west-3"
 }
 
 #[test]
+fn database_static_accepts_managed_sql_tiers() {
+    for tier in ["GP_Gen5_4", "db-n1-standard-4", "db-perf-optimized-N-8"] {
+        let toml = format!(
+            "[green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
+             instance_type = \"{tier}\"\nregion = \"eu-west-3\"\n"
+        );
+        load_from_str(&toml).unwrap_or_else(|e| panic!("{tier}: {e}"));
+    }
+}
+
+#[test]
 fn database_static_placement_alone_next_to_alumet_is_accepted() {
     let toml = format!(
         "[green]\ndefault_region = \"eu-west-3\"\n{ALUMET_DATABASE}\n\
@@ -4321,6 +4332,10 @@ fn database_static_rejections_name_their_rule() {
         (
             format!("{dedicated}nodes = 2\ninstance_type = \"db.serverless\"\n"),
             "ACU",
+        ),
+        (
+            format!("{dedicated}nodes = 2\ninstance_type = \"db-custom-4-15360\"\n"),
+            "dedicated-core custom tiers",
         ),
         (
             format!(
