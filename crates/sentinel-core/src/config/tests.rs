@@ -4097,6 +4097,9 @@ fn broker_static_placement_alone_next_to_alumet_is_accepted() {
 #[test]
 fn broker_static_shared_with_cpu_query_is_accepted() {
     let toml = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+
 [green.broker_static]
 placement = "shared"
 instance_type = "m5.large"
@@ -4275,6 +4278,9 @@ fn database_static_placement_alone_next_to_alumet_is_accepted() {
 #[test]
 fn database_static_shared_with_cpu_query_is_accepted() {
     let toml = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+
 [green.database_static]
 placement = "shared"
 instance_type = "m5.large"
@@ -4389,6 +4395,260 @@ fn database_static_and_alumet_regions_must_agree() {
     let err = database_static_error(&toml);
     assert!(err.contains("differ"), "{err}");
     load_from_str(&toml.replace("us-east-1", "eu-west-3")).expect("one region loads");
+}
+
+/// Node A read by `orders` and `billing` (one query, padded once), two
+/// services on the AWS default query, and node B whose two services
+/// declare different envelopes.
+const CLOUD_NODES: &str = r#"
+[green.cloud]
+prometheus_endpoint = "http://prom:9090"
+default_provider = "aws"
+
+[green.cloud.services]
+orders = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-a"})' }
+billing = { instance_type = "m5.large", cpu_query = ' avg(node_cpu{node="node-a"}) ' }
+search = { instance_type = "m5.large" }
+api = { instance_type = "m5.large" }
+cache = { instance_type = "m5.xlarge", cpu_query = 'avg(node_cpu{node="node-b"})' }
+queue = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-b"})' }
+"#;
+
+const HOST_QUERY: &str = r#"cpu_query = 'avg(container_cpu{container="host", node="node-a"})'"#;
+
+const SUBSYSTEMS: [crate::score::host_static::Subsystem; 2] = [
+    crate::score::host_static::Subsystem::Database,
+    crate::score::host_static::Subsystem::Broker,
+];
+
+fn alumet_workload(subsystem: crate::score::host_static::Subsystem) -> &'static str {
+    match subsystem {
+        crate::score::host_static::Subsystem::Database => ALUMET_DATABASE,
+        crate::score::host_static::Subsystem::Broker => ALUMET_BROKER,
+    }
+}
+
+/// A shared declaration of `subsystem` next to [`CLOUD_NODES`].
+fn shared_host_toml(subsystem: crate::score::host_static::Subsystem, keys: &str) -> String {
+    format!(
+        "{CLOUD_NODES}\n{}\nplacement = \"shared\"\nregion = \"eu-west-3\"\n{keys}\n",
+        subsystem.section()
+    )
+}
+
+#[test]
+fn host_cpu_query_rejections_name_their_rule() {
+    for subsystem in SUBSYSTEMS {
+        let section = subsystem.section();
+        let shared = |query: &str| {
+            shared_host_toml(
+                subsystem,
+                &format!("instance_type = \"m5.large\"\ncpu_query = {query}"),
+            )
+        };
+        let cases = [
+            (
+                format!(
+                    "{section}\nplacement = \"shared\"\nregion = \"eu-west-3\"\n\
+                     instance_type = \"m5.large\"\ncpu_query = \"avg(host_cpu)\"\n"
+                ),
+                "cpu_query needs [green.cloud]".to_string(),
+            ),
+            (
+                shared("\"aws_ec2_cpuutilization_average\""),
+                "is a provider default CPU query".to_string(),
+            ),
+            (
+                shared("\"  aws_ec2_cpuutilization_average \""),
+                "is a provider default CPU query".to_string(),
+            ),
+            (
+                shared("'avg(node_cpu{node=\"node-a\"})'"),
+                "the CPU query of [green.cloud.services] billing, orders".to_string(),
+            ),
+            (
+                format!(
+                    "[green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n\
+                     cpu_metric = \" node_cpu \"\n\n{section}\nplacement = \"shared\"\n\
+                     region = \"eu-west-3\"\ninstance_type = \"m5.large\"\n\
+                     cpu_query = \"node_cpu\"\n"
+                ),
+                "is [green.cloud] cpu_metric".to_string(),
+            ),
+            (
+                shared("\"avg(host\\u0007cpu)\""),
+                "free of control characters".to_string(),
+            ),
+            (
+                shared(&format!("\"{}\"", "q".repeat(4097))),
+                "must be 1-4096 chars".to_string(),
+            ),
+            (
+                format!(
+                    "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{}\n\
+                     {section}\nplacement = \"dedicated\"\nnodes = 2\n\
+                     instance_type = \"m5.large\"\n{HOST_QUERY}\n",
+                    alumet_workload(subsystem)
+                ),
+                format!(
+                    "cpu_query cannot sit next to {}",
+                    subsystem.alumet_section()
+                ),
+            ),
+        ];
+        for (toml, expected) in cases {
+            let err = load_from_str(&toml)
+                .expect_err("the host cpu_query must be rejected")
+                .to_string();
+            assert!(err.contains(section), "{toml}\n=> {err}");
+            assert!(err.contains(&expected), "{toml}\n=> {err}");
+        }
+    }
+}
+
+#[test]
+fn database_and_broker_hosts_need_their_own_cpu_query() {
+    let toml = format!(
+        "{CLOUD_NODES}\n[green.database_static]\nplacement = \"shared\"\n\
+         region = \"eu-west-3\"\ninstance_type = \"m5.large\"\n\
+         cpu_query = \" avg(host_cpu) \"\n\n[green.broker_static]\nplacement = \"shared\"\n\
+         region = \"eu-west-3\"\ninstance_type = \"m5.large\"\ncpu_query = \"avg(host_cpu)\"\n"
+    );
+    let err = load_from_str(&toml)
+        .expect_err("one query for both hosts must be rejected")
+        .to_string();
+    assert!(
+        err.contains("read the same cpu_query 'avg(host_cpu)'"),
+        "{err}"
+    );
+    load_from_str(&toml.replacen("avg(host_cpu)", "avg(db_cpu)", 1)).expect("two queries load");
+}
+
+#[test]
+fn shared_with_rejections_name_their_rule() {
+    let redfish = "\n[green.redfish.endpoints.rack1]\n\
+                   url = \"https://bmc.local/redfish/v1/Chassis/1/Power\"\n\
+                   schema = \"legacy_power\"\n\n[green.redfish.service_mappings]\n\
+                   orders = \"rack1\"\n";
+    let alumet_domain = "\n[green.alumet]\nendpoint = \"http://localhost:9091/metrics\"\n\
+                         metric_name = \"rapl_consumed_energy_alumet\"\nlabel_key = \"domain\"\n\n\
+                         [green.alumet.service_mappings]\nbilling = \"package-0\"\n";
+    for subsystem in SUBSYSTEMS {
+        let listing = |shared_with: &str, extra: &str| {
+            shared_host_toml(
+                subsystem,
+                &format!(
+                    "instance_type = \"m5.large\"\n{HOST_QUERY}\nshared_with = {shared_with}\n{extra}"
+                ),
+            )
+        };
+        let cases = [
+            (
+                listing("[\"nope\"]", ""),
+                "'nope' is not a [green.cloud.services] key",
+            ),
+            (
+                listing("[\"orders\", \"orders\"]", ""),
+                "lists 'orders' twice",
+            ),
+            (listing("[\"search\"]", ""), "misses api, which also read"),
+            (
+                listing("[\"orders\", \"billing\", \"api\", \"search\"]", ""),
+                "spans several CPU queries",
+            ),
+            (
+                listing("[\"cache\", \"queue\"]", ""),
+                "different power envelopes",
+            ),
+            (
+                listing("[\"orders\", \"billing\"]", "").replace(
+                    "instance_type = \"m5.large\"\ncpu_query = 'avg(container",
+                    "instance_type = \"m5.xlarge\"\ncpu_query = 'avg(container",
+                ),
+                "differs from the envelope of the services it shares",
+            ),
+            (
+                listing("[\"orders\", \"billing\"]", "") + redfish,
+                "'orders' is in [green.redfish] service_mappings",
+            ),
+            (
+                listing("[\"orders\", \"billing\"]", "") + alumet_domain,
+                "'billing' is in [green.alumet] service_mappings under label_key = 'domain'",
+            ),
+        ];
+        for (toml, expected) in cases {
+            let err = load_from_str(&toml)
+                .expect_err("the shared_with list must be rejected")
+                .to_string();
+            assert!(err.contains(subsystem.section()), "{toml}\n=> {err}");
+            assert!(err.contains(expected), "{toml}\n=> {err}");
+        }
+    }
+}
+
+#[test]
+fn shared_with_two_query_groups_names_each_side() {
+    let err = load_from_str(&shared_host_toml(
+        crate::score::host_static::Subsystem::Database,
+        &format!("{HOST_QUERY}\nshared_with = [\"orders\", \"billing\", \"api\", \"search\"]"),
+    ))
+    .expect_err("two groups must be rejected")
+    .to_string();
+    assert!(
+        err.contains("'aws_ec2_cpuutilization_average' (api, search)"),
+        "{err}"
+    );
+    assert!(err.contains("(orders, billing)"), "{err}");
+}
+
+#[test]
+fn shared_with_the_exact_group_of_a_filtered_query_loads() {
+    for subsystem in SUBSYSTEMS {
+        for keys in [
+            format!("{HOST_QUERY}\nshared_with = [\"billing\", \"orders\"]"),
+            format!(
+                "instance_type = \"m5.large\"\n{HOST_QUERY}\nshared_with = [\"orders\", \"billing\"]"
+            ),
+        ] {
+            let cfg = load_from_str(&shared_host_toml(subsystem, &keys))
+                .unwrap_or_else(|err| panic!("{keys}\n=> {err}"));
+            assert_eq!(
+                validate::green::unlisted_shared_host_warnings(&cfg.green),
+                Vec::<String>::new(),
+                "a listed group does not warn"
+            );
+        }
+    }
+}
+
+#[test]
+fn shared_host_with_an_empty_shared_with_warns_and_loads() {
+    for subsystem in SUBSYSTEMS {
+        let keys = format!("instance_type = \"m5.large\"\n{HOST_QUERY}");
+        let cfg = load_from_str(&shared_host_toml(subsystem, &keys))
+            .expect("an unlisted shared host warns, it does not reject");
+        let warnings = validate::green::unlisted_shared_host_warnings(&cfg.green);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains(&format!(
+                "{} placement = 'shared' with an empty shared_with",
+                subsystem.section()
+            )),
+            "{}",
+            warnings[0]
+        );
+        // No backend reads application nodes: nothing to count twice.
+        let alone = load_from_str(&format!(
+            "[green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n\n{}\n\
+             placement = \"shared\"\nregion = \"eu-west-3\"\n{keys}\n",
+            subsystem.section()
+        ))
+        .expect("loads");
+        assert_eq!(
+            validate::green::unlisted_shared_host_warnings(&alone.green),
+            Vec::<String>::new()
+        );
+    }
 }
 
 #[test]

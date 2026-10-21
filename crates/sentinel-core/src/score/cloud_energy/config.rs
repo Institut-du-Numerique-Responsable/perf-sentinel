@@ -16,6 +16,15 @@ pub(crate) const DEFAULT_CPU_QUERY_AZURE: &str =
 pub(crate) const DEFAULT_CPU_QUERY_GENERIC: &str =
     "100 - (avg by(instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)";
 
+/// The four provider defaults. Each reads every node of the fleet, so
+/// none can stand for one declared host.
+pub(crate) const DEFAULT_CPU_QUERIES: [&str; 4] = [
+    DEFAULT_CPU_QUERY_AWS,
+    DEFAULT_CPU_QUERY_GCP,
+    DEFAULT_CPU_QUERY_AZURE,
+    DEFAULT_CPU_QUERY_GENERIC,
+];
+
 /// Per-service cloud energy configuration.
 ///
 /// A service can be configured either by instance type (looked up in

@@ -1,9 +1,12 @@
 //! Validation of the `[green]` section and its energy-backend subsections.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::config::GreenConfig;
 use crate::score::alumet::AlumetConfig;
-use crate::score::cloud_energy::config::{CloudEnergyConfig, ServiceCloudConfig};
+use crate::score::cloud_energy::config::{
+    CloudEnergyConfig, DEFAULT_CPU_QUERIES, ServiceCloudConfig,
+};
 use crate::score::host_static::{HostPlacement, StaticHostsConfig, Subsystem};
 use crate::score::kepler::{KeplerConfig, KeplerMetricKind};
 use crate::score::redfish::{RedfishConfig, RedfishEndpoint};
@@ -272,9 +275,264 @@ fn validate_shared_host(subsystem: Subsystem, cfg: &StaticHostsConfig) -> Result
     Ok(())
 }
 
+/// Rule D6/B6: a declared host's CPU query is a reading of its own, run
+/// against `[green.cloud]`, never one the application side already reads.
+fn validate_host_cpu_query(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    green: &GreenConfig,
+) -> Result<(), String> {
+    let Some(query) = cfg.cpu_query.as_deref().map(str::trim) else {
+        return Ok(());
+    };
+    let section = subsystem.section();
+    if query.is_empty() || query.len() > 4096 || has_control_char(query) {
+        return Err(format!(
+            "{section} cpu_query must be 1-4096 chars and free of control characters"
+        ));
+    }
+    if green.alumet_host(subsystem).is_some() {
+        return Err(format!(
+            "{section} cpu_query cannot sit next to {}: Alumet already measures the {} \
+             hosts, drop cpu_query",
+            subsystem.alumet_section(),
+            subsystem.noun()
+        ));
+    }
+    let Some(cloud) = green.cloud_energy.as_ref() else {
+        return Err(format!(
+            "{section} cpu_query needs [green.cloud]: it runs against its prometheus_endpoint"
+        ));
+    };
+    match application_query_reader(query, cloud) {
+        Some(reader) => Err(format!(
+            "{section} cpu_query '{query}' is {reader}, which reads application nodes. \
+             Give the {} hosts a CPU query of their own",
+            subsystem.noun()
+        )),
+        None => Ok(()),
+    }
+}
+
+/// What already reads `query` on the application side, if anything.
+fn application_query_reader(query: &str, cloud: &CloudEnergyConfig) -> Option<String> {
+    if DEFAULT_CPU_QUERIES.contains(&query) {
+        return Some("a provider default CPU query".to_string());
+    }
+    if cloud.cpu_metric.as_deref().map(str::trim) == Some(query) {
+        return Some("[green.cloud] cpu_metric".to_string());
+    }
+    cloud.cpu_query_groups().remove(query).map(|services| {
+        format!(
+            "the CPU query of [green.cloud.services] {}",
+            services.join(", ")
+        )
+    })
+}
+
+/// Maximum `shared_with` entries (rule D7/B7).
+const MAX_SHARED_WITH: usize = 256;
+
+/// Rule D7/B7: `shared_with` names exactly the services of one CPU query
+/// group, a node that only `[green.cloud]` reads.
+fn validate_shared_with(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    green: &GreenConfig,
+) -> Result<(), String> {
+    if cfg.shared_with.is_empty() {
+        return Ok(());
+    }
+    let section = subsystem.section();
+    let Some(cloud) = green.cloud_energy.as_ref() else {
+        return Err(format!(
+            "{section} shared_with needs [green.cloud]: it lists [green.cloud.services] entries"
+        ));
+    };
+    check_shared_with_entries(section, &cfg.shared_with, cloud)?;
+    let query = shared_with_query(section, &cfg.shared_with, cloud)?;
+    let envelope = shared_with_envelope(section, &query, &cfg.shared_with, cloud)?;
+    if let (Some(instance_type), Some(node)) = (cfg.instance_type.as_deref(), cfg.node_power())
+        && node != envelope
+    {
+        return Err(format!(
+            "{section} instance_type '{instance_type}' ({} to {} W) differs from the \
+             envelope of the services it shares ({} to {} W): one node has one power \
+             envelope",
+            node.0, node.1, envelope.0, envelope.1
+        ));
+    }
+    check_shared_with_node_backends(subsystem, &cfg.shared_with, green)
+}
+
+/// Bounded, without duplicates, each a `[green.cloud.services]` key.
+fn check_shared_with_entries(
+    section: &str,
+    names: &[String],
+    cloud: &CloudEnergyConfig,
+) -> Result<(), String> {
+    if names.len() > MAX_SHARED_WITH {
+        return Err(format!(
+            "{section} shared_with has {} entries; maximum is {MAX_SHARED_WITH}",
+            names.len()
+        ));
+    }
+    let mut seen = HashSet::new();
+    for name in names {
+        if !seen.insert(name.as_str()) {
+            return Err(format!("{section} shared_with lists '{name}' twice"));
+        }
+        if !cloud.services.contains_key(name) {
+            return Err(format!(
+                "{section} shared_with entry '{name}' is not a [green.cloud.services] key"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The one CPU query the listed services resolve, every service reading
+/// it listed.
+fn shared_with_query(
+    section: &str,
+    names: &[String],
+    cloud: &CloudEnergyConfig,
+) -> Result<String, String> {
+    let mut by_query: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for name in names {
+        by_query
+            .entry(cloud.service_cpu_query(&cloud.services[name]).into_owned())
+            .or_default()
+            .push(name);
+    }
+    if by_query.len() > 1 {
+        let spans = by_query
+            .iter()
+            .map(|(query, services)| format!("'{query}' ({})", services.join(", ")))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        return Err(format!(
+            "{section} shared_with spans several CPU queries, {spans}: a shared host runs \
+             on one node, list the services of one query"
+        ));
+    }
+    let query = by_query.into_keys().next().unwrap_or_default();
+    let group = cloud.cpu_query_groups().remove(&query).unwrap_or_default();
+    let missing: Vec<&str> = group
+        .iter()
+        .map(String::as_str)
+        .filter(|service| !names.iter().any(|name| name == service))
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "{section} shared_with misses {}, which also read the CPU query '{query}': \
+             list every service of that node",
+            missing.join(", ")
+        ));
+    }
+    Ok(query)
+}
+
+/// The one power envelope of the listed services.
+fn shared_with_envelope(
+    section: &str,
+    query: &str,
+    names: &[String],
+    cloud: &CloudEnergyConfig,
+) -> Result<(f64, f64), String> {
+    let mut members = names
+        .iter()
+        .map(|name| (name, cloud.service_power(&cloud.services[name])));
+    let Some((first, envelope)) = members.next() else {
+        return Err(format!("{section} shared_with is empty"));
+    };
+    if let Some((other, other_envelope)) = members.find(|(_, e)| *e != envelope) {
+        return Err(format!(
+            "{section} shared_with services '{first}' ({} to {} W) and '{other}' ({} to \
+             {} W) read the CPU query '{query}' with different power envelopes: one node \
+             has one envelope, give them one instance type",
+            envelope.0, envelope.1, other_envelope.0, other_envelope.1
+        ));
+    }
+    Ok(envelope)
+}
+
+/// No listed service sits on a node a higher-precedence backend reads
+/// whole: Redfish chassis, or Alumet under `label_key = "domain"`.
+fn check_shared_with_node_backends(
+    subsystem: Subsystem,
+    names: &[String],
+    green: &GreenConfig,
+) -> Result<(), String> {
+    let redfish = green.redfish.as_ref().map(|cfg| &cfg.service_mappings);
+    let alumet = green
+        .alumet
+        .as_ref()
+        .filter(|cfg| cfg.label_key == "domain")
+        .map(|cfg| &cfg.service_mappings);
+    for (backend, mappings) in [
+        ("[green.redfish] service_mappings", redfish),
+        (
+            "[green.alumet] service_mappings under label_key = 'domain'",
+            alumet,
+        ),
+    ] {
+        if let Some(name) = mappings.and_then(|m| names.iter().find(|n| m.contains_key(*n))) {
+            return Err(format!(
+                "{} shared_with entry '{name}' is in {backend}: that node is read whole by a \
+                 higher-precedence backend, so a {} host on it is already inside that \
+                 reading and must not be declared. Declare it dedicated only if it runs on \
+                 separate hosts",
+                subsystem.section(),
+                subsystem.noun()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Rule W2: a shared host with an empty `shared_with` next to backends
+/// that read application nodes. Its dynamic share is billed on top of
+/// every reading, so it may count a node twice.
+pub(crate) fn unlisted_shared_host_warnings(green: &GreenConfig) -> Vec<String> {
+    let reads_nodes = green
+        .cloud_energy
+        .as_ref()
+        .is_some_and(|cfg| !cfg.services.is_empty())
+        || green
+            .redfish
+            .as_ref()
+            .is_some_and(|cfg| !cfg.service_mappings.is_empty())
+        || green
+            .alumet
+            .as_ref()
+            .is_some_and(|cfg| cfg.label_key == "domain" && !cfg.service_mappings.is_empty());
+    if !reads_nodes {
+        return Vec::new();
+    }
+    [Subsystem::Database, Subsystem::Broker]
+        .into_iter()
+        .filter(|&subsystem| {
+            green.static_hosts(subsystem).is_some_and(|cfg| {
+                cfg.placement == HostPlacement::Shared && cfg.shared_with.is_empty()
+            })
+        })
+        .map(|subsystem| {
+            format!(
+                "{} placement = 'shared' with an empty shared_with: the {}'s dynamic share is \
+                 billed on top of every [green.cloud.services], [green.redfish] or [green.alumet] \
+                 domain reading. List the query group of the node it runs on, or do not declare \
+                 a host whose node is read whole",
+                subsystem.section(),
+                subsystem.noun()
+            )
+        })
+        .collect()
+}
+
 impl Config {
-    /// Rules D2 to D5 and D8/D9 (database), B2 to B5 and B8/B9 (broker)
-    /// for one subsystem's declared hosts.
+    /// Rules D2 to D8/D9 (database), B2 to B8/B9 (broker) for one
+    /// subsystem's declared hosts.
     fn validate_static_hosts(&self, subsystem: Subsystem) -> Result<(), String> {
         let alumet = self.green.alumet_host(subsystem);
         if let Some(cfg) = self.green.static_hosts(subsystem) {
@@ -287,8 +545,33 @@ impl Config {
                 }
                 HostPlacement::Shared => validate_shared_host(subsystem, cfg)?,
             }
+            validate_host_cpu_query(subsystem, cfg, &self.green)?;
+            validate_shared_with(subsystem, cfg, &self.green)?;
         }
         self.validate_host_region(subsystem)
+    }
+
+    /// Rule X1: the database and broker hosts read different CPU queries.
+    fn validate_distinct_host_queries(&self) -> Result<(), String> {
+        let query = |subsystem| {
+            self.green
+                .static_hosts(subsystem)
+                .and_then(|cfg| cfg.cpu_query.as_deref())
+                .map(str::trim)
+        };
+        match (query(Subsystem::Database), query(Subsystem::Broker)) {
+            (Some(database), Some(broker)) if database == broker => Err(format!(
+                "[green.database_static] and [green.broker_static] read the same cpu_query \
+                 '{database}': each declared host reads its own CPU, give each its own query"
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    fn warn_unlisted_shared_hosts(&self) {
+        for message in unlisted_shared_host_warnings(&self.green) {
+            tracing::warn!("{message}");
+        }
     }
 
     /// Rules B8 and B9: a valid declared region, one region per
@@ -355,6 +638,8 @@ impl Config {
         }
         self.validate_static_hosts(Subsystem::Database)?;
         self.validate_static_hosts(Subsystem::Broker)?;
+        self.validate_distinct_host_queries()?;
+        self.warn_unlisted_shared_hosts();
         self.validate_hourly_profiles_file()?;
         if let Some(cfg) = &self.green.electricity_maps {
             Self::validate_electricity_maps(cfg)?;
