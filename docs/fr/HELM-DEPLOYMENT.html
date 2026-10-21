@@ -535,9 +535,9 @@
 <span style="color:var(--code-sub)">  labels</span>:
 <span style="color:var(--term-comment)">    # Adaptez au ruleSelector de votre ressource Prometheus.</span>
 <span style="color:var(--code-sub)">    release</span>: prometheus
-<span style="color:var(--term-comment)">  # N'ajoutez les alertes de péremption des scrapers d'énergie par backend</span>
-<span style="color:var(--term-comment)">  # que lorsqu'un backend énergie (Alumet, Scaphandre, Kepler, Redfish, cloud_energy)</span>
-<span style="color:var(--term-comment)">  # est configuré.</span>
+<span style="color:var(--term-comment)">  # N'ajoutez les alertes de péremption des scrapers d'énergie par backend,</span>
+<span style="color:var(--term-comment)">  # et celles des sondes CPU des hôtes, que lorsqu'un backend énergie</span>
+<span style="color:var(--term-comment)">  # (Alumet, Scaphandre, Kepler, Redfish, cloud_energy) est configuré.</span>
 <span style="color:var(--code-sub)">  energyScrapers</span>: false
 <span style="color:var(--code-sub)">  scraperStaleSeconds</span>: 120</code></pre></div>
 <p class="ps-p">Le groupe par défaut <code class="ps-ic">perf-sentinel.rules</code> porte cinq règles. Chacune se déclenche sur une donnée que le daemon a perdue sans pouvoir la retrouver : le daemon qui n'est plus collecté (<code class="ps-ic">up{job="&lt;nom complet de la release&gt;"} == 0</code>), l'ingestion abandonnée sur un canal saturé, l'ingestion refusée sous pression mémoire, les traces délestées avant analyse, et une fenêtre d'archive de divulgation perdue. La <code class="ps-ic">description</code> de chaque alerte nomme le paramètre <code class="ps-ic">[daemon]</code> à relever. Ajoutez les vôtres via <code class="ps-ic">prometheusRule.additionalRules</code>, passées telles quelles dans le même groupe, sans fork.</p>

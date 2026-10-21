@@ -538,8 +538,9 @@
 <span style="color:var(--code-sub)">  labels</span>:
 <span style="color:var(--term-comment)">    # Match your Prometheus resource's ruleSelector.</span>
 <span style="color:var(--code-sub)">    release</span>: prometheus
-<span style="color:var(--term-comment)">  # Add the per-backend energy-scraper staleness alerts only when an</span>
-<span style="color:var(--term-comment)">  # energy backend (Alumet, Scaphandre, Kepler, Redfish, cloud_energy) is configured.</span>
+<span style="color:var(--term-comment)">  # Add the per-backend energy-scraper staleness alerts, and the host CPU</span>
+<span style="color:var(--term-comment)">  # probe ones, only when an energy backend (Alumet, Scaphandre, Kepler,</span>
+<span style="color:var(--term-comment)">  # Redfish, cloud_energy) is configured.</span>
 <span style="color:var(--code-sub)">  energyScrapers</span>: false
 <span style="color:var(--code-sub)">  scraperStaleSeconds</span>: 120</code></pre></div>
 <p class="ps-p">The default group <code class="ps-ic">perf-sentinel.rules</code> carries five rules. Every one of them fires on data the daemon lost and cannot recover: the daemon not being scraped (<code class="ps-ic">up{job="&lt;release fullname&gt;"} == 0</code>), ingest dropped at a saturated channel, ingest refused under memory pressure, traces shed before analysis, and a dropped disclosure archive window. Each <code class="ps-ic">description</code> names the <code class="ps-ic">[daemon]</code> knob to raise. Append your own with <code class="ps-ic">prometheusRule.additionalRules</code>, passed through verbatim into the same group, no fork needed.</p>
