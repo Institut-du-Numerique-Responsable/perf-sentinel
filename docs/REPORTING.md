@@ -115,7 +115,7 @@ Publishing both lets a reader compare the two and see how much avoidable waste a
 Every report states this perimeter three times:
 
 - `notes.disclaimers` ends with one line per subsystem, database then broker, appended after the custom or default disclaimers. It says the hosts are inside the totals in all N windows that carried a figure (with their models and placements), in K of N windows (naming the estimated windows and the ones kept beside the totals), or that the totals hold none of that subsystem's host energy. When a host is inside, the line adds that its carbon is in `total_carbon_kgco2eq` and in no application's figures.
-- The PDF at-a-glance page names the database and broker hosts whose `in_totals_energy_kwh` is above zero, and says the others are outside the totals.
+- The PDF at-a-glance page names the database and broker hosts whose `in_totals_windows` is non-zero, the test `notes.disclaimers` uses, with their `in_totals_energy_kwh`, and says the others are outside the totals.
 - `carbon_breakdown.database_kgco2eq` and `messaging_kgco2eq` carry the in-total host carbon, and `database_waste.in_totals_energy_kwh` and `messaging_waste.in_totals_energy_kwh` the in-total host energy.
 
 For `intent = official`, the validator checks the perimeter: the two host carbon terms are finite and >= 0, the five breakdown terms add up to `total_carbon_kgco2eq` within 1e-6 relative (skipped when `carbon_methodologies` holds the legacy `sci_v1_numerator` tag), and the applications' `energy_kwh` plus both in-total host shares fit in `total_energy_kwh`.

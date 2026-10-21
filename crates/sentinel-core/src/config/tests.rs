@@ -3739,6 +3739,31 @@ fn overlapping_node_readings_accept_containment_and_disjoint_groups() {
 }
 
 #[test]
+fn overlapping_node_readings_rank_alumet_domains_only() {
+    let alumet = |label_key: &str| {
+        format!(
+            "{}\n\n[green.alumet]\nendpoint = \"http://localhost:9091/metrics\"\n\
+             metric_name = \"rapl_consumed_energy_alumet\"\nlabel_key = \"{label_key}\"\n\n\
+             [green.alumet.service_mappings]\nb = \"package-0\"\n",
+            cloud_and_redfish_toml(&["a", "b"])
+        )
+    };
+    let overlaps = |toml: String| {
+        let config =
+            load_from_str(&toml).expect("overlapping node readings warn, they do not reject");
+        validate::green::overlapping_node_readings(&config.green)
+    };
+    let warnings = overlaps(alumet("domain"));
+    assert!(
+        warnings.iter().any(|m| m.contains("chassis 'rack1' (a, b)")
+            && m.contains("[green.alumet] domain 'package-0' (b)")),
+        "{warnings:?}"
+    );
+    // Only a domain names a node: other label keys rank nothing.
+    assert_eq!(overlaps(alumet("name")), Vec::<String>::new());
+}
+
+#[test]
 fn validate_redfish_rejects_unknown_chassis_in_mapping() {
     let mut cfg = minimal_redfish_config();
     cfg.service_mappings
@@ -4545,6 +4570,13 @@ fn shared_with_rejections_name_their_rule() {
     let alumet_domain = "\n[green.alumet]\nendpoint = \"http://localhost:9091/metrics\"\n\
                          metric_name = \"rapl_consumed_energy_alumet\"\nlabel_key = \"domain\"\n\n\
                          [green.alumet.service_mappings]\nbilling = \"package-0\"\n";
+    let too_many = format!(
+        "[{}]",
+        (0..=256)
+            .map(|i| format!("\"s{i}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     for subsystem in SUBSYSTEMS {
         let listing = |shared_with: &str, extra: &str| {
             shared_host_toml(
@@ -4555,6 +4587,7 @@ fn shared_with_rejections_name_their_rule() {
             )
         };
         let cases = [
+            (listing(&too_many, ""), "has 257 entries; maximum is 256"),
             (
                 listing("[\"nope\"]", ""),
                 "'nope' is not a [green.cloud.services] key",
@@ -4722,7 +4755,10 @@ fn alumet_workload_on_hosts_of_its_own_loads() {
     for subsystem in SUBSYSTEMS {
         let workload = alumet_workload(subsystem);
         let dedicated = format!("{}\nplacement = \"dedicated\"\n", subsystem.section());
+        // A RAPL domain with no service mapped: the whole database node.
+        let domain = workload.replace("label_key = \"name\"", "label_key = \"domain\"");
         for toml in [
+            format!("[green]\ndefault_region = \"eu-west-3\"\n{domain}"),
             format!("[green]\ndefault_region = \"eu-west-3\"\n{kepler}\n{workload}"),
             format!(
                 "[green]\ndefault_region = \"eu-west-3\"\n{CLOUD_NODES}\n{workload}\n{dedicated}"
@@ -4733,6 +4769,31 @@ fn alumet_workload_on_hosts_of_its_own_loads() {
         ] {
             load_from_str(&toml).unwrap_or_else(|err| panic!("{toml}\n=> {err}"));
         }
+    }
+}
+
+#[test]
+fn host_sources_warn_on_a_default_cpu_metric() {
+    for subsystem in SUBSYSTEMS {
+        let toml = format!(
+            "[green]\ndefault_region = \"eu-west-3\"\n\n[green.cloud]\n\
+             prometheus_endpoint = \"http://prom:9090\"\n\
+             cpu_metric = \"  aws_ec2_cpuutilization_average \"\n\n[green.cloud.services]\n\
+             search = {{ instance_type = \"m5.large\" }}\napi = {{ instance_type = \"m5.large\" }}\n\n\
+             {}\nplacement = \"dedicated\"\nnodes = 2\ninstance_type = \"m5.large\"\n",
+            subsystem.section()
+        );
+        let cfg = load_from_str(&toml).expect("W1 warns, it does not reject");
+        let warnings = validate::green::host_source_warnings(&cfg.green);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains(
+                "[green.cloud.services] api, search read the unfiltered provider default CPU \
+                 query 'aws_ec2_cpuutilization_average'"
+            ),
+            "{}",
+            warnings[0]
+        );
     }
 }
 

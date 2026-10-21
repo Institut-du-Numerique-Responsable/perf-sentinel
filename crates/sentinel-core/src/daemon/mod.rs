@@ -477,8 +477,7 @@ fn declared_ceiling(
     config: &Config,
     subsystem: Subsystem,
 ) -> Option<crate::score::broker_static::StaticBrokerState> {
-    let mut ceiling = config.green.static_hosts(subsystem)?.ceiling()?;
-    ceiling.region = config.green.host_region(subsystem).map(str::to_string);
+    let ceiling = config.green.static_hosts(subsystem)?.ceiling()?;
     Some(crate::score::broker_static::StaticBrokerState::new(
         crate::score::scaphandre::monotonic_ms(),
         &ceiling,
@@ -723,6 +722,19 @@ mod tests {
              [green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n"
         ));
         let ctx = host_energy_context(&probed, Subsystem::Database).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+
+        // The broker twin: declared tag alone, the probe's tag with a cpu_query.
+        let broker = DATABASE_CEILING
+            .replace("database_static", "broker_static")
+            .replace("db.r6i.large", "m5.large");
+        let ctx = host_energy_context(&load(&broker), Subsystem::Broker).expect("ceiling bills");
+        assert_eq!(ctx.model, crate::report::BROKER_WASTE_MODEL_SPECPOWER);
+        let probed = load(&format!(
+            "{broker}cpu_query = 'avg(broker_cpu)'\n\
+             [green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n"
+        ));
+        let ctx = host_energy_context(&probed, Subsystem::Broker).expect("ceiling bills");
         assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
     }
 

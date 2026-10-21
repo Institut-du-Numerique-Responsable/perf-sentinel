@@ -286,7 +286,7 @@ fn validate_host_cpu_query(
         return Ok(());
     };
     let section = subsystem.section();
-    if query.is_empty() || query.len() > 4096 || has_control_char(query) {
+    if query.is_empty() || query.chars().count() > 4096 || has_control_char(query) {
         return Err(format!(
             "{section} cpu_query must be 1-4096 chars and free of control characters"
         ));
@@ -344,6 +344,8 @@ fn validate_shared_with(
         return Ok(());
     }
     let section = subsystem.section();
+    // Defensive: D6 already refuses the cpu_query a shared placement needs
+    // without [green.cloud], and B4 refuses shared_with on a dedicated one.
     let Some(cloud) = green.cloud_energy.as_ref() else {
         return Err(format!(
             "{section} shared_with needs [green.cloud]: it lists [green.cloud.services] entries"

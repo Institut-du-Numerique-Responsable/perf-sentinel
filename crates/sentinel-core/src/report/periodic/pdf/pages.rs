@@ -1245,7 +1245,8 @@ fn host_perimeter(aggregate: &Aggregate) -> String {
     let mut inside = Vec::new();
     let mut outside = Vec::new();
     for (noun, block) in hosts {
-        match block.as_ref().filter(|b| b.in_totals_energy_kwh > 0.0) {
+        // Same predicate as the disclaimers and the preview.
+        match block.as_ref().filter(|b| b.in_totals_windows > 0) {
             Some(b) => inside.push(format!("{noun} hosts ({:.2} kWh)", b.in_totals_energy_kwh)),
             None => outside.push(noun),
         }
@@ -1309,7 +1310,7 @@ fn carbon_breakdown(breakdown: &CarbonBreakdown) -> Option<String> {
     let made_of = (!inside.is_empty()).then(|| format!("Made of {}.", inside.join(", ")));
     let beside = (!outside.is_empty()).then(|| {
         format!(
-            "Outside this total, as a different scope from the instrumented services: {}.",
+            "Outside this total, from windows that kept the host figure beside it: {}.",
             outside.join(", ")
         )
     });

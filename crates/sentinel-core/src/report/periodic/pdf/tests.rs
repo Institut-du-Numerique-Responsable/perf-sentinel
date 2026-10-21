@@ -524,6 +524,10 @@ mod layout_and_pages {
             text.contains("The broker servers are outside these totals."),
             "{text}"
         );
+        // In-total windows that billed nothing still put the hosts inside.
+        report.aggregate.messaging_waste = Some(in_total_block(0.0));
+        let text = at_a_glance_text(&report);
+        assert!(text.contains("and broker hosts (0.00 kWh)."), "{text}");
     }
 
     #[test]

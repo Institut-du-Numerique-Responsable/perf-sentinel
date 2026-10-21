@@ -39,8 +39,9 @@ pub struct StaticBrokerConfig {
     /// Fallback of the table lookup. A declaration that passed validation
     /// resolves to a row, so the ceiling sets `generic` and it is unread.
     pub provider: String,
-    /// Region used to convert the waste energy to gCO2. The daemon sets
-    /// the subsystem's effective region, `None` reports kWh only.
+    /// The section's declared region, copied as is. The daemon converts
+    /// with the subsystem's effective region
+    /// ([`crate::config::GreenConfig::host_region`]) and never reads it.
     pub region: Option<String>,
 }
 

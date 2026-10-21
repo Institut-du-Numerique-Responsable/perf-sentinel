@@ -337,8 +337,16 @@ fn fold_provenance(acc: &mut DbWasteAccumulator, model: &str, energy: f64) {
     }
 }
 
-/// The in-total share and the declared placement. An estimated figure is
-/// the application-side share, never a host term, whatever its flag says.
+/// Whether a window's host block is a host term inside its totals. An
+/// estimated figure is the application-side share, never a host term,
+/// whatever its flag says, and an out-of-spec tag never reaches the sums.
+fn is_in_total_host(in_totals: bool, model: &str) -> bool {
+    in_totals
+        && model != crate::report::DB_WASTE_MODEL_ESTIMATED
+        && super::schema::is_valid_model_tag(model)
+}
+
+/// The in-total share and the declared placement.
 fn fold_host_scope(
     acc: &mut DbWasteAccumulator,
     model: &str,
@@ -346,7 +354,7 @@ fn fold_host_scope(
     placement: Option<crate::score::host_static::HostPlacement>,
     energy: f64,
 ) {
-    if in_totals && model != crate::report::DB_WASTE_MODEL_ESTIMATED {
+    if is_in_total_host(in_totals, model) {
         acc.in_totals_windows = acc.in_totals_windows.saturating_add(1);
         acc.in_totals_energy_kwh += energy;
     }
@@ -933,7 +941,7 @@ impl PeriodState {
     /// An in-total host block's energy is part of `total_energy_kwh`, so
     /// its model is one of the period's energy sources.
     fn record_in_total_model(&mut self, block: &crate::report::DisclosureDbWaste) {
-        if block.in_totals && super::schema::is_valid_model_tag(&block.model) {
+        if is_in_total_host(block.in_totals, &block.model) {
             self.record_energy_model_tag(&block.model);
         }
     }
@@ -1936,12 +1944,18 @@ fn build_carbon_breakdown(state: &PeriodState) -> Option<CarbonBreakdown> {
 }
 
 /// In-total database and broker host energy (kWh) and carbon (kg) of one
-/// window, each term sanitized on its own.
+/// window, each term sanitized on its own. The kWh follows the block
+/// rule of [`is_in_total_host`], so the application part keeps what the
+/// in-total share leaves out.
 fn in_total_host_terms(gs: &crate::report::GreenSummary) -> (f64, f64) {
     let kwh = gs
-        .database_in_totals()
+        .database_waste
+        .as_ref()
+        .filter(|w| is_in_total_host(w.in_totals, &w.model))
         .map_or(0.0, |w| sanitize_f64(w.energy_kwh))
-        + gs.messaging_in_totals()
+        + gs.messaging_waste
+            .as_ref()
+            .filter(|w| is_in_total_host(w.in_totals, &w.model))
             .map_or(0.0, |w| sanitize_f64(w.energy_kwh));
     let gco2 = gs.co2.as_ref().map_or(0.0, |c| {
         sanitize_f64(c.database_gco2.unwrap_or(0.0)) + sanitize_f64(c.messaging_gco2.unwrap_or(0.0))

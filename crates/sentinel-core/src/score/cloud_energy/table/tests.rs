@@ -542,7 +542,7 @@ fn azure_sql_gen5_scales_the_reference_row_per_vcore() {
     let (idle, max) = row("Standard_D4s_v3");
     assert_within_step(idle_watts, idle, "idle");
     assert_within_step(max_watts, max, "max");
-    for same in ["BC_Gen5_4", "HS_Gen5_4", "GP_S_Gen5_4"] {
+    for same in ["BC_Gen5_4", "HS_Gen5_4", "GP_S_Gen5_4", "HS_S_Gen5_4"] {
         assert_eq!(
             resolve_instance_class(same),
             resolve_instance_class("GP_Gen5_4"),
@@ -551,6 +551,8 @@ fn azure_sql_gen5_scales_the_reference_row_per_vcore() {
     }
     for name in [
         "GP_Gen5_0",
+        "GP_Gen5_04",
+        "BC_S_Gen5_4",
         "GP_Gen5_1025",
         "GP_Gen5_+4",
         "GP_DC_2",

@@ -407,8 +407,9 @@ fn cloud_sql_tier(name: &str) -> Option<(f64, f64)> {
 }
 
 /// Azure SQL Database and Managed Instance vCore objectives on
-/// standard-series (Gen5) hardware, `{GP|BC|HS}_[S_]Gen5_N`: N vCores at
-/// the per-vCPU rate of `Standard_D64s_v3`. Microsoft lists Broadwell,
+/// standard-series (Gen5) hardware, `{GP|BC|HS}_Gen5_N` and serverless
+/// `{GP|HS}_S_Gen5_N`: N vCores at the per-vCPU rate of
+/// `Standard_D64s_v3`. Microsoft lists Broadwell,
 /// Skylake, Cascade Lake, Ice Lake, Milan, Genoa and Emerald Rapids for
 /// Gen5, the Azure CSV publishes Broadwell, Skylake, Cascade Lake and
 /// EPYC 3rd Gen, and Skylake has the highest max W/vCPU among them
@@ -422,11 +423,12 @@ fn azure_sql_vcore(name: &str) -> Option<(f64, f64)> {
     if !matches!(tier, "GP" | "BC" | "HS") {
         return None;
     }
-    let vcores = rest
-        .strip_prefix("S_")
-        .unwrap_or(rest)
-        .strip_prefix("Gen5_")?;
-    if !vcores.bytes().all(|b| b.is_ascii_digit()) {
+    let serverless = rest.strip_prefix("S_");
+    if serverless.is_some() && tier == "BC" {
+        return None;
+    }
+    let vcores = serverless.unwrap_or(rest).strip_prefix("Gen5_")?;
+    if vcores.starts_with('0') || !vcores.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     let vcores: u32 = vcores.parse().ok().filter(|n| (1..=1024).contains(n))?;

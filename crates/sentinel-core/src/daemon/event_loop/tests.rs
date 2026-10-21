@@ -1404,6 +1404,9 @@ async fn in_total_host_figures_reach_the_counters_and_restore_outside_the_totals
             assert!(hosts > 0.0);
             assert!((metrics.carbon_gco2.get() - (regions + hosts)).abs() < 1e-12);
             assert!((metrics.energy_kwh.get() - live.energy_kwh).abs() < 1e-12);
+            // First batch: the scored counters hold the same window figures.
+            assert!((metrics.carbon_gco2_total.get() - (regions + hosts)).abs() < 1e-12);
+            assert!((metrics.energy_kwh_total.get() - live.energy_kwh).abs() < 1e-12);
             assert!(live.energy_kwh > 3.0, "both hosts inside energy_kwh");
         } else {
             // Restored from the first batch, not inside this one's totals.

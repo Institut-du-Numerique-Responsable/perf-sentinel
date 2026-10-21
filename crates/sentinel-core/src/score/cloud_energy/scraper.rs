@@ -489,7 +489,14 @@ fn probe_watts(
     let Some(group) = &probe.group_key else {
         return Some(probe.dynamic_watts(cpu));
     };
-    let &(group_cpu, _) = readings.get(group).filter(|&&(_, series)| series == 1)?;
+    let Some(&(group_cpu, _)) = readings.get(group).filter(|&&(_, series)| series == 1) else {
+        // The probe's own gauge stays fresh while this tick bills nothing.
+        tracing::debug!(
+            group = %group,
+            "shared host probe skipped: its node query has no one-series reading"
+        );
+        return None;
+    };
     let taken = deductions.entry(group.clone()).or_insert(0.0);
     let watts = probe
         .dynamic_watts(cpu)
