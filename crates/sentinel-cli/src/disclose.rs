@@ -1132,6 +1132,8 @@ mod tests {
             Some(sentinel_core::report::periodic::schema::CarbonBreakdown {
                 operational_kgco2eq: None,
                 embodied_kgco2eq: Some(0.000_000_1),
+                database_kgco2eq: None,
+                messaging_kgco2eq: None,
                 database_kgco2eq_out_of_total: None,
                 messaging_kgco2eq_out_of_total: None,
                 transport_kgco2eq: None,

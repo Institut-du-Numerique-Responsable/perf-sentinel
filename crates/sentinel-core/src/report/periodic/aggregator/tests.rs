@@ -720,9 +720,15 @@ fn transport_bracket_needs_every_window_to_declare_the_fixed_coefficient() {
     acc.fold_transport_coefficient(Some(&with_transport(0.0)), None);
     assert!(!acc.transport_coefficient_uncertain);
 
-    let with_bracket = build_carbon_breakdown(10.0, 0.0, 4.0, None, None, true).unwrap();
+    let mut state = PeriodState {
+        operational_gco2_total: 10.0,
+        transport_gco2_total: 4.0,
+        ..PeriodState::default()
+    };
+    let with_bracket = build_carbon_breakdown(&state).unwrap();
     assert!(with_bracket.transport_kgco2eq_low.is_some());
-    let without = build_carbon_breakdown(10.0, 0.0, 4.0, None, None, false).unwrap();
+    state.transport_coefficient_uncertain = true;
+    let without = build_carbon_breakdown(&state).unwrap();
     assert!(
         without.transport_kgco2eq.is_some(),
         "the mid still publishes"
@@ -734,8 +740,10 @@ fn transport_bracket_needs_every_window_to_declare_the_fixed_coefficient() {
 #[test]
 fn standalone_subsystem_carbon_emits_a_breakdown() {
     for (database_gco2, messaging_gco2) in [(Some(2.0), None), (None, Some(3.0))] {
-        let breakdown = build_carbon_breakdown(0.0, 0.0, 0.0, database_gco2, messaging_gco2, true)
-            .expect("subsystem carbon emits a breakdown");
+        let mut state = PeriodState::default();
+        state.db_waste.energy_g = database_gco2;
+        state.msg_waste.energy_g = messaging_gco2;
+        let breakdown = build_carbon_breakdown(&state).expect("subsystem carbon emits a breakdown");
 
         // Unmeasured terms are omitted, never published as 0.0.
         assert!(breakdown.operational_kgco2eq.is_none());
@@ -973,6 +981,165 @@ fn aggregator_sums_database_waste_across_windows() {
     assert_eq!(db.measured_windows, 1);
     assert_eq!(db.estimated_windows, 1);
     assert_eq!(db.windows_with_carbon, 2);
+    let breakdown = agg.carbon_breakdown.expect("breakdown");
+    assert_eq!(
+        breakdown.database_kgco2eq, None,
+        "a figure without the flag stays beside the total"
+    );
+}
+
+const DB_KWH: f64 = 0.4;
+const DB_GCO2: f64 = 20.0;
+const MSG_KWH: f64 = 0.1;
+const MSG_GCO2: f64 = 5.0;
+
+/// A window whose totals hold `app_kwh` of application energy plus an
+/// in-total database figure, an in-total broker figure, or both, the way
+/// the daemon archives them: the host kWh inside `energy_kwh`, the host
+/// gCO2 inside `co2.total` and in its own `co2` field.
+fn in_total_window(app_kwh: f64, db: bool, msg: bool) -> Report {
+    let mut r = make_report(
+        10,
+        100,
+        5,
+        &[("svc-a", "/api", 60), ("svc-b", "/api", 40)],
+        vec![],
+    );
+    let tier = crate::report::AvoidableTier::default();
+    let mut waste = crate::report::DisclosureWaste {
+        canonical: tier.clone(),
+        operational: tier,
+        database: None,
+        messaging: None,
+    };
+    let (mut host_kwh, mut host_gco2) = (0.0, 0.0);
+    if db {
+        r.green_summary.database_waste = Some(
+            serde_json::from_value(serde_json::json!({
+                "energy_kwh": DB_KWH, "waste_kwh": 0.0, "sql_waste_ratio": 0.0,
+                "model": "alumet_rapl", "in_totals": true
+            }))
+            .unwrap(),
+        );
+        r.green_summary.co2.as_mut().unwrap().database_gco2 = Some(DB_GCO2);
+        waste.database = Some(crate::report::DisclosureDbWaste {
+            in_totals: true,
+            energy_gco2: Some(DB_GCO2),
+            ..waste_block(DB_KWH, "alumet_rapl")
+        });
+        (host_kwh, host_gco2) = (host_kwh + DB_KWH, host_gco2 + DB_GCO2);
+    }
+    if msg {
+        r.green_summary.messaging_waste = Some(
+            serde_json::from_value(serde_json::json!({
+                "energy_kwh": MSG_KWH, "waste_kwh": 0.0, "messaging_waste_ratio": 0.0,
+                "model": "broker_specpower", "in_totals": true
+            }))
+            .unwrap(),
+        );
+        r.green_summary.co2.as_mut().unwrap().messaging_gco2 = Some(MSG_GCO2);
+        waste.messaging = Some(crate::report::DisclosureDbWaste {
+            in_totals: true,
+            energy_gco2: Some(MSG_GCO2),
+            ..waste_block(MSG_KWH, "broker_specpower")
+        });
+        (host_kwh, host_gco2) = (host_kwh + MSG_KWH, host_gco2 + MSG_GCO2);
+    }
+    r.green_summary.energy_kwh = app_kwh + host_kwh;
+    let co2 = r.green_summary.co2.as_mut().unwrap();
+    co2.total.mid += host_gco2;
+    co2.total.methodology = "sci_v1_numerator+transport".to_string();
+    r.disclosure_waste = Some(waste);
+    r
+}
+
+fn aggregate_windows(lines: &[(DateTime<Utc>, Report)]) -> AggregateInputs {
+    let (_dir, path) = write_archive(lines);
+    aggregate_from_paths(&[path], &q1_2026(), false).unwrap()
+}
+
+#[test]
+fn in_total_host_terms_land_inside_the_breakdown() {
+    let out = aggregate_windows(&[
+        (day(10, 9), in_total_window(1.0, true, false)),
+        (day(11, 9), in_total_window(2.0, false, true)),
+    ]);
+    let agg = &out.aggregate;
+    // Each host kWh counted once, inside the window energy.
+    assert!((agg.total_energy_kwh - (3.0 + DB_KWH + MSG_KWH)).abs() < 1e-9);
+    let b = agg.carbon_breakdown.as_ref().expect("breakdown");
+    assert_eq!(b.database_kgco2eq, Some(DB_GCO2 / 1000.0));
+    assert_eq!(b.messaging_kgco2eq, Some(MSG_GCO2 / 1000.0));
+    assert_eq!(b.database_kgco2eq_out_of_total, None);
+    assert_eq!(b.messaging_kgco2eq_out_of_total, None);
+    let terms = [
+        b.operational_kgco2eq,
+        b.embodied_kgco2eq,
+        b.transport_kgco2eq,
+        b.database_kgco2eq,
+        b.messaging_kgco2eq,
+    ];
+    let sum: f64 = terms.into_iter().flatten().sum();
+    assert!((sum - agg.total_carbon_kgco2eq).abs() < 1e-9, "{sum}");
+    assert!(out.energy_source_models.contains("alumet_rapl"));
+    assert!(out.energy_source_models.contains("broker_specpower"));
+    // In-total blocks still feed the waste blocks' provenance split.
+    let db = agg.database_waste.as_ref().expect("database block");
+    assert_eq!(db.measured_windows, 1);
+}
+
+#[test]
+fn applications_never_receive_the_host_terms() {
+    let host_kwh = DB_KWH + MSG_KWH;
+    let host_kg = (DB_GCO2 + MSG_GCO2) / 1000.0;
+    // Runtime path: the per-service maps already hold the application part.
+    let mut runtime = in_total_window(1.0, true, true);
+    let gs = &mut runtime.green_summary;
+    gs.per_service_energy_kwh = [("svc-a".to_string(), 0.6), ("svc-b".to_string(), 0.4)].into();
+    gs.per_service_carbon_kgco2eq =
+        [("svc-a".to_string(), 0.0006), ("svc-b".to_string(), 0.0004)].into();
+    // Unattributed path: no I/O per service and no runtime maps.
+    let mut unattributed = in_total_window(1.0, true, true);
+    unattributed.per_endpoint_io_ops.clear();
+    let proxy_share = in_total_window(1.0, true, true);
+    for window in [runtime, proxy_share, unattributed] {
+        let out = aggregate_windows(&[(day(10, 9), window)]);
+        let apps_kwh: f64 = out.per_service.values().map(|s| s.energy_kwh).sum();
+        assert!(
+            (apps_kwh + host_kwh - out.aggregate.total_energy_kwh).abs() < 1e-9,
+            "{apps_kwh} + {host_kwh} vs {}",
+            out.aggregate.total_energy_kwh
+        );
+        if out.runtime_windows == 0 {
+            let apps_kg: f64 = out.per_service.values().map(|s| s.carbon_kgco2eq).sum();
+            assert!((apps_kg + host_kg - out.aggregate.total_carbon_kgco2eq).abs() < 1e-9);
+        }
+    }
+}
+
+#[test]
+fn an_application_part_without_energy_falls_back_to_the_proxy_and_keeps_the_host() {
+    let out = aggregate_windows(&[(day(10, 9), in_total_window(0.0, true, false))]);
+    let proxy = 100.0 * ENERGY_PER_IO_OP_KWH;
+    assert!((out.aggregate.total_energy_kwh - (proxy + DB_KWH)).abs() < 1e-12);
+    let apps_kwh: f64 = out.per_service.values().map(|s| s.energy_kwh).sum();
+    assert!((apps_kwh - proxy).abs() < 1e-12);
+}
+
+#[test]
+fn a_rollup_state_without_the_host_terms_reads_and_merges_them() {
+    let state = folded(&[(day(10, 9), in_total_window(1.0, true, true))]);
+    let mut json = serde_json::to_value(&state).unwrap();
+    let map = json.as_object_mut().unwrap();
+    assert!(map.remove("database_gco2_total").is_some());
+    assert!(map.remove("messaging_gco2_total").is_some());
+    let mut older: PeriodState = serde_json::from_value(json).unwrap();
+    assert_eq!(older.database_gco2_total, 0.0);
+    assert_eq!(older.messaging_gco2_total, 0.0);
+    older.merge(state);
+    older.merge(folded(&[(day(11, 9), in_total_window(1.0, true, true))]));
+    assert!((older.database_gco2_total - 2.0 * DB_GCO2).abs() < 1e-12);
+    assert!((older.messaging_gco2_total - 2.0 * MSG_GCO2).abs() < 1e-12);
 }
 
 #[test]

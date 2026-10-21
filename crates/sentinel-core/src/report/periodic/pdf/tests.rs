@@ -447,6 +447,8 @@ mod layout_and_pages {
             Some(crate::report::periodic::schema::CarbonBreakdown {
                 operational_kgco2eq: Some(1.71),
                 embodied_kgco2eq: Some(0.2),
+                database_kgco2eq: None,
+                messaging_kgco2eq: None,
                 database_kgco2eq_out_of_total: Some(0.12),
                 messaging_kgco2eq_out_of_total: None,
                 transport_kgco2eq: Some(0.04),
@@ -459,6 +461,26 @@ mod layout_and_pages {
         assert!(all.contains("network transport 0.04 kg"), "{all}");
         assert!(all.contains("database 0.12 kg"), "{all}");
         assert!(!all.contains("broker"), "{all}");
+    }
+
+    #[test]
+    fn in_total_host_carbon_is_printed_inside_the_total() {
+        let (mut report, _) = baked_report();
+        report.aggregate.carbon_breakdown =
+            Some(crate::report::periodic::schema::CarbonBreakdown {
+                operational_kgco2eq: Some(1.71),
+                database_kgco2eq: Some(0.3),
+                messaging_kgco2eq: Some(0.05),
+                ..Default::default()
+            });
+        let all = texts(&layout_pages(&PageContext::for_report(&report))).join(" ");
+        assert!(
+            all.contains(
+                "Made of operational 1.71 kg, database hosts 0.30 kg, broker hosts 0.05 kg."
+            ),
+            "{all}"
+        );
+        assert!(!all.contains("Outside this total"), "{all}");
     }
 
     #[test]

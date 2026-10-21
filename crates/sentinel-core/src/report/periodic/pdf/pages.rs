@@ -1256,6 +1256,12 @@ fn carbon_breakdown(breakdown: &CarbonBreakdown) -> Option<String> {
             .embodied_kgco2eq
             .map(|v| format!("embodied {v:.2} kg")),
         transport,
+        breakdown
+            .database_kgco2eq
+            .map(|v| format!("database hosts {v:.2} kg")),
+        breakdown
+            .messaging_kgco2eq
+            .map(|v| format!("broker hosts {v:.2} kg")),
     ]
     .into_iter()
     .flatten()

@@ -58,7 +58,9 @@
 //!
 //! v1.8 adds the grid operator feeds to `CarbonIntensitySource`:
 //! `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
-//! `open_electricity`, `mavir` and `em6`.
+//! `open_electricity`, `mavir` and `em6`. It also adds
+//! `CarbonBreakdown.database_kgco2eq` and `messaging_kgco2eq`, the database
+//! and broker host carbon a window counted inside its total.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -545,13 +547,16 @@ impl TemporalCoverage {
     }
 }
 
-/// Split of the published carbon total into its three SCI terms, which
-/// differ in what an operator can act on. `operational` is the only one
-/// carrying an avoidable share, the one the waste tiers quantify.
+/// Split of the published carbon total into its in-total terms, which
+/// differ in what an operator can act on. `operational` carries the
+/// application's avoidable share, the one the waste tiers quantify.
 /// `embodied` amortises manufactured hardware and `transport` covers
 /// cross-region network energy, both irreducible by fixing an
 /// anti-pattern: they belong in the total and not in a savings target.
-/// The three sum to `total_carbon_kgco2eq`, up to rounding. v1.6.
+/// `database` and `messaging` are the measured or declared database and
+/// broker host carbon counted inside the window totals. On windows tagged
+/// `+transport`, the five sum to `total_carbon_kgco2eq`, up to rounding.
+/// v1.6, the two host terms v1.8.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CarbonBreakdown {
     /// SCI `O = E x I`, running the workload. Contains the avoidable part.
@@ -562,14 +567,23 @@ pub struct CarbonBreakdown {
     /// `[green] embodied_carbon_per_request_gco2`. Absent when zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embodied_kgco2eq: Option<f64>,
-    /// Total carbon of the database and broker over the period when
-    /// measured or declared as an external scope. Estimated fallback
-    /// carbon is already in the service total and stays excluded here.
-    /// **Outside the sum above and outside
-    /// `total_carbon_kgco2eq`**: both cover a different scope from the
-    /// instrumented services, and folding them in would mix perimeters.
-    /// Published here so a reader sees every carbon figure the run
-    /// produced in one place. v1.6.
+    /// Database host carbon counted inside the window totals: a measured
+    /// or declared figure whose carbon converted. Inside
+    /// `total_carbon_kgco2eq`. Absent when zero. v1.8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_kgco2eq: Option<f64>,
+    /// Broker host carbon counted inside the window totals, the twin of
+    /// `database_kgco2eq`. Absent when zero. v1.8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messaging_kgco2eq: Option<f64>,
+    /// Carbon of the measured or declared database and broker figures
+    /// that stayed beside the window totals: windows archived before host
+    /// energy entered the totals, or whose figure carried no carbon.
+    /// Estimated fallback carbon is already in the service total and stays
+    /// excluded here, and in-total figures sit in `database_kgco2eq` and
+    /// `messaging_kgco2eq`. **Outside the sum above and outside
+    /// `total_carbon_kgco2eq`**. Published here so a reader sees every
+    /// carbon figure the run produced in one place. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_kgco2eq_out_of_total: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

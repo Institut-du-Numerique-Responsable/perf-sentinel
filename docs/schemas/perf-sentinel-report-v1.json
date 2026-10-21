@@ -432,14 +432,24 @@
         "total_energy_kwh": { "type": "number", "minimum": 0 },
         "carbon_breakdown": {
           "type": "object",
-          "description": "The three SCI terms total_carbon_kgco2eq is made of, which differ in what an operator can act on (v1.6+). operational carries the avoidable share the waste tiers quantify; embodied amortises manufactured hardware and transport covers cross-region network energy, both irreducible by fixing an anti-pattern. The three sum to the total, up to rounding, an absent term counting as zero. Omitted entirely when no window carried a carbon figure, and each term is omitted rather than zeroed when nothing measured it, so an unmeasured term never reads as measured at zero.",
+          "description": "The five terms total_carbon_kgco2eq is made of, which differ in what an operator can act on (v1.6+, the two host terms v1.8+). operational carries the avoidable share the waste tiers quantify; embodied amortises manufactured hardware and transport covers cross-region network energy, both irreducible by fixing an anti-pattern; database and messaging are the measured or declared database and broker host carbon the windows counted inside their totals. On windows tagged +transport the five sum to the total, up to rounding, an absent term counting as zero. Omitted entirely when no window carried a carbon figure, and each term is omitted rather than zeroed when nothing measured it, so an unmeasured term never reads as measured at zero.",
           "properties": {
             "operational_kgco2eq": { "type": "number", "minimum": 0 },
             "embodied_kgco2eq": { "type": "number", "minimum": 0 },
+            "database_kgco2eq": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Database host carbon the windows counted inside their totals: a measured or declared figure whose carbon converted. Part of the five-term sum and of total_carbon_kgco2eq, omitted when zero (v1.8+)."
+            },
+            "messaging_kgco2eq": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Same as database_kgco2eq, for the message broker hosts (v1.8+)."
+            },
             "database_kgco2eq_out_of_total": {
               "type": "number",
               "minimum": 0,
-              "description": "Total carbon of the database over the period when measured or declared as an external scope. Estimated fallback carbon is already included in the service total and is excluded here. This field sits outside the three-term sum and total_carbon_kgco2eq (v1.6+)."
+              "description": "Carbon of the measured or declared database figures that stayed beside the window totals: windows archived before host energy entered the totals, or whose figure carried no carbon. Estimated fallback carbon is already included in the service total and is excluded here, and an in-total figure sits in database_kgco2eq. This field sits outside the five-term sum and total_carbon_kgco2eq (v1.6+)."
             },
             "messaging_kgco2eq_out_of_total": {
               "type": "number",

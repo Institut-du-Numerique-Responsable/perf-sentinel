@@ -73,6 +73,8 @@ pub(super) const FIELDS: &[&str] = &[
     "aggregate.total_carbon_kgco2eq",
     "aggregate.carbon_breakdown.operational_kgco2eq",
     "aggregate.carbon_breakdown.embodied_kgco2eq",
+    "aggregate.carbon_breakdown.database_kgco2eq",
+    "aggregate.carbon_breakdown.messaging_kgco2eq",
     "aggregate.carbon_breakdown.database_kgco2eq_out_of_total",
     "aggregate.carbon_breakdown.messaging_kgco2eq_out_of_total",
     "aggregate.carbon_breakdown.transport_kgco2eq",
