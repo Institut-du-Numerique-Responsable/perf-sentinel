@@ -403,7 +403,7 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_+]+$" },
-          "description": "Distinct provenance tags observed over the period: alumet_rapl = measured on the workload cgroup, broker_specpower = declared provisioned cluster (messaging block only), estimated = the application-side share of the SQL or publish spans, the energy the span scoring gave the emitting services, already inside the totals."
+          "description": "Distinct provenance tags observed over the period: alumet_rapl = measured on the workload cgroup, database_specpower = declared provisioned database cluster (database block only), broker_specpower = declared provisioned broker cluster (messaging block only), estimated = the application-side share of the SQL or publish spans, the energy the span scoring gave the emitting services, already inside the totals."
         },
         "windows_with_figure": { "type": "integer", "minimum": 1 },
         "measured_windows": { "type": "integer", "minimum": 0, "description": "Windows whose figure came from a measured source." },

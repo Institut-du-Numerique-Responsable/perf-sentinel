@@ -577,9 +577,10 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # "special" = { provider = "aws", instance_type = "c5.4xlarge", cpu_query = "avg(node_cpu{job=\"special\"})" }
 
 # --- Declared database hosts (opt-in, no agent needed) --------------------
-# The keys and rules of [green.broker_static] below, without provider. The
-# section is validated at load, the daemon does not read it: the database
-# figure stays the estimated or the [green.alumet.database] one.
+# The keys and rules of [green.broker_static] below, without provider. A
+# dedicated declaration with nodes and instance_type bills nodes x P_max,
+# tagged database_specpower, and next to [green.alumet.database] only while
+# its series is stale. Declare it in one daemon only.
 # [green.database_static]
 # placement = "dedicated"        # required once any key is set: "dedicated" or "shared"
 # nodes = 2                      # hosts, readers and standbys included

@@ -450,12 +450,14 @@ pub struct GreenSummary {
     /// average. Empty on pre-per-service-ratio baselines.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_service_measured_ratio: BTreeMap<String, f64>,
-    /// Database waste figure, on every run, in one of two forms that
+    /// Database waste figure, on every run, in one of three forms that
     /// `model` names. Measured (`alumet_rapl`): the energy of the declared
-    /// `[green.alumet.database]` cgroup when a reading landed (daemon),
-    /// host energy counted inside `energy_kwh` and `co2.total` (as
-    /// `co2.database_gco2`) once its carbon converts, which `in_totals`
-    /// records. Without a carbon conversion it stays beside them.
+    /// `[green.alumet.database]` cgroup when a reading landed (daemon).
+    /// Declared (`database_specpower`): the `[green.database_static]`
+    /// ceiling (daemon). Both are host energy counted inside `energy_kwh`
+    /// and `co2.total` (as `co2.database_gco2`) once their carbon
+    /// converts, which `in_totals` records. Without a carbon conversion
+    /// they stay beside them.
     /// Estimated (`estimated`): the application-side share of the
     /// window's SQL spans, the energy the span scoring gave the emitting
     /// services, already inside `energy_kwh`/`co2` and never added to
@@ -516,14 +518,14 @@ pub fn waste_scope_label(model: &str, in_totals: bool) -> &'static str {
 }
 
 /// Database window energy × the SQL-only waste ratio. On the measured
-/// path the host energy is inside the report totals when `in_totals` is
-/// set, beside them otherwise. On the estimated path it is already a
-/// share of them, never added again.
+/// and declared paths the host energy is inside the report totals when
+/// `in_totals` is set, beside them otherwise. On the estimated path it
+/// is already a share of them, never added again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseWaste {
     /// Window energy in kWh. Measured path: the database cgroup (CPU
-    /// share only). Estimated path: the application-side share of the
-    /// window's SQL spans.
+    /// share only). Declared path: the `nodes × P_max` ceiling. Estimated
+    /// path: the application-side share of the window's SQL spans.
     pub energy_kwh: f64,
     /// `energy_kwh × sql_waste_ratio`.
     pub waste_kwh: f64,
@@ -544,9 +546,9 @@ pub struct DatabaseWaste {
     /// `avoidable_sql_io_ops / total_sql_io_ops`, in `[0, 1]`.
     pub sql_waste_ratio: f64,
     /// Provenance tag: `alumet_rapl` when the energy is measured on the
-    /// declared database cgroup, otherwise `estimated` for the
-    /// application-side share of the window's SQL spans. Empty on
-    /// baselines predating the field.
+    /// declared database cgroup, `database_specpower` for a declared
+    /// cluster, otherwise `estimated` for the application-side share of
+    /// the window's SQL spans. Empty on baselines predating the field.
     #[serde(default)]
     pub model: String,
     /// The host energy and carbon of this figure are inside the report

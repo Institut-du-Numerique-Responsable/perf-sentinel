@@ -172,7 +172,7 @@ In Perf Sentinel:
 pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1; // 0.1 mWh per I/O op
 ```
 
-This is a rough order-of-magnitude approximation, not a measured value. Every rung of the ladder, the I/O proxy included, prices the emitting service's own host for each operation it issues: CPU, memory and network stack on that host. The callee (database server, broker, downstream service) is never in it. Database and broker host energy enters a report only through a declared or measured source: `[green.alumet.database]`, `[green.alumet.broker]` or `[green.broker_static]`. SQL verb weights and HTTP tiers are relative weights that rank operation classes. Their ratios come from database-server benchmarks, but they bill no database host. The [Cloud Carbon Footprint project](https://www.cloudcarbonfootprint.org/docs/methodology/) uses a similar approach of estimating energy from resource usage rather than direct measurement.
+This is a rough order-of-magnitude approximation, not a measured value. Every rung of the ladder, the I/O proxy included, prices the emitting service's own host for each operation it issues: CPU, memory and network stack on that host. The callee (database server, broker, downstream service) is never in it. Database and broker host energy enters a report only through a declared or measured source: `[green.alumet.database]`, `[green.database_static]`, `[green.alumet.broker]` or `[green.broker_static]`. SQL verb weights and HTTP tiers are relative weights that rank operation classes. Their ratios come from database-server benchmarks, but they bill no database host. The [Cloud Carbon Footprint project](https://www.cloudcarbonfootprint.org/docs/methodology/) uses a similar approach of estimating energy from resource usage rather than direct measurement.
 
 The value must be disclosed as methodology per SCI requirements. It is documented in the code, in [LIMITATIONS.md](../LIMITATIONS.md) and here.
 
@@ -277,7 +277,7 @@ This preserves the **relative scale** (a 50% waste reduction yields a 50% drop i
 
 ### Database and broker host terms
 
-A measured or declared database or broker figure (`[green.alumet.database]`, `[green.alumet.broker]`, `[green.broker_static]`) enters the numerator as host terms beside transport, `G_db` and `G_msg`, and its kWh joins `energy_kwh`. `fold_host_terms` in `score/mod.rs` runs once per window after the region loop. A figure enters when its model is not `estimated`, its `energy_gco2` converted and `co2` is `Some`, so the energy and carbon perimeters always agree. It then sets `in_totals` on the figure and writes `co2.database_gco2` or `co2.messaging_gco2`. `total`, `avoidable` and `sci_per_trace` are rescaled once, keeping the 2x bracket:
+A measured or declared database or broker figure (`[green.alumet.database]`, `[green.database_static]`, `[green.alumet.broker]`, `[green.broker_static]`) enters the numerator as host terms beside transport, `G_db` and `G_msg`, and its kWh joins `energy_kwh`. `fold_host_terms` in `score/mod.rs` runs once per window after the region loop. A figure enters when its model is not `estimated`, its `energy_gco2` converted and `co2` is `Some`, so the energy and carbon perimeters always agree. It then sets `in_totals` on the figure and writes `co2.database_gco2` or `co2.messaging_gco2`. `total`, `avoidable` and `sci_per_trace` are rescaled once, keeping the 2x bracket:
 
 ```
 energy_kwh    = Σ per-service energy + D + B
@@ -552,6 +552,18 @@ What that declared figure bounds is narrower than it reads. `SPECpower` covers C
 
 **The figure carries its provenance.** `DbEnergyContext.model` is filled by whichever source populated the window, because nothing downstream can infer it. Its `Default` is the weakest of the three tags (`estimated`), so a caller that forgets to state provenance cannot claim a measurement. The periodic disclosure keeps three buckets rather than two: folding a declared cluster into `measured_energy_kwh` would publish an operator's statement about provisioned hardware as a reading of the broker.
 
+## Database energy attribution
+
+The database figure has the broker's shape with the SQL-only ratio, and the same two sources. `[green.alumet.database]` measures the database cgroup. `[green.database_static]` with `placement = "dedicated"`, `nodes` and `instance_type` declares a provisioned cluster, billed at `E(n) = n × P_max` by the same `StaticBrokerState` ceiling under the `database_specpower` tag. That suits a managed database with a typed instance class, whose managed name resolves to its VM family. The ceiling's bounds on a database (a lightly loaded host, readers and standbys counted by the operator, managed storage, IOPS and network left out) are in `docs/LIMITATIONS.md`.
+
+**The arbitration is reused, not copied.** `take_broker_energy` arbitrates both subsystems unchanged: a fresh live series owns the timeline and advances the ceiling marker without billing, a stale one lets the ceiling bill and set the outage marker, and the delta that lands on recovery is discarded once. `take_host_energy` calls it for one subsystem. Every property listed under "Arbitration is the subtle part" above holds for the database as for the broker.
+
+**One bundle per subsystem.** `EnergySources` carries `database` and `broker`, each a `SubsystemSources { live, live_staleness_ms, declared }`. Each live state travels with its own staleness, so one subsystem's reading is never gated by the other's freshness window. With green scoring off, `host_sources` hands the loop two empty bundles, so nothing consumes banked energy that `score_green` would never read. The live cell keeps a host figure for twice the Alumet staleness, raised to `trace_ttl_ms` when either subsystem declares a ceiling, which has no scraper to bridge sub-second batches.
+
+**Base tags.** `host_energy_context` builds a context only for a subsystem with a source the daemon bills, and its `model` is the base tag: `alumet_rapl` with an Alumet workload, otherwise `cloud_specpower` for a ceiling with a `cpu_query`, the live source that query names, and the declared tag without one. `patch_host_energy` keeps the base tag when a live reading fills the window and writes the declared tag (`database_specpower`, `broker_specpower`) when the ceiling does, so a figure names the source of its kWh. The daemon does not read `cpu_query`, so every window such a ceiling bills carries the declared tag. A shared or ceiling-less declaration builds no context, and the estimated figure stays.
+
+**The region never switches.** A context's `region` is the subsystem's effective region, `GreenConfig::host_region`: the static section's, else the Alumet workload's, else `default_region`. Load-time validation refuses a static and an Alumet region that differ, so the live and declared sources of one subsystem share it, and `patch_host_energy` never touches it. One cluster sits on one grid whichever source billed the window, so its carbon intensity does not change with the source.
+
 ## Kepler and Redfish attribution notes
 
 The Kepler and Redfish integrations follow the same shared-state pattern as Scaphandre and cloud SPECpower (`ArcSwap`-backed `AgedEnergyMap`, `3 × scrape_interval` staleness gate, per-service `OpsSnapshotDiff`) but each carries its own methodology trade-offs that warrant a dedicated note.
@@ -788,7 +800,7 @@ The planned consumer is perf-lint, a companion IDE integration (not yet publishe
 
 The arithmetic is plain: for each service present in **both** the traces and the readings, `energy_per_op = total_energy / total_ops`, and the emitted factor is that divided by the default proxy coefficient. A service with zero ops in the observation window is skipped rather than assigned a factor, since dividing by it would manufacture a number out of no evidence.
 
-Readings must cover the service's own host share only. Database or broker power belongs to `[green.alumet.database]`, `[green.alumet.broker]` or `[green.broker_static]`, and folding it into a service's reading counts it twice once a host source is declared.
+Readings must cover the service's own host share only. Database or broker power belongs to `[green.alumet.database]`, `[green.database_static]`, `[green.alumet.broker]` or `[green.broker_static]`, and folding it into a service's reading counts it twice once a host source is declared.
 
 Two input shapes are accepted and auto-detected from the CSV header. `timestamp,service,power_watts` is integrated into energy using the interval between consecutive readings **per service**, so interleaved services do not corrupt each other's intervals. `timestamp,service,energy_kwh` is taken as-is. Comment lines starting with `#` are skipped, because wattmeter exports routinely carry a preamble.
 

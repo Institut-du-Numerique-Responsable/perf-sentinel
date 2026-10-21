@@ -27,8 +27,8 @@ pub(crate) use super::carbon_profiles::HourlyProfileRef;
 /// network stack on that host. The callee (database server, broker,
 /// downstream service) is never in it. Database and broker host energy
 /// enters a report only through a declared or measured source:
-/// `[green.alumet.database]`, `[green.alumet.broker]` or
-/// `[green.broker_static]`.
+/// `[green.alumet.database]`, `[green.database_static]`,
+/// `[green.alumet.broker]` or `[green.broker_static]`.
 ///
 /// Not a measured value. See `docs/design/05-GREENOPS-AND-CARBON.md`.
 pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1;
