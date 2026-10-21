@@ -792,6 +792,21 @@ impl GreenSummary {
         Some(label)
     }
 
+    /// The host models inside the total, `" + database hosts <tag>"` then
+    /// `" + broker hosts <tag>"`, to append after `co2.total.model`, which
+    /// names the application part only. Empty when no host is in the
+    /// totals. Tags pass [`display_tag`] (else `unknown`), so the result is
+    /// safe on a terminal and in HTML.
+    #[must_use]
+    pub fn host_model_suffix(&self) -> String {
+        let mut suffix = String::new();
+        for (noun, model, _) in self.hosts_in_totals() {
+            let tag = display_tag(model).unwrap_or("unknown");
+            let _ = write!(suffix, " + {noun} {tag}");
+        }
+        suffix
+    }
+
     /// `(noun, model, kWh)` of each host figure inside the totals, database
     /// first.
     fn hosts_in_totals(&self) -> Vec<(&'static str, &str, f64)> {
@@ -1355,6 +1370,24 @@ mod tests {
 
         let db_only = waste_summary(true, false);
         assert!((db_only.application_energy_kwh() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn host_model_suffix_names_each_in_total_host() {
+        assert_eq!(waste_summary(false, false).host_model_suffix(), "");
+        assert_eq!(
+            waste_summary(true, false).host_model_suffix(),
+            " + database hosts alumet_rapl"
+        );
+        assert_eq!(
+            waste_summary(true, true).host_model_suffix(),
+            " + database hosts alumet_rapl + broker hosts broker_specpower"
+        );
+        let mut forged = waste_summary(true, false);
+        if let Some(w) = forged.database_waste.as_mut() {
+            w.model = "x\u{1b}[2J".to_string();
+        }
+        assert_eq!(forged.host_model_suffix(), " + database hosts unknown");
     }
 
     #[test]

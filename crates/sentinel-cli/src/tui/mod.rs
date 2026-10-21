@@ -1434,8 +1434,11 @@ fn push_carbon_lines(
     let model = sanitize_for_terminal(&carbon.total.model);
     let methodology = sanitize_for_terminal(&carbon.total.methodology);
     lines.push(Line::from(Span::raw(format!(
-        "Est. CO\u{2082}: {:.6} g (low {:.6}, high {:.6}, model {model})",
-        carbon.total.mid, carbon.total.low, carbon.total.high,
+        "Est. CO\u{2082}: {:.6} g (low {:.6}, high {:.6}, model {model}{})",
+        carbon.total.mid,
+        carbon.total.low,
+        carbon.total.high,
+        gs.host_model_suffix(),
     ))));
     lines.push(Line::from(Span::raw(format!(
         "Avoidable CO\u{2082}: {:.6} g (low {:.6}, high {:.6})",

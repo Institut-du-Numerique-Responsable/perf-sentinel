@@ -233,6 +233,9 @@ fn green_panel_shows_the_application_and_host_split() {
         "a host figure needs `[green.database_static]` or `[green.alumet.database]`",
         "a host figure needs `[green.broker_static]` or `[green.alumet.broker]`",
         "plus the database and broker host terms when their host energy is in the totals",
+        "function co2TotalSub(total, gs)",
+        "sub += \" + \" + h.noun + \" \" + (energyDisplayTag(h.model) || \"unknown\")",
+        "co2TotalSub(co2.total, greenSummary)",
     ] {
         assert!(html.contains(needle), "missing: {needle}");
     }

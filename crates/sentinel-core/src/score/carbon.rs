@@ -345,7 +345,11 @@ impl CarbonEstimate {
 /// Each estimate carries a 2× multiplicative uncertainty bracket.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CarbonReport {
-    /// Total estimated CO₂ (operational + embodied) with confidence interval.
+    /// Total estimated CO₂ (operational + embodied + transport, plus the
+    /// in-total database and broker host terms) with confidence interval.
+    /// Its `model` is the energy model of the application part only: a host
+    /// term's model is on its waste block
+    /// ([`crate::report::GreenSummary::host_model_suffix`]).
     pub total: CarbonEstimate,
     /// Estimated CO₂ that could be saved by eliminating I/O waste.
     /// Excludes the embodied term (you can't optimize away manufactured

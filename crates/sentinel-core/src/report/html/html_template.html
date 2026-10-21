@@ -2173,7 +2173,7 @@
     if (hasGreen) {
       var co2 = greenSummary.co2;
       root.appendChild(wireKpiCard(tonedValue(
-        metricCard("Total CO2", formatGco2(co2.total.mid), co2TotalSub(co2.total)),
+        metricCard("Total CO2", formatGco2(co2.total.mid), co2TotalSub(co2.total, greenSummary)),
         "brand"
       ), "green"));
     } else {
@@ -3719,11 +3719,18 @@
   // The bracket plus co2.total.model, as the CLI's Est. CO2 line prints
   // it: an energy backend, the I/O proxy's intensity tier or
   // electricity_maps_api, +cal kept. A tag failing the gate is dropped.
-  function co2TotalSub(total) {
+  // total.model names the application part, so each in-total host term
+  // follows with its own model (GreenSummary::host_model_suffix).
+  function co2TotalSub(total, gs) {
     var sub = "low " + formatGco2(total.low) + " · high " + formatGco2(total.high);
     var m = total.model;
     // No-break space: a wrap never strands "model" away from its tag.
-    return typeof m === "string" && ENERGY_TAG_RE.test(m) ? sub + " · model\u00a0" + m : sub;
+    if (typeof m !== "string" || !ENERGY_TAG_RE.test(m)) return sub;
+    sub += " · model\u00a0" + m;
+    hostsInTotals(gs).forEach(function (h) {
+      sub += " + " + h.noun + " " + (energyDisplayTag(h.model) || "unknown");
+    });
+    return sub;
   }
   // Host figures inside energy_kwh, database first, as
   // GreenSummary::hosts_in_totals returns them.
@@ -3825,7 +3832,7 @@
     metrics.appendChild(greenCard(
       "Total CO2",
       formatGco2(co2.total.mid),
-      co2TotalSub(co2.total),
+      co2TotalSub(co2.total, greenSummary),
       null,
       "The SCI v1.0 numerator summed over analyzed traces: operational `(E x I)` + embodied `M` + network transport `T`, plus the database and broker host terms when their host energy is in the totals. The low/high bracket is log-symmetric (half, double): a directional estimate, not a wattmeter reading.",
       "total_co2"

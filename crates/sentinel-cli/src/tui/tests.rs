@@ -564,6 +564,10 @@ fn analyze_view_splits_energy_and_carbon_for_in_total_hosts() {
         "got: {text}"
     );
     assert!(
+        text.contains("high 2.000000, model io_proxy_v3 + database hosts database_specpower)"),
+        "the total names the in-total host model after the application one: {text}"
+    );
+    assert!(
         text.contains("Database: 0.300000 g (host energy, model database_specpower)"),
         "got: {text}"
     );

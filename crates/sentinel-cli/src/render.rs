@@ -1046,8 +1046,12 @@ fn print_carbon_summary(
     gs: &sentinel_core::report::GreenSummary,
 ) {
     println!(
-        "  Est. CO\u{2082}:          {:.6} g (low {:.6}, high {:.6}, model {})",
-        carbon.total.mid, carbon.total.low, carbon.total.high, carbon.total.model,
+        "  Est. CO\u{2082}:          {:.6} g (low {:.6}, high {:.6}, model {}{})",
+        carbon.total.mid,
+        carbon.total.low,
+        carbon.total.high,
+        carbon.total.model,
+        gs.host_model_suffix(),
     );
     println!(
         "  Avoidable CO\u{2082}:     {:.6} g (low {:.6}, high {:.6})",
