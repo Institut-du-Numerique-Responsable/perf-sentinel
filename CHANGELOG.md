@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Changed
+
+- The official public example disclosure, `docs/schemas/examples/example-official-public-G2.json`, moves to schema `perf-sentinel-report/v1.8` and perf-sentinel 0.32.0, with the `binary_hash` of the published 0.32.0 `perf-sentinel-linux-amd64` binary and a rebaked `content_hash`. The sample disclosure the website shows is signed from this file.
+
 ## [0.32.0] - 2026-10-21
 
 ### Added
