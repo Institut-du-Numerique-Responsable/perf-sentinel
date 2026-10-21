@@ -1118,6 +1118,19 @@ fn in_total_host_terms_land_inside_the_breakdown() {
 }
 
 #[test]
+fn an_out_of_spec_host_tag_drops_its_kwh_and_its_carbon() {
+    let mut window = in_total_window(1.0, true, false);
+    if let Some(db) = window.green_summary.database_waste.as_mut() {
+        db.model = "bad tag!".to_string();
+    }
+    let out = aggregate_windows(&[(day(10, 9), window)]);
+    let b = out.aggregate.carbon_breakdown.as_ref().expect("breakdown");
+    assert_eq!(b.database_kgco2eq, None);
+    let apps_kg: f64 = out.per_service.values().map(|s| s.carbon_kgco2eq).sum();
+    assert!((apps_kg - out.aggregate.total_carbon_kgco2eq).abs() < 1e-9);
+}
+
+#[test]
 fn applications_never_receive_the_host_terms() {
     let host_kwh = DB_KWH + MSG_KWH;
     let host_kg = (DB_GCO2 + MSG_GCO2) / 1000.0;

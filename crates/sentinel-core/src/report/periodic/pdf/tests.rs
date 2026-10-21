@@ -528,6 +528,57 @@ mod layout_and_pages {
         report.aggregate.messaging_waste = Some(in_total_block(0.0));
         let text = at_a_glance_text(&report);
         assert!(text.contains("and broker hosts (0.00 kWh)."), "{text}");
+        // A small host never reads as zero, a partial one names its windows.
+        report.aggregate.messaging_waste =
+            Some(crate::report::periodic::schema::DatabaseWasteAggregate {
+                windows_with_figure: 4,
+                ..in_total_block(0.0024)
+            });
+        let text = at_a_glance_text(&report);
+        assert!(
+            text.contains("and broker hosts (2.4e-3 kWh, in 1 of 4 windows)."),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_application_table_shows_the_in_total_hosts() {
+        let (mut report, _) = baked_report();
+        report.aggregate.database_waste = Some(in_total_block(3.0));
+        report.aggregate.messaging_waste = None;
+        report.aggregate.carbon_breakdown =
+            Some(crate::report::periodic::schema::CarbonBreakdown {
+                database_kgco2eq: Some(0.25),
+                ..Default::default()
+            });
+        let pages = layout_pages(&PageContext::for_report(&report));
+        let page = &pages[page_of(&pages, "Which services consumed what") - 1];
+        let row_of = |name: &str| -> Vec<String> {
+            let y = page
+                .iter()
+                .find_map(|op| match op {
+                    Op::Text { y, text, .. } if text == name => Some(*y),
+                    _ => None,
+                })
+                .expect("the row");
+            page.iter()
+                .filter_map(|op| match op {
+                    Op::Text { y: row_y, text, .. } if (*row_y - y).abs() < 0.01 => {
+                        Some(text.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let host = row_of("Database hosts");
+        assert!(host.contains(&"3.00".to_string()), "{host:?}");
+        assert!(host.contains(&"0.25".to_string()), "{host:?}");
+        assert!(
+            !page
+                .iter()
+                .any(|op| matches!(op, Op::Text { text, .. } if text == "Broker hosts")),
+            "no broker host in the totals, no broker row"
+        );
     }
 
     #[test]

@@ -628,6 +628,16 @@ fn validate_waste_in_totals(
             ),
         });
     }
+    // An in-total window may bill zero, but in-total energy needs a window.
+    if block.in_totals_energy_kwh > 0.0 && block.in_totals_windows == 0 {
+        errors.push(ValidationError::Aggregate {
+            field: f.in_totals_windows,
+            reason: format!(
+                "is 0 while in_totals_energy_kwh is {}",
+                block.in_totals_energy_kwh
+            ),
+        });
+    }
     let bound = block.windows_with_figure.min(host_windows(block));
     if block.in_totals_windows > bound {
         errors.push(ValidationError::Aggregate {
@@ -642,9 +652,10 @@ fn validate_waste_in_totals(
 }
 
 /// The v1.8 host perimeter: the database and broker carbon terms are
-/// sane, the five breakdown terms add up to the published total, and
-/// the in-total host energy leaves room for the applications inside
-/// `total_energy_kwh`. Only a hand-edited or forged report trips these.
+/// sane, each one has an in-total block behind it, the five breakdown
+/// terms add up to the published total, and the in-total host energy
+/// leaves room for the applications inside `total_energy_kwh`. Only a
+/// hand-edited or forged report trips these.
 fn validate_host_perimeter(report: &PeriodicReport, errors: &mut Vec<ValidationError>) {
     let agg = &report.aggregate;
     if let Some(breakdown) = &agg.carbon_breakdown {
@@ -654,8 +665,41 @@ fn validate_host_perimeter(report: &PeriodicReport, errors: &mut Vec<ValidationE
             .carbon_methodologies
             .contains(METHODOLOGY_SCI_NUMERATOR);
         validate_host_carbon_terms(breakdown, agg.total_carbon_kgco2eq, legacy, errors);
+        validate_host_carbon_blocks(agg, breakdown, errors);
     }
     validate_host_energy_room(agg, &report.applications, errors);
+}
+
+/// A host carbon term is the carbon of in-total host windows: no such
+/// window in the matching waste block, no carbon in the term.
+fn validate_host_carbon_blocks(
+    agg: &Aggregate,
+    b: &CarbonBreakdown,
+    errors: &mut Vec<ValidationError>,
+) {
+    let terms = [
+        (
+            "carbon_breakdown.database_kgco2eq",
+            b.database_kgco2eq,
+            &agg.database_waste,
+            "database_waste",
+        ),
+        (
+            "carbon_breakdown.messaging_kgco2eq",
+            b.messaging_kgco2eq,
+            &agg.messaging_waste,
+            "messaging_waste",
+        ),
+    ];
+    for (field, value, block, name) in terms {
+        let in_totals = block.as_ref().is_some_and(|b| b.in_totals_windows > 0);
+        if value.is_some_and(|v| v > 0.0) && !in_totals {
+            errors.push(ValidationError::Aggregate {
+                field,
+                reason: format!("is non-zero while {name} has no in-total window"),
+            });
+        }
+    }
 }
 
 fn validate_host_carbon_terms(
@@ -1703,6 +1747,10 @@ mod tests {
         });
         r.methodology.calibration_inputs.carbon_methodologies =
             ["sci_v1_numerator+transport".to_string()].into();
+        // The G2 application holds 0.5 kWh, each host block 1.0 kWh.
+        r.aggregate.database_waste = Some(in_total_db_waste());
+        r.aggregate.messaging_waste = Some(in_total_db_waste());
+        r.aggregate.total_energy_kwh = 2.5;
         r
     }
 
@@ -1763,9 +1811,41 @@ mod tests {
     }
 
     #[test]
+    fn a_host_carbon_term_needs_an_in_total_block() {
+        // Carbon moved from operational into the database term keeps the
+        // sum, but no in-total database window stands behind it.
+        let mut report = host_perimeter_report();
+        report.aggregate.database_waste = None;
+        report.aggregate.total_energy_kwh = 1.5;
+        assert!(rejects_at(&report, "carbon_breakdown.database_kgco2eq"));
+        if let Some(db) = report.aggregate.messaging_waste.as_mut() {
+            db.in_totals_windows = 0;
+            db.in_totals_energy_kwh = 0.0;
+        }
+        assert!(rejects_at(&report, "carbon_breakdown.messaging_kgco2eq"));
+        assert!(validate_official(&report).is_err());
+    }
+
+    #[test]
+    fn in_total_energy_needs_an_in_total_window() {
+        let mut db = in_total_db_waste();
+        db.in_totals_windows = 0;
+        assert!(rejects(db.clone(), "database_waste.in_totals_windows"));
+        // An in-total window that billed nothing is legitimate.
+        db.in_totals_windows = 1;
+        db.in_totals_energy_kwh = 0.0;
+        assert!(!rejects(db, "database_waste.in_totals_windows"));
+    }
+
+    #[test]
     fn in_total_host_energy_leaves_room_for_the_applications() {
         // The G2 application holds 0.5 kWh, the database block 0.3 kWh.
         let mut report = host_perimeter_report();
+        report.aggregate.messaging_waste = None;
+        if let Some(b) = report.aggregate.carbon_breakdown.as_mut() {
+            b.messaging_kgco2eq = None;
+            b.operational_kgco2eq = Some(0.034);
+        }
         report.aggregate.database_waste =
             Some(crate::report::periodic::schema::DatabaseWasteAggregate {
                 energy_kwh: 0.3,

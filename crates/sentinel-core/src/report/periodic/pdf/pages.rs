@@ -1247,7 +1247,16 @@ fn host_perimeter(aggregate: &Aggregate) -> String {
     for (noun, block) in hosts {
         // Same predicate as the disclaimers and the preview.
         match block.as_ref().filter(|b| b.in_totals_windows > 0) {
-            Some(b) => inside.push(format!("{noun} hosts ({:.2} kWh)", b.in_totals_energy_kwh)),
+            Some(b) if b.in_totals_windows < b.windows_with_figure => inside.push(format!(
+                "{noun} hosts ({} kWh, in {} of {} windows)",
+                host_kwh(b.in_totals_energy_kwh),
+                b.in_totals_windows,
+                b.windows_with_figure
+            )),
+            Some(b) => inside.push(format!(
+                "{noun} hosts ({} kWh)",
+                host_kwh(b.in_totals_energy_kwh)
+            )),
             None => outside.push(noun),
         }
     }
@@ -1263,6 +1272,43 @@ fn host_perimeter(aggregate: &Aggregate) -> String {
         .flatten()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Host kWh with two decimals, scientific below 0.005 so a small in-total
+/// host never reads as zero.
+fn host_kwh(v: f64) -> String {
+    if v == 0.0 || v >= 0.005 {
+        format!("{v:.2}")
+    } else {
+        format!("{v:.1e}")
+    }
+}
+
+/// The in-total database and broker host rows of the application table:
+/// label, kWh and kgCO2eq. Their energy is inside `total_energy_kwh` and
+/// in no application row.
+fn host_rows(aggregate: &Aggregate) -> Vec<(&'static str, f64, f64)> {
+    let breakdown = aggregate.carbon_breakdown.as_ref();
+    [
+        (
+            "Database hosts",
+            &aggregate.database_waste,
+            breakdown.and_then(|b| b.database_kgco2eq),
+        ),
+        (
+            "Broker hosts",
+            &aggregate.messaging_waste,
+            breakdown.and_then(|b| b.messaging_kgco2eq),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(label, block, kg)| {
+        block
+            .as_ref()
+            .filter(|b| b.in_totals_windows > 0)
+            .map(|b| (label, b.in_totals_energy_kwh, kg.unwrap_or(0.0)))
+    })
+    .collect()
 }
 
 /// The SCI terms the carbon total is made of, then what stays outside it.
@@ -1512,6 +1558,24 @@ fn application_table(w: &mut Writer, report: &PeriodicReport) {
         );
         w.y = w.y.max(name_bottom) + 4.0;
         w.rule(MARGIN, w.y, CONTENT_WIDTH);
+    }
+    for (label, energy, carbon) in host_rows(&report.aggregate) {
+        totals.1 = totals.1.map(|sum| sum + carbon);
+        w.ensure(row_height(label));
+        share_bar(
+            w,
+            if total_energy > 0.0 {
+                energy / total_energy
+            } else {
+                0.0
+            },
+        );
+        table_row(
+            w,
+            label,
+            "-",
+            [&host_kwh(energy), &format!("{carbon:.2}"), "-", "-"],
+        );
     }
     w.ensure(row_height("Total"));
     table_row(

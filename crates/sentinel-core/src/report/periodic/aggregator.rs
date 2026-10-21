@@ -819,7 +819,7 @@ impl PeriodState {
             &report.green_summary.energy_model,
             report.green_summary.energy_calibrated,
         );
-        self.fold_carbon_methodology(report.green_summary.co2.as_ref());
+        self.fold_carbon_methodology(&report.green_summary);
         self.fold_transport_coefficient(
             report.green_summary.co2.as_ref(),
             report.green_summary.scoring_config.as_ref(),
@@ -1008,13 +1008,14 @@ impl PeriodState {
     /// operational, embodied, transport, and the in-total database and
     /// broker hosts. The split tells a reader how much of the published
     /// total is reducible at all.
-    fn fold_carbon_methodology(&mut self, co2: Option<&crate::score::carbon::CarbonReport>) {
-        let Some(co2) = co2 else { return };
+    fn fold_carbon_methodology(&mut self, gs: &crate::report::GreenSummary) {
+        let Some(co2) = gs.co2.as_ref() else { return };
         self.embodied_gco2_total += sanitize_f64(co2.embodied_gco2);
         self.operational_gco2_total += sanitize_f64(co2.operational_gco2);
         self.transport_gco2_total += sanitize_f64(co2.transport_gco2.unwrap_or(0.0));
-        self.database_gco2_total += sanitize_f64(co2.database_gco2.unwrap_or(0.0));
-        self.messaging_gco2_total += sanitize_f64(co2.messaging_gco2.unwrap_or(0.0));
+        let (database_gco2, messaging_gco2) = in_total_host_gco2(gs);
+        self.database_gco2_total += database_gco2;
+        self.messaging_gco2_total += messaging_gco2;
         let tag = co2.total.methodology.as_str();
         if tag.is_empty() || tag.len() > MAX_ENERGY_MODEL_LEN {
             return;
@@ -1957,10 +1958,37 @@ fn in_total_host_terms(gs: &crate::report::GreenSummary) -> (f64, f64) {
             .as_ref()
             .filter(|w| is_in_total_host(w.in_totals, &w.model))
             .map_or(0.0, |w| sanitize_f64(w.energy_kwh));
-    let gco2 = gs.co2.as_ref().map_or(0.0, |c| {
-        sanitize_f64(c.database_gco2.unwrap_or(0.0)) + sanitize_f64(c.messaging_gco2.unwrap_or(0.0))
-    });
-    (kwh, gco2 / 1000.0)
+    let (database_gco2, messaging_gco2) = in_total_host_gco2(gs);
+    (kwh, (database_gco2 + messaging_gco2) / 1000.0)
+}
+
+/// In-total database and broker host carbon (g) of one window, under the
+/// same [`is_in_total_host`] rule as the kWh: a dropped block takes its
+/// carbon out of the host perimeter too.
+fn in_total_host_gco2(gs: &crate::report::GreenSummary) -> (f64, f64) {
+    let Some(co2) = gs.co2.as_ref() else {
+        return (0.0, 0.0);
+    };
+    let term = |tag: Option<(bool, &str)>, gco2: Option<f64>| match tag {
+        Some((in_totals, model)) if is_in_total_host(in_totals, model) => {
+            sanitize_f64(gco2.unwrap_or(0.0))
+        }
+        _ => 0.0,
+    };
+    (
+        term(
+            gs.database_waste
+                .as_ref()
+                .map(|w| (w.in_totals, w.model.as_str())),
+            co2.database_gco2,
+        ),
+        term(
+            gs.messaging_waste
+                .as_ref()
+                .map(|w| (w.in_totals, w.model.as_str())),
+            co2.messaging_gco2,
+        ),
+    )
 }
 
 /// One warning per file, whatever the number of broken lines.
