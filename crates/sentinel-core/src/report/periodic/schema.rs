@@ -587,8 +587,8 @@ impl TemporalCoverage {
 /// `embodied` amortises manufactured hardware and `transport` covers
 /// cross-region network energy, both irreducible by fixing an
 /// anti-pattern: they belong in the total and not in a savings target.
-/// `database` and `messaging` are the measured or declared database and
-/// broker host carbon counted inside the window totals. On windows tagged
+/// `database` and `messaging` are the measured, modeled or declared
+/// database and broker host carbon counted inside the window totals. On windows tagged
 /// `+transport`, the five sum to `total_carbon_kgco2eq`, up to rounding.
 /// v1.6, the two host terms v1.8.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -601,8 +601,8 @@ pub struct CarbonBreakdown {
     /// `[green] embodied_carbon_per_request_gco2`. Absent when zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embodied_kgco2eq: Option<f64>,
-    /// Database host carbon counted inside the window totals: a measured
-    /// or declared figure whose carbon converted. Inside
+    /// Database host carbon counted inside the window totals: a measured,
+    /// modeled or declared figure whose carbon converted. Inside
     /// `total_carbon_kgco2eq`. Absent when zero. v1.8.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_kgco2eq: Option<f64>,
@@ -610,8 +610,8 @@ pub struct CarbonBreakdown {
     /// `database_kgco2eq`. Absent when zero. v1.8.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub messaging_kgco2eq: Option<f64>,
-    /// Carbon of the measured or declared database and broker figures
-    /// that stayed beside the window totals: windows archived before host
+    /// Carbon of the measured, modeled or declared database and broker
+    /// figures that stayed beside the window totals: windows archived before host
     /// energy entered the totals, or whose figure carried no carbon.
     /// Estimated fallback carbon is already in the service total and stays
     /// excluded here, and in-total figures sit in `database_kgco2eq` and

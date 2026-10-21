@@ -449,7 +449,7 @@
             "database_kgco2eq": {
               "type": "number",
               "minimum": 0,
-              "description": "Database host carbon the windows counted inside their totals: a measured or declared figure whose carbon converted. Part of the five-term sum and of total_carbon_kgco2eq, omitted when zero (v1.8+)."
+              "description": "Database host carbon the windows counted inside their totals: a measured, modeled or declared figure whose carbon converted. Part of the five-term sum and of total_carbon_kgco2eq, omitted when zero (v1.8+)."
             },
             "messaging_kgco2eq": {
               "type": "number",

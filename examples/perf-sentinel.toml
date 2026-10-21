@@ -599,12 +599,14 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # nodes = 3                      # no default, cluster size
 # instance_type = "kafka.m5.large"  # an embedded row or a managed class, an unknown type fails the load
 # region = "eu-west-3"           # else [green.alumet.broker] region, else [green] default_region, one is required
-# A broker pod on an application node instead: placement = "shared", its
+# A broker pod on an application node instead: placement = "shared", nodes
+# and instance_type dropped (the node's envelope comes from shared_with), its
 # CPU as a percent of that node (filtered to it, divided by its vCPUs), and
-# the [green.cloud.services] entries reading that node. Its share is billed
-# and taken out of the node's reading, so the node counts once.
-# # cpu_query = '100 * sum(rate(container_cpu_usage_seconds_total{container="kafka",node="node-a"}[5m])) / 4'
-# # shared_with = ["orders"]
+# the [green.cloud.services] entries reading that node, here the "custom"
+# service above. Its share is billed and taken out of the node's reading, so
+# the node counts once.
+# # cpu_query = '100 * sum(rate(container_cpu_usage_seconds_total{container="kafka",instance="custom:9100"}[5m])) / 4'
+# # shared_with = ["custom"]
 
 # --- Carbon: per-service regions -------------------------------------------
 # Region override when the OTel `cloud.region` resource attribute is absent.

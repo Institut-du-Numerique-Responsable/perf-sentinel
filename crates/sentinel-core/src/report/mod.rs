@@ -185,11 +185,13 @@ pub struct DisclosureWaste {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DisclosureDbWaste {
     /// Window energy of the database figure: the database host energy on
-    /// the measured path, the application-side share of the SQL spans on
-    /// the estimated path.
+    /// the measured, modeled and declared paths, the application-side
+    /// share of the SQL spans on the estimated path.
     pub energy_kwh: f64,
     /// Provenance tag of that energy: `alumet_rapl` for a reading of the
-    /// database cgroup, `estimated` for the application-side share of the
+    /// database cgroup, `cloud_specpower` for declared hosts priced from
+    /// their `cpu_query`, `database_specpower` or `broker_specpower` for a
+    /// declared ceiling, `estimated` for the application-side share of the
     /// SQL spans, already inside the totals.
     pub model: String,
     pub operational_waste_kwh: f64,
@@ -451,11 +453,13 @@ pub struct GreenSummary {
     /// average. Empty on pre-per-service-ratio baselines.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_service_measured_ratio: BTreeMap<String, f64>,
-    /// Database waste figure, on every run, in one of three forms that
+    /// Database waste figure, on every run, in one of four forms that
     /// `model` names. Measured (`alumet_rapl`): the energy of the declared
     /// `[green.alumet.database]` cgroup when a reading landed (daemon).
-    /// Declared (`database_specpower`): the `[green.database_static]`
-    /// ceiling (daemon). Both are host energy counted inside `energy_kwh`
+    /// Modeled (`cloud_specpower`): the `[green.database_static]` hosts
+    /// priced from their `cpu_query` (daemon). Declared
+    /// (`database_specpower`): the `[green.database_static]` ceiling
+    /// (daemon). All three are host energy counted inside `energy_kwh`
     /// and `co2.total` (as `co2.database_gco2`) once their carbon
     /// converts, which `in_totals` records. Without a carbon conversion
     /// they stay beside them.
@@ -466,8 +470,9 @@ pub struct GreenSummary {
     /// `aggregate.database_waste` block (`docs/METHODOLOGY.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_waste: Option<DatabaseWaste>,
-    /// Messaging twin of `database_waste`. Measured (`alumet_rapl`) or
-    /// declared (`broker_specpower`): broker host energy inside the
+    /// Messaging twin of `database_waste`. Measured (`alumet_rapl`),
+    /// modeled (`cloud_specpower`) or declared (`broker_specpower`): broker
+    /// host energy inside the
     /// totals (as `co2.messaging_gco2`) once its carbon converts, beside
     /// them otherwise, `in_totals` says which. Estimated: the
     /// application-side share of the window's publish spans, already
@@ -482,7 +487,8 @@ pub struct GreenSummary {
 /// path: the figure is the application-side share of the SQL or publish
 /// spans, the energy the span scoring gave the emitting services, already
 /// inside the report totals. It is not a reading of the database or the
-/// broker host. The measured path carries `alumet_rapl` instead.
+/// broker host. The host paths carry `alumet_rapl`, `cloud_specpower` or
+/// a declared `*_specpower` ceiling tag instead.
 pub const DB_WASTE_MODEL_ESTIMATED: &str = "estimated";
 
 /// Provenance tag of a broker figure built from a declared cluster and
@@ -526,15 +532,16 @@ pub const DATABASE_WASTE_ABSENT: &str = "not available: no SQL activity this win
 /// Broker twin of [`DATABASE_WASTE_ABSENT`].
 pub const MESSAGING_WASTE_ABSENT: &str = "not available: no broker publish spans this window, or no broker reading yet, see [green.broker_static] or [green.alumet.broker]";
 
-/// Database window energy × the SQL-only waste ratio. On the measured
-/// and declared paths the host energy is inside the report totals when
+/// Database window energy × the SQL-only waste ratio. On the measured,
+/// modeled and declared paths the host energy is inside the report totals when
 /// `in_totals` is set, beside them otherwise. On the estimated path it
 /// is already a share of them, never added again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseWaste {
     /// Window energy in kWh. Measured path: the database cgroup (CPU
-    /// share only). Declared path: the `nodes × P_max` ceiling. Estimated
-    /// path: the application-side share of the window's SQL spans.
+    /// share only). Modeled path: the `SPECpower` envelope at the hosts'
+    /// CPU. Declared path: the `nodes × P_max` ceiling. Estimated path:
+    /// the application-side share of the window's SQL spans.
     pub energy_kwh: f64,
     /// `energy_kwh × sql_waste_ratio`.
     pub waste_kwh: f64,
@@ -548,15 +555,17 @@ pub struct DatabaseWaste {
     /// zero the canonical carbon figure. `None` without a conversion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_gco2: Option<f64>,
-    /// Operator-declared region of the database host. `None` on the
+    /// Effective region of the database host (`GreenConfig::host_region`:
+    /// a declared region, else `[green] default_region`). `None` on the
     /// estimated path (no database was declared).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     /// `avoidable_sql_io_ops / total_sql_io_ops`, in `[0, 1]`.
     pub sql_waste_ratio: f64,
     /// Provenance tag: `alumet_rapl` when the energy is measured on the
-    /// declared database cgroup, `database_specpower` for a declared
-    /// cluster, otherwise `estimated` for the application-side share of
+    /// declared database cgroup, `cloud_specpower` for declared hosts
+    /// priced from their `cpu_query`, `database_specpower` for a declared
+    /// cluster's ceiling, otherwise `estimated` for the application-side share of
     /// the window's SQL spans. Empty on baselines predating the field.
     #[serde(default)]
     pub model: String,
@@ -574,16 +583,17 @@ pub struct DatabaseWaste {
 
 /// Messaging avoidable energy for the window, the twin of
 /// [`DatabaseWaste`], inside the report totals under the same rule
-/// (`in_totals`). Which way it errs depends on `model`, since the three
+/// (`in_totals`). Which way it errs depends on `model`, since the four
 /// sources do not agree: `alumet_rapl` reads CPU only and so
-/// under-counts, `broker_specpower` bounds the declared vCPUs at full
+/// under-counts, `cloud_specpower` follows the load on an envelope
+/// without storage or network, `broker_specpower` bounds the declared vCPUs at full
 /// load without storage or network, `estimated` is the application-side
 /// share of the publish spans, already inside the totals, and holds no
 /// broker host energy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MessagingWaste {
-    /// Window energy: the broker host when measured or declared, the
-    /// application-side share of the publish spans when estimated.
+    /// Window energy: the broker host when measured, modeled or declared,
+    /// the application-side share of the publish spans when estimated.
     pub energy_kwh: f64,
     /// `energy_kwh` × `messaging_waste_ratio`.
     pub waste_kwh: f64,
@@ -594,13 +604,15 @@ pub struct MessagingWaste {
     /// disclosure's canonical tier rescales from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_gco2: Option<f64>,
-    /// Operator-declared region of the broker. `None` on the estimated path.
+    /// Effective region of the broker hosts (`GreenConfig::host_region`).
+    /// `None` on the estimated path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     /// `avoidable_messaging_io_ops / total_messaging_io_ops`, in `[0, 1]`.
     pub messaging_waste_ratio: f64,
     /// Provenance: `alumet_rapl` measured on the declared cgroup,
-    /// `broker_specpower` for a declared cluster, `estimated` for the
+    /// `cloud_specpower` for declared hosts priced from their `cpu_query`,
+    /// `broker_specpower` for a declared cluster's ceiling, `estimated` for the
     /// application-side share of the window's publish spans.
     #[serde(default)]
     pub model: String,
