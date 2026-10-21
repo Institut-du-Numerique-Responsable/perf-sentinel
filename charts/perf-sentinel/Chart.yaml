@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.31.4
-appVersion: "0.31.4"
+version: 0.32.0
+appVersion: "0.32.0"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -37,10 +37,12 @@ annotations:
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
     - kind: changed
-      description: "appVersion 0.31.4. The release adds a test and moves a yanked dependency, no daemon behavior changes. No values.yaml key is added or removed, and no template changes."
+      description: "appVersion 0.32.0. The daemon counts database and broker host energy inside the totals from [green.database_static], [green.broker_static] or Alumet, splits a node shared by several services, and adds grid operator carbon intensity feeds. Configs that declare [green.broker_static] without placement, or a host source without a region, now fail to load."
+    - kind: added
+      description: "With prometheusRule.energyScrapers, a PerfSentinelHostCpuProbeStale alert per host subsystem (database, broker) on the new *_cpu_last_scrape_age_seconds gauges. No values.yaml key is added or removed."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.31.4
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.32.0
       platforms:
         - linux/amd64
         - linux/arm64

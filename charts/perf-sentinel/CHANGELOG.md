@@ -10,6 +10,29 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.32.0]
+
+### Changed
+
+- **`appVersion` moves to `0.32.0`.** The daemon counts database and
+  broker host energy inside the totals, from `[green.database_static]`,
+  `[green.broker_static]` or Alumet, splits a node shared by several
+  services by their operations, and adds grid operator carbon intensity
+  feeds. A config that declares `[green.broker_static]` without
+  `placement`, or a database or broker source without an effective
+  region, now fails to load. See the application `CHANGELOG.md`.
+
+### Added
+
+- **`PerfSentinelHostCpuProbeStale`**, one rule per host subsystem
+  (`database`, `broker`), emitted with `prometheusRule.energyScrapers`
+  like the energy scraper rules. It fires when
+  `perf_sentinel_<subsystem>_cpu_last_scrape_age_seconds` exceeds
+  `scraperStaleSeconds`: a dedicated declaration then bills its
+  SPECpower ceiling, a shared one bills no host energy.
+
+No `values.yaml` key is added or removed.
+
 ## [0.31.4]
 
 ### Changed

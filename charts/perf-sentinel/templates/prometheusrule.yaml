@@ -81,6 +81,17 @@ spec:
             summary: "perf-sentinel {{ $backend }} energy scraper is stale"
             description: "perf_sentinel_{{ $backend }}_last_scrape_age_seconds exceeded {{ $stale }}s: the {{ $backend }} energy backend produced no fresh sample. Carbon attribution falls back to the proxy model."
         {{- end }}
+        {{- range $subsystem := list "database" "broker" }}
+        - alert: PerfSentinelHostCpuProbeStale
+          expr: perf_sentinel_{{ $subsystem }}_cpu_last_scrape_age_seconds > {{ $stale }}
+          for: 5m
+          labels:
+            severity: warning
+            subsystem: {{ $subsystem }}
+          annotations:
+            summary: "perf-sentinel {{ $subsystem }} host CPU probe is stale"
+            description: "perf_sentinel_{{ $subsystem }}_cpu_last_scrape_age_seconds exceeded {{ $stale }}s: the cpu_query of the {{ $subsystem }} hosts returned no fresh single series. A dedicated declaration falls back to its SPECpower ceiling, a shared one bills no host energy."
+        {{- end }}
         {{- end }}
         {{- with .Values.prometheusRule.additionalRules }}
         {{- toYaml . | nindent 8 }}

@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-21
+
 ### Added
 
 - Grid operator feeds, free real-time carbon intensity published by the grid operators themselves: `[green.rte_eco2mix]` (France, RTE `éCO2mix` on ODRÉ, Licence Ouverte v2.0, 15 min), `[green.neso]` (Great Britain, NESO Carbon Intensity API, CC BY 4.0, 30 min), `[green.fingrid]` (Finland, Fingrid dataset 266 or 265, CC BY 4.0, 3 min, free key in `PERF_SENTINEL_FINGRID_API_KEY`) and `[green.energinet]` (Denmark `DK1` and `DK2`, Energinet `CO2Emis`, CC BY 4.0, 5 min). Each section lists the cloud regions on its grid and the daemon gives them the operator's value. All four count direct emissions, lifecycle excluded, so they read lower than an Electricity Maps lifecycle intensity; RTE and Fingrid 266 count production, NESO, Fingrid 265 and Energinet consumption. Electricity Maps wins for any region both cover, a region may belong to one feed only, and a Fingrid section without a key is disabled with a warning. A latest record past each operator's lag (3 h RTE, 2 h NESO, 1 h Fingrid and Energinet) or dated more than 15 minutes ahead is rejected, and a missing value falls back to the embedded profiles after 3x the poll interval, as with Electricity Maps. NESO is read over its last 3 hours of windows: the newest estimate wins, unless it stayed identical on 4 windows while the forecast moved, a sign NESO stopped updating it, in which case the newest forecast is used. Failures are counted per zone, so a silent `DK2` is reported while `DK1` answers. One scraper loop serves the four feeds.

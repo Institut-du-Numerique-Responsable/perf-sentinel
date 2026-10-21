@@ -284,10 +284,11 @@ prometheusRule:
   # -- Extra labels applied to the PrometheusRule (e.g. `release: prometheus`
   # for the kube-prometheus-stack operator's ruleSelector).
   labels: {}
-  # -- Also emit per-backend energy-scraper staleness alerts. Only meaningful
-  # when an energy backend (Alumet, Scaphandre, Kepler, Redfish, cloud_energy)
-  # is configured, off by default so a proxy-only deploy is not alerted on a
-  # backend it does not run.
+  # -- Also emit per-backend energy-scraper staleness alerts, and the host
+  # CPU probe ones of [green.database_static] and [green.broker_static]. Only
+  # meaningful when an energy backend (Alumet, Scaphandre, Kepler, Redfish,
+  # cloud_energy) is configured, off by default so a proxy-only deploy is not
+  # alerted on a backend it does not run.
   energyScrapers: false
   # -- Staleness threshold (seconds) for the energy-scraper alerts.
   scraperStaleSeconds: 120
