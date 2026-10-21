@@ -424,6 +424,8 @@ struct WasteBlockFields {
     energy_kwh: &'static str,
     measured_energy_kwh: &'static str,
     declared_energy_kwh: &'static str,
+    modeled_energy_kwh: &'static str,
+    in_totals_energy_kwh: &'static str,
     operational_waste_kwh: &'static str,
     operational_waste_kgco2eq: &'static str,
     canonical_waste_kwh: &'static str,
@@ -431,6 +433,8 @@ struct WasteBlockFields {
     models: &'static str,
     windows_with_figure: &'static str,
     measured_windows: &'static str,
+    in_totals_windows: &'static str,
+    placements: &'static str,
     windows_with_carbon: &'static str,
 }
 
@@ -438,6 +442,8 @@ const DB_WASTE_FIELDS: WasteBlockFields = WasteBlockFields {
     energy_kwh: "database_waste.energy_kwh",
     measured_energy_kwh: "database_waste.measured_energy_kwh",
     declared_energy_kwh: "database_waste.declared_energy_kwh",
+    modeled_energy_kwh: "database_waste.modeled_energy_kwh",
+    in_totals_energy_kwh: "database_waste.in_totals_energy_kwh",
     operational_waste_kwh: "database_waste.operational_waste_kwh",
     operational_waste_kgco2eq: "database_waste.operational_waste_kgco2eq",
     canonical_waste_kwh: "database_waste.canonical_waste_kwh",
@@ -445,6 +451,8 @@ const DB_WASTE_FIELDS: WasteBlockFields = WasteBlockFields {
     models: "database_waste.models",
     windows_with_figure: "database_waste.windows_with_figure",
     measured_windows: "database_waste.measured_windows",
+    in_totals_windows: "database_waste.in_totals_windows",
+    placements: "database_waste.placements",
     windows_with_carbon: "database_waste.windows_with_carbon",
 };
 
@@ -452,6 +460,8 @@ const MSG_WASTE_FIELDS: WasteBlockFields = WasteBlockFields {
     energy_kwh: "messaging_waste.energy_kwh",
     measured_energy_kwh: "messaging_waste.measured_energy_kwh",
     declared_energy_kwh: "messaging_waste.declared_energy_kwh",
+    modeled_energy_kwh: "messaging_waste.modeled_energy_kwh",
+    in_totals_energy_kwh: "messaging_waste.in_totals_energy_kwh",
     operational_waste_kwh: "messaging_waste.operational_waste_kwh",
     operational_waste_kgco2eq: "messaging_waste.operational_waste_kgco2eq",
     canonical_waste_kwh: "messaging_waste.canonical_waste_kwh",
@@ -459,6 +469,8 @@ const MSG_WASTE_FIELDS: WasteBlockFields = WasteBlockFields {
     models: "messaging_waste.models",
     windows_with_figure: "messaging_waste.windows_with_figure",
     measured_windows: "messaging_waste.measured_windows",
+    in_totals_windows: "messaging_waste.in_totals_windows",
+    placements: "messaging_waste.placements",
     windows_with_carbon: "messaging_waste.windows_with_carbon",
 };
 
@@ -475,18 +487,31 @@ fn validate_messaging_waste(agg: &Aggregate, errors: &mut Vec<ValidationError>) 
 }
 
 /// One waste block, either twin: finite non-negative figures, bounded
-/// charset-clean model tags, and the provenance-split invariants. The
-/// zero split is accepted as-is because it marks a report predating the
-/// fields.
+/// charset-clean model tags and placements, the provenance-split
+/// invariants and the in-total share. The zero split is accepted as-is
+/// because it marks a report predating the fields.
 fn validate_waste_block(
     block: &super::schema::DatabaseWasteAggregate,
     f: &WasteBlockFields,
     errors: &mut Vec<ValidationError>,
 ) {
-    let figures: [(&'static str, f64); 7] = [
+    validate_waste_figures(block, f, errors);
+    validate_waste_labels(block, f, errors);
+    validate_waste_windows(block, f, errors);
+    validate_waste_in_totals(block, f, errors);
+}
+
+fn validate_waste_figures(
+    block: &super::schema::DatabaseWasteAggregate,
+    f: &WasteBlockFields,
+    errors: &mut Vec<ValidationError>,
+) {
+    let figures: [(&'static str, f64); 9] = [
         (f.energy_kwh, block.energy_kwh),
         (f.measured_energy_kwh, block.measured_energy_kwh),
+        (f.modeled_energy_kwh, block.modeled_energy_kwh),
         (f.declared_energy_kwh, block.declared_energy_kwh),
+        (f.in_totals_energy_kwh, block.in_totals_energy_kwh),
         (f.operational_waste_kwh, block.operational_waste_kwh),
         (
             f.operational_waste_kgco2eq,
@@ -511,6 +536,13 @@ fn validate_waste_block(
             });
         }
     }
+}
+
+fn validate_waste_labels(
+    block: &super::schema::DatabaseWasteAggregate,
+    f: &WasteBlockFields,
+    errors: &mut Vec<ValidationError>,
+) {
     for model in &block.models {
         if !super::schema::is_valid_model_tag(model) {
             errors.push(ValidationError::Aggregate {
@@ -523,21 +555,35 @@ fn validate_waste_block(
             });
         }
     }
+    if block
+        .placements
+        .iter()
+        .any(|p| !super::schema::is_known_placement(p))
+    {
+        errors.push(ValidationError::Aggregate {
+            field: f.placements,
+            reason: "placements must be 'dedicated' or 'shared'".to_string(),
+        });
+    }
+}
+
+fn validate_waste_windows(
+    block: &super::schema::DatabaseWasteAggregate,
+    f: &WasteBlockFields,
+    errors: &mut Vec<ValidationError>,
+) {
     if block.windows_with_figure == 0 {
         errors.push(ValidationError::Aggregate {
             field: f.windows_with_figure,
             reason: "block present with zero windows".to_string(),
         });
     }
-    let split = block
-        .measured_windows
-        .saturating_add(block.declared_windows)
-        .saturating_add(block.estimated_windows);
+    let split = host_windows(block).saturating_add(block.estimated_windows);
     if split > 0 && split != block.windows_with_figure {
         errors.push(ValidationError::Aggregate {
             field: f.measured_windows,
             reason: format!(
-                "measured + declared + estimated windows ({split}) != \
+                "measured + modeled + declared + estimated windows ({split}) != \
                  windows_with_figure ({})",
                 block.windows_with_figure
             ),
@@ -549,6 +595,45 @@ fn validate_waste_block(
             reason: format!(
                 "exceeds windows_with_figure ({} > {})",
                 block.windows_with_carbon, block.windows_with_figure
+            ),
+        });
+    }
+}
+
+/// Windows whose figure a host source billed: measured, modeled or
+/// declared.
+fn host_windows(block: &super::schema::DatabaseWasteAggregate) -> u64 {
+    block
+        .measured_windows
+        .saturating_add(block.modeled_windows)
+        .saturating_add(block.declared_windows)
+}
+
+/// The in-total share is part of the block: no more energy than the block
+/// covers, no more windows than carried a host figure.
+fn validate_waste_in_totals(
+    block: &super::schema::DatabaseWasteAggregate,
+    f: &WasteBlockFields,
+    errors: &mut Vec<ValidationError>,
+) {
+    // Relative slack for the summation order, absolute for near-zero sums.
+    if block.in_totals_energy_kwh > block.energy_kwh * (1.0 + 1e-9) + 1e-12 {
+        errors.push(ValidationError::Aggregate {
+            field: f.in_totals_energy_kwh,
+            reason: format!(
+                "exceeds energy_kwh ({} > {})",
+                block.in_totals_energy_kwh, block.energy_kwh
+            ),
+        });
+    }
+    let bound = block.windows_with_figure.min(host_windows(block));
+    if block.in_totals_windows > bound {
+        errors.push(ValidationError::Aggregate {
+            field: f.in_totals_windows,
+            reason: format!(
+                "exceeds windows_with_figure or measured + modeled + declared windows \
+                 ({} > {bound})",
+                block.in_totals_windows
             ),
         });
     }
@@ -1262,6 +1347,7 @@ mod tests {
             operational_waste_kgco2eq: Some(0.05),
             canonical_waste_kwh: 0.8,
             canonical_waste_kgco2eq: Some(0.08),
+            ..Default::default()
         }
     }
 
@@ -1403,5 +1489,100 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    /// One measured, one modeled and one declared window, all in the
+    /// totals, the shape a period with three host sources produces.
+    fn in_total_db_waste() -> crate::report::periodic::schema::DatabaseWasteAggregate {
+        crate::report::periodic::schema::DatabaseWasteAggregate {
+            measured_energy_kwh: 0.2,
+            modeled_energy_kwh: 0.3,
+            declared_energy_kwh: 0.5,
+            in_totals_energy_kwh: 1.0,
+            models: ["alumet_rapl", "cloud_specpower", "database_specpower"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            placements: ["dedicated", "shared"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            windows_with_figure: 3,
+            measured_windows: 1,
+            modeled_windows: 1,
+            declared_windows: 1,
+            estimated_windows: 0,
+            in_totals_windows: 3,
+            ..valid_db_waste()
+        }
+    }
+
+    fn rejects(db: crate::report::periodic::schema::DatabaseWasteAggregate, at: &str) -> bool {
+        db_errors(db)
+            .iter()
+            .any(|e| matches!(e, ValidationError::Aggregate { field, .. } if *field == at))
+    }
+
+    #[test]
+    fn an_in_total_block_with_four_buckets_passes() {
+        let errors = db_errors(in_total_db_waste());
+        assert!(errors.is_empty(), "got: {errors:?}");
+    }
+
+    #[test]
+    fn in_total_and_modeled_energy_must_be_finite_and_non_negative() {
+        for (at, value) in [
+            ("database_waste.in_totals_energy_kwh", f64::INFINITY),
+            ("database_waste.in_totals_energy_kwh", -0.1),
+            ("database_waste.modeled_energy_kwh", f64::NAN),
+            ("database_waste.modeled_energy_kwh", -0.1),
+        ] {
+            let mut db = in_total_db_waste();
+            if at.ends_with("in_totals_energy_kwh") {
+                db.in_totals_energy_kwh = value;
+            } else {
+                db.modeled_energy_kwh = value;
+            }
+            assert!(rejects(db, at), "{at} = {value}");
+        }
+    }
+
+    #[test]
+    fn in_total_energy_cannot_exceed_the_block_energy() {
+        let mut db = in_total_db_waste();
+        // Summation-order noise stays inside the tolerance.
+        db.in_totals_energy_kwh = db.energy_kwh * (1.0 + 1e-12);
+        assert!(!rejects(db.clone(), "database_waste.in_totals_energy_kwh"));
+        db.in_totals_energy_kwh = db.energy_kwh * 1.01;
+        assert!(rejects(db, "database_waste.in_totals_energy_kwh"));
+    }
+
+    #[test]
+    fn in_total_windows_are_bounded_by_the_host_windows() {
+        let mut db = in_total_db_waste();
+        db.in_totals_windows = 4;
+        assert!(rejects(db, "database_waste.in_totals_windows"));
+        // An estimated window is the application-side share, never in the
+        // totals as a host term.
+        let mut db = in_total_db_waste();
+        db.declared_windows = 0;
+        db.estimated_windows = 1;
+        assert!(rejects(db.clone(), "database_waste.in_totals_windows"));
+        db.in_totals_windows = 2;
+        assert!(!rejects(db, "database_waste.in_totals_windows"));
+    }
+
+    #[test]
+    fn placements_are_dedicated_or_shared() {
+        let mut db = in_total_db_waste();
+        db.placements.insert("colocated".to_string());
+        assert!(rejects(db, "database_waste.placements"));
+    }
+
+    #[test]
+    fn the_four_bucket_split_must_match_the_windows() {
+        let mut db = in_total_db_waste();
+        db.modeled_windows = 2;
+        assert!(rejects(db, "database_waste.measured_windows"));
     }
 }

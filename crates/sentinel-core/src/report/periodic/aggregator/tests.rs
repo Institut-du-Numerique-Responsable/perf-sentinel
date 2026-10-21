@@ -3,6 +3,7 @@ use crate::detect::{Confidence, Finding, FindingType, Pattern, Severity};
 use crate::report::interpret::InterpretationLevel;
 use crate::report::{Analysis, GreenSummary, PerEndpointIoOps, QualityGate, Report};
 use crate::score::carbon::{CarbonEstimate, CarbonReport};
+use crate::score::host_static::HostPlacement;
 use chrono::TimeZone;
 use core::assert_matches;
 use std::io::Write;
@@ -1168,6 +1169,145 @@ fn a_rollup_state_without_the_host_terms_reads_and_merges_them() {
     older.merge(folded(&[(day(11, 9), in_total_window(1.0, true, true))]));
     assert!((older.database_gco2_total - 2.0 * DB_GCO2).abs() < 1e-12);
     assert!((older.messaging_gco2_total - 2.0 * MSG_GCO2).abs() < 1e-12);
+}
+
+/// An in-total database window billed by `model`, placed as `placement`.
+fn in_total_db_window(model: &str, placement: HostPlacement) -> Report {
+    let mut r = in_total_window(1.0, true, false);
+    let block = r
+        .disclosure_waste
+        .as_mut()
+        .and_then(|w| w.database.as_mut())
+        .unwrap();
+    block.model = model.to_string();
+    block.placement = Some(placement);
+    r
+}
+
+/// A window whose database block stayed beside the totals: archived
+/// before host accounting (no flag), or the estimated fallback.
+fn beside_db_window(energy: f64, model: &str) -> Report {
+    let mut r = make_report(10, 100, 5, &[("svc-a", "/api", 100)], vec![]);
+    let tier = crate::report::AvoidableTier::default();
+    r.disclosure_waste = Some(crate::report::DisclosureWaste {
+        canonical: tier.clone(),
+        operational: tier,
+        database: Some(waste_block(energy, model)),
+        messaging: None,
+    });
+    r
+}
+
+/// Legacy measured, dedicated declared, shared modeled, a broker and an
+/// estimated window, in that order.
+fn mixed_host_period() -> Vec<(DateTime<Utc>, Report)> {
+    let mut broker = in_total_window(1.0, false, true);
+    if let Some(block) = broker
+        .disclosure_waste
+        .as_mut()
+        .and_then(|w| w.messaging.as_mut())
+    {
+        block.placement = Some(HostPlacement::Dedicated);
+    }
+    vec![
+        (day(10, 9), beside_db_window(0.7, "alumet_rapl")),
+        (
+            day(11, 9),
+            in_total_db_window(
+                crate::report::DB_WASTE_MODEL_SPECPOWER,
+                HostPlacement::Dedicated,
+            ),
+        ),
+        (
+            day(12, 9),
+            in_total_db_window(
+                crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER,
+                HostPlacement::Shared,
+            ),
+        ),
+        (day(13, 9), broker),
+        (day(14, 9), beside_db_window(0.5, "estimated")),
+    ]
+}
+
+#[test]
+fn waste_blocks_record_the_in_total_share_placements_and_modeled_windows() {
+    let out = aggregate_windows(&mixed_host_period());
+    let agg = &out.aggregate;
+    let db = agg.database_waste.as_ref().expect("database block");
+    assert_eq!(db.windows_with_figure, 4);
+    assert_eq!(db.in_totals_windows, 2);
+    assert!((db.in_totals_energy_kwh - 2.0 * DB_KWH).abs() < 1e-12);
+    let placements: Vec<&str> = db.placements.iter().map(String::as_str).collect();
+    assert_eq!(placements, ["dedicated", "shared"]);
+    assert_eq!(db.modeled_windows, 1);
+    assert!((db.modeled_energy_kwh - DB_KWH).abs() < 1e-12);
+    assert_eq!(db.declared_windows, 1);
+    assert_eq!(db.measured_windows, 1);
+    assert_eq!(db.estimated_windows, 1);
+    let mw = agg.messaging_waste.as_ref().expect("messaging block");
+    assert_eq!(mw.in_totals_windows, 1);
+    assert!((mw.in_totals_energy_kwh - MSG_KWH).abs() < 1e-12);
+    assert_eq!(mw.declared_windows, 1);
+    assert_eq!(mw.modeled_windows, 0);
+    // Each window's host carbon lands in one place: the two in-total
+    // database windows and the broker inside the total, the legacy window
+    // beside it, the estimated one already inside the services.
+    let b = agg.carbon_breakdown.as_ref().expect("breakdown");
+    assert_eq!(b.database_kgco2eq, Some(2.0 * DB_GCO2 / 1000.0));
+    assert_eq!(b.messaging_kgco2eq, Some(MSG_GCO2 / 1000.0));
+    let legacy_kg = waste_block(0.7, "alumet_rapl").energy_gco2.unwrap() / 1000.0;
+    assert!((b.database_kgco2eq_out_of_total.unwrap() - legacy_kg).abs() < 1e-12);
+    assert_eq!(b.messaging_kgco2eq_out_of_total, None);
+    assert_eq!(
+        db.measured_windows + db.modeled_windows + db.declared_windows + db.estimated_windows,
+        db.windows_with_figure
+    );
+}
+
+#[test]
+fn merging_two_states_sums_the_host_scope_of_the_waste_blocks() {
+    let lines = mixed_host_period();
+    let mut merged = folded(&lines[..2]);
+    merged.merge(folded(&lines[2..]));
+    let whole = folded(&lines);
+    let fields = |a: &DbWasteAccumulator| {
+        (
+            a.in_totals_windows,
+            a.modeled_windows,
+            a.placements.clone(),
+            a.in_totals_energy_kwh,
+            a.modeled_energy_kwh,
+        )
+    };
+    assert_eq!(fields(&merged.db_waste), fields(&whole.db_waste));
+    assert_eq!(fields(&merged.msg_waste), fields(&whole.msg_waste));
+}
+
+#[test]
+fn a_rollup_state_without_the_waste_block_scope_reads_and_merges_it() {
+    let state = folded(&mixed_host_period());
+    let mut json = serde_json::to_value(&state).unwrap();
+    let block = json["db_waste"].as_object_mut().unwrap();
+    for key in [
+        "in_totals_energy_kwh",
+        "in_totals_windows",
+        "placements",
+        "modeled_energy_kwh",
+        "modeled_windows",
+    ] {
+        assert!(block.remove(key).is_some(), "{key}");
+    }
+    let mut older: PeriodState = serde_json::from_value(json).unwrap();
+    assert_eq!(older.db_waste.in_totals_windows, 0);
+    assert!(older.db_waste.placements.is_empty());
+    // A tampered rollup placement is dropped on merge.
+    let mut incoming = folded(&mixed_host_period());
+    incoming.db_waste.placements.insert("colocated".to_string());
+    older.merge(incoming);
+    assert_eq!(older.db_waste.in_totals_windows, 2);
+    assert_eq!(older.db_waste.modeled_windows, 1);
+    assert_eq!(older.db_waste.placements.len(), 2);
 }
 
 #[test]

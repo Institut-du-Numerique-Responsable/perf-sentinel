@@ -61,7 +61,11 @@
 //! `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`,
 //! `open_electricity`, `mavir` and `em6`. It also adds
 //! `CarbonBreakdown.database_kgco2eq` and `messaging_kgco2eq`, the database
-//! and broker host carbon a window counted inside its total.
+//! and broker host carbon a window counted inside its total, and five
+//! `DatabaseWasteAggregate` fields on both waste blocks: the in-total
+//! share (`in_totals_energy_kwh`, `in_totals_windows`), the declared
+//! `placements`, and the CPU-interpolated bucket (`modeled_energy_kwh`,
+//! `modeled_windows`).
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -431,16 +435,16 @@ pub struct CalibrationInputs {
 
 /// Database waste summed over the period's windows that carried a
 /// `database_waste` figure: the window energy multiplied by the SQL-only
-/// waste ratio. The energy is the database cgroup when measured via
-/// Alumet (a CPU-only lower bound of the host), otherwise the
-/// application-side share of the SQL spans, the energy the span scoring
-/// gave the emitting services (`models` says which). The `canonical_*`
-/// figures use the binary-pinned N+1 threshold so the published number
-/// cannot be shrunk by operator config. A breakdown, never added on top
-/// of the aggregate energy or carbon totals, `canonical_waste` or
-/// `operational_waste`: the measured share is inside them for windows
-/// that counted it (`in_totals`) and beside them otherwise, the estimated
-/// share is already inside them.
+/// waste ratio. The energy is the database host's when a source bills it
+/// (measured through Alumet, a CPU-interpolated `SPECpower` figure, or a
+/// declared ceiling), otherwise the application-side share of the SQL
+/// spans, the energy the span scoring gave the emitting services (`models`
+/// says which). The `canonical_*` figures use the binary-pinned N+1
+/// threshold so the published number cannot be shrunk by operator config.
+/// A breakdown of the aggregate totals and of `canonical_waste` and
+/// `operational_waste`, never an addend: `in_totals_energy_kwh` is the
+/// host share already inside them, the estimated share is inside them
+/// too, and the rest sits beside them.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseWasteAggregate {
     /// Energy the figure covered over the period, in kWh.
@@ -449,20 +453,36 @@ pub struct DatabaseWasteAggregate {
     /// agent reading the workload's own power), in kWh.
     #[serde(default)]
     pub measured_energy_kwh: f64,
+    /// Share of `energy_kwh` from windows whose figure was modeled
+    /// (`cloud_specpower`, a `SPECpower` envelope interpolated at the
+    /// host's CPU reading), in kWh. v1.8.
+    #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_f64")]
+    pub modeled_energy_kwh: f64,
     /// Share of `energy_kwh` from windows whose figure was declared
-    /// rather than measured (`broker_specpower`, a declared broker
-    /// cluster), in kWh. Absent on a database-only report: no declared
-    /// source feeds that figure today.
+    /// rather than measured (`database_specpower` or `broker_specpower`,
+    /// a declared cluster billed at its `SPECpower` ceiling), in kWh.
     #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_f64")]
     pub declared_energy_kwh: f64,
-    /// Distinct provenance tags observed (`alumet_rapl`, `estimated`,
-    /// and `broker_specpower` on the messaging block).
+    /// Share of `energy_kwh` the windows counted inside their totals, in
+    /// kWh: already part of `total_energy_kwh`, never to be added to it.
+    /// v1.8.
+    #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_f64")]
+    pub in_totals_energy_kwh: f64,
+    /// Distinct provenance tags observed (`alumet_rapl`, `cloud_specpower`,
+    /// `database_specpower` or `broker_specpower`, `estimated`).
     pub models: BTreeSet<String>,
+    /// Host placements the operator declared (`dedicated`, `shared`): a
+    /// statement of where the hosts run, not a measurement. v1.8.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub placements: BTreeSet<String>,
     /// Windows that carried the figure (of the period's total).
     pub windows_with_figure: u64,
     /// Windows whose figure came from a measured source.
     #[serde(default)]
     pub measured_windows: u64,
+    /// Windows whose figure was modeled from a CPU reading. v1.8.
+    #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_u64")]
+    pub modeled_windows: u64,
     /// Windows whose figure was declared, not measured: an operator
     /// statement of provisioned infrastructure, which bounds compute
     /// rather than reporting it.
@@ -471,6 +491,9 @@ pub struct DatabaseWasteAggregate {
     /// Windows whose figure was the estimated fallback.
     #[serde(default)]
     pub estimated_windows: u64,
+    /// Windows that counted their host figure inside their totals. v1.8.
+    #[serde(default, skip_serializing_if = "crate::report::periodic::is_zero_u64")]
+    pub in_totals_windows: u64,
     /// Windows whose figure carried a carbon conversion. Reads on the
     /// `*_kgco2eq` sums: fewer contributing windows than
     /// `windows_with_figure` means a partial carbon picture.
@@ -484,6 +507,15 @@ pub struct DatabaseWasteAggregate {
     pub canonical_waste_kwh: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canonical_waste_kgco2eq: Option<f64>,
+}
+
+/// Whether `placement` is one of the two `HostPlacement` spellings.
+#[must_use]
+pub(crate) fn is_known_placement(placement: &str) -> bool {
+    use crate::score::host_static::HostPlacement;
+    [HostPlacement::Dedicated, HostPlacement::Shared]
+        .iter()
+        .any(|p| p.as_str() == placement)
 }
 
 /// Messaging waste summed over the period. Wire-identical to the
