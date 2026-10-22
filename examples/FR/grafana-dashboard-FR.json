@@ -1740,8 +1740,8 @@
       }
     },
     {
-      "title": "Énergie par fenêtre de scoring (kWh)",
-      "description": "Électricité attribuée à la charge analysée pour la dernière fenêtre de scoring. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Quand une source d'hôte de base de données ou de broker est configurée, elle comprend aussi l'énergie de ces hôtes comptée dans les totaux.\n\nLe détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.",
+      "title": "Puissance moyenne (W)",
+      "description": "Puissance électrique moyenne attribuée à la charge analysée, le débit du compteur d'énergie `perf_sentinel_scored_energy_kwh_total`. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Quand une source d'hôte de base de données ou de broker est configurée, elle comprend aussi la puissance de ces hôtes comptée dans les totaux.\n\nLes fenêtres de scoring n'ont pas toutes la même durée, donc la jauge par fenêtre `perf_sentinel_energy_kwh` se lit comme une énergie par lot, pas comme une puissance : ce panneau la dérive plutôt du compteur. Le détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1755,14 +1755,14 @@
       },
       "targets": [
         {
-          "expr": "perf_sentinel_energy_kwh{job=~\"$job\", namespace=~\"$namespace\"}",
+          "expr": "rate(perf_sentinel_scored_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
           "refId": "A",
-          "legendFormat": "énergie {{instance}}"
+          "legendFormat": "puissance {{instance}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "kwatth",
+          "unit": "kwatt",
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
@@ -1774,8 +1774,8 @@
       }
     },
     {
-      "title": "Carbone par fenêtre de scoring (gCO2e)",
-      "description": "Émissions opérationnelles pour la même fenêtre, sommées sur les régions : l'énergie multipliée par l'intensité carbone du réseau local. Quand une source d'hôte de base de données ou de broker est configurée, elles comprennent aussi le carbone de ces hôtes compté dans les totaux.\n\nElles bougent avec la charge mais aussi avec le réseau électrique, donc une baisse peut être une heure plus propre plutôt qu'une optimisation. Les émissions de fabrication sont exclues.",
+      "title": "Carbone par heure (gCO2e/h)",
+      "description": "Émissions opérationnelles par heure, le débit du compteur `perf_sentinel_scored_carbon_gco2_total`, sommées sur les régions : l'énergie multipliée par l'intensité carbone du réseau local. Quand une source d'hôte de base de données ou de broker est configurée, elles comprennent aussi le carbone de ces hôtes compté dans les totaux.\n\nElles bougent avec la charge mais aussi avec le réseau électrique, donc une baisse peut être une heure plus propre plutôt qu'une optimisation. Les émissions de fabrication sont exclues.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1789,14 +1789,14 @@
       },
       "targets": [
         {
-          "expr": "perf_sentinel_carbon_gco2{job=~\"$job\", namespace=~\"$namespace\"}",
+          "expr": "rate(perf_sentinel_scored_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
           "refId": "A",
           "legendFormat": "carbone {{instance}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "suffix: gCO2e",
+          "unit": "suffix: gCO2e/h",
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
@@ -2006,6 +2006,6 @@
   "timezone": "browser",
   "title": "perf-sentinel overview",
   "uid": "perf-sentinel-overview",
-  "version": 10,
+  "version": 11,
   "refresh": "1m"
 }

@@ -65,8 +65,8 @@ t("title", "Energy ingestion freshness", "Fraîcheur des relevés d'énergie")
 t("title", "Runtime headroom and shedding", "Marge d'exécution et délestage")
 t("title", "OTLP span intake (received vs filtered)", "Admission des spans OTLP (reçus vs filtrés)")
 t("title", "Report exports rate", "Débit d'exports de rapport")
-t("title", "Energy per scoring window (kWh)", "Énergie par fenêtre de scoring (kWh)")
-t("title", "Carbon per scoring window (gCO2e)", "Carbone par fenêtre de scoring (gCO2e)")
+t("title", "Average power (W)", "Puissance moyenne (W)")
+t("title", "Carbon per hour (gCO2e/h)", "Carbone par heure (gCO2e/h)")
 t("title", "Energy over the selected range (kWh)", "Énergie sur la plage choisie (kWh)")
 t("title", "Carbon over the selected range (gCO2e)", "Carbone sur la plage choisie (gCO2e)")
 
@@ -148,8 +148,8 @@ t("description",
   "rate(perf_sentinel_export_report_requests_total). Suit la fréquence d'appel de /api/export/report (instantanés de CI, tri en dev, passage du rapport du daemon vers une analyse locale).")
 
 t("description",
-  "Electricity attributed to the analysed workload for the most recent scoring window. Depending on configuration it is measured (an agent reading real power) or modelled from operation counts, the energy source line of `query monitor` and the HTML report says which. When a database or broker host source is configured, it includes their host energy counted in the totals.\n\nPer-service and per-region detail is kept off /metrics and lives in the query monitor.",
-  "Électricité attribuée à la charge analysée pour la dernière fenêtre de scoring. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Quand une source d'hôte de base de données ou de broker est configurée, elle comprend aussi l'énergie de ces hôtes comptée dans les totaux.\n\nLe détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.")
+  "Average electrical power attributed to the analysed workload, the rate of the energy counter `perf_sentinel_scored_energy_kwh_total`. Depending on configuration it is measured (an agent reading real power) or modelled from operation counts, the energy source line of `query monitor` and the HTML report says which. When a database or broker host source is configured, it includes their host power counted in the totals.\n\nScoring windows do not all last the same time, so the per-window gauge `perf_sentinel_energy_kwh` reads as energy per batch, not as power: this panel derives it from the counter instead. Per-service and per-region detail is kept off /metrics and lives in the query monitor.",
+  "Puissance électrique moyenne attribuée à la charge analysée, le débit du compteur d'énergie `perf_sentinel_scored_energy_kwh_total`. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Quand une source d'hôte de base de données ou de broker est configurée, elle comprend aussi la puissance de ces hôtes comptée dans les totaux.\n\nLes fenêtres de scoring n'ont pas toutes la même durée, donc la jauge par fenêtre `perf_sentinel_energy_kwh` se lit comme une énergie par lot, pas comme une puissance : ce panneau la dérive plutôt du compteur. Le détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.")
 
 
 
@@ -168,7 +168,7 @@ t("legendFormat", "avoidable ops/s", "ops évitables/s")
 t("legendFormat", "ingested ops", "ops ingérées")
 t("legendFormat", "waste ratio", "ratio de gaspillage")
 t("legendFormat", "events/s {{instance}}", "événements/s {{instance}}")
-t("legendFormat", "energy {{instance}}", "énergie {{instance}}")
+t("legendFormat", "power {{instance}}", "puissance {{instance}}")
 t("legendFormat", "carbon {{instance}}", "carbone {{instance}}")
 
 # --- 0.19.0: grouping label, and the panels added upstream after it ---
@@ -418,8 +418,8 @@ f("text", "Serialized calls", "Appels sérialisés")
 
 
 t("description",
-  "Operational emissions for the same window, summed across regions: energy multiplied by the local grid intensity. When a database or broker host source is configured, it includes their host carbon counted in the totals.\n\nIt moves with the grid as well as the workload, so a drop can be a cleaner hour rather than an optimisation. Manufacturing emissions are excluded.",
-  "Émissions opérationnelles pour la même fenêtre, sommées sur les régions : l'énergie multipliée par l'intensité carbone du réseau local. Quand une source d'hôte de base de données ou de broker est configurée, elles comprennent aussi le carbone de ces hôtes compté dans les totaux.\n\nElles bougent avec la charge mais aussi avec le réseau électrique, donc une baisse peut être une heure plus propre plutôt qu'une optimisation. Les émissions de fabrication sont exclues.")
+  "Operational emissions per hour, the rate of the counter `perf_sentinel_scored_carbon_gco2_total`, summed across regions: energy multiplied by the local grid intensity. When a database or broker host source is configured, it includes their host carbon counted in the totals.\n\nIt moves with the grid as well as the workload, so a drop can be a cleaner hour rather than an optimisation. Manufacturing emissions are excluded.",
+  "Émissions opérationnelles par heure, le débit du compteur `perf_sentinel_scored_carbon_gco2_total`, sommées sur les régions : l'énergie multipliée par l'intensité carbone du réseau local. Quand une source d'hôte de base de données ou de broker est configurée, elles comprennent aussi le carbone de ces hôtes compté dans les totaux.\n\nElles bougent avec la charge mais aussi avec le réseau électrique, donc une baisse peut être une heure plus propre plutôt qu'une optimisation. Les émissions de fabrication sont exclues.")
 
 f("description",
   "The findings frozen for the incident selected above, from GET /api/incidents?id=, whatever page the Incidents table shows. A daemon before 0.24.0 ignores id and answers the Incidents table's page, where a clicked row is found too. Empty until a row is clicked or Incident holds an id. The time picker does not apply.\n\nOne row per signature folded over the incident's window alone, so Traces and First seen describe the window, not the whole ring. The settle pass can add rows and raise counts, never remove. A First seen after Started fired only after the restart.\n\nSent with [daemon] read_api_key as X-API-Key. Est. impact, Suggestion, Fix for, Code and the column order follow the Findings table above.",

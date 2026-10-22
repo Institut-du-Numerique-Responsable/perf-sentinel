@@ -1740,8 +1740,8 @@
       }
     },
     {
-      "title": "Energy per scoring window (kWh)",
-      "description": "Electricity attributed to the analysed workload for the most recent scoring window. Depending on configuration it is measured (an agent reading real power) or modelled from operation counts, the energy source line of `query monitor` and the HTML report says which. When a database or broker host source is configured, it includes their host energy counted in the totals.\n\nPer-service and per-region detail is kept off /metrics and lives in the query monitor.",
+      "title": "Average power (W)",
+      "description": "Average electrical power attributed to the analysed workload, the rate of the energy counter `perf_sentinel_scored_energy_kwh_total`. Depending on configuration it is measured (an agent reading real power) or modelled from operation counts, the energy source line of `query monitor` and the HTML report says which. When a database or broker host source is configured, it includes their host power counted in the totals.\n\nScoring windows do not all last the same time, so the per-window gauge `perf_sentinel_energy_kwh` reads as energy per batch, not as power: this panel derives it from the counter instead. Per-service and per-region detail is kept off /metrics and lives in the query monitor.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1755,14 +1755,14 @@
       },
       "targets": [
         {
-          "expr": "perf_sentinel_energy_kwh{job=~\"$job\", namespace=~\"$namespace\"}",
+          "expr": "rate(perf_sentinel_scored_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
           "refId": "A",
-          "legendFormat": "energy {{instance}}"
+          "legendFormat": "power {{instance}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "kwatth",
+          "unit": "kwatt",
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
@@ -1774,8 +1774,8 @@
       }
     },
     {
-      "title": "Carbon per scoring window (gCO2e)",
-      "description": "Operational emissions for the same window, summed across regions: energy multiplied by the local grid intensity. When a database or broker host source is configured, it includes their host carbon counted in the totals.\n\nIt moves with the grid as well as the workload, so a drop can be a cleaner hour rather than an optimisation. Manufacturing emissions are excluded.",
+      "title": "Carbon per hour (gCO2e/h)",
+      "description": "Operational emissions per hour, the rate of the counter `perf_sentinel_scored_carbon_gco2_total`, summed across regions: energy multiplied by the local grid intensity. When a database or broker host source is configured, it includes their host carbon counted in the totals.\n\nIt moves with the grid as well as the workload, so a drop can be a cleaner hour rather than an optimisation. Manufacturing emissions are excluded.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1789,14 +1789,14 @@
       },
       "targets": [
         {
-          "expr": "perf_sentinel_carbon_gco2{job=~\"$job\", namespace=~\"$namespace\"}",
+          "expr": "rate(perf_sentinel_scored_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
           "refId": "A",
           "legendFormat": "carbon {{instance}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "suffix: gCO2e",
+          "unit": "suffix: gCO2e/h",
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
@@ -2006,6 +2006,6 @@
   "timezone": "browser",
   "title": "perf-sentinel overview",
   "uid": "perf-sentinel-overview",
-  "version": 10,
+  "version": 11,
   "refresh": "1m"
 }

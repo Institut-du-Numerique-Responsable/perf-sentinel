@@ -6,6 +6,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Changed
 
+- The `Energy per scoring window (kWh)` and `Carbon per scoring window (gCO2e)` panels of `examples/grafana-dashboard.json` become `Average power (W)` and `Carbon per hour (gCO2e/h)`, the rates of `perf_sentinel_scored_energy_kwh_total` and `perf_sentinel_scored_carbon_gco2_total` times 3600. Scoring windows do not all last the same time, so the per-window gauges plotted an energy per batch that read like a power: about 0.5 Wh every 15 s looked like 0.5 kW. The gauges stay on `/metrics`, and the French dashboard follows.
 - The official public example disclosure, `docs/schemas/examples/example-official-public-G2.json`, moves to schema `perf-sentinel-report/v1.8` and perf-sentinel 0.32.0, with the `binary_hash` of the published 0.32.0 `perf-sentinel-linux-amd64` binary and a rebaked `content_hash`. The sample disclosure the website shows is signed from this file.
 
 ## [0.32.0] - 2026-10-21
