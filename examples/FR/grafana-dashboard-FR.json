@@ -115,7 +115,7 @@
     },
     {
       "title": "Compatibilité",
-      "description": "Indique si le daemon qui alimente ce dashboard est assez récent pour ses panneaux. La vérification repose sur la présence de deux métriques dont dépendent les panneaux, et non sur un numéro de version, parce qu'aucune métrique perf-sentinel n'en porte.\n\nLa métrique `perf_sentinel_incidents_total` est apparue en 0.20.0 et `perf_sentinel_analysis_service_overflow_total` en 0.18.0. Les deux sont publiées dès le démarrage du daemon, quelle que soit la configuration, donc leur absence indique l'âge du binaire. Si une règle de relabel retire l'une des deux au relevé, le daemon apparaît ici comme ancien.\n\nPartiellement compatible veut dire que 'Silence des services' reste vide. Non compatible veut dire que les sélecteurs Service et Namespace des services proposent des noms que les panneaux de findings ne peuvent pas prendre en compte, si bien qu'une vue filtrée donne l'impression d'un service sans problème.\n\nDes panneaux vides sur un daemon à jour viennent de la configuration, pas de l'âge : `[green] enabled = false` rend muets le ratio de gaspillage et les compteurs d'opérations évitables, et `[daemon] per_service_labels = false` ou `per_grouping_labels = false` vident les deux sélecteurs.",
+      "description": "Indique si le daemon qui alimente ce dashboard est assez récent pour ses panneaux. La vérification repose sur la présence de trois métriques dont dépendent les panneaux, et non sur un numéro de version, parce qu'aucune métrique perf-sentinel n'en porte.\n\nLa métrique `perf_sentinel_scored_energy_kwh_total` est apparue en 0.32.0, `perf_sentinel_incidents_total` en 0.20.0 et `perf_sentinel_analysis_service_overflow_total` en 0.18.0. Les trois sont publiées dès le démarrage du daemon, quelle que soit la configuration, donc leur absence indique l'âge du binaire. Si une règle de relabel retire l'une des trois au relevé, le daemon apparaît ici comme ancien.\n\nPartiellement compatible veut dire que la puissance moyenne, le carbone par heure et les deux totaux sur la plage restent vides (avant 0.32.0), ainsi que 'Silence des services' (avant 0.20.0). Non compatible veut dire que les sélecteurs Service et Namespace des services proposent des noms que les panneaux de findings ne peuvent pas prendre en compte, si bien qu'une vue filtrée donne l'impression d'un service sans problème.\n\nDes panneaux vides sur un daemon à jour viennent de la configuration, pas de l'âge : `[green] enabled = false` rend muets le ratio de gaspillage et les compteurs d'opérations évitables, et `[daemon] per_service_labels = false` ou `per_grouping_labels = false` vident les deux sélecteurs.",
       "type": "stat",
       "gridPos": {
         "h": 8,
@@ -129,7 +129,7 @@
       },
       "targets": [
         {
-          "expr": "(absent_over_time(perf_sentinel_incidents_total{job=~\"$job\", namespace=~\"$namespace\"}[10m]) or vector(0))\n+ (absent_over_time(perf_sentinel_analysis_service_overflow_total{job=~\"$job\", namespace=~\"$namespace\"}[10m]) or vector(0))\nand on() (count(up{job=~\"$job\", namespace=~\"$namespace\"} == 1) > 0)",
+          "expr": "(absent_over_time(perf_sentinel_incidents_total{job=~\"$job\", namespace=~\"$namespace\"}[10m]) or vector(0))\n+ (absent_over_time(perf_sentinel_analysis_service_overflow_total{job=~\"$job\", namespace=~\"$namespace\"}[10m]) or vector(0))\n+ (absent_over_time(perf_sentinel_scored_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[10m]) or vector(0))\nand on() (count(up{job=~\"$job\", namespace=~\"$namespace\"} == 1) > 0)",
           "refId": "A",
           "instant": true,
           "legendFormat": "Compatibilité du dashboard"
@@ -157,9 +157,14 @@
                   "index": 1
                 },
                 "2": {
+                  "text": "Partiellement compatible",
+                  "color": "orange",
+                  "index": 2
+                },
+                "3": {
                   "text": "Non compatible",
                   "color": "red",
-                  "index": 2
+                  "index": 3
                 }
               }
             }
@@ -181,7 +186,7 @@
               },
               {
                 "color": "red",
-                "value": 2
+                "value": 3
               }
             ]
           },
@@ -1741,7 +1746,7 @@
     },
     {
       "title": "Puissance moyenne (W)",
-      "description": "Puissance électrique moyenne attribuée à la charge analysée, le débit du compteur d'énergie `perf_sentinel_scored_energy_kwh_total`. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Quand une source d'hôte de base de données ou de broker est configurée, elle comprend aussi la puissance de ces hôtes comptée dans les totaux.\n\nLes fenêtres de scoring n'ont pas toutes la même durée, donc la jauge par fenêtre `perf_sentinel_energy_kwh` se lit comme une énergie par lot, pas comme une puissance : ce panneau la dérive plutôt du compteur. Le détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.",
+      "description": "Puissance électrique moyenne attribuée à la charge analysée, le débit du compteur d'énergie `perf_sentinel_scored_energy_kwh_total`. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Elle couvre l'hôte de chaque service pour les opérations qu'il émet (CPU, mémoire, pile réseau), jamais la base de données, le broker ou le service qu'il appelle : leurs hôtes n'y entrent que si une source d'hôte de base de données ou de broker est configurée. Les serveurs au repos et le stockage n'y sont jamais.\n\nLes fenêtres de scoring n'ont pas toutes la même durée, donc la jauge par fenêtre `perf_sentinel_energy_kwh` se lit comme une énergie par lot, pas comme une puissance : ce panneau la dérive plutôt du compteur. Le détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1809,7 +1814,7 @@
     },
     {
       "title": "Énergie sur la plage choisie (kWh)",
-      "description": "Électricité attribuée à la charge analysée. Quand une source d'hôte de base de données ou de broker est configurée, elle comprend aussi l'énergie de ces hôtes comptée dans les totaux. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner le panneau par fenêtre ci-dessus compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.",
+      "description": "Électricité attribuée à la charge analysée. Même périmètre que la puissance moyenne : l'hôte de chaque service, les hôtes de base de données et de broker seulement si une source d'hôte est configurée, jamais les serveurs au repos ni le stockage. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner la jauge par fenêtre `perf_sentinel_energy_kwh` compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.",
       "type": "stat",
       "gridPos": {
         "h": 6,
@@ -1837,7 +1842,7 @@
     },
     {
       "title": "Carbone sur la plage choisie (gCO2e)",
-      "description": "Carbone opérationnel de la charge analysée, hors carbone incorporé et transport réseau. Quand une source d'hôte de base de données ou de broker est configurée, il comprend aussi le carbone de ces hôtes compté dans les totaux. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner le panneau par fenêtre ci-dessus compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.",
+      "description": "Carbone opérationnel de la charge analysée, hors carbone incorporé et transport réseau. Quand une source d'hôte de base de données ou de broker est configurée, il comprend aussi le carbone de ces hôtes compté dans les totaux. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner la jauge par fenêtre `perf_sentinel_carbon_gco2` compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.",
       "type": "stat",
       "gridPos": {
         "h": 6,
