@@ -680,3 +680,19 @@ v0.31.4	164bf0f	2026-10-19	PASS
 # daemon manifest. Not run: the hub-*, limit-*, failure-mode-*, template-*
 # and ci-e2e-* families, pg-stat, mysql-stat and sql-backtick-redaction.
 v0.32.0	96fd3cd	2026-10-21	PASS
+# v0.33.0, 2026-10-23. Targeted pass on the release tree. Local release
+# binary perf-sentinel 0.33.0 built from feat/static-host-groups at b950c7e1
+# ([[green.database_static.hosts]] and [[green.broker_static.hosts]] groups of
+# hosts of different sizes). New self-contained database-host-groups, 12/12:
+# the six load refusals and a section without hosts still loading, both groups
+# live at their summed SPECpower envelope (25.4 W against 25.47 W), the reader
+# silenced to an empty vector billing writer live plus reader ceiling
+# (26.7 W against 26.75 W, two ceilings would read 33.2 W) with the age gauge
+# on the silent group, the reader back with the outage billed once (1058 J
+# against 1098 J, 1550 J if stacked), and broker groups at their envelope.
+# Also green: config-fragments, alumet-db-waste (its G-html check moved to
+# wasteScope(), which made it skip since 0.32.0), broker-messaging-waste,
+# alumet-conformance and disclose. No cluster: every scenario run is
+# self-contained. Not run: the cluster scenarios, the hub-*, limit-*,
+# failure-mode-*, template-* and ci-e2e-* families.
+v0.33.0	6349f6f	2026-10-23	PASS
