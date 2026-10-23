@@ -687,6 +687,9 @@ struct ConfigResponse {
     /// `[daemon] per_grouping_labels`: whether the same series and the
     /// per-service I/O counters carry a `grouping` label (since 0.19.0).
     per_grouping_labels: bool,
+    /// `[daemon] findings_stdout`: whether each finding is also written to
+    /// stdout as one NDJSON line.
+    findings_stdout: bool,
     api_enabled: bool,
     /// True when both TLS cert and key paths are set (paths themselves
     /// never exposed).
@@ -735,6 +738,7 @@ async fn handle_config(State(state): State<Arc<QueryApiState>>) -> Json<ConfigRe
         memory_high_water_pct: d.memory_high_water_pct,
         per_service_labels: d.per_service_labels,
         per_grouping_labels: d.per_grouping_labels,
+        findings_stdout: d.findings_stdout,
         api_enabled: d.api_enabled,
         tls_configured: d.tls.cert_path.is_some() && d.tls.key_path.is_some(),
         ack_enabled: d.ack.enabled,

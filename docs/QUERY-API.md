@@ -369,7 +369,7 @@ startup.
 `max_events_per_trace`, `max_payload_size`, `environment`,
 `max_retained_findings`, `max_export_findings`,
 `max_retained_traces`, `memory_high_water_pct`, `ingest_queue_capacity`,
-`analysis_queue_capacity`, `per_service_labels`, `per_grouping_labels`, `api_enabled`), the summarized sub-systems
+`analysis_queue_capacity`, `per_service_labels`, `per_grouping_labels`, `findings_stdout`, `api_enabled`), the summarized sub-systems
 (`tls_configured`, `ack_enabled`, `ack_api_key_set`, `read_api_key_set`,
 `incidents_enabled`, `hub_export_enabled`, `cors_allowed_origins`, `archive_configured`), and the correlation
 block (`correlation_enabled`, `correlation_window_ms`,

@@ -34,6 +34,7 @@ type TraceSourceEndpointGroups<T> = HashMap<String, HashMap<Arc<str>, HashMap<St
 /// Config slice the main event loop needs, the values that are pulled out
 /// of `Config` once at startup and never change.
 #[derive(Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)] // independent [daemon] toggles, not a state machine
 pub(super) struct EventLoopConfig {
     pub(super) green_enabled: bool,
     pub(super) sampling_rate: f64,
@@ -55,6 +56,9 @@ pub(super) struct EventLoopConfig {
     /// Whether the same series and the per-service I/O counters carry a
     /// `grouping` label. From `[daemon] per_grouping_labels`.
     pub(super) per_grouping_labels: bool,
+    /// Whether each finding is also written to stdout as one NDJSON line.
+    /// From `[daemon] findings_stdout`.
+    pub(super) findings_stdout: bool,
 }
 
 /// Bundle of handles aborted on shutdown (SIGINT, or SIGTERM on Unix).
@@ -146,11 +150,13 @@ impl AnalysisBatch {
 /// Owned/`Arc` state the analysis worker needs. Everything crossing the
 /// task boundary is owned or shared via `Arc` so the spawned worker is
 /// `'static`. Mirrors the borrowed fields of [`ProcessTracesCtx`].
+#[allow(clippy::struct_excessive_bools)] // independent [daemon] toggles, not a state machine
 struct AnalysisWorkerCtx {
     detect_config: DetectConfig,
     green_enabled: bool,
     per_service_labels: bool,
     per_grouping_labels: bool,
+    findings_stdout: bool,
     confidence: Confidence,
     metrics: Arc<MetricsState>,
     findings_store: Arc<findings_store::FindingsStore>,
@@ -204,6 +210,7 @@ pub(super) async fn run_event_loop(
             green_enabled: loop_cfg.green_enabled,
             per_service_labels: loop_cfg.per_service_labels,
             per_grouping_labels: loop_cfg.per_grouping_labels,
+            findings_stdout: loop_cfg.findings_stdout,
             confidence: loop_cfg.confidence,
             metrics: metrics.clone(),
             findings_store,
@@ -355,6 +362,7 @@ async fn run_analysis_worker(mut work_rx: mpsc::Receiver<AnalysisBatch>, wctx: A
             ProcessTracesCtx {
                 detect_config: &wctx.detect_config,
                 green_enabled: wctx.green_enabled,
+                findings_stdout: wctx.findings_stdout,
                 service_meter: &mut service_meter,
                 carbon_ctx: batch.carbon_ctx.as_ref(),
                 metrics: &wctx.metrics,
@@ -1456,13 +1464,14 @@ fn inc_scored(total: &prometheus::Counter, value: f64, parts: [(&prometheus::Cou
 }
 
 /// Update Prometheus counters, gauges, and exemplars, then emit findings
-/// as NDJSON to stdout.
+/// as NDJSON to stdout unless `findings_stdout` is off.
 fn emit_findings_and_update_metrics(
     trace_count: usize,
     findings: &[detect::Finding],
     green_summary: &GreenSummary,
     metrics: &MetricsState,
     meter: &mut AnalysisServiceMeter,
+    findings_stdout: bool,
 ) {
     use std::io::Write;
 
@@ -1565,7 +1574,7 @@ fn emit_findings_and_update_metrics(
                 grouping_label,
             ])
             .inc();
-        if serde_json::to_writer(&mut lock, finding).is_ok() {
+        if findings_stdout && serde_json::to_writer(&mut lock, finding).is_ok() {
             let _ = writeln!(lock);
         }
     }
@@ -1653,6 +1662,7 @@ fn score_batch(
 struct ProcessTracesCtx<'a> {
     detect_config: &'a DetectConfig,
     green_enabled: bool,
+    findings_stdout: bool,
     service_meter: &'a mut AnalysisServiceMeter,
     carbon_ctx: &'a score::carbon::CarbonContext,
     metrics: &'a MetricsState,
@@ -1817,6 +1827,7 @@ async fn process_traces(
         &green_summary,
         ctx.metrics,
         ctx.service_meter,
+        ctx.findings_stdout,
     );
 
     if let Some(archive_tx) = ctx.archive_tx {

@@ -874,6 +874,10 @@ fn new_fields_have_correct_defaults() {
     assert!((config.daemon.sampling_rate - 1.0).abs() < f64::EPSILON);
     assert!(config.daemon.per_service_labels);
     assert!(config.daemon.per_grouping_labels);
+    assert!(
+        config.daemon.findings_stdout,
+        "findings reach stdout by default"
+    );
 }
 
 #[test]
@@ -5323,11 +5327,13 @@ fn parse_daemon_metric_label_knobs() {
     let config = load_from_str(
         "[daemon]\n\
          per_service_labels = false\n\
-         per_grouping_labels = false",
+         per_grouping_labels = false\n\
+         findings_stdout = false",
     )
     .unwrap();
     assert!(!config.daemon.per_service_labels);
     assert!(!config.daemon.per_grouping_labels);
+    assert!(!config.daemon.findings_stdout);
 }
 
 #[test]

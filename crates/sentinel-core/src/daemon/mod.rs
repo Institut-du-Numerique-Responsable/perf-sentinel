@@ -422,6 +422,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
             analysis_queue_capacity: config.daemon.analysis_queue_capacity,
             per_service_labels: config.daemon.per_service_labels,
             per_grouping_labels: config.daemon.per_grouping_labels,
+            findings_stdout: config.daemon.findings_stdout,
             waste_sticky_ttl_ms: waste_sticky_ttl_ms(
                 &config,
                 alumet.staleness_ms,

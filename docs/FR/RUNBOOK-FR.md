@@ -115,7 +115,7 @@ parse que `%Y-%m-%dT%H:%M:%SZ`.
 
 L'archivage est **désactivé par défaut** (`archive` non défini). S'il n'a jamais été configuré, rien n'a été écrit et le rejeu Tempo est la seule voie restante.
 
-**Un backend de logs garde chaque détection, si vous collectez déjà les logs du daemon.** Le daemon écrit chaque finding comme une ligne JSON sur stdout et ses propres logs en texte sur stderr, donc un collecteur qui suit le conteneur garde les findings aussi longtemps que ce backend les retient, sans aucun réglage côté Perf Sentinel. Avec Loki, l'étape `json` distingue les deux d'elle-même, parce qu'une ligne de texte échoue à l'analyse :
+**Un backend de logs garde chaque détection, si vous collectez déjà les logs du daemon.** Le daemon écrit chaque finding comme une ligne JSON sur stdout et ses propres logs en texte sur stderr, donc un collecteur qui suit le conteneur garde les findings aussi longtemps que ce backend les retient. `[daemon] findings_stdout = false` coupe la copie sur stdout, pour un daemon dont les findings arrivent déjà dans PerfSentinelHub. Avec Loki, l'étape `json` distingue les deux d'elle-même, parce qu'une ligne de texte échoue à l'analyse :
 
 ```logql
 sum by (signature, type, severity, service) (
