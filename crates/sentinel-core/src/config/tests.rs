@@ -4469,7 +4469,7 @@ fn database_static_host_group_rejections_name_their_rule() {
         ),
         (
             format!("{CLOUD_PROM}{section}{writer}{writer}"),
-            "read the same cpu_query 'avg(a)' twice",
+            "hosts[0] and hosts[1] read the same cpu_query",
         ),
         (
             format!(
@@ -4479,7 +4479,10 @@ fn database_static_host_group_rejections_name_their_rule() {
             ),
             "11000 nodes in all",
         ),
-        (format!("{section}{}", group("nodes = 1\n")), "go together"),
+        (
+            format!("{section}{}", group("nodes = 1\n")),
+            "hosts[0] nodes and instance_type go together",
+        ),
         (
             format!(
                 "{section}{}",

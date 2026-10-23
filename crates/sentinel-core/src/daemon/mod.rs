@@ -349,26 +349,16 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     });
     let detect_config = DetectConfig::from(&config);
     let green_on = config.green.enabled;
-    let database_probes: Vec<_> = host_cpu
-        .database
-        .iter()
-        .map(|slot| slot.as_deref().map(|s| (s, host_cpu.staleness_ms)))
-        .collect();
-    let broker_probes: Vec<_> = host_cpu
-        .broker
-        .iter()
-        .map(|slot| slot.as_deref().map(|s| (s, host_cpu.staleness_ms)))
-        .collect();
     let database_sources = group_sources(
         green_on,
         alumet_db.as_deref().map(|s| (s, alumet.staleness_ms)),
-        &database_probes,
+        (&host_cpu.database, host_cpu.staleness_ms),
         &database_ceilings,
     );
     let broker_sources = group_sources(
         green_on,
         alumet_broker.as_deref().map(|s| (s, alumet.staleness_ms)),
-        &broker_probes,
+        (&host_cpu.broker, host_cpu.staleness_ms),
         &broker_ceilings,
     );
     let energy_sources = EnergySources {
@@ -493,13 +483,14 @@ fn declared_ceilings(
 }
 
 /// One subsystem's sources, one entry per host group, each pairing the
-/// group's live state with its declared ceiling. D6/B6 refuse a `cpu_query`
+/// group's live state with its declared ceiling. `probes` are the groups'
+/// CPU probe states with their shared staleness. D6/B6 refuse a `cpu_query`
 /// next to the Alumet workload, and D10/B10 refuse hosts next to it, so
 /// the Alumet state is the single group's live source when it exists.
 fn group_sources<'a>(
     green_on: bool,
     alumet: Option<(&'a crate::score::alumet::DbEnergyState, u64)>,
-    probes: &[Option<(&'a crate::score::alumet::DbEnergyState, u64)>],
+    (probes, probe_staleness_ms): (&'a [Option<Arc<crate::score::alumet::DbEnergyState>>], u64),
     ceilings: &'a [Option<crate::score::broker_static::StaticBrokerState>],
 ) -> Vec<SubsystemSources<'a>> {
     let groups = ceilings
@@ -508,9 +499,12 @@ fn group_sources<'a>(
         .max(usize::from(alumet.is_some()));
     (0..groups)
         .map(|i| {
-            let live = alumet
-                .filter(|_| i == 0)
-                .or_else(|| probes.get(i).copied().flatten());
+            let live = alumet.filter(|_| i == 0).or_else(|| {
+                probes
+                    .get(i)
+                    .and_then(Option::as_deref)
+                    .map(|s| (s, probe_staleness_ms))
+            });
             host_sources(green_on, live, ceilings.get(i).and_then(Option::as_ref))
         })
         .collect()
@@ -803,14 +797,16 @@ mod tests {
         assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
 
         let live = crate::score::alumet::DbEnergyState::new();
-        let sources = group_sources(true, None, &[Some((&live, 30_000)), None], &ceilings);
+        let probes = [Some(live.clone()), None];
+        let sources = group_sources(true, None, (&probes, 30_000), &ceilings);
         assert_eq!(sources.len(), 2);
         assert!(sources[0].live.is_some() && sources[0].declared.is_some());
+        assert_eq!(sources[0].live_staleness_ms, 30_000);
         assert!(sources[1].live.is_none() && sources[1].declared.is_some());
-        let off = group_sources(false, None, &[Some((&live, 30_000)), None], &ceilings);
+        let off = group_sources(false, None, (&probes, 30_000), &ceilings);
         assert!(off.iter().all(|s| s.live.is_none() && s.declared.is_none()));
         // The Alumet workload is the single group's live source.
-        let alumet = group_sources(true, Some((&live, 10_000)), &[], &[]);
+        let alumet = group_sources(true, Some((&live, 10_000)), (&[], 0), &[]);
         assert_eq!(alumet.len(), 1);
         assert_eq!(alumet[0].live_staleness_ms, 10_000);
     }

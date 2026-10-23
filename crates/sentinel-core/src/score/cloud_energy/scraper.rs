@@ -433,7 +433,7 @@ async fn fetch_host_probes(
     probes: &mut [HostProbe],
     client: &HttpClient,
     uri: &hyper::Uri,
-    auth: Option<&AuthHeader>,
+    auth: Option<&Arc<AuthHeader>>,
     metrics: &MetricsState,
 ) -> Vec<Option<f64>> {
     let mut set = tokio::task::JoinSet::new();
@@ -447,7 +447,7 @@ async fn fetch_host_probes(
         set.spawn(async move {
             (
                 i,
-                fetch_cpu_percent(&client, &uri, &query, auth.as_ref()).await,
+                fetch_cpu_percent(&client, &uri, &query, auth.as_deref()).await,
             )
         });
     }
@@ -676,7 +676,7 @@ async fn run_cloud_scraper_loop(
         // both at once so a slow endpoint stretches the tick only once.
         let (cpu_readings, probe_cpu) = tokio::join!(
             collect_readings(set, groups.len()),
-            fetch_host_probes(&mut probes, &client, &uri, parsed_auth.as_deref(), &metrics),
+            fetch_host_probes(&mut probes, &client, &uri, parsed_auth.as_ref(), &metrics),
         );
         warn_multi_series_groups(&groups, &cpu_readings, &mut multi_series_warned);
         let any_success = !cpu_readings.is_empty();

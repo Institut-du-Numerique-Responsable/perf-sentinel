@@ -120,12 +120,15 @@ impl StaticHostsConfig {
         }
         self.hosts
             .iter()
+            // Field by field: `..self.clone()` would copy every group per group.
             .map(|group| Self {
+                placement: self.placement,
                 nodes: group.nodes,
                 instance_type: group.instance_type.clone(),
+                region: self.region.clone(),
                 cpu_query: group.cpu_query.clone(),
+                shared_with: self.shared_with.clone(),
                 hosts: Vec::new(),
-                ..self.clone()
             })
             .collect()
     }

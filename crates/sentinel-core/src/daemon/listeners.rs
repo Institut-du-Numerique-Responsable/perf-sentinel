@@ -855,11 +855,10 @@ pub(super) fn setup_redfish_scraper(
     }
 }
 
-/// The live states the cloud scraper bills from the host CPU queries.
-/// `staleness_ms` is the cloud staleness when a probe runs, 0 otherwise.
 /// The live state of each host group's CPU probe, in
 /// [`crate::score::host_static::StaticHostsConfig::groups`] order, `None`
-/// for a group without `cpu_query`. Empty without `[green.cloud]`.
+/// for a group without `cpu_query`, empty without `[green.cloud]`.
+/// `staleness_ms` is the cloud staleness when a probe runs, 0 otherwise.
 #[derive(Default)]
 pub(super) struct HostCpuStates {
     pub(super) database: Vec<Option<Arc<score::alumet::DbEnergyState>>>,

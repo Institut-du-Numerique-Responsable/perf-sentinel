@@ -308,13 +308,18 @@ fn validate_host_groups(
             "{section} hosts count {total} nodes in all, at most 10000"
         ));
     }
-    let mut seen = HashSet::new();
-    for query in cfg.hosts.iter().filter_map(|g| g.cpu_query.as_deref()) {
-        if !seen.insert(query.trim()) {
+    let mut seen = HashMap::new();
+    for (i, group) in cfg.hosts.iter().enumerate() {
+        if group.nodes.is_none() || group.instance_type.is_none() {
             return Err(format!(
-                "{section} hosts read the same cpu_query '{}' twice: each group reads the \
-                 CPU of its own hosts",
-                query.trim()
+                "{section} hosts[{i}] nodes and instance_type go together: a group sets both"
+            ));
+        }
+        // Indices, not the query: it is not yet checked to be printable (D6).
+        if let Some(first) = group.cpu_query.as_deref().and_then(|q| seen.insert(q, i)) {
+            return Err(format!(
+                "{section} hosts[{first}] and hosts[{i}] read the same cpu_query: each group \
+                 reads the CPU of its own hosts"
             ));
         }
     }
@@ -364,13 +369,13 @@ fn validate_shared_host(
 /// against `[green.cloud]`, never one the application side already reads.
 fn validate_host_cpu_query(
     subsystem: Subsystem,
+    section: &str,
     cfg: &StaticHostsConfig,
     green: &GreenConfig,
 ) -> Result<(), String> {
     let Some(query) = cfg.cpu_query.as_deref().map(str::trim) else {
         return Ok(());
     };
-    let section = subsystem.section();
     if query.is_empty() || query.chars().count() > 4096 || has_control_char(query) {
         return Err(format!(
             "{section} cpu_query must be 1-4096 chars and free of control characters"
@@ -742,7 +747,7 @@ impl Config {
                         validate_shared_host(subsystem, group, alumet.is_some())?;
                     }
                 }
-                validate_host_cpu_query(subsystem, group, &self.green)?;
+                validate_host_cpu_query(subsystem, &label, group, &self.green)?;
                 validate_shared_with(subsystem, group, &self.green)?;
             }
         }
