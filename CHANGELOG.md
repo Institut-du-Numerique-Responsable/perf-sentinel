@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-10-23
+
+### Changed
+
+- Dependency updates: `serde_json` 1.0.154, `uuid` 1.29.0, `skrifa` 0.49.0, `lru` 0.19.0, `toml` 1.1.8, `opentelemetry-proto` 0.33.1, `rustls` 0.23.46, `webpki-roots` 1.0.11, `thiserror` 2.0.21, `sha2` 0.11.1, `arc-swap` 1.9.3 and `libc` 0.2.191, plus `proptest` 1.12.0 and `tokio` 1.54.1 for the tests. No behavior changes. `krilla` still draws with `skrifa` 0.42.1 and `ratatui` still uses `lru` 0.18, so both crates now ship in two versions.
+
 ## [0.34.0] - 2026-10-23
 
 ### Added

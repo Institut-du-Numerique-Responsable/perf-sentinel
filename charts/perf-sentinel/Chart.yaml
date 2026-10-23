@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.34.0
-appVersion: "0.34.0"
+version: 0.34.1
+appVersion: "0.34.1"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -37,10 +37,10 @@ annotations:
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
     - kind: changed
-      description: "appVersion 0.34.0. The daemon config takes [daemon] findings_stdout, default true. false stops the NDJSON copy of every finding on stdout, and the daemon warns at startup when nothing else keeps the findings. A config without the key behaves as before. No values.yaml key is added or removed, and no template changes."
+      description: "appVersion 0.34.1. Dependency updates only, no daemon behavior changes. No values.yaml key is added or removed, and no template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.34.0
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.34.1
       platforms:
         - linux/amd64
         - linux/arm64
