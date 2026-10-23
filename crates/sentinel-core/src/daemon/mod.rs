@@ -2,7 +2,8 @@
 //!
 //! Runs an event loop that receives spans from multiple sources (OTLP gRPC,
 //! OTLP HTTP, JSON socket), accumulates them in a `TraceWindow`, and emits
-//! findings as NDJSON on stdout when traces expire.
+//! findings as NDJSON on stdout when traces expire, unless
+//! `[daemon] findings_stdout` is off.
 
 pub mod ack;
 pub mod ack_toml_state;

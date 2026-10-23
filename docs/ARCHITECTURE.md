@@ -125,7 +125,7 @@ JSON unix socket       /                               |
   share the trace LRU and TTL and never count as I/O events.
 - Traces are evicted when the LRU cache is full (`max_active_traces`) or when TTL expires (`trace_ttl_ms`).
 - On eviction, the trace is analyzed through detect and score stages.
-- Findings are emitted as newline-delimited JSON to stdout.
+- Findings are emitted as newline-delimited JSON to stdout, unless `[daemon] findings_stdout = false`.
 - Prometheus metrics are exposed on the same HTTP port (4318) at `/metrics`.
 
 ### Daemon query API

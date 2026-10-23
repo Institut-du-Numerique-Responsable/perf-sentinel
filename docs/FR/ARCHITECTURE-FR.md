@@ -127,7 +127,7 @@ Socket unix JSON       /                               |
   jamais comme événements I/O.
 - Les traces sont évincées lorsque le cache LRU est plein (`max_active_traces`) ou lorsque le TTL expire (`trace_ttl_ms`).
 - À l'éviction, la trace est analysée via les étapes detect et score.
-- Les findings sont émis en JSON délimité par des sauts de ligne sur stdout.
+- Les findings sont émis en JSON délimité par des sauts de ligne sur stdout, sauf avec `[daemon] findings_stdout = false`.
 - Les métriques Prometheus sont exposées sur le même port HTTP (4318) à `/metrics`.
 
 ### API de requête du daemon

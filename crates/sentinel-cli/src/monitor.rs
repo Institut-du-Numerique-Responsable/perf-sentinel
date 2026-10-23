@@ -1610,7 +1610,7 @@ fn push_subsystem_rows(
             lines,
             "findings_stdout",
             &yes_no(enabled),
-            "yes",
+            &yes_no(d.findings_stdout),
             "Whether each finding is also written to stdout as one NDJSON line, for a log backend that tails the container. Off keeps them in the query API, the archive and the Hub export only.",
         );
     }

@@ -311,6 +311,8 @@ for finding in &findings {
 
 This format is compatible with log aggregation tools (Loki, ELK) that consume line-delimited JSON. Each line is a complete JSON object that can be parsed independently.
 
+`[daemon] findings_stdout = false` skips this write and the stdout lock with it. The metrics, the ring buffer, the archive and the Hub export still receive every finding.
+
 ### Cumulative waste ratio
 
 The Prometheus `io_waste_ratio` gauge is computed from cumulative counters:

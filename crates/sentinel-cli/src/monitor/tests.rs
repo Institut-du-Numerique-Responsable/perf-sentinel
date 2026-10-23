@@ -690,6 +690,27 @@ fn config_says_the_hub_keeps_what_the_ring_evicts_when_the_export_is_on() {
 }
 
 #[test]
+fn config_flags_findings_stdout_off_and_skips_it_on_an_older_daemon() {
+    let mut snapshot = snapshot_with_warnings(Vec::new());
+    let mut cfg = full_config();
+    cfg.findings_stdout = Some(false);
+    snapshot.config = Some(cfg);
+    let text = line_text(&build_config_lines(Some(&snapshot)));
+    let row = text
+        .lines()
+        .find(|l| l.contains("findings_stdout ="))
+        .expect("findings_stdout row");
+    assert!(row.contains("= no") && row.contains("modified"), "{row}");
+
+    let old: ConfigSlim = serde_json::from_str(r#"{"listen_port":4318}"#).unwrap();
+    assert!(old.findings_stdout.is_none());
+    let mut snapshot = snapshot_with_warnings(Vec::new());
+    snapshot.config = Some(old);
+    let text = line_text(&build_config_lines(Some(&snapshot)));
+    assert!(!text.contains("findings_stdout ="), "{text}");
+}
+
+#[test]
 fn headroom_legend_says_where_the_ring_evictions_go_with_the_export_on() {
     let mut snapshot = snapshot_with_warnings(Vec::new());
     assert!(!hub_export_on(Some(&snapshot)), "no /api/config yet");

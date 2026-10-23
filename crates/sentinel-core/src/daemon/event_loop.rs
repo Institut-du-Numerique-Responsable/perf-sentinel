@@ -1562,8 +1562,7 @@ fn emit_findings_and_update_metrics(
         .collect();
     metrics.record_exemplars_labeled(&labeled, green_summary);
 
-    let stdout = std::io::stdout();
-    let mut lock = stdout.lock();
+    let mut stdout = findings_stdout.then(|| std::io::stdout().lock());
     for (finding, service_label, grouping_label) in &labeled {
         metrics
             .findings_total
@@ -1574,7 +1573,9 @@ fn emit_findings_and_update_metrics(
                 grouping_label,
             ])
             .inc();
-        if findings_stdout && serde_json::to_writer(&mut lock, finding).is_ok() {
+        if let Some(lock) = stdout.as_mut()
+            && serde_json::to_writer(&mut *lock, finding).is_ok()
+        {
             let _ = writeln!(lock);
         }
     }
