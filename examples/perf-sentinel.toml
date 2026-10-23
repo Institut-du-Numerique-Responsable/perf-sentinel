@@ -234,7 +234,9 @@ per_grouping_labels = true         # default true
 # Write each finding to stdout as one NDJSON line, for a log backend that
 # tails the container. false keeps them in the query API, the archive and
 # the Hub export only, and leaves the container log to the daemon's own
-# messages on stderr.
+# messages on stderr. With false and neither [daemon.hub_export] nor
+# [daemon.archive], the daemon warns at startup that nothing lasting keeps
+# the findings.
 findings_stdout = true             # default true
 
 # Stamped on every finding as `confidence`, read by downstream tooling and
@@ -402,7 +404,9 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 
 # --- /!\ Batched export to PerfSentinelHub /!\ ----------------------------
 # Coalesces repeated signatures and never blocks detection. Mount the API
-# key as a Secret-backed file. Never put its value in this TOML file.
+# key as a Secret-backed file. Never put its value in this TOML file. Once
+# the Hub receives the findings, `findings_stdout = false` above drops the
+# stdout copy nothing else reads.
 # [daemon.hub_export]
 # enabled = true
 # endpoint = "https://hub.example.com/api/import/findings"
