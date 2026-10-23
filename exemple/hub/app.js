@@ -3796,7 +3796,7 @@
             section.appendChild(unknownRun());
             return section;
         }
-        if (state.runReadFailures > 0) section.appendChild(hubUnreachableBanner());
+        if (state.runReadFailures > 0) section.appendChild(runUnreachableBanner());
         if (!run || run.id !== id) {
             section.appendChild(el('div', {class: 'card skeleton', style: 'height:220px;margin-top:16px'}));
             return section;
@@ -4323,7 +4323,7 @@
     }
 
     /** Said while reads of this run fail for a reason other than its absence. */
-    function hubUnreachableBanner() {
+    function runUnreachableBanner() {
         return el('div', {class: 'banner', 'data-tone': 'warn', role: 'status'}, [
             warningGlyph(16),
             el('p', {text: 'The Hub is not answering. This page keeps what it last read and asks again.'})
@@ -6170,7 +6170,7 @@
         ]);
     }
 
-    function downloadButton(id, name, primary, status) {
+    function disclosureFileButton(id, name, primary, status) {
         const button = el('button', {type: 'button', class: 'pill-button pill-sm' + (primary ? ' pill-primary' : '')},
             [primary ? downloadGlyph() : null, el('span', {text: primary ? 'Download the PDF' : name})]);
         button.addEventListener('click', function () {
@@ -6217,10 +6217,10 @@
     function disclosureCard(item) {
         const status = el('span', {class: 'terminal-status', role: 'status'});
         const actions = [
-            item.files.pdf ? downloadButton(item.id, 'report.pdf', true, status) : null,
-            downloadButton(item.id, 'report.json', false, status),
-            item.files.attestation ? downloadButton(item.id, 'attestation.intoto.jsonl', false, status) : null,
-            item.files.bundle ? downloadButton(item.id, 'bundle.sig', false, status) : null,
+            item.files.pdf ? disclosureFileButton(item.id, 'report.pdf', true, status) : null,
+            disclosureFileButton(item.id, 'report.json', false, status),
+            item.files.attestation ? disclosureFileButton(item.id, 'attestation.intoto.jsonl', false, status) : null,
+            item.files.bundle ? disclosureFileButton(item.id, 'bundle.sig', false, status) : null,
             el('a', {
                 class: 'pill-button pill-sm disc-open',
                 href: '#/disclosures/' + item.id
@@ -6508,7 +6508,7 @@
             return el('tr', {}, [
                 el('td', {class: 'table-strong', text: file[0]}),
                 el('td', {class: 'table-mono', text: file[1]}),
-                el('td', {'data-align': 'right'}, [downloadButton(item.id, file[0], false, status)])
+                el('td', {'data-align': 'right'}, [disclosureFileButton(item.id, file[0], false, status)])
             ]);
         });
         return detailPanel('// files', 'Exactly what was published, kept in the Hub\'s database so its backup carries '
@@ -6526,7 +6526,7 @@
         const item = detail.disclosure;
         const rows = detail.share_links.map(function (link) {
             const revoke = manage && link.state === 'active'
-                ? actionButton('Revoke', function () {
+                ? disclosureActionButton('Revoke', function () {
                     return sendDisclosure('/api/disclosures/' + item.id + '/share-links/' + link.id, 'DELETE');
                 }, 'Link revoked.')
                 : null;
@@ -6564,7 +6564,7 @@
         const item = detail.disclosure;
         const rows = detail.deliveries.map(function (delivery) {
             const retry = manage && delivery.state !== 'delivered'
-                ? actionButton('Retry', function () {
+                ? disclosureActionButton('Retry', function () {
                     return sendDisclosure('/api/disclosures/' + item.id + '/deliveries/' + delivery.id + '/retry', 'POST');
                 }, 'Delivery queued again.')
                 : null;
@@ -6612,7 +6612,7 @@
     }
 
     /** A button that runs one write, says what came of it, and reloads the detail. */
-    function actionButton(label, run, done, primary) {
+    function disclosureActionButton(label, run, done, primary) {
         const button = el('button', {
             type: 'button', class: 'pill-button pill-sm' + (primary ? ' pill-primary' : ''),
             text: label
@@ -6637,7 +6637,7 @@
             class: 'disc-reason', rows: '2', maxlength: '500', 'aria-label': 'Reason for the withdrawal',
             placeholder: 'Why, in a sentence: it is kept and sent with the withdrawal.'
         });
-        const submit = actionButton('Withdraw this disclosure', function () {
+        const submit = disclosureActionButton('Withdraw this disclosure', function () {
             if (!reason.value.trim()) return Promise.resolve({
                 ok: false,
                 status: 400,
@@ -6658,9 +6658,9 @@
     function detailActions(detail, manage) {
         const item = detail.disclosure;
         const status = el('span', {class: 'terminal-status', role: 'status'});
-        const buttons = [item.files.pdf ? downloadButton(item.id, 'report.pdf', true, status) : null];
+        const buttons = [item.files.pdf ? disclosureFileButton(item.id, 'report.pdf', true, status) : null];
         if (manage && !item.withdrawn && item.confidentiality !== 'internal') {
-            buttons.push(actionButton('New share link', function () {
+            buttons.push(disclosureActionButton('New share link', function () {
                 return sendDisclosure('/api/disclosures/' + item.id + '/share-links', 'POST', {}).then(function (outcome) {
                     if (outcome.ok) {
                         const base = location.origin + outcome.payload.path;
@@ -6675,7 +6675,7 @@
             }, 'Share link created. Copy it below: it is not shown again.'));
         }
         if (manage && item.pdf !== 'rendered') {
-            buttons.push(actionButton('Render again', function () {
+            buttons.push(disclosureActionButton('Render again', function () {
                 return sendDisclosure('/api/disclosures/' + item.id + '/render', 'POST', {});
             }, 'Rendered again.'));
         }

@@ -150,8 +150,8 @@
         <div data-dc-tpl="270" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 16px;">
           <div data-dc-tpl="271" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: var(--accent); letter-spacing: 0.04em;"><span class="sc-interp">Read this first</span></div>
           <div data-dc-tpl="272" style="display: flex; flex-wrap: wrap; gap: 8px;">
-            <a data-dc-tpl="273" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.32.0" target="_blank" rel="noopener" class="scp5" style="display: inline-flex; align-items: center; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--rust); background: color-mix(in srgb,var(--rust) 12%,transparent); border: 1px solid color-mix(in srgb,var(--rust) 38%,transparent); border-radius: 999px; padding: 6px 12px;"><span class="sc-interp">Perf Sentinel v0.32.0</span></a>
-            <a data-dc-tpl="274" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v0.8.0" target="_blank" rel="noopener" class="scp6" style="display: inline-flex; align-items: center; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--dotnet); background: color-mix(in srgb,var(--dotnet) 12%,transparent); border: 1px solid color-mix(in srgb,var(--dotnet) 38%,transparent); border-radius: 999px; padding: 6px 12px;"><span class="sc-interp">Perf Sentinel Hub v0.8.0</span></a>
+            <a data-dc-tpl="273" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.33.0" target="_blank" rel="noopener" class="scp5" style="display: inline-flex; align-items: center; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--rust); background: color-mix(in srgb,var(--rust) 12%,transparent); border: 1px solid color-mix(in srgb,var(--rust) 38%,transparent); border-radius: 999px; padding: 6px 12px;"><span class="sc-interp">Perf Sentinel v0.33.0</span></a>
+            <a data-dc-tpl="274" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v0.8.1" target="_blank" rel="noopener" class="scp6" style="display: inline-flex; align-items: center; font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 12.5px; color: var(--dotnet); background: color-mix(in srgb,var(--dotnet) 12%,transparent); border: 1px solid color-mix(in srgb,var(--dotnet) 38%,transparent); border-radius: 999px; padding: 6px 12px;"><span class="sc-interp">Perf Sentinel Hub v0.8.1</span></a>
           </div>
         </div>
         <div data-dc-tpl="275" style="display: flex; flex-direction: column; gap: 12px;">
@@ -3218,10 +3218,10 @@ class Component extends DCLogic {
         'perf-sentinel analyze --input traces.json --format sarif > findings.sarif',
       ].map((c, k) => [`ciCmd${k + 1}View`, c.split(' ').flatMap((w, i) => [i ? ' ' : '', React.createElement('span', { key: i, style: { whiteSpace: 'nowrap' } }, w)])])),
       ctaGuide: t.ctaGuide, ctaGuideHref: lang === 'fr' ? '/fr/guide#install' : '/guide#install',
-      psRelLabel: 'Perf Sentinel v' + (this.state.psVersion || '0.32.0'),
-      psRelHref: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v' + (this.state.psVersion || '0.32.0'),
-      hubRelLabel: 'Perf Sentinel Hub v' + (this.state.hubVersion || '0.8.0'),
-      hubRelHref: 'https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v' + (this.state.hubVersion || '0.8.0'),
+      psRelLabel: 'Perf Sentinel v' + (this.state.psVersion || '0.33.0'),
+      psRelHref: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v' + (this.state.psVersion || '0.33.0'),
+      hubRelLabel: 'Perf Sentinel Hub v' + (this.state.hubVersion || '0.8.1'),
+      hubRelHref: 'https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/releases/tag/v' + (this.state.hubVersion || '0.8.1'),
       ftTagline: t.ftTagline, ftColProduct: t.ftColProduct, ftColDocs: t.ftColDocs, ftColProject: t.ftColProject,
       ftDocQuickstart: t.ftDocQuickstart, ftDocCli: t.ftDocCli, ftDocConfig: t.ftDocConfig, ftDocMethod: t.ftDocMethod,
       ftProjLicense: t.ftProjLicense, ftBadgeNote: t.ftBadgeNote, ftBottomLeft: t.ftBottomLeft, ftBottomRight: t.ftBottomRight, inrBy: t.inrBy, inrArt: t.inrArt, inrName: t.inrName, govEyebrow: t.govEyebrow, govTitleA: t.govTitleA, govTitleB: t.govTitleB, govBodyA: t.govBodyA, govBodyB: t.govBodyB, govGh: t.govGh,
