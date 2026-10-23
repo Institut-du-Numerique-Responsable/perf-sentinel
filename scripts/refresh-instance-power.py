@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Regenerate cloud_energy/table_data.rs from CCF coefficients.
+"""
+
+from __future__ import annotationsRegenerate cloud_energy/table_data.rs from CCF coefficients.
 
 Downloads coefficients-{aws,gcp,azure}-use.csv from the
 cloud-carbon-footprint/ccf-coefficients repo and rewrites the generated

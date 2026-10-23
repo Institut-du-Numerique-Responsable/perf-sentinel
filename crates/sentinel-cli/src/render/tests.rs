@@ -1171,7 +1171,7 @@ fn absent_waste_messages_name_both_sources() {
     use sentinel_core::report::{DATABASE_WASTE_ABSENT, MESSAGING_WASTE_ABSENT};
     assert!(DATABASE_WASTE_ABSENT.contains("[green.database_static] or [green.alumet.database]"));
     assert!(MESSAGING_WASTE_ABSENT.contains("[green.broker_static] or [green.alumet.broker]"));
-    print_green_summary(&sentinel_core::report::GreenSummary::disabled(0), 1, false);
+    print_green_summary(&GreenSummary::disabled(0), 1, false);
 }
 
 #[test]

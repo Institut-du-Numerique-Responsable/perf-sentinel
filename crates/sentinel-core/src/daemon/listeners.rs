@@ -856,7 +856,7 @@ pub(super) fn setup_redfish_scraper(
 }
 
 /// The live state of each host group's CPU probe, in
-/// [`crate::score::host_static::StaticHostsConfig::groups`] order, `None`
+/// [`score::host_static::StaticHostsConfig::groups`] order, `None`
 /// for a group without `cpu_query`, empty without `[green.cloud]`.
 /// `staleness_ms` is the cloud staleness when a probe runs, 0 otherwise.
 #[derive(Default)]
