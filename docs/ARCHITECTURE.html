@@ -183,7 +183,7 @@ JSON unix socket       /                               |
 <li>Valid sampled OTLP route, parent and consumer-destination context from named services is retained alongside events, so the window can resolve an outer same-service entry route, or a consumer span, that arrives in a later export. Endpoint contexts, consumer destinations and ancestry entries are independently bounded by <code class="ps-ic">max_events_per_trace</code>. They share the trace LRU and TTL and never count as I/O events.</li>
 <li>Traces are evicted when the LRU cache is full (<code class="ps-ic">max_active_traces</code>) or when TTL expires (<code class="ps-ic">trace_ttl_ms</code>).</li>
 <li>On eviction, the trace is analyzed through detect and score stages.</li>
-<li>Findings are emitted as newline-delimited JSON to stdout.</li>
+<li>Findings are emitted as newline-delimited JSON to stdout, unless <code class="ps-ic">[daemon] findings_stdout = false</code>.</li>
 <li>Prometheus metrics are exposed on the same HTTP port (4318) at <code class="ps-ic">/metrics</code>.</li>
 </ul>
 <h3 id="daemon-query-api" class="ps-h3">Daemon query API</h3>

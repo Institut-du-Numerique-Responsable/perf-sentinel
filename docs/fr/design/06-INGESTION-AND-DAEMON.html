@@ -298,6 +298,7 @@ std::fs::set_permissions(path, std::fs::<span style="color:var(--code-sub)">Perm
     }
 }</code></pre></div>
 <p class="ps-p">Ce format est compatible avec les outils d'agrégation de logs (Loki, ELK) qui consomment du JSON délimité par des lignes. Chaque ligne est un objet JSON complet qui peut être parsé indépendamment.</p>
+<p class="ps-p"><code class="ps-ic">[daemon] findings_stdout = false</code> saute cette écriture, et le verrou de stdout avec elle. Les métriques, le buffer circulaire, l'archive et l'export vers le Hub reçoivent toujours chaque finding.</p>
 <h3 id="ratio-de-gaspillage-cumulatif" class="ps-h3">Ratio de gaspillage cumulatif</h3>
 <p class="ps-p">La jauge Prometheus <code class="ps-ic">io_waste_ratio</code> est calculée à partir de compteurs cumulatifs :</p>
 <div class="ps-code"><div class="ps-code-lang">rust</div><pre><code><span style="color:var(--code-cmd);font-weight:600">let</span> cumulative_total = metrics.total_io_ops.get();
