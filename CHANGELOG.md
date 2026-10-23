@@ -14,6 +14,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 - The official public example disclosure, `docs/schemas/examples/example-official-public-G2.json`, moves to perf-sentinel 0.33.0 on schema `perf-sentinel-report/v1.8`, with the `binary_hash` of the published 0.33.0 `perf-sentinel-linux-amd64` binary and a rebaked `content_hash`. The sample disclosure the website shows is signed from this file.
 
+### Security
+
+- **`tokio` bumped to 1.54.1 against RUSTSEC-2026-0386.** `AsyncFd::new` and the related constructors violated I/O safety. perf-sentinel does not call them itself, and `fuzz/Cargo.lock` follows.
+
 ## [0.33.0] - 2026-10-23
 
 ### Added
