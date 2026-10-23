@@ -10,6 +10,20 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.34.0]
+
+### Changed
+
+- **`appVersion` moves to `0.34.0`.** The daemon config takes
+  `[daemon] findings_stdout`, default `true`. Setting it to `false`
+  stops the NDJSON copy of every finding on stdout, for a daemon whose
+  findings already reach PerfSentinelHub, and the daemon warns at
+  startup when no Hub export, archive or query API ring keeps them. A
+  config without the key behaves as before. See the application
+  `CHANGELOG.md`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.33.0]
 
 ### Changed
