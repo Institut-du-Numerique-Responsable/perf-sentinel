@@ -146,11 +146,11 @@ pub struct EnergyBackendsConfigured {
 impl EnergyBackendsConfigured {
     /// The flags of a loaded `[green]` config. A host CPU query counts
     /// once its `[green.database_static]` or `[green.broker_static]`
-    /// section sets `cpu_query`.
+    /// section sets `cpu_query`, at its top level or in a host group.
     #[must_use]
     pub fn from_green(green: &crate::config::GreenConfig) -> Self {
         let cpu_query = |hosts: Option<&crate::score::host_static::StaticHostsConfig>| {
-            hosts.is_some_and(|h| h.cpu_query.is_some())
+            hosts.is_some_and(|h| h.groups().iter().any(|g| g.cpu_query.is_some()))
         };
         Self {
             alumet: green.alumet.is_some(),

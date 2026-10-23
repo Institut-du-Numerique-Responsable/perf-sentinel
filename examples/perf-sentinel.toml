@@ -586,6 +586,16 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # nodes = 2                      # hosts, readers and standbys included
 # instance_type = "db.r6i.large" # an embedded row or a managed class, an unknown type fails the load
 # region = "eu-west-3"           # else [green.alumet.database] region, else [green] default_region, one is required
+# Hosts of different sizes, such as a writer and a smaller reader, or one
+# cluster per tenant: one [[green.database_static.hosts]] entry per group of
+# identical hosts, each with its own nodes, instance_type and optional
+# cpu_query, which then leave the top level (placement = "dedicated" only).
+# Each group bills and falls back to its ceiling on its own, and the
+# database figure is their sum. [green.broker_static] takes the same table.
+# # [[green.database_static.hosts]]
+# # nodes = 1
+# # instance_type = "db.t4g.2xlarge"
+# # cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier="orders-writer"})'
 
 # --- Declared broker cluster (opt-in, no agent needed) ---------------------
 # Messaging energy for a provisioned broker cluster with a typed instance

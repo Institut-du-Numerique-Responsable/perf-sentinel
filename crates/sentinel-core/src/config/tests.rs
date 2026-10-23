@@ -4397,6 +4397,138 @@ fn database_static_rejections_name_their_rule() {
     }
 }
 
+const CLOUD_PROM: &str = "[green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n";
+
+#[test]
+fn database_static_host_groups_are_parsed() {
+    let toml = format!(
+        "{CLOUD_PROM}\n[green.database_static]\nplacement = \"dedicated\"\nregion = \"eu-west-3\"\n\n\
+         [[green.database_static.hosts]]\nnodes = 1\ninstance_type = \" db.t4g.2xlarge \"\n\
+         cpu_query = ' avg(writer_cpu) '\n\n\
+         [[green.database_static.hosts]]\nnodes = 2\ninstance_type = \"db.t4g.small\"\n"
+    );
+    let cfg = load_from_str(&toml).expect("host groups load");
+    let db = cfg.green.database_static.as_ref().expect("declared");
+    assert_eq!(db.hosts.len(), 2);
+    assert_eq!(db.nodes, None, "the groups carry the hosts");
+    let groups = db.groups();
+    assert_eq!(
+        groups[0].instance_type.as_deref(),
+        Some("db.t4g.2xlarge"),
+        "trimmed"
+    );
+    assert_eq!(
+        groups[0].cpu_query.as_deref(),
+        Some("avg(writer_cpu)"),
+        "trimmed"
+    );
+    assert_eq!(
+        groups[1].cpu_query, None,
+        "a group may bill its ceiling alone"
+    );
+    assert!(groups.iter().all(|g| g.ceiling().is_some()));
+    assert_eq!(
+        cfg.green.host_region(Subsystem::Database),
+        Some("eu-west-3")
+    );
+}
+
+#[test]
+fn broker_static_takes_host_groups_too() {
+    let toml = "[green.broker_static]\nplacement = \"dedicated\"\nregion = \"eu-west-3\"\n\n\
+                [[green.broker_static.hosts]]\nnodes = 3\ninstance_type = \"kafka.m5.large\"\n\n\
+                [[green.broker_static.hosts]]\nnodes = 1\ninstance_type = \"m5.xlarge\"\n";
+    let cfg = load_from_str(toml).expect("broker host groups load");
+    let broker = cfg.green.broker_static.as_ref().expect("declared");
+    assert_eq!(broker.groups().len(), 2);
+}
+
+#[test]
+fn database_static_host_group_rejections_name_their_rule() {
+    let section = "[green.database_static]\nplacement = \"dedicated\"\nregion = \"eu-west-3\"\n";
+    let group = |body: &str| format!("\n[[green.database_static.hosts]]\n{body}");
+    let writer = group("nodes = 1\ninstance_type = \"db.t4g.large\"\ncpu_query = 'avg(a)'\n");
+    let cases = [
+        (
+            format!(
+                "{CLOUD_PROM}[green.database_static]\nplacement = \"shared\"\n\
+                 region = \"eu-west-3\"\n{writer}"
+            ),
+            "hosts applies to placement = 'dedicated' only",
+        ),
+        (
+            format!("{CLOUD_PROM}{section}nodes = 1\n{writer}"),
+            "next to hosts",
+        ),
+        (
+            format!(
+                "[green]\ndefault_region = \"eu-west-3\"\n{ALUMET_DATABASE}\n{section}{}",
+                group("nodes = 1\ninstance_type = \"db.t4g.large\"\n")
+            ),
+            "hosts cannot sit next to [green.alumet.database]",
+        ),
+        (
+            format!("{CLOUD_PROM}{section}{writer}{writer}"),
+            "hosts[0] and hosts[1] read the same cpu_query",
+        ),
+        (
+            format!(
+                "{section}{}{}",
+                group("nodes = 6000\ninstance_type = \"db.t4g.large\"\n"),
+                group("nodes = 5000\ninstance_type = \"db.t4g.small\"\n")
+            ),
+            "11000 nodes in all",
+        ),
+        (
+            format!("{section}{}", group("nodes = 1\n")),
+            "hosts[0] nodes and instance_type go together",
+        ),
+        (
+            format!(
+                "{section}{}",
+                group("nodes = 1\ninstance_type = \"db.zz9.large\"\n")
+            ),
+            "[green.database_static] hosts[0] instance_type 'db.zz9.large'",
+        ),
+        (
+            format!(
+                "{section}{}",
+                group("nodes = 0\ninstance_type = \"db.t4g.large\"\n")
+            ),
+            "[green.database_static] hosts[0] nodes = 0",
+        ),
+        (
+            format!(
+                "{section}{}",
+                group("nodes = 1\ninstance_type = \"db.t4g.large\"\nregion = \"eu-west-1\"\n")
+            ),
+            "region",
+        ),
+        (
+            format!("{section}{writer}"),
+            "cpu_query needs [green.cloud]",
+        ),
+    ];
+    for (toml, expected) in cases {
+        let err = database_static_error(&toml);
+        assert!(err.contains(expected), "{toml}\n=> {err}");
+    }
+}
+
+#[test]
+fn database_and_broker_host_groups_read_distinct_queries() {
+    let toml = format!(
+        "{CLOUD_PROM}[green]\ndefault_region = \"eu-west-3\"\n\
+         [green.database_static]\nplacement = \"dedicated\"\n\
+         [[green.database_static.hosts]]\nnodes = 1\ninstance_type = \"db.t4g.large\"\n\
+         cpu_query = 'avg(shared_cpu)'\n\
+         [green.broker_static]\nplacement = \"dedicated\"\nnodes = 1\n\
+         instance_type = \"m5.large\"\ncpu_query = 'avg(shared_cpu)'\n"
+    );
+    let err = database_static_error(&toml);
+    assert!(err.contains("read the same cpu_query"), "{err}");
+}
+
 #[test]
 fn database_static_without_any_region_is_rejected() {
     let toml = r#"

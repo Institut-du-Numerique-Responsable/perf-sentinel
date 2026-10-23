@@ -855,12 +855,14 @@ pub(super) fn setup_redfish_scraper(
     }
 }
 
-/// The live states the cloud scraper bills from the host CPU queries.
+/// The live state of each host group's CPU probe, in
+/// [`crate::score::host_static::StaticHostsConfig::groups`] order, `None`
+/// for a group without `cpu_query`, empty without `[green.cloud]`.
 /// `staleness_ms` is the cloud staleness when a probe runs, 0 otherwise.
 #[derive(Default)]
 pub(super) struct HostCpuStates {
-    pub(super) database: Option<Arc<score::alumet::DbEnergyState>>,
-    pub(super) broker: Option<Arc<score::alumet::DbEnergyState>>,
+    pub(super) database: Vec<Option<Arc<score::alumet::DbEnergyState>>>,
+    pub(super) broker: Vec<Option<Arc<score::alumet::DbEnergyState>>>,
     pub(super) staleness_ms: u64,
 }
 
@@ -881,25 +883,32 @@ pub(super) fn setup_cloud_scraper(
         };
         return (setup, HostCpuStates::default());
     };
-    let probe = |subsystem| {
-        let cfg = config.green.static_hosts(subsystem)?;
-        HostProbe::dedicated(subsystem, cfg)
-            .or_else(|| HostProbe::shared(subsystem, cfg, &cloud_cfg))
-    };
-    let probes: Vec<_> = [probe(Subsystem::Database), probe(Subsystem::Broker)]
-        .into_iter()
-        .flatten()
-        .collect();
-    let state_of = |subsystem| {
-        probes
+    // One probe slot per host group, database first.
+    let probes_of = |subsystem| -> Vec<Option<HostProbe>> {
+        let Some(cfg) = config.green.static_hosts(subsystem) else {
+            return Vec::new();
+        };
+        cfg.groups()
             .iter()
-            .find(|p| p.subsystem == subsystem)
-            .map(|p| p.state.clone())
+            .map(|group| {
+                HostProbe::dedicated(subsystem, group)
+                    .or_else(|| HostProbe::shared(subsystem, group, &cloud_cfg))
+            })
+            .collect()
     };
+    let (database, broker) = (probes_of(Subsystem::Database), probes_of(Subsystem::Broker));
+    let states = |slots: &[Option<HostProbe>]| {
+        slots
+            .iter()
+            .map(|slot| slot.as_ref().map(|p| p.state.clone()))
+            .collect()
+    };
+    let (database_states, broker_states) = (states(&database), states(&broker));
+    let probes: Vec<HostProbe> = database.into_iter().chain(broker).flatten().collect();
     let staleness_ms = cloud_cfg.scrape_interval.as_millis() as u64 * 3;
     let host_cpu = HostCpuStates {
-        database: state_of(Subsystem::Database),
-        broker: state_of(Subsystem::Broker),
+        database: database_states,
+        broker: broker_states,
         staleness_ms: if probes.is_empty() { 0 } else { staleness_ms },
     };
     let state = CloudEnergyState::new();
@@ -988,8 +997,8 @@ orders = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-a"})
              [green.broker_static]\nplacement = \"shared\"\ninstance_type = \"m5.large\"\n\
              cpu_query = 'avg(broker_cpu)'\n",
         );
-        assert!(host_cpu.database.is_some());
-        assert!(host_cpu.broker.is_some());
+        assert_eq!(host_cpu.database.iter().flatten().count(), 1);
+        assert_eq!(host_cpu.broker.iter().flatten().count(), 1);
         assert_eq!(host_cpu.staleness_ms, 30_000);
         cloud.handle.expect("scraper spawned").abort();
     }
@@ -1000,10 +1009,27 @@ orders = { instance_type = "m5.large", cpu_query = 'avg(node_cpu{node="node-a"})
             "[green.database_static]\nplacement = \"dedicated\"\nnodes = 2\n\
              instance_type = \"m5.large\"\n",
         );
-        assert!(host_cpu.database.is_none());
-        assert!(host_cpu.broker.is_none());
+        assert_eq!(host_cpu.database.len(), 1);
+        assert!(host_cpu.database.iter().all(Option::is_none));
+        assert!(host_cpu.broker.is_empty());
         assert_eq!(host_cpu.staleness_ms, 0);
         assert_eq!(cloud.staleness_ms, 30_000);
+        cloud.handle.expect("scraper spawned").abort();
+    }
+
+    #[tokio::test]
+    async fn each_host_group_gets_its_own_probe_slot() {
+        let (cloud, host_cpu) = setup(
+            "[green.database_static]\nplacement = \"dedicated\"\n\n\
+             [[green.database_static.hosts]]\nnodes = 1\ninstance_type = \"db.t4g.large\"\n\
+             cpu_query = 'avg(writer_cpu)'\n\n\
+             [[green.database_static.hosts]]\nnodes = 1\ninstance_type = \"db.t4g.small\"\n\n\
+             [[green.database_static.hosts]]\nnodes = 1\ninstance_type = \"db.t4g.small\"\n\
+             cpu_query = 'avg(reader_cpu)'\n",
+        );
+        let slots: Vec<bool> = host_cpu.database.iter().map(Option::is_some).collect();
+        assert_eq!(slots, vec![true, false, true]);
+        assert_eq!(host_cpu.staleness_ms, 30_000);
         cloud.handle.expect("scraper spawned").abort();
     }
 }

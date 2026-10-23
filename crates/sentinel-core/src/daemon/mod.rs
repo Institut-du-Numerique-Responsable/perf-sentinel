@@ -319,8 +319,8 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     .await?;
 
     let (alumet, alumet_db, alumet_broker) = setup_alumet_scraper(&config, &metrics);
-    let database_ceiling = declared_ceiling(&config, Subsystem::Database);
-    let broker_ceiling = declared_ceiling(&config, Subsystem::Broker);
+    let database_ceilings = declared_ceilings(&config, Subsystem::Database);
+    let broker_ceilings = declared_ceilings(&config, Subsystem::Broker);
     let scaphandre = setup_scaphandre_scraper(&config, &metrics);
     let kepler = setup_kepler_scraper(&config, &metrics);
     let redfish = setup_redfish_scraper(&config, &metrics);
@@ -349,33 +349,23 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     });
     let detect_config = DetectConfig::from(&config);
     let green_on = config.green.enabled;
+    let database_sources = group_sources(
+        green_on,
+        alumet_db.as_deref().map(|s| (s, alumet.staleness_ms)),
+        (&host_cpu.database, host_cpu.staleness_ms),
+        &database_ceilings,
+    );
+    let broker_sources = group_sources(
+        green_on,
+        alumet_broker.as_deref().map(|s| (s, alumet.staleness_ms)),
+        (&host_cpu.broker, host_cpu.staleness_ms),
+        &broker_ceilings,
+    );
     let energy_sources = EnergySources {
         base_carbon_ctx,
         alumet_state: alumet.state.as_deref(),
-        // D6/B6 refuse a cpu_query next to the Alumet workload, so at
-        // most one live state exists per subsystem.
-        database: host_sources(
-            green_on,
-            alumet_db
-                .as_deref()
-                .map(|s| (s, alumet.staleness_ms))
-                .or(host_cpu
-                    .database
-                    .as_deref()
-                    .map(|s| (s, host_cpu.staleness_ms))),
-            database_ceiling.as_ref(),
-        ),
-        broker: host_sources(
-            green_on,
-            alumet_broker
-                .as_deref()
-                .map(|s| (s, alumet.staleness_ms))
-                .or(host_cpu
-                    .broker
-                    .as_deref()
-                    .map(|s| (s, host_cpu.staleness_ms))),
-            broker_ceiling.as_ref(),
-        ),
+        database: &database_sources,
+        broker: &broker_sources,
         alumet_staleness_ms: alumet.staleness_ms,
         scaphandre_state: scaphandre.state.as_deref(),
         scaphandre_staleness_ms: scaphandre.staleness_ms,
@@ -469,19 +459,55 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     loop_result
 }
 
-/// The billing state of one subsystem's declared ceiling: a dedicated
-/// declaration with `nodes` and `instance_type`. No scraper, the state
-/// only needs a start marker to bill elapsed time from. Its region is
-/// the subsystem's effective one.
-fn declared_ceiling(
+/// The billing state of each host group's declared ceiling, in
+/// [`crate::score::host_static::StaticHostsConfig::groups`] order: a
+/// dedicated group with `nodes` and `instance_type`, `None` otherwise. No
+/// scraper, the state only needs a start marker to bill elapsed time from.
+/// Its region is the subsystem's effective one. Empty without a section.
+fn declared_ceilings(
     config: &Config,
     subsystem: Subsystem,
-) -> Option<crate::score::broker_static::StaticBrokerState> {
-    let ceiling = config.green.static_hosts(subsystem)?.ceiling()?;
-    Some(crate::score::broker_static::StaticBrokerState::new(
-        crate::score::scaphandre::monotonic_ms(),
-        &ceiling,
-    ))
+) -> Vec<Option<crate::score::broker_static::StaticBrokerState>> {
+    let Some(cfg) = config.green.static_hosts(subsystem) else {
+        return Vec::new();
+    };
+    let now = crate::score::scaphandre::monotonic_ms();
+    cfg.groups()
+        .iter()
+        .map(|group| {
+            group
+                .ceiling()
+                .map(|c| crate::score::broker_static::StaticBrokerState::new(now, &c))
+        })
+        .collect()
+}
+
+/// One subsystem's sources, one entry per host group, each pairing the
+/// group's live state with its declared ceiling. `probes` are the groups'
+/// CPU probe states with their shared staleness. D6/B6 refuse a `cpu_query`
+/// next to the Alumet workload, and D10/B10 refuse hosts next to it, so
+/// the Alumet state is the single group's live source when it exists.
+fn group_sources<'a>(
+    green_on: bool,
+    alumet: Option<(&'a crate::score::alumet::DbEnergyState, u64)>,
+    (probes, probe_staleness_ms): (&'a [Option<Arc<crate::score::alumet::DbEnergyState>>], u64),
+    ceilings: &'a [Option<crate::score::broker_static::StaticBrokerState>],
+) -> Vec<SubsystemSources<'a>> {
+    let groups = ceilings
+        .len()
+        .max(probes.len())
+        .max(usize::from(alumet.is_some()));
+    (0..groups)
+        .map(|i| {
+            let live = alumet.filter(|_| i == 0).or_else(|| {
+                probes
+                    .get(i)
+                    .and_then(Option::as_deref)
+                    .map(|s| (s, probe_staleness_ms))
+            });
+            host_sources(green_on, live, ceilings.get(i).and_then(Option::as_ref))
+        })
+        .collect()
 }
 
 /// One subsystem's host sources, the live state (the Alumet workload or
@@ -513,13 +539,9 @@ fn host_sources<'a>(
 fn waste_sticky_ttl_ms(config: &Config, alumet_staleness_ms: u64, probe_staleness_ms: u64) -> u64 {
     let any_ceiling = [Subsystem::Database, Subsystem::Broker]
         .into_iter()
-        .any(|s| {
-            config
-                .green
-                .static_hosts(s)
-                .and_then(crate::score::host_static::StaticHostsConfig::ceiling)
-                .is_some()
-        });
+        .filter_map(|s| config.green.static_hosts(s))
+        .flat_map(crate::score::host_static::StaticHostsConfig::groups)
+        .any(|group| group.ceiling().is_some());
     let ceiling_ttl = if any_ceiling {
         config.daemon.trace_ttl_ms
     } else {
@@ -549,11 +571,13 @@ fn host_energy_context(
     let model = if green.alumet_host(subsystem).is_some() {
         crate::score::carbon::CO2_MODEL_ALUMET
     } else {
-        let cfg = declared.filter(|cfg| cfg.ceiling().is_some() || cfg.cpu_query.is_some())?;
-        if cfg.cpu_query.is_some() {
+        let groups = declared?.groups();
+        if groups.iter().any(|g| g.cpu_query.is_some()) {
             crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER
-        } else {
+        } else if groups.iter().any(|g| g.ceiling().is_some()) {
             subsystem.declared_tag()
+        } else {
+            return None;
         }
     };
     Some(crate::score::carbon::DbEnergyContext {
@@ -712,8 +736,9 @@ mod tests {
         assert_eq!(ctx.model, crate::report::DB_WASTE_MODEL_SPECPOWER);
         assert_eq!(ctx.placement, Some(HostPlacement::Dedicated));
         assert_eq!(ctx.region.as_deref(), Some("eu-west-3"));
-        assert!(declared_ceiling(&ceiling, Subsystem::Database).is_some());
-        assert!(declared_ceiling(&ceiling, Subsystem::Broker).is_none());
+        assert_eq!(declared_ceilings(&ceiling, Subsystem::Database).len(), 1);
+        assert!(declared_ceilings(&ceiling, Subsystem::Database)[0].is_some());
+        assert!(declared_ceilings(&ceiling, Subsystem::Broker).is_empty());
 
         // A cpu_query is the live source: the base tag is its model, and
         // only a declared tick takes the declared tag.
@@ -750,8 +775,40 @@ mod tests {
         assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
         assert_eq!(ctx.placement, Some(HostPlacement::Shared));
         assert_eq!(ctx.region.as_deref(), Some("eu-west-3"));
-        assert!(declared_ceiling(&shared, Subsystem::Broker).is_none());
+        assert!(declared_ceilings(&shared, Subsystem::Broker)[0].is_none());
         assert!(host_energy_context(&shared, Subsystem::Database).is_none());
+    }
+
+    #[test]
+    fn host_groups_pair_each_probe_with_its_own_ceiling() {
+        let config = crate::config::load_from_str(
+            "[green]\ndefault_region = \"eu-west-3\"\n\
+             [green.cloud]\nprometheus_endpoint = \"http://prom:9090\"\n\
+             [green.database_static]\nplacement = \"dedicated\"\n\
+             [[green.database_static.hosts]]\nnodes = 1\ninstance_type = \"db.t4g.large\"\n\
+             cpu_query = 'avg(writer_cpu)'\n\
+             [[green.database_static.hosts]]\nnodes = 2\ninstance_type = \"db.t4g.small\"\n",
+        )
+        .expect("config loads");
+        let ceilings = declared_ceilings(&config, Subsystem::Database);
+        assert_eq!(ceilings.len(), 2);
+        assert!(ceilings.iter().all(Option::is_some));
+        let ctx = host_energy_context(&config, Subsystem::Database).expect("groups bill");
+        assert_eq!(ctx.model, crate::score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
+
+        let live = crate::score::alumet::DbEnergyState::new();
+        let probes = [Some(live.clone()), None];
+        let sources = group_sources(true, None, (&probes, 30_000), &ceilings);
+        assert_eq!(sources.len(), 2);
+        assert!(sources[0].live.is_some() && sources[0].declared.is_some());
+        assert_eq!(sources[0].live_staleness_ms, 30_000);
+        assert!(sources[1].live.is_none() && sources[1].declared.is_some());
+        let off = group_sources(false, None, (&probes, 30_000), &ceilings);
+        assert!(off.iter().all(|s| s.live.is_none() && s.declared.is_none()));
+        // The Alumet workload is the single group's live source.
+        let alumet = group_sources(true, Some((&live, 10_000)), (&[], 0), &[]);
+        assert_eq!(alumet.len(), 1);
+        assert_eq!(alumet[0].live_staleness_ms, 10_000);
     }
 
     #[test]

@@ -256,6 +256,76 @@ fn validate_dedicated_hosts(
     }
 }
 
+/// Maximum `[[...hosts]]` groups in one declared-hosts section (rule D10/B10).
+const MAX_HOST_GROUPS: usize = 256;
+
+/// Rule D10/B10: `hosts` lists the groups of a dedicated declaration. It
+/// replaces the top-level host keys, takes no Alumet workload, holds at
+/// most 10000 nodes in all, and its groups read distinct CPU queries.
+fn validate_host_groups(
+    subsystem: Subsystem,
+    cfg: &StaticHostsConfig,
+    alumet_present: bool,
+) -> Result<(), String> {
+    if cfg.hosts.is_empty() {
+        return Ok(());
+    }
+    let section = subsystem.section();
+    let groups = format!("[[{}.hosts]]", section.trim_matches(['[', ']']));
+    if cfg.placement != HostPlacement::Dedicated {
+        return Err(format!(
+            "{section} hosts applies to placement = 'dedicated' only: a shared host is one \
+             application node"
+        ));
+    }
+    if cfg.nodes.is_some() || cfg.instance_type.is_some() || cfg.cpu_query.is_some() {
+        return Err(format!(
+            "{section} sets nodes, instance_type or cpu_query next to hosts: move them into \
+             a {groups} entry, or drop hosts"
+        ));
+    }
+    if alumet_present {
+        return Err(format!(
+            "{section} hosts cannot sit next to {}: Alumet already measures the {} hosts",
+            subsystem.alumet_section(),
+            subsystem.noun()
+        ));
+    }
+    if cfg.hosts.len() > MAX_HOST_GROUPS {
+        return Err(format!(
+            "{section} lists {} {groups} entries, at most {MAX_HOST_GROUPS}",
+            cfg.hosts.len()
+        ));
+    }
+    let total: u64 = cfg
+        .hosts
+        .iter()
+        .filter_map(|g| g.nodes)
+        .map(u64::from)
+        .sum();
+    if total > 10_000 {
+        return Err(format!(
+            "{section} hosts count {total} nodes in all, at most 10000"
+        ));
+    }
+    let mut seen = HashMap::new();
+    for (i, group) in cfg.hosts.iter().enumerate() {
+        if group.nodes.is_none() || group.instance_type.is_none() {
+            return Err(format!(
+                "{section} hosts[{i}] nodes and instance_type go together: a group sets both"
+            ));
+        }
+        // Indices, not the query: it is not yet checked to be printable (D6).
+        if let Some(first) = group.cpu_query.as_deref().and_then(|q| seen.insert(q, i)) {
+            return Err(format!(
+                "{section} hosts[{first}] and hosts[{i}] read the same cpu_query: each group \
+                 reads the CPU of its own hosts"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Rule B5: a shared host is one application node read by its own query,
 /// which the subsystem's Alumet workload leaves no room for.
 fn validate_shared_host(
@@ -299,13 +369,13 @@ fn validate_shared_host(
 /// against `[green.cloud]`, never one the application side already reads.
 fn validate_host_cpu_query(
     subsystem: Subsystem,
+    section: &str,
     cfg: &StaticHostsConfig,
     green: &GreenConfig,
 ) -> Result<(), String> {
     let Some(query) = cfg.cpu_query.as_deref().map(str::trim) else {
         return Ok(());
     };
-    let section = subsystem.section();
     if query.is_empty() || query.chars().count() > 4096 || has_control_char(query) {
         return Err(format!(
             "{section} cpu_query must be 1-4096 chars and free of control characters"
@@ -660,35 +730,51 @@ impl Config {
     fn validate_static_hosts(&self, subsystem: Subsystem) -> Result<(), String> {
         let alumet = self.green.alumet_host(subsystem);
         if let Some(cfg) = self.green.static_hosts(subsystem) {
-            let section = subsystem.section();
-            validate_host_counts(section, cfg)?;
-            validate_host_class(section, cfg)?;
-            match cfg.placement {
-                HostPlacement::Dedicated => {
-                    validate_dedicated_hosts(subsystem, cfg, alumet.is_some())?;
+            validate_host_groups(subsystem, cfg, alumet.is_some())?;
+            for (i, group) in cfg.groups().iter().enumerate() {
+                let label = if cfg.hosts.is_empty() {
+                    subsystem.section().to_string()
+                } else {
+                    format!("{} hosts[{i}]", subsystem.section())
+                };
+                validate_host_counts(&label, group)?;
+                validate_host_class(&label, group)?;
+                match group.placement {
+                    HostPlacement::Dedicated => {
+                        validate_dedicated_hosts(subsystem, group, alumet.is_some())?;
+                    }
+                    HostPlacement::Shared => {
+                        validate_shared_host(subsystem, group, alumet.is_some())?;
+                    }
                 }
-                HostPlacement::Shared => validate_shared_host(subsystem, cfg, alumet.is_some())?,
+                validate_host_cpu_query(subsystem, &label, group, &self.green)?;
+                validate_shared_with(subsystem, group, &self.green)?;
             }
-            validate_host_cpu_query(subsystem, cfg, &self.green)?;
-            validate_shared_with(subsystem, cfg, &self.green)?;
         }
         self.validate_host_region(subsystem)
     }
 
     /// Rule X1: the database and broker hosts read different CPU queries.
     fn validate_distinct_host_queries(&self) -> Result<(), String> {
-        let query = |subsystem| {
+        let queries = |subsystem| -> Vec<String> {
             self.green
                 .static_hosts(subsystem)
-                .and_then(|cfg| cfg.cpu_query.as_deref())
-                .map(str::trim)
+                .map(StaticHostsConfig::groups)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|group| group.cpu_query.map(|q| q.trim().to_string()))
+                .collect()
         };
-        match (query(Subsystem::Database), query(Subsystem::Broker)) {
-            (Some(database), Some(broker)) if database == broker => Err(format!(
+        let broker = queries(Subsystem::Broker);
+        match queries(Subsystem::Database)
+            .into_iter()
+            .find(|query| broker.contains(query))
+        {
+            Some(query) => Err(format!(
                 "[green.database_static] and [green.broker_static] read the same cpu_query \
-                 '{database}': each declared host reads its own CPU, give each its own query"
+                 '{query}': each declared host reads its own CPU, give each its own query"
             )),
-            _ => Ok(()),
+            None => Ok(()),
         }
     }
 

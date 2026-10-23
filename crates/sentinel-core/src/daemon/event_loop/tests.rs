@@ -1734,8 +1734,12 @@ fn build_tick_ctx_database_energy_forces_owned_then_consumes() {
     let now = score::scaphandre::monotonic_ms();
     db.add_window_kwh(2e-6, now);
     let mut sources = no_scrapers(&base);
-    sources.database.live = Some(&db);
-    sources.database.live_staleness_ms = 60_000;
+    let database_groups = [SubsystemSources {
+        live: Some(&db),
+        live_staleness_ms: 60_000,
+        ..SubsystemSources::default()
+    }];
+    sources.database = &database_groups;
 
     // Fresh DB energy alone must force the owned path and patch it in.
     let ctx = build_tick_ctx(&sources, score::scaphandre::monotonic_ms());
@@ -1767,8 +1771,12 @@ fn build_tick_ctx_broker_only_energy_forces_owned() {
     let broker = DbEnergyState::new();
     broker.add_window_kwh(3e-6, 10_000);
     let mut sources = no_scrapers(&base);
-    sources.broker.live = Some(&broker);
-    sources.broker.live_staleness_ms = 60_000;
+    let broker_groups = [SubsystemSources {
+        live: Some(&broker),
+        live_staleness_ms: 60_000,
+        ..SubsystemSources::default()
+    }];
+    sources.broker = &broker_groups;
 
     let ctx = build_tick_ctx(&sources, 10_000);
     assert!(
@@ -1984,7 +1992,7 @@ fn a_fallback_window_carries_the_declared_tag_and_keeps_the_region() {
 }
 
 #[test]
-fn a_live_window_keeps_its_base_tag_when_both_sources_deliver() {
+fn a_window_some_groups_billed_declared_sums_both_under_the_declared_tag() {
     for base_tag in [
         score::carbon::CO2_MODEL_ALUMET,
         score::carbon::CO2_MODEL_CLOUD_SPECPOWER,
@@ -2002,10 +2010,38 @@ fn a_live_window_keeps_its_base_tag_when_both_sources_deliver() {
             Some(9e-6),
             crate::report::DB_WASTE_MODEL_SPECPOWER,
         );
-        assert_eq!(host.model, base_tag);
+        // One host group read, another fell back to its ceiling: the
+        // window holds both, and a fallback is never published as a reading.
+        assert_eq!(host.model, crate::report::DB_WASTE_MODEL_SPECPOWER);
         assert_eq!(host.region.as_deref(), Some("eu-west-1"));
-        assert!((host.window_kwh - 5e-6).abs() < 1e-18);
+        assert!((host.window_kwh - 14e-6).abs() < 1e-18);
     }
+}
+
+#[test]
+fn host_groups_bill_on_their_own_and_sum() {
+    // Group 0 reads its CPU, group 1 declares a ceiling and nothing else:
+    // each arbitrates alone, and the subsystem holds both parts.
+    let writer = DbEnergyState::new();
+    let reader_cfg = database_cfg(1);
+    let reader = score::broker_static::StaticBrokerState::new(0, &reader_cfg);
+    let groups = [
+        SubsystemSources {
+            live: Some(&writer),
+            live_staleness_ms: 45_000,
+            declared: None,
+        },
+        SubsystemSources {
+            declared: Some(&reader),
+            ..SubsystemSources::default()
+        },
+    ];
+    writer.add_window_kwh(2e-6, 30_000);
+    let (live, declared) = take_host_energy(&groups, 30_000);
+    assert!((live.expect("the writer read its CPU") - 2e-6).abs() < 1e-18);
+    let expected = reader_cfg.cluster_watts() * 30_000.0 / 3_600_000_000.0;
+    assert!((declared.expect("the reader billed its ceiling") - expected).abs() < 1e-15);
+    assert_eq!(take_host_energy(&[], 60_000), (None, None));
 }
 
 fn database_cfg(nodes: u32) -> score::broker_static::StaticBrokerConfig {
@@ -2044,7 +2080,11 @@ fn a_database_ceiling_alone_bills_nodes_times_p_max_over_elapsed() {
     let state = score::broker_static::StaticBrokerState::new(0, &cfg);
     let base = database_base(crate::report::DB_WASTE_MODEL_SPECPOWER);
     let mut sources = no_scrapers(&base);
-    sources.database.declared = Some(&state);
+    let database_groups = [SubsystemSources {
+        declared: Some(&state),
+        ..SubsystemSources::default()
+    }];
+    sources.database = &database_groups;
 
     // Sub-second takes accrue on the borrowed fast path.
     for now in [300_u64, 600, 900] {
@@ -2078,11 +2118,12 @@ fn a_database_ceiling_covers_only_the_alumet_outage() {
     let live = DbEnergyState::new();
     let base = database_base(score::carbon::CO2_MODEL_ALUMET);
     let mut sources = no_scrapers(&base);
-    sources.database = SubsystemSources {
+    let database_groups = [SubsystemSources {
         live: Some(&live),
         live_staleness_ms: 10_000,
         declared: Some(&state),
-    };
+    }];
+    sources.database = &database_groups;
 
     // Fresh Alumet owns the timeline: the ceiling stays silent.
     live.add_window_kwh(2e-6, 5_000);
@@ -2122,11 +2163,12 @@ fn a_cpu_probe_owns_the_timeline_until_three_intervals_pass() {
     let probe = DbEnergyState::new();
     let base = database_base(score::carbon::CO2_MODEL_CLOUD_SPECPOWER);
     let mut sources = no_scrapers(&base);
-    sources.database = SubsystemSources {
+    let database_groups = [SubsystemSources {
         live: Some(&probe),
         live_staleness_ms: CLOUD_STALENESS_MS,
         declared: Some(&state),
-    };
+    }];
+    sources.database = &database_groups;
 
     // A fresh CPU reading bills under cloud_specpower, the ceiling stays
     // silent.
@@ -2180,16 +2222,18 @@ fn each_subsystem_is_gated_by_its_own_staleness() {
     let db_state = score::broker_static::StaticBrokerState::new(0, &db_cfg);
     let broker_state = score::broker_static::StaticBrokerState::new(0, &broker_cfg);
     let mut sources = no_scrapers(&base);
-    sources.database = SubsystemSources {
+    let database_groups = [SubsystemSources {
         live: Some(&db_live),
         live_staleness_ms: 60_000,
         declared: Some(&db_state),
-    };
-    sources.broker = SubsystemSources {
+    }];
+    sources.database = &database_groups;
+    let broker_groups = [SubsystemSources {
         live: Some(&broker_live),
         live_staleness_ms: 5_000,
         declared: Some(&broker_state),
-    };
+    }];
+    sources.broker = &broker_groups;
     db_live.add_window_kwh(1e-6, 1_000);
     broker_live.add_window_kwh(2e-6, 1_000);
     build_tick_ctx(&sources, 1_000);
@@ -2215,15 +2259,19 @@ fn a_stale_shared_host_bills_nothing() {
         declared: None,
     };
     assert_eq!(
-        take_host_energy(&shared, 1_000),
+        take_host_energy(std::slice::from_ref(&shared), 1_000),
         (None, None),
         "never sampled"
     );
     probe.add_window_kwh(1e-6, 1_000);
-    let (live, declared) = take_host_energy(&shared, 2_000);
+    let (live, declared) = take_host_energy(std::slice::from_ref(&shared), 2_000);
     assert!(live.is_some_and(|kwh| (kwh - 1e-6).abs() < 1e-18));
     assert_eq!(declared, None);
-    assert_eq!(take_host_energy(&shared, 200_000), (None, None), "stale");
+    assert_eq!(
+        take_host_energy(std::slice::from_ref(&shared), 200_000),
+        (None, None),
+        "stale"
+    );
 }
 
 #[test]
@@ -2256,7 +2304,11 @@ fn build_tick_ctx_falls_back_to_the_declared_cluster() {
     let declared = declared_cfg(3);
     let declared_state = score::broker_static::StaticBrokerState::new(0, &declared);
     let mut sources = no_scrapers(&base);
-    sources.broker.declared = Some(&declared_state);
+    let broker_groups = [SubsystemSources {
+        declared: Some(&declared_state),
+        ..SubsystemSources::default()
+    }];
+    sources.broker = &broker_groups;
 
     let ctx = build_tick_ctx(&sources, 60_000);
     assert!(
@@ -2279,7 +2331,11 @@ fn build_tick_ctx_keeps_the_fast_path_on_a_sub_second_tick() {
     let declared = declared_cfg(3);
     let declared_state = score::broker_static::StaticBrokerState::new(0, &declared);
     let mut sources = no_scrapers(&base);
-    sources.broker.declared = Some(&declared_state);
+    let broker_groups = [SubsystemSources {
+        declared: Some(&declared_state),
+        ..SubsystemSources::default()
+    }];
+    sources.broker = &broker_groups;
 
     let ctx = build_tick_ctx(&sources, 200);
     assert!(matches!(ctx, std::borrow::Cow::Borrowed(_)));
@@ -2391,8 +2447,8 @@ fn no_scrapers(base: &Arc<score::carbon::CarbonContext>) -> EnergySources<'_> {
     EnergySources {
         base_carbon_ctx: base.clone(),
         alumet_state: None,
-        database: SubsystemSources::default(),
-        broker: SubsystemSources::default(),
+        database: &[],
+        broker: &[],
         alumet_staleness_ms: 0,
         scaphandre_state: None,
         scaphandre_staleness_ms: 0,

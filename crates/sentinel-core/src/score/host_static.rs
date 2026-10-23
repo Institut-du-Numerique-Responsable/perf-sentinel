@@ -95,9 +95,44 @@ pub struct StaticHostsConfig {
     pub cpu_query: Option<String>,
     /// `[green.cloud.services]` entries whose node a shared host runs on.
     pub shared_with: Vec<String>,
+    /// `[[...hosts]]` groups of a dedicated declaration, each with its own
+    /// `nodes`, `instance_type` and `cpu_query`. Empty when the section
+    /// sets those keys at its top level instead.
+    pub hosts: Vec<HostGroup>,
+}
+
+/// One group of identical hosts in a dedicated declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostGroup {
+    pub nodes: Option<u32>,
+    pub instance_type: Option<String>,
+    pub cpu_query: Option<String>,
 }
 
 impl StaticHostsConfig {
+    /// The declaration as one single-group declaration per host group, so
+    /// each group bills, probes and falls back on its own. A section
+    /// without `hosts` is its own single group.
+    #[must_use]
+    pub fn groups(&self) -> Vec<Self> {
+        if self.hosts.is_empty() {
+            return vec![self.clone()];
+        }
+        self.hosts
+            .iter()
+            // Field by field: `..self.clone()` would copy every group per group.
+            .map(|group| Self {
+                placement: self.placement,
+                nodes: group.nodes,
+                instance_type: group.instance_type.clone(),
+                region: self.region.clone(),
+                cpu_query: group.cpu_query.clone(),
+                shared_with: self.shared_with.clone(),
+                hosts: Vec::new(),
+            })
+            .collect()
+    }
+
     /// Idle and maximum watts of one host, `None` without an instance type
     /// or when the type resolves to no row.
     #[must_use]
@@ -141,6 +176,7 @@ mod tests {
             region: Some("eu-west-3".to_string()),
             cpu_query: None,
             shared_with: Vec::new(),
+            hosts: Vec::new(),
         }
     }
 
@@ -190,6 +226,42 @@ mod tests {
             dedicated(2, "db.r6i.large").node_power(),
             dedicated(2, "r6i.large").node_power()
         );
+    }
+
+    #[test]
+    fn groups_split_hosts_into_single_group_declarations() {
+        let flat = dedicated(2, "m5.large");
+        assert_eq!(flat.groups(), vec![flat.clone()]);
+
+        let grouped = StaticHostsConfig {
+            nodes: None,
+            instance_type: None,
+            hosts: vec![
+                HostGroup {
+                    nodes: Some(1),
+                    instance_type: Some("db.t4g.2xlarge".to_string()),
+                    cpu_query: Some("q1".to_string()),
+                },
+                HostGroup {
+                    nodes: Some(2),
+                    instance_type: Some("db.t4g.small".to_string()),
+                    cpu_query: None,
+                },
+            ],
+            ..dedicated(1, "m5.large")
+        };
+        let groups = grouped.groups();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].nodes, Some(1));
+        assert_eq!(groups[0].cpu_query.as_deref(), Some("q1"));
+        assert_eq!(groups[1].instance_type.as_deref(), Some("db.t4g.small"));
+        assert!(groups.iter().all(|g| g.hosts.is_empty()));
+        assert!(
+            groups
+                .iter()
+                .all(|g| g.region.as_deref() == Some("eu-west-3"))
+        );
+        assert!(groups[1].ceiling().is_some());
     }
 
     #[test]

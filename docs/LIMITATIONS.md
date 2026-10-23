@@ -600,6 +600,7 @@ With a `cpu_query`, the hosts are priced on their CPU instead, `nodes × (idle +
 
 - **Managed CPU metrics lag the hosts.** Cloud monitoring publishes CPU utilization one to five minutes after the fact, and an exporter adds its own delay, so each interval is billed at the CPU of a few minutes earlier. Totals over a period are close, a single window is not.
 - **The query is the operator's average.** It must return one series, the average CPU of the declared hosts. A query that leaves out a reader or a standby, or averages hosts of other databases, prices the cluster on the wrong CPU, and the daemon cannot see it. A response with several series bills nothing.
+- **Hosts of different sizes are separate groups.** One query averaging a large writer and a small reader prices both at the same load and on one class. `[[green.database_static.hosts]]` gives each group its own class and query, and each group falls back to its own ceiling, so a window where one group billed its ceiling carries `database_specpower` for the whole database figure. The SQL ratio still blends every SQL span of the window, so with one group per tenant database the waste split across databases stays a blend.
 - **`idle` is the SPECpower idle of the class.** A host at 0 % CPU still bills `nodes × idle`, the provisioned floor, which is the intent, and it is a table value, not the host's measured idle.
 
 ### Scaphandre precision bounds

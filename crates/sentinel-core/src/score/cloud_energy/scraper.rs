@@ -273,6 +273,9 @@ pub struct HostProbe {
     /// Read by the event loop as the subsystem's live source.
     pub state: Arc<DbEnergyState>,
     last_success_ms: u64,
+    /// Seconds since the last good reading, 0 after one. The subsystem's
+    /// age gauge reads its oldest probe.
+    age_secs: f64,
     warned: bool,
 }
 
@@ -347,6 +350,7 @@ impl HostProbe {
             group_key,
             state: DbEnergyState::new(),
             last_success_ms: monotonic_ms(),
+            age_secs: 0.0,
             warned: false,
         }
     }
@@ -363,12 +367,12 @@ impl HostProbe {
         }
     }
 
-    /// Advance the age gauge and warn on the first failure of a run of
+    /// Advance the probe's age and warn on the first failure of a run of
     /// failures, debug after.
-    fn record_failure(&mut self, metrics: &MetricsState, reason: &str) {
+    fn record_failure(&mut self, reason: &str) {
         #[allow(clippy::cast_precision_loss)]
         let age_secs = monotonic_ms().saturating_sub(self.last_success_ms) as f64 / 1000.0;
-        self.age_gauge(metrics).set(age_secs);
+        self.age_secs = age_secs;
         if self.warned {
             tracing::debug!(query = %self.query, reason, "Host CPU scrape failed");
             return;
@@ -383,32 +387,26 @@ impl HostProbe {
         );
         self.warned = true;
     }
-}
 
-/// Fetch one probe's CPU percent. A response with several series, an
-/// error or a non-finite value is a failure.
-async fn fetch_host_cpu(
-    probe: &mut HostProbe,
-    client: &HttpClient,
-    uri: &hyper::Uri,
-    auth: Option<&AuthHeader>,
-    metrics: &MetricsState,
-) -> Option<f64> {
-    let fetched = fetch_cpu_percent(client, uri, &probe.query, auth).await;
-    match single_series(fetched, &probe.query) {
-        Ok(cpu) if cpu.is_finite() => {
-            probe.last_success_ms = monotonic_ms();
-            probe.warned = false;
-            probe.age_gauge(metrics).set(0.0);
-            Some(cpu)
-        }
-        Ok(cpu) => {
-            probe.record_failure(metrics, &format!("non-finite CPU% {cpu}"));
-            None
-        }
-        Err(e) => {
-            probe.record_failure(metrics, &e.to_string());
-            None
+    /// Record one fetch outcome and return the CPU percent it gives. A
+    /// response with several series, an error or a non-finite value is a
+    /// failure.
+    fn record(&mut self, fetched: Result<Reading, CloudScraperError>) -> Option<f64> {
+        match single_series(fetched, &self.query) {
+            Ok(cpu) if cpu.is_finite() => {
+                self.last_success_ms = monotonic_ms();
+                self.age_secs = 0.0;
+                self.warned = false;
+                Some(cpu)
+            }
+            Ok(cpu) => {
+                self.record_failure(&format!("non-finite CPU% {cpu}"));
+                None
+            }
+            Err(e) => {
+                self.record_failure(&e.to_string());
+                None
+            }
         }
     }
 }
@@ -428,27 +426,65 @@ fn single_series(
     }
 }
 
-/// Fetch every probe, one reading per probe in probe order. The database
-/// and broker probes run together, so a slow endpoint costs one timeout.
+/// Fetch every probe at once, one reading per probe in probe order, so a
+/// slow endpoint costs one timeout whatever the number of host groups. Each
+/// subsystem's age gauge then reads its oldest probe.
 async fn fetch_host_probes(
     probes: &mut [HostProbe],
     client: &HttpClient,
     uri: &hyper::Uri,
-    auth: Option<&AuthHeader>,
+    auth: Option<&Arc<AuthHeader>>,
     metrics: &MetricsState,
 ) -> Vec<Option<f64>> {
-    if let [database, broker] = probes {
-        let (a, b) = tokio::join!(
-            fetch_host_cpu(database, client, uri, auth, metrics),
-            fetch_host_cpu(broker, client, uri, auth, metrics),
+    let mut set = tokio::task::JoinSet::new();
+    for (i, probe) in probes.iter().enumerate() {
+        let (client, uri, query, auth) = (
+            client.clone(),
+            uri.clone(),
+            probe.query.clone(),
+            auth.cloned(),
         );
-        return vec![a, b];
+        set.spawn(async move {
+            (
+                i,
+                fetch_cpu_percent(&client, &uri, &query, auth.as_deref()).await,
+            )
+        });
     }
-    let mut readings = Vec::with_capacity(probes.len());
-    for probe in probes {
-        readings.push(fetch_host_cpu(probe, client, uri, auth, metrics).await);
+    let mut fetched: Vec<Option<Result<Reading, CloudScraperError>>> =
+        std::iter::repeat_with(|| None).take(probes.len()).collect();
+    while let Some(joined) = set.join_next().await {
+        if let Ok((i, result)) = joined {
+            fetched[i] = Some(result);
+        }
     }
+    let readings = probes
+        .iter_mut()
+        .zip(fetched)
+        .map(|(probe, result)| {
+            if let Some(result) = result {
+                probe.record(result)
+            } else {
+                probe.record_failure("the fetch task did not complete");
+                None
+            }
+        })
+        .collect();
+    publish_probe_ages(probes, metrics);
     readings
+}
+
+/// Set each subsystem's age gauge to its oldest probe, so one stale host
+/// group shows even while the others answer. A subsystem without a probe
+/// keeps its gauge untouched.
+fn publish_probe_ages(probes: &[HostProbe], metrics: &MetricsState) {
+    for subsystem in [Subsystem::Database, Subsystem::Broker] {
+        let mut ages = probes.iter().filter(|p| p.subsystem == subsystem);
+        if let Some(first) = ages.next() {
+            let oldest = ages.fold(first.age_secs, |max, p| max.max(p.age_secs));
+            first.age_gauge(metrics).set(oldest);
+        }
+    }
 }
 
 /// Bill each probe with a reading over the interval, in probe order
@@ -640,7 +676,7 @@ async fn run_cloud_scraper_loop(
         // both at once so a slow endpoint stretches the tick only once.
         let (cpu_readings, probe_cpu) = tokio::join!(
             collect_readings(set, groups.len()),
-            fetch_host_probes(&mut probes, &client, &uri, parsed_auth.as_deref(), &metrics),
+            fetch_host_probes(&mut probes, &client, &uri, parsed_auth.as_ref(), &metrics),
         );
         warn_multi_series_groups(&groups, &cpu_readings, &mut multi_series_warned);
         let any_success = !cpu_readings.is_empty();
@@ -1182,6 +1218,7 @@ mod tests {
             region: None,
             cpu_query: cpu_query.map(str::to_string),
             shared_with: Vec::new(),
+            hosts: Vec::new(),
         }
     }
 
@@ -1448,6 +1485,20 @@ mod tests {
         assert!(!probes[0].warned, "a success re-arms the warning");
         assert!(metrics.database_cpu_last_scrape_age_seconds.get().abs() < 1e-12);
         server.await.unwrap();
+    }
+
+    #[test]
+    fn the_age_gauge_reads_the_oldest_host_group() {
+        let metrics = MetricsState::new();
+        metrics.broker_cpu_last_scrape_age_seconds.set(7.0);
+        let mut probes = [probe(1, 10.0, 50.0), probe(1, 10.0, 50.0)];
+        probes[1].age_secs = 42.0;
+        publish_probe_ages(&probes, &metrics);
+        assert!((metrics.database_cpu_last_scrape_age_seconds.get() - 42.0).abs() < 1e-12);
+        assert!(
+            (metrics.broker_cpu_last_scrape_age_seconds.get() - 7.0).abs() < 1e-12,
+            "a subsystem without a probe keeps its gauge"
+        );
     }
 
     // ------------------------------------------------------------------

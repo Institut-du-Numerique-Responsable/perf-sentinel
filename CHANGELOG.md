@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-23
+
+### Added
+
+- `[green.database_static]` and `[green.broker_static]` take `[[...hosts]]` groups of identical hosts, each with its own `nodes`, `instance_type` and optional `cpu_query`, for a writer and a smaller reader or one database cluster per tenant, which a single instance type and query could not describe. Each group bills from its CPU, falls back to its own ceiling and recovers on its own, and the subsystem's figure is their sum, tagged with the declared model (`database_specpower`, `broker_specpower`) as soon as one group billed its ceiling. The section's `region` holds for every group. The load refuses `hosts` under `placement = "shared"`, next to the Alumet workload or next to a top-level `nodes`, `instance_type` or `cpu_query`, with more than 256 groups or 10000 nodes in all, and two groups reading the same `cpu_query`. The cloud scraper now fetches every host probe at once, and `perf_sentinel_database_cpu_last_scrape_age_seconds` and its broker twin read the group that has gone longest without a reading. A section without `hosts` loads and bills as before. `StaticHostsConfig` gains a public `hosts: Vec<HostGroup>` field and a `groups()` method, so a downstream crate building it with a struct literal must follow.
+
 ### Changed
 
 - The `Energy per scoring window (kWh)` and `Carbon per scoring window (gCO2e)` panels of `examples/grafana-dashboard.json` become `Average power (W)` and `Carbon per hour (gCO2e/h)`, the rates of `perf_sentinel_scored_energy_kwh_total` and `perf_sentinel_scored_carbon_gco2_total` times 3600. Scoring windows do not all last the same time, so the per-window gauges plotted an energy per batch that read like a power: about 0.5 Wh every 15 s looked like 0.5 kW. The gauges stay on `/metrics`, and the French dashboard follows. The power and range descriptions now state the scope: each service's own host for the operations it issues, the database and broker hosts only when a host source is configured, never idle servers or storage. The `Compatibility` badge also checks `perf_sentinel_scored_energy_kwh_total`, so a daemon older than 0.32.0 reads `Partly compatible` instead of leaving the power and range panels empty without a word.

@@ -507,6 +507,26 @@ cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier=~"orders-d
 
 A response with several series, an empty or non-finite result, or a failed fetch bills nothing that tick, warns once until the next good reading, and lets `perf_sentinel_database_cpu_last_scrape_age_seconds` grow. Once no reading has landed for three scrape intervals, the ceiling above bills the stretch under `database_specpower`, and the first reading after recovery, which reaches back over that stretch, is dropped. The query cannot be a provider default CPU query, `[green.cloud] cpu_metric` or the query of a `[green.cloud.services]` entry, which read application nodes, and it cannot sit next to `[green.alumet.database]`. Managed CPU metrics lag the hosts, see [docs/LIMITATIONS.md](LIMITATIONS.md#declared-database-precision-bounds).
 
+**Hosts of different sizes.** One instance type and one `cpu_query` cannot describe a writer and a smaller reader, or one cluster per tenant. A dedicated declaration then lists its groups of identical hosts as `[[green.database_static.hosts]]` entries, each with its own `nodes`, `instance_type` and optional `cpu_query`, and leaves those three keys out of the section itself:
+
+```toml
+[green.database_static]
+placement = "dedicated"
+region = "eu-west-3"
+
+[[green.database_static.hosts]]
+nodes = 1
+instance_type = "db.r6i.xlarge"
+cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier="orders-writer"})'
+
+[[green.database_static.hosts]]
+nodes = 2
+instance_type = "db.r6i.large"
+cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier=~"orders-reader-.*"})'
+```
+
+Each group is a declaration of its own. It sets both `nodes` and `instance_type`, since the Alumet exception above does not apply to groups, and its `cpu_query` follows the rules of the previous paragraph. It bills, falls back to its ceiling and recovers on its own: a group whose query stops answering bills its ceiling while the others keep their readings. A group without `cpu_query` bills its ceiling. The database figure is their sum, tagged `cloud_specpower` while every group bills from its CPU and `database_specpower` as soon as one group bills its ceiling, so a fallback is never published as a reading. `perf_sentinel_database_cpu_last_scrape_age_seconds` reads the group that has gone longest without a reading. The load refuses `hosts` under `placement = "shared"` or next to `[green.alumet.database]`, next to a top-level `nodes`, `instance_type` or `cpu_query`, with more than 256 entries or more than 10000 nodes in all, and two groups reading the same `cpu_query`. The section's `region` holds for every group.
+
 **A database on an application node.** With `placement = "shared"`, the database runs on a node that a `[green.cloud.services]` query group already reads, so its energy is inside that node's reading. `cpu_query` returns the pod's CPU as a percent of that node, in one series: filtered to the node the group's query reads, and normalized to one node by dividing a container's CPU rate by the node's vCPU count. `shared_with` lists that group exactly: every listed service resolves the same CPU query, every service resolving it is listed, and they share one power envelope, equal to `instance_type`'s when it is set (`instance_type` may then be left out, the group's envelope prices the host). Each tick the probe bills the pod's dynamic share, `(max_watts - idle_watts) × cpu / 100`, capped at the node's own dynamic watts, and takes the same watts out of the node before its services split it. The node is counted once, and its idle stays with the services. When the database and the broker are both declared on one node, the database is billed first and the broker at most what is left. A tick without a one-series reading of the group's query bills the host nothing, and a shared host has no ceiling to fall back on, so a stale probe bills nothing either. The windows it bills carry `model = "cloud_specpower"`. For a Postgres pod on the 4-vCPU node the `orders` and `billing` services read:
 
 ```toml
@@ -543,7 +563,7 @@ region = "eu-west-3"           # else [green.alumet.broker] region, else [green]
 
 `instance_type` accepts the embedded rows and the managed class names listed in [Managed service classes](./INSTANCE-TYPES.md#managed-service-classes) (`kafka.m5.large`, `mq.m5.large`). Names match case exactly. A type that resolves to no row fails the load, naming the type, the spelling that resolves when only the case differs, and the reason when it is a class left out on purpose. The broker host energy needs a region: this section's, else `[green.alumet.broker]`'s, else `[green] default_region`. Without one the load fails, and two declared regions that differ are refused. `provider` is accepted (`aws`, `gcp`, `azure`, `scaleway` or `generic`, anything else is refused) but prices nothing, the instance type alone prices the hosts, so setting it warns at load. A section left without `placement` fails with a message naming both placements.
 
-A dedicated declaration with `nodes` and `instance_type` bills energy, and so does a shared one through its `cpu_query`. That energy enters the totals like a measured figure, as `co2.messaging_gco2`, converted at the region above. A `cpu_query` on a dedicated declaration prices the brokers from their CPU, tagged `cloud_specpower` with the ceiling below as its `broker_specpower` fallback, as `[green.database_static]` above describes, and `perf_sentinel_broker_cpu_last_scrape_age_seconds` tracks its scrapes.
+A dedicated declaration with `nodes` and `instance_type` bills energy, and so does a shared one through its `cpu_query`. That energy enters the totals like a measured figure, as `co2.messaging_gco2`, converted at the region above. A `cpu_query` on a dedicated declaration prices the brokers from their CPU, tagged `cloud_specpower` with the ceiling below as its `broker_specpower` fallback, as `[green.database_static]` above describes, and `perf_sentinel_broker_cpu_last_scrape_age_seconds` tracks its scrapes. Brokers of different sizes take `[[green.broker_static.hosts]]` groups, under the rules `[green.database_static]` gives for hosts of different sizes, with `broker_specpower` as the declared tag.
 
 The energy is `nodes × max_watts × window duration`, following `E(n) = n × P_max`: provisioned nodes times their power ceiling. Three properties to accept before relying on it:
 
