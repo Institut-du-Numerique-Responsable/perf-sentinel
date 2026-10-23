@@ -241,6 +241,7 @@ fn publish_config_caps(metrics: &MetricsState, daemon: &crate::config::DaemonCon
 #[allow(clippy::too_many_lines)]
 pub async fn run(config: Config) -> Result<(), DaemonError> {
     validate_official_reporting(&config)?;
+    warn_if_findings_kept_nowhere(&config.daemon);
     let (tx, mut rx) = mpsc::channel::<IngestBatch>(config.daemon.ingest_queue_capacity);
     let window = Arc::new(Mutex::new(TraceWindow::new(WindowConfig {
         max_events_per_trace: config.daemon.max_events_per_trace,
@@ -649,6 +650,23 @@ fn load_incident_store(
     ))))
 }
 
+/// Whether the daemon keeps no lasting copy of its findings: stdout off,
+/// no Hub export and no archive, so only the bounded findings ring holds them.
+fn findings_kept_nowhere(daemon: &crate::config::DaemonConfig) -> bool {
+    !daemon.findings_stdout && !daemon.hub_export.enabled && daemon.archive.is_none()
+}
+
+fn warn_if_findings_kept_nowhere(daemon: &crate::config::DaemonConfig) {
+    if findings_kept_nowhere(daemon) {
+        tracing::warn!(
+            max_retained_findings = daemon.max_retained_findings,
+            "[daemon] findings_stdout = false with neither [daemon.hub_export] nor \
+             [daemon.archive]: findings stay in the query API's bounded ring only, and are \
+             lost once it rolls over or the daemon restarts"
+        );
+    }
+}
+
 /// Daemon startup gate for `[reporting] intent = "official"`.
 /// See `docs/design/08-PERIODIC-DISCLOSURE.md`.
 fn validate_official_reporting(config: &Config) -> Result<(), DaemonError> {
@@ -699,6 +717,25 @@ mod tests {
     use super::*;
     use crate::score::host_static::HostPlacement;
     use core::assert_matches;
+
+    #[test]
+    fn findings_kept_nowhere_only_without_stdout_hub_export_or_archive() {
+        let mut daemon = Config::default().daemon;
+        assert!(!findings_kept_nowhere(&daemon), "stdout on by default");
+        daemon.findings_stdout = false;
+        assert!(findings_kept_nowhere(&daemon));
+        daemon.hub_export.enabled = true;
+        assert!(!findings_kept_nowhere(&daemon), "the Hub keeps them");
+        daemon.hub_export.enabled = false;
+        daemon.archive = crate::config::load_from_str(
+            "[daemon.archive]\npath = \"/var/lib/perf-sentinel/reports.ndjson\"\n",
+        )
+        .expect("config loads")
+        .daemon
+        .archive;
+        assert!(daemon.archive.is_some());
+        assert!(!findings_kept_nowhere(&daemon), "the archive keeps them");
+    }
 
     #[test]
     fn host_context_exists_only_for_a_billable_source() {

@@ -1463,18 +1463,17 @@ fn inc_scored(total: &prometheus::Counter, value: f64, parts: [(&prometheus::Cou
     }
 }
 
-/// Update Prometheus counters, gauges, and exemplars, then emit findings
-/// as NDJSON to stdout unless `findings_stdout` is off.
+/// Update Prometheus counters, gauges, and exemplars, then write each
+/// finding as one NDJSON line to `findings_out`: the stdout lock, or
+/// `None` when `findings_stdout` is off.
 fn emit_findings_and_update_metrics(
     trace_count: usize,
     findings: &[detect::Finding],
     green_summary: &GreenSummary,
     metrics: &MetricsState,
     meter: &mut AnalysisServiceMeter,
-    findings_stdout: bool,
+    mut findings_out: Option<impl std::io::Write>,
 ) {
-    use std::io::Write;
-
     metrics.traces_analyzed_total.inc_by(trace_count as f64);
     metrics
         .total_io_ops
@@ -1562,7 +1561,6 @@ fn emit_findings_and_update_metrics(
         .collect();
     metrics.record_exemplars_labeled(&labeled, green_summary);
 
-    let mut stdout = findings_stdout.then(|| std::io::stdout().lock());
     for (finding, service_label, grouping_label) in &labeled {
         metrics
             .findings_total
@@ -1573,10 +1571,10 @@ fn emit_findings_and_update_metrics(
                 grouping_label,
             ])
             .inc();
-        if let Some(lock) = stdout.as_mut()
-            && serde_json::to_writer(&mut *lock, finding).is_ok()
+        if let Some(out) = findings_out.as_mut()
+            && serde_json::to_writer(&mut *out, finding).is_ok()
         {
-            let _ = writeln!(lock);
+            let _ = writeln!(out);
         }
     }
 }
@@ -1828,7 +1826,7 @@ async fn process_traces(
         &green_summary,
         ctx.metrics,
         ctx.service_meter,
-        ctx.findings_stdout,
+        ctx.findings_stdout.then(|| std::io::stdout().lock()),
     );
 
     if let Some(archive_tx) = ctx.archive_tx {

@@ -1498,7 +1498,7 @@ async fn host_counters_sum_the_in_total_host_figures() {
     poisoned.regions[0].co2_gco2 = f64::NAN;
     let before = scored_counters(&metrics);
     let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
-    emit_findings_and_update_metrics(0, &[], &poisoned, &metrics, &mut meter, true);
+    emit_findings_and_update_metrics(0, &[], &poisoned, &metrics, &mut meter, None::<Vec<u8>>);
     assert_eq!(scored_counters(&metrics), before);
 }
 
@@ -3634,6 +3634,40 @@ async fn findings_total_carries_the_findings_grouping() {
         "findings_total must carry the finding's grouping: {rendered}"
     );
     assert!(!rendered.contains("perf_sentinel_findings_total{grouping=\"\""));
+}
+
+#[test]
+fn emitted_findings_reach_the_writer_one_ndjson_line_each() {
+    use crate::detect::{FindingType, Severity};
+    let metrics = MetricsState::new();
+    let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
+    let findings = [
+        crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning),
+        crate::test_helpers::make_finding(FindingType::SlowSql, Severity::Info),
+    ];
+    let summary = GreenSummary::disabled(0);
+
+    let mut out = Vec::new();
+    emit_findings_and_update_metrics(1, &findings, &summary, &metrics, &mut meter, Some(&mut out));
+    let lines: Vec<&str> = std::str::from_utf8(&out).expect("utf-8").lines().collect();
+    assert_eq!(lines.len(), 2, "one line per finding");
+    for (line, finding) in lines.iter().zip(&findings) {
+        let back: crate::detect::Finding = serde_json::from_str(line).expect("NDJSON line");
+        assert_eq!(back.finding_type, finding.finding_type);
+    }
+
+    // Off: no writer, yet the findings are still counted.
+    let metrics = MetricsState::new();
+    let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
+    emit_findings_and_update_metrics(
+        1,
+        &findings,
+        &summary,
+        &metrics,
+        &mut meter,
+        None::<Vec<u8>>,
+    );
+    assert!(metrics.render().contains("perf_sentinel_findings_total{"));
 }
 
 #[tokio::test]
