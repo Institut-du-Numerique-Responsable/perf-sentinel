@@ -36,7 +36,7 @@ pdf = ["dep:krilla", "dep:fast_qr", "dep:lopdf", "dep:skrifa"]
 krilla = { version = "0.8.2", optional = true, default-features = false, features = ["simple-text"] }
 fast_qr = { version = "0.14.0", optional = true, default-features = false }
 # Glyph coverage and advances for line breaking, the version krilla draws with.
-skrifa = { version = "0.42.1", optional = true }
+skrifa = { version = "0.49.0", optional = true }
 lopdf = { version = "0.46.0", optional = true, default-features = false }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_path_to_error = "0.1.20"
@@ -46,10 +46,10 @@ serde_path_to_error = "0.1.20"
 # breaking the hash of an untampered report. This feature makes parsing exact.
 # `raw_value`: the Jaeger v3 search wraps each OTLP JSON document in
 # `{"result": ...}`, borrowed as raw bytes and handed to the OTLP JSON parser.
-serde_json = { version = "1.0.151", features = ["float_roundtrip", "raw_value"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "raw_value"] }
 tracing = "0.1.44"
-thiserror = "2.0.20"
-toml = "1.1.6"
+thiserror = "2.0.21"
+toml = "1.1.8"
 regex = "1.13.1"
 tokio = { version = "1.53.1", features = ["rt", "rt-multi-thread", "sync", "time", "net", "signal", "macros", "io-util", "fs"] }
 # tonic/axum/tower are unconditional because report/metrics.rs (Prometheus
@@ -66,11 +66,11 @@ prost = "0.14.4"
 # with-serde (already on via the default `full` feature) is pinned explicitly:
 # the batch `analyze --input` OTLP/JSON arm needs the serde impls (camelCase +
 # hex ids) and must keep working if `default-features = false` is set later.
-opentelemetry-proto = { version = "0.33.0", features = ["gen-tonic-messages", "trace", "with-serde"] }
+opentelemetry-proto = { version = "0.33.1", features = ["gen-tonic-messages", "trace", "with-serde"] }
 axum = "0.8.9"
 tower = { version = "0.5.3", features = ["timeout", "limit"] }
 prometheus = { version = "0.14.0", features = ["process"] }
-lru = "0.18.4"
+lru = "0.19.0"
 # SHA-256 for the canonical signature of a Finding used by the
 # acknowledgments file (`.perf-sentinel-acknowledgments.toml`). The 0.11
 # line moved from `generic-array` to `hybrid-array`, so it does not
@@ -79,7 +79,7 @@ lru = "0.18.4"
 # upstream RustCrypto release. chrono powers the `expires_at` ISO 8601
 # date parsing and the "is this ack still active" check
 # (`Utc::now()` comparison).
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
 # UUID v4 for the `report_uuid` field of periodic disclosure reports.
 # Serde feature lets the wire schema embed the value as a JSON string.
@@ -89,12 +89,12 @@ hyper = { version = "1.11.1", features = ["client", "http1", "server"], optional
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-proxy", "http1", "http2", "tokio", "server-auto"], optional = true }
 http-body-util = { version = "0.1.5", optional = true }
 bytes = { version = "1.12.1", optional = true }
-arc-swap = { version = "1.9.2", optional = true }
+arc-swap = { version = "1.9.3", optional = true }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["http1", "webpki-tokio", "ring", "tls12"], optional = true }
 # The outbound client builds its own rustls config: the Mozilla roots plus
 # the PEM certificates of `SSL_CERT_FILE` (see `http_client`).
-rustls = { version = "0.23.45", default-features = false, features = ["ring", "tls12", "std"], optional = true }
-webpki-roots = { version = "1.0.9", optional = true }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "tls12", "std"], optional = true }
+webpki-roots = { version = "1.0.11", optional = true }
 tokio-rustls = { version = "0.26.5", optional = true, default-features = false, features = ["logging", "tls12", "ring"] }
 
 tokio-stream = { version = "0.1.19", optional = true }
@@ -109,7 +109,7 @@ dirs = { version = "7.0.0", optional = true }
 # header check. Daemon-only (loopback API).
 subtle = { version = "2.6.1", optional = true }
 # `libc::O_NOFOLLOW` for `daemon::archive::no_follow`, the opener the analysis archive, the incident archive and the ack store share. Daemon-only.
-libc = { version = "0.2.189", optional = true }
+libc = { version = "0.2.191", optional = true }
 # Inflates the XLSX export of the MAVIR grid feed. Already in the daemon
 # build through tower-http and tonic.
 flate2 = { version = "1.1.10", optional = true }
@@ -118,14 +118,14 @@ flate2 = { version = "1.1.10", optional = true }
 # Signs a throwaway CA and server certificate at test time, so the TLS
 # round trip of `http_client` needs no private key in the repository.
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
-proptest = "1.11.0"
+proptest = "1.12.0"
 tower = { version = "0.5.3", features = ["util", "timeout"] }
 http-body-util = "0.1.5"
 tempfile = "3.27.0"
 flate2 = "1.1.10"
 criterion = "0.8.2"
 # test-util enables start_paused so enqueue-timeout tests run instantly.
-tokio = { version = "1.53.1", features = ["test-util"] }
+tokio = { version = "1.54.1", features = ["test-util"] }
 
 [[bench]]
 name = "pipeline"
