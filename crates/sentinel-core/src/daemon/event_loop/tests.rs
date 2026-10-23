@@ -162,6 +162,7 @@ fn test_ctx<'a>(
         detect_config,
         traces_store: noop_traces_store(),
         green_enabled,
+        findings_stdout: true,
         service_meter: Box::leak(Box::new(AnalysisServiceMeter::new(true, true, metrics))),
         carbon_ctx,
         metrics,
@@ -1497,7 +1498,7 @@ async fn host_counters_sum_the_in_total_host_figures() {
     poisoned.regions[0].co2_gco2 = f64::NAN;
     let before = scored_counters(&metrics);
     let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
-    emit_findings_and_update_metrics(0, &[], &poisoned, &metrics, &mut meter);
+    emit_findings_and_update_metrics(0, &[], &poisoned, &metrics, &mut meter, None::<Vec<u8>>);
     assert_eq!(scored_counters(&metrics), before);
 }
 
@@ -2487,6 +2488,7 @@ fn test_worker_ctx(
         green_enabled: true,
         per_service_labels: true,
         per_grouping_labels: true,
+        findings_stdout: true,
 
         confidence: Confidence::DaemonStaging,
         metrics: metrics.clone(),
@@ -3054,6 +3056,7 @@ fn test_loop_cfg() -> EventLoopConfig {
         analysis_queue_capacity: 1024,
         per_service_labels: true,
         per_grouping_labels: true,
+        findings_stdout: true,
         waste_sticky_ttl_ms: 0,
     }
 }
@@ -3631,6 +3634,76 @@ async fn findings_total_carries_the_findings_grouping() {
         "findings_total must carry the finding's grouping: {rendered}"
     );
     assert!(!rendered.contains("perf_sentinel_findings_total{grouping=\"\""));
+}
+
+#[test]
+fn emitted_findings_reach_the_writer_one_ndjson_line_each() {
+    use crate::detect::{FindingType, Severity};
+    let metrics = MetricsState::new();
+    let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
+    let findings = [
+        crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning),
+        crate::test_helpers::make_finding(FindingType::SlowSql, Severity::Info),
+    ];
+    let summary = GreenSummary::disabled(0);
+
+    let mut out = Vec::new();
+    emit_findings_and_update_metrics(1, &findings, &summary, &metrics, &mut meter, Some(&mut out));
+    let lines: Vec<&str> = std::str::from_utf8(&out).expect("utf-8").lines().collect();
+    assert_eq!(lines.len(), 2, "one line per finding");
+    for (line, finding) in lines.iter().zip(&findings) {
+        let back: detect::Finding = serde_json::from_str(line).expect("NDJSON line");
+        assert_eq!(back.finding_type, finding.finding_type);
+    }
+
+    // Off: no writer, yet the findings are still counted.
+    let metrics = MetricsState::new();
+    let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
+    emit_findings_and_update_metrics(
+        1,
+        &findings,
+        &summary,
+        &metrics,
+        &mut meter,
+        None::<Vec<u8>>,
+    );
+    assert!(metrics.render().contains("perf_sentinel_findings_total{"));
+}
+
+#[test]
+fn findings_sink_follows_the_findings_stdout_setting() {
+    let metrics = MetricsState::new();
+    let ctx = empty_carbon_ctx();
+    let store = findings_store::FindingsStore::new(100);
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    let mut pctx = test_ctx(&detect_config, &ctx, &metrics, &store, true, &cell);
+    pctx.findings_stdout = true;
+    assert!(pctx.findings_sink().is_some(), "on: findings go to stdout");
+    pctx.findings_stdout = false;
+    assert!(pctx.findings_sink().is_none(), "off: no stdout write");
+}
+
+#[tokio::test]
+async fn findings_stdout_off_still_counts_and_stores_findings() {
+    // The knob silences the stdout copy only: the metrics, the ring
+    // buffer and everything downstream of it keep every finding.
+    let metrics = MetricsState::new();
+    let ctx = empty_carbon_ctx();
+    let store = findings_store::FindingsStore::new(100);
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    let mut pctx = test_ctx(&detect_config, &ctx, &metrics, &store, true, &cell);
+    pctx.findings_stdout = false;
+    process_traces(vec![n_plus_one_trace("t1", "svc-a", "prod", 6)], pctx).await;
+
+    assert!(
+        metrics
+            .render()
+            .contains("perf_sentinel_findings_total{grouping=\"prod\",service=\"svc-a\""),
+        "findings are still counted"
+    );
+    assert!(store.len().await > 0, "findings are still retained");
 }
 
 #[tokio::test]

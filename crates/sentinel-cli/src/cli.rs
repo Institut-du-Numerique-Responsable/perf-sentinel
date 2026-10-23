@@ -215,7 +215,8 @@ pub(crate) enum Commands {
     /// Bounded-queue backpressure (default 1024 each):
     /// `ingest_queue_capacity` and `analysis_queue_capacity` (sheds whole
     /// batches when full).
-    /// Behavior: `sampling_rate`, `environment`, `api_enabled`.
+    /// Behavior: `sampling_rate`, `environment`, `api_enabled`,
+    /// `findings_stdout`.
     /// Sub-sections: `[daemon.correlation]`, `[daemon.ack]`,
     /// `[daemon.cors]`, `[daemon.archive]`.
     #[cfg(feature = "daemon")]

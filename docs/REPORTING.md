@@ -155,7 +155,7 @@ rollup_retention_days = 400
 
 When the active file exceeds `max_size_mb`, Perf Sentinel renames it to `reports-<utc-timestamp>.ndjson` and starts a fresh file. Older rotated files beyond `max_files` are pruned by modification time. Window rotation never touches the daily rollup files, which `rollup_retention_days` prunes by age, see [Daily rollups hold a period](#daily-rollups-hold-a-period-0280).
 
-Operators that already collect daemon stdout via a sidecar can pass the resulting file (or directory) to `--input` directly, as long as each line is one `{ts, report}` envelope.
+The daemon's stdout carries findings, not these envelopes, so `--input` takes the archive files or another file of `{ts, report}` lines, never a capture of stdout.
 
 ## org-config TOML
 

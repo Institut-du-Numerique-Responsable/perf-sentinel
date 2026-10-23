@@ -167,6 +167,7 @@ async fn config_exposes_daemon_params_without_secrets() {
     assert!(cfg.get("correlation_enabled").is_some());
     assert_eq!(cfg["per_service_labels"], true);
     assert_eq!(cfg["per_grouping_labels"], true);
+    assert_eq!(cfg["findings_stdout"], true);
     // Secrets are summarized to booleans, never echoed: no raw key
     // or path fields exist on the response at all.
     assert_eq!(cfg["tls_configured"], false);

@@ -344,6 +344,7 @@ pub(super) struct DaemonSection {
     analysis_queue_capacity: Option<usize>,
     per_service_labels: Option<bool>,
     per_grouping_labels: Option<bool>,
+    findings_stdout: Option<bool>,
     memory_high_water_pct: Option<u8>,
     api_enabled: Option<bool>,
     read_api_key: Option<String>,
@@ -696,6 +697,10 @@ impl From<RawConfig> for Config {
                     .daemon
                     .per_grouping_labels
                     .unwrap_or(daemon_defaults.per_grouping_labels),
+                findings_stdout: raw
+                    .daemon
+                    .findings_stdout
+                    .unwrap_or(daemon_defaults.findings_stdout),
                 memory_high_water_pct: raw
                     .daemon
                     .memory_high_water_pct

@@ -155,7 +155,7 @@ rollup_retention_days = 400
 
 Quand le fichier actif dépasse `max_size_mb`, Perf Sentinel le renomme en `reports-<utc-timestamp>.ndjson` et ouvre un nouveau fichier. Les anciens fichiers tournés au-delà de `max_files` sont élagués par date de modification. La rotation des fenêtres ne touche jamais les fichiers de cumuls quotidiens, que `rollup_retention_days` élague par ancienneté, voir [Les cumuls quotidiens tiennent une période](#les-cumuls-quotidiens-tiennent-une-période-0280).
 
-Les opérateurs qui collectent déjà stdout du daemon via un sidecar peuvent passer le fichier (ou le dossier) résultant à `--input` directement, à condition que chaque ligne soit une enveloppe `{ts, report}`.
+Le stdout du daemon porte des findings, pas ces enveloppes : `--input` prend donc les fichiers de l'archive ou un autre fichier de lignes `{ts, report}`, jamais une capture de stdout.
 
 ## TOML org-config
 

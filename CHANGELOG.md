@@ -4,9 +4,19 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-23
+
+### Added
+
+- `[daemon] findings_stdout` (default `true`) turns off the NDJSON copy of every finding on stdout. A daemon whose findings already reach PerfSentinelHub through `[daemon.hub_export]` wrote millions of lines a day that nothing read, at a CPU and node disk cost, and buried its own messages on stderr in the container log. Metrics, the ring buffer, the archive and every export are unchanged with it off. A daemon that turns it off with neither `[daemon.hub_export]` nor `[daemon.archive]` warns at startup, since its findings then live in the bounded ring only, or nowhere with `api_enabled = false` or `max_retained_findings = 0`. `/api/config` reports it, and the `query monitor` Config tab shows it for a daemon that does. `docs/REPORTING.md` no longer suggests passing a capture of stdout to `disclose`: stdout carries findings, not the `{ts, report}` envelopes it reads.
+
 ### Changed
 
 - The official public example disclosure, `docs/schemas/examples/example-official-public-G2.json`, moves to perf-sentinel 0.33.0 on schema `perf-sentinel-report/v1.8`, with the `binary_hash` of the published 0.33.0 `perf-sentinel-linux-amd64` binary and a rebaked `content_hash`. The sample disclosure the website shows is signed from this file.
+
+### Security
+
+- **`tokio` bumped to 1.54.1 against RUSTSEC-2026-0386.** `AsyncFd::new` and the related constructors violated I/O safety. perf-sentinel does not call them itself, and `fuzz/Cargo.lock` follows.
 
 ## [0.33.0] - 2026-10-23
 

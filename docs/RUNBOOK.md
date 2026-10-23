@@ -114,7 +114,7 @@ needs the fraction stripped first, it parses `%Y-%m-%dT%H:%M:%SZ` only.
 
 Archiving is **off by default** (`archive` is unset). If it was never configured, nothing was written and Tempo replay is the only route left.
 
-**A log backend keeps every detection, if you already ship the daemon's logs.** The daemon writes each finding as one JSON line on stdout and its own logs as text on stderr, so a collector that tails the container keeps the findings for as long as that backend retains them, with no Perf Sentinel setting involved. With Loki, the `json` stage tells the two apart by itself, because a text line fails to parse:
+**A log backend keeps every detection, if you already ship the daemon's logs.** The daemon writes each finding as one JSON line on stdout and its own logs as text on stderr, so a collector that tails the container keeps the findings for as long as that backend retains them. `[daemon] findings_stdout = false` turns the stdout copy off, for a daemon whose findings already reach PerfSentinelHub. With Loki, the `json` stage tells the two apart by itself, because a text line fails to parse:
 
 ```logql
 sum by (signature, type, severity, service) (

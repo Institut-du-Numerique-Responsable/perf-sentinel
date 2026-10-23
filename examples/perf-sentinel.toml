@@ -231,6 +231,12 @@ per_service_labels = true          # default true
 # pairs. false restores the 0.18 shape.
 per_grouping_labels = true         # default true
 
+# Write each finding to stdout as one NDJSON line, for a log backend that
+# tails the container. false keeps them in the query API, the archive and
+# the Hub export only, and leaves the container log to the daemon's own
+# messages on stderr.
+findings_stdout = true             # default true
+
 # Stamped on every finding as `confidence`, read by downstream tooling and
 # not by the quality gate. Two values here, case-insensitive (anything else
 # is rejected at load time): "production" -> `daemon_production` (real

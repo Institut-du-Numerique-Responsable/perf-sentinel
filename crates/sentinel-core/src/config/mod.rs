@@ -346,6 +346,10 @@ pub struct DaemonConfig {
     /// `false` leaves the label empty on every series, restoring the
     /// 0.18 shape. Since 0.19.0.
     pub per_grouping_labels: bool,
+    /// Whether each finding is also written to stdout as one NDJSON line,
+    /// for a log backend that tails the container. `false` keeps the
+    /// findings in the query API, the archive and the Hub export only.
+    pub findings_stdout: bool,
     /// Memory-pressure admission control, as a percentage of the cgroup v2
     /// memory limit (1-100). When the pod's `memory.current / memory.max`
     /// crosses this high-water mark, OTLP ingest is rejected with a
@@ -659,6 +663,7 @@ impl Default for DaemonConfig {
             analysis_queue_capacity: 1024,
             per_service_labels: true,
             per_grouping_labels: true,
+            findings_stdout: true,
             memory_high_water_pct: 0,
             api_enabled: true,
             read_api_key: None,

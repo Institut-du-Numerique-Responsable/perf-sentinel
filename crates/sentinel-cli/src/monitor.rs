@@ -207,6 +207,9 @@ struct ConfigSlim {
     incidents_enabled: Option<bool>,
     #[serde(default)]
     hub_export_enabled: Option<bool>,
+    /// Absent before the key existed, when every finding went to stdout.
+    #[serde(default)]
+    findings_stdout: Option<bool>,
     #[serde(default)]
     cors_allowed_origins: Vec<String>,
     #[serde(default)]
@@ -1600,6 +1603,15 @@ fn push_subsystem_rows(
             on_off(enabled, "enabled", "disabled"),
             "disabled",
             "Pushes findings, incidents and correlations to PerfSentinelHub, which keeps them past the ring buffer. What it fails to deliver shows on the Advisor tab and in perf_sentinel_hub_export_*_dropped_total.",
+        );
+    }
+    if let Some(enabled) = c.findings_stdout {
+        config_row(
+            lines,
+            "findings_stdout",
+            &yes_no(enabled),
+            &yes_no(d.findings_stdout),
+            "Whether each finding is also written to stdout as one NDJSON line, for a log backend that tails the container. Off keeps them in the query API, the archive and the Hub export only.",
         );
     }
     config_row(

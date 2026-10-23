@@ -524,6 +524,7 @@ fn full_config() -> ConfigSlim {
         read_api_key_set: Some(d.read_api_key.is_some()),
         incidents_enabled: Some(d.incidents.enabled),
         hub_export_enabled: Some(d.hub_export.enabled),
+        findings_stdout: Some(d.findings_stdout),
         ..Default::default()
     }
 }
@@ -547,6 +548,14 @@ fn config_renders_params_with_defaults() {
     assert!(
         gline.contains("= yes") && !gline.contains("modified"),
         "default knob rendered as its value, unflagged: {gline}"
+    );
+    let sline = text
+        .lines()
+        .find(|l| l.contains("findings_stdout ="))
+        .expect("findings_stdout row");
+    assert!(
+        sline.contains("= yes") && !sline.contains("modified"),
+        "default knob rendered as its value, unflagged: {sline}"
     );
     // A param left at its default must not be flagged modified.
     let dline = text
@@ -678,6 +687,27 @@ fn config_says_the_hub_keeps_what_the_ring_evicts_when_the_export_is_on() {
         !text.contains("loses nothing the export delivered"),
         "{text}"
     );
+}
+
+#[test]
+fn config_flags_findings_stdout_off_and_skips_it_on_an_older_daemon() {
+    let mut snapshot = snapshot_with_warnings(Vec::new());
+    let mut cfg = full_config();
+    cfg.findings_stdout = Some(false);
+    snapshot.config = Some(cfg);
+    let text = line_text(&build_config_lines(Some(&snapshot)));
+    let row = text
+        .lines()
+        .find(|l| l.contains("findings_stdout ="))
+        .expect("findings_stdout row");
+    assert!(row.contains("= no") && row.contains("modified"), "{row}");
+
+    let old: ConfigSlim = serde_json::from_str(r#"{"listen_port":4318}"#).unwrap();
+    assert!(old.findings_stdout.is_none());
+    let mut snapshot = snapshot_with_warnings(Vec::new());
+    snapshot.config = Some(old);
+    let text = line_text(&build_config_lines(Some(&snapshot)));
+    assert!(!text.contains("findings_stdout ="), "{text}");
 }
 
 #[test]
