@@ -6,9 +6,9 @@
     "integrity_level": "signed",
     "generated_at": "2026-04-05T12:00:00Z",
     "generated_by": "daemon",
-    "perf_sentinel_version": "0.32.0",
+    "perf_sentinel_version": "0.33.0",
     "report_uuid": "00000000-0000-4000-8000-000000000002",
-    "binary_version": "0.32.0"
+    "binary_version": "0.33.0"
   },
   "organisation": {
     "name": "Example SAS",
@@ -58,7 +58,7 @@
   },
   "methodology": {
     "sci_specification": "ISO/IEC 21031:2024",
-    "perf_sentinel_version": "0.32.0",
+    "perf_sentinel_version": "0.33.0",
     "enabled_patterns": [
       "n_plus_one_sql",
       "n_plus_one_http",
@@ -156,7 +156,7 @@
     },
     "period_coverage": 0.91,
     "binary_versions": [
-      "0.32.0"
+      "0.33.0"
     ],
     "runtime_windows_count": 164,
     "fallback_windows_count": 16,
@@ -216,9 +216,9 @@
     }
   ],
   "integrity": {
-    "content_hash": "sha256:1cf1daa92eb5763488af93f4ea04c5644f3f5d8b3a203bc8a09c9c8191d0f069",
-    "binary_hash": "sha256:cf4bfd5301664e06810ed082432bf113eafa54da3d9179e5bb4f6d2cdd23cc3a",
-    "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.32.0",
+    "content_hash": "sha256:f87c35296100c6c8ed0f116b1b771c07af607d857c7d3d3f63aebe30c26a4775",
+    "binary_hash": "sha256:63a328cd764b8e2960344601c0c2024485a90109d79ad2f426ded2bceb0732cb",
+    "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.33.0",
     "trace_integrity_chain": {
       "breaks": 0,
       "breaks_outside_period": 0,
@@ -233,8 +233,8 @@
       "signer_identity": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/.github/workflows/sample-disclosure.yml@refs/heads/main",
       "signer_issuer": "https://token.actions.githubusercontent.com",
       "rekor_url": "https://rekor.sigstore.dev",
-      "rekor_log_index": 3363475211,
-      "signed_at": "2026-10-21T20:21:13Z"
+      "rekor_log_index": 3420564740,
+      "signed_at": "2026-10-23T14:52:30Z"
     }
   },
   "notes": {
