@@ -10,6 +10,18 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.33.0]
+
+### Changed
+
+- **`appVersion` moves to `0.33.0`.** `[green.database_static]` and
+  `[green.broker_static]` take `[[...hosts]]` groups of hosts of
+  different sizes, each billed from its own CPU query or ceiling. A
+  config without groups loads and bills as before. See the application
+  `CHANGELOG.md`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.32.0]
 
 ### Changed

@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-23
+
 ### Added
 
 - `[green.database_static]` and `[green.broker_static]` take `[[...hosts]]` groups of identical hosts, each with its own `nodes`, `instance_type` and optional `cpu_query`, for a writer and a smaller reader or one database cluster per tenant, which a single instance type and query could not describe. Each group bills from its CPU, falls back to its own ceiling and recovers on its own, and the subsystem's figure is their sum, tagged with the declared model (`database_specpower`, `broker_specpower`) as soon as one group billed its ceiling. The section's `region` holds for every group. The load refuses `hosts` under `placement = "shared"`, next to the Alumet workload or next to a top-level `nodes`, `instance_type` or `cpu_query`, with more than 256 groups or 10000 nodes in all, and two groups reading the same `cpu_query`. The cloud scraper now fetches every host probe at once, and `perf_sentinel_database_cpu_last_scrape_age_seconds` and its broker twin read the group that has gone longest without a reading. A section without `hosts` loads and bills as before. `StaticHostsConfig` gains a public `hosts: Vec<HostGroup>` field and a `groups()` method, so a downstream crate building it with a struct literal must follow.
