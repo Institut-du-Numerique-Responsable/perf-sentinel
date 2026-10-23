@@ -522,6 +522,26 @@ cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier=~"orders-d
 
 Une réponse à plusieurs séries, un résultat vide ou non fini, ou un échec de récupération ne facture rien sur ce tick, avertit une fois jusqu'à la prochaine lecture valide, et laisse grimper `perf_sentinel_database_cpu_last_scrape_age_seconds`. Quand aucune lecture n'est arrivée depuis trois intervalles de scrape, le plafond ci-dessus facture la période en `database_specpower`, et la première lecture après le retour, qui remonte sur cette période, est écartée. La requête ne peut être ni une requête CPU par défaut d'un fournisseur, ni `[green.cloud] cpu_metric`, ni la requête d'une entrée de `[green.cloud.services]`, qui lisent des nœuds applicatifs, et elle ne peut pas côtoyer `[green.alumet.database]`. Les métriques CPU managées sont en retard sur les hôtes, voir [docs/LIMITATIONS-FR.md](LIMITATIONS-FR.md#limites-de-précision-des-bases-déclarées).
 
+**Des hôtes de tailles différentes.** Un seul type d'instance et une seule `cpu_query` ne décrivent pas un writer et un reader plus petit, ni un cluster par tenant. Une déclaration dédiée liste alors ses groupes d'hôtes identiques en entrées `[[green.database_static.hosts]]`, chacune avec ses propres `nodes`, `instance_type` et `cpu_query` facultative, et retire ces trois clés de la section elle-même :
+
+```toml
+[green.database_static]
+placement = "dedicated"
+region = "eu-west-3"
+
+[[green.database_static.hosts]]
+nodes = 1
+instance_type = "db.r6i.xlarge"
+cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier="orders-writer"})'
+
+[[green.database_static.hosts]]
+nodes = 2
+instance_type = "db.r6i.large"
+cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier=~"orders-reader-.*"})'
+```
+
+Chaque groupe est une déclaration à part entière. Son entrée suit les règles de `nodes` et d'`instance_type` ci-dessus et sa `cpu_query` celles du paragraphe précédent, et il facture, se replie sur son plafond et reprend seul : un groupe dont la requête ne répond plus facture son plafond pendant que les autres gardent leurs lectures. Un groupe sans `cpu_query` facture son plafond. Le chiffre de la base est leur somme, étiquetée `cloud_specpower` tant que chaque groupe facture sur son CPU et `database_specpower` dès qu'un groupe facture son plafond, si bien qu'un repli n'est jamais publié comme une lecture. `perf_sentinel_database_cpu_last_scrape_age_seconds` lit le groupe resté le plus longtemps sans lecture. Le chargement refuse `hosts` sous `placement = "shared"` ou à côté de `[green.alumet.database]`, à côté de `nodes`, `instance_type` ou `cpu_query` au niveau de la section, avec plus de 256 entrées ou plus de 10000 nœuds au total, et deux groupes qui lisent la même `cpu_query`. La `region` de la section vaut pour chaque groupe.
+
 **Une base sur un nœud applicatif.** Avec `placement = "shared"`, la base tourne sur un nœud qu'un groupe de requête de `[green.cloud.services]` lit déjà, son énergie est donc dans la lecture de ce nœud. `cpu_query` renvoie le CPU du pod en pourcentage de ce nœud, en une seule série : filtrée sur le nœud que lit la requête du groupe, et ramenée à un nœud en divisant le débit CPU d'un conteneur par le nombre de vCPU du nœud. `shared_with` liste exactement ce groupe : chaque service listé résout la même requête CPU, chaque service qui la résout est listé, et ils partagent une seule enveloppe de puissance, égale à celle d'`instance_type` quand il est posé (`instance_type` peut alors être omis, l'enveloppe du groupe chiffre l'hôte). À chaque tick la sonde facture la part dynamique du pod, `(max_watts - idle_watts) × cpu / 100`, plafonnée aux watts dynamiques du nœud lui-même, et retire ces mêmes watts du nœud avant que ses services se le partagent. Le nœud est compté une fois, et son idle reste aux services. Quand la base et le broker sont tous deux déclarés sur un même nœud, la base est facturée en premier et le broker au plus ce qui reste. Un tick sans lecture à une seule série de la requête du groupe ne facture rien à l'hôte, et un hôte partagé n'a pas de plafond de repli, une sonde périmée ne facture donc rien non plus. Les fenêtres qu'elle facture portent `model = "cloud_specpower"`. Pour un pod Postgres sur le nœud à 4 vCPU que lisent les services `orders` et `billing` :
 
 ```toml
@@ -558,7 +578,7 @@ region = "eu-west-3"           # sinon la région de [green.alumet.broker], sino
 
 `instance_type` accepte les lignes embarquées et les noms de classes managées listés dans [Classes de services managés](./INSTANCE-TYPES-FR.md#classes-de-services-managés) (`kafka.m5.large`, `mq.m5.large`). Les noms respectent la casse. Un type qui ne se résout sur aucune ligne fait échouer le chargement, en nommant le type, la graphie qui se résout quand seule la casse diffère, et la raison quand il s'agit d'une classe laissée de côté exprès. L'énergie de l'hôte du broker a besoin d'une région : celle de cette section, sinon celle de `[green.alumet.broker]`, sinon `[green] default_region`. Sans aucune, le chargement échoue, et deux régions déclarées qui diffèrent sont refusées. `provider` est accepté (`aws`, `gcp`, `azure`, `scaleway` ou `generic`, toute autre valeur est refusée) mais ne chiffre rien, le type d'instance seul chiffre les hôtes : le renseigner émet donc un avertissement au chargement. Une section sans `placement` échoue avec un message qui nomme les deux placements.
 
-Une déclaration dédiée avec `nodes` et `instance_type` facture de l'énergie, une déclaration partagée aussi par sa `cpu_query`. Cette énergie entre dans les totaux comme un chiffre mesuré, en `co2.messaging_gco2`, convertie à la région ci-dessus. Une `cpu_query` sur une déclaration dédiée chiffre les brokers sur leur CPU, étiquetés `cloud_specpower` avec le plafond ci-dessous comme repli `broker_specpower`, comme le décrit `[green.database_static]` plus haut, et `perf_sentinel_broker_cpu_last_scrape_age_seconds` suit ses scrapes.
+Une déclaration dédiée avec `nodes` et `instance_type` facture de l'énergie, une déclaration partagée aussi par sa `cpu_query`. Cette énergie entre dans les totaux comme un chiffre mesuré, en `co2.messaging_gco2`, convertie à la région ci-dessus. Une `cpu_query` sur une déclaration dédiée chiffre les brokers sur leur CPU, étiquetés `cloud_specpower` avec le plafond ci-dessous comme repli `broker_specpower`, comme le décrit `[green.database_static]` plus haut, et `perf_sentinel_broker_cpu_last_scrape_age_seconds` suit ses scrapes. Des brokers de tailles différentes prennent des groupes `[[green.broker_static.hosts]]`, selon les règles que `[green.database_static]` donne pour des hôtes de tailles différentes, avec `broker_specpower` comme étiquette déclarée.
 
 L'énergie vaut `nodes × max_watts × durée de la fenêtre`, suivant `E(n) = n × P_max` : les nœuds provisionnés multipliés par leur plafond de puissance. Trois propriétés à accepter avant de s'appuyer dessus :
 

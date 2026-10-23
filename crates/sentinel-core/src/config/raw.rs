@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::score::alumet::config::DEFAULT_ENERGY_INTERVAL_SECS;
 use crate::score::alumet::{AlumetBrokerConfig, AlumetConfig, AlumetDatabaseConfig};
 use crate::score::cloud_energy::config::{CloudEnergyConfig, ServiceCloudConfig};
-use crate::score::host_static::{HostPlacement, StaticHostsConfig, Subsystem};
+use crate::score::host_static::{HostGroup, HostPlacement, StaticHostsConfig, Subsystem};
 use crate::score::kepler::{KeplerConfig, KeplerMetricKind};
 use crate::score::redfish::{RedfishConfig, RedfishEndpoint};
 use crate::score::scaphandre::{ProcessMatcher, ScaphandreConfig};
@@ -1064,6 +1064,7 @@ pub(super) struct StaticHostsSection {
     pub(super) region: Option<String>,
     pub(super) cpu_query: Option<String>,
     pub(super) shared_with: Option<Vec<String>>,
+    pub(super) hosts: Option<Vec<HostGroupSection>>,
 }
 
 impl StaticHostsSection {
@@ -1073,7 +1074,17 @@ impl StaticHostsSection {
             || self.region.is_some()
             || self.cpu_query.is_some()
             || self.shared_with.is_some()
+            || self.hosts.is_some()
     }
+}
+
+/// Raw deserialization target for one `[[...hosts]]` group.
+#[derive(Deserialize, Default, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct HostGroupSection {
+    pub(super) nodes: Option<u32>,
+    pub(super) instance_type: Option<String>,
+    pub(super) cpu_query: Option<String>,
 }
 
 /// Raw deserialization target for `[green.broker_static]`: the
@@ -1088,6 +1099,7 @@ pub(super) struct BrokerStaticSection {
     pub(super) region: Option<String>,
     pub(super) cpu_query: Option<String>,
     pub(super) shared_with: Option<Vec<String>>,
+    pub(super) hosts: Option<Vec<HostGroupSection>>,
 }
 
 impl BrokerStaticSection {
@@ -1100,6 +1112,7 @@ impl BrokerStaticSection {
             region: self.region.clone(),
             cpu_query: self.cpu_query.clone(),
             shared_with: self.shared_with.clone(),
+            hosts: self.hosts.clone(),
         }
     }
 }
@@ -1120,6 +1133,16 @@ fn convert_static_hosts_section(raw: &StaticHostsSection) -> Option<StaticHostsC
             .iter()
             .flatten()
             .map(|name| name.trim().to_string())
+            .collect(),
+        hosts: raw
+            .hosts
+            .iter()
+            .flatten()
+            .map(|group| HostGroup {
+                nodes: group.nodes,
+                instance_type: trimmed(&group.instance_type),
+                cpu_query: trimmed(&group.cpu_query),
+            })
             .collect(),
     })
 }

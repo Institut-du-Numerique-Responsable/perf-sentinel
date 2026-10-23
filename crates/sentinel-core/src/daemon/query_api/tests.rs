@@ -2243,6 +2243,7 @@ async fn energy_endpoint_reports_the_host_cpu_queries() {
         region: None,
         cpu_query: cpu_query.map(str::to_string),
         shared_with: Vec::new(),
+        hosts: Vec::new(),
     };
     let mut config = crate::config::Config::default();
     config.green.database_static = Some(hosts(Some("db_cpu")));

@@ -101,8 +101,9 @@ pub(super) struct SubsystemSources<'a> {
 pub(super) struct EnergySources<'a> {
     pub(super) base_carbon_ctx: Arc<score::carbon::CarbonContext>,
     pub(super) alumet_state: Option<&'a AlumetState>,
-    pub(super) database: SubsystemSources<'a>,
-    pub(super) broker: SubsystemSources<'a>,
+    /// One entry per declared host group, see `StaticHostsConfig::groups`.
+    pub(super) database: &'a [SubsystemSources<'a>],
+    pub(super) broker: &'a [SubsystemSources<'a>],
     pub(super) alumet_staleness_ms: u64,
     pub(super) scaphandre_state: Option<&'a ScaphandreState>,
     pub(super) scaphandre_staleness_ms: u64,
@@ -1238,8 +1239,8 @@ fn build_tick_ctx<'s>(
     // Host energy accumulated since the previous scored batch.
     // Consuming here (once per built batch) keeps shed batches from
     // losing energy: they never build a context.
-    let database_kwh = take_host_energy(&database, now);
-    let broker_kwh = take_host_energy(&broker, now);
+    let database_kwh = take_host_energy(database, now);
+    let broker_kwh = take_host_energy(broker, now);
 
     // Fast path: with nothing fresh this tick, borrow base instead of cloning.
     if cloud_snap.is_empty()
@@ -1300,14 +1301,19 @@ fn build_tick_ctx<'s>(
 }
 
 /// The live and declared energy of one subsystem for one tick, live
-/// first. A subsystem with no source yields `(None, None)`.
-fn take_host_energy(sources: &SubsystemSources<'_>, now: u64) -> (Option<f64>, Option<f64>) {
-    take_broker_energy(
-        sources.live,
-        sources.declared,
-        now,
-        sources.live_staleness_ms,
-    )
+/// first, each summed over the host groups. Every group arbitrates its own
+/// live and declared sources. A subsystem with no source yields
+/// `(None, None)`.
+fn take_host_energy(groups: &[SubsystemSources<'_>], now: u64) -> (Option<f64>, Option<f64>) {
+    let add = |total: Option<f64>, kwh: Option<f64>| match (total, kwh) {
+        (Some(a), Some(b)) => Some(a + b),
+        (a, b) => a.or(b),
+    };
+    groups.iter().fold((None, None), |(live, declared), group| {
+        let (group_live, group_declared) =
+            take_broker_energy(group.live, group.declared, now, group.live_staleness_ms);
+        (add(live, group_live), add(declared, group_declared))
+    })
 }
 
 /// Resolve the two host energy sources of a subsystem (database or
@@ -1386,20 +1392,20 @@ fn take_broker_energy_stale(
 
 /// The tag follows the source that filled the window, so a fallback tick
 /// is never published as a reading: a live reading keeps the base tag
-/// (`alumet_rapl`, `cloud_specpower`), a declared one takes
-/// `declared_tag`. The region is the subsystem's either way and is never
-/// touched.
+/// (`alumet_rapl`, `cloud_specpower`), and a window any host group billed
+/// from its declaration takes `declared_tag`, its energy the sum of both
+/// parts. The region is the subsystem's either way and is never touched.
 fn patch_host_energy(
     host: &mut score::carbon::DbEnergyContext,
     live_kwh: Option<f64>,
     declared_kwh: Option<f64>,
     declared_tag: &'static str,
 ) {
-    if let Some(kwh) = live_kwh {
-        host.window_kwh = kwh;
-    } else if let Some(kwh) = declared_kwh {
-        host.window_kwh = kwh;
+    if let Some(declared) = declared_kwh {
+        host.window_kwh = live_kwh.unwrap_or(0.0) + declared;
         host.model = declared_tag;
+    } else if let Some(kwh) = live_kwh {
+        host.window_kwh = kwh;
     }
 }
 
