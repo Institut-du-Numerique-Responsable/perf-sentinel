@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-
-from __future__ import annotationsRegenerate cloud_energy/table_data.rs from CCF coefficients.
+"""Regenerate cloud_energy/table_data.rs from CCF coefficients.
 
 Downloads coefficients-{aws,gcp,azure}-use.csv from the
 cloud-carbon-footprint/ccf-coefficients repo and rewrites the generated
@@ -27,6 +25,7 @@ import re
 import sys
 import urllib.request
 from pathlib import Path
+from typing import Optional
 
 CCF_REPO = "cloud-carbon-footprint/ccf-coefficients"
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -60,7 +59,7 @@ G_SIZES = ["medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlar
 G_XL_SIZES = G_SIZES + ["24xlarge", "48xlarge"]
 
 
-def aws(prefix: str, sizes: list[str], vcpu: dict[str, int] | None = None) -> list[tuple[str, int]]:
+def aws(prefix: str, sizes: list[str], vcpu: Optional[dict[str, int]] = None) -> list[tuple[str, int]]:
     counts = {**AWS_VCPU, **(vcpu or {})}
     return [(f"{prefix}.{s}", counts[s]) for s in sizes]
 

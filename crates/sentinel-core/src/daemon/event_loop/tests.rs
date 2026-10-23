@@ -3652,7 +3652,7 @@ fn emitted_findings_reach_the_writer_one_ndjson_line_each() {
     let lines: Vec<&str> = std::str::from_utf8(&out).expect("utf-8").lines().collect();
     assert_eq!(lines.len(), 2, "one line per finding");
     for (line, finding) in lines.iter().zip(&findings) {
-        let back: crate::detect::Finding = serde_json::from_str(line).expect("NDJSON line");
+        let back: detect::Finding = serde_json::from_str(line).expect("NDJSON line");
         assert_eq!(back.finding_type, finding.finding_type);
     }
 
