@@ -1683,6 +1683,14 @@ struct ProcessTracesCtx<'a> {
     slow_window: Option<&'a mut super::slow_window::SlowWindowTracker>,
 }
 
+impl ProcessTracesCtx<'_> {
+    /// Where the batch's findings go as NDJSON: the stdout lock, or
+    /// `None` when `[daemon] findings_stdout` is off.
+    fn findings_sink(&self) -> Option<std::io::StdoutLock<'static>> {
+        self.findings_stdout.then(|| std::io::stdout().lock())
+    }
+}
+
 /// Copy the batch summary onto the shared cell, with both waste figures
 /// bridged over their scrape gaps. The per-window archive keeps the
 /// batch-scoped truth. Only the live cell gets the TTL-bounded figures.
@@ -1826,7 +1834,7 @@ async fn process_traces(
         &green_summary,
         ctx.metrics,
         ctx.service_meter,
-        ctx.findings_stdout.then(|| std::io::stdout().lock()),
+        ctx.findings_sink(),
     );
 
     if let Some(archive_tx) = ctx.archive_tx {

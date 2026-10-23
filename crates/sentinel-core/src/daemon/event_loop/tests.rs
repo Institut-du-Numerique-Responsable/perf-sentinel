@@ -3670,6 +3670,20 @@ fn emitted_findings_reach_the_writer_one_ndjson_line_each() {
     assert!(metrics.render().contains("perf_sentinel_findings_total{"));
 }
 
+#[test]
+fn findings_sink_follows_the_findings_stdout_setting() {
+    let metrics = MetricsState::new();
+    let ctx = empty_carbon_ctx();
+    let store = findings_store::FindingsStore::new(100);
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    let mut pctx = test_ctx(&detect_config, &ctx, &metrics, &store, true, &cell);
+    pctx.findings_stdout = true;
+    assert!(pctx.findings_sink().is_some(), "on: findings go to stdout");
+    pctx.findings_stdout = false;
+    assert!(pctx.findings_sink().is_none(), "off: no stdout write");
+}
+
 #[tokio::test]
 async fn findings_stdout_off_still_counts_and_stores_findings() {
     // The knob silences the stdout copy only: the metrics, the ring
