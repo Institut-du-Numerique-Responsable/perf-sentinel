@@ -40,11 +40,18 @@ La fonction partagée `detect::sort_findings()` trie les findings après le scor
 ```rust
 pub(crate) fn sort_findings(findings: &mut [Finding]) {
     findings.sort_by(|a, b| {
-        a.finding_type.cmp(&b.finding_type)
+        a.finding_type
+            .cmp(&b.finding_type)
             .then_with(|| a.severity.cmp(&b.severity))
             .then_with(|| a.trace_id.cmp(&b.trace_id))
             .then_with(|| a.source_endpoint.cmp(&b.source_endpoint))
             .then_with(|| a.pattern.template.cmp(&b.pattern.template))
+            .then_with(|| a.grouping_identity().cmp(&b.grouping_identity()))
+            .then_with(|| a.first_timestamp.cmp(&b.first_timestamp))
+            .then_with(|| a.service.cmp(&b.service))
+            .then_with(|| a.last_timestamp.cmp(&b.last_timestamp))
+            .then_with(|| a.pattern.occurrences.cmp(&b.pattern.occurrences))
+            .then_with(|| a.code_location.cmp(&b.code_location))
     });
 }
 ```
@@ -70,7 +77,7 @@ Le quality gate (`quality_gate::evaluate`) est une étape distincte appelée apr
 - Au scoring de calculer **toutes** les métriques indépendamment du pass/fail
 - Au quality gate de prendre une décision binaire pass/fail basée sur des **règles configurables**
 
-Les quatre règles (max N+1 SQL critiques, max N+1 HTTP warning+, max N+1 messaging warning+, max ratio de gaspillage) sont évaluées indépendamment. Le gate passe uniquement si toutes les règles passent. C'est plus flexible qu'un seuil de sévérité unique.
+Les cinq règles (max N+1 SQL critiques, max N+1 HTTP warning+, max N+1 messaging warning+, max ratio de gaspillage, et le ratio minimal de spans exploitables en opt-in) sont évaluées indépendamment. Le gate passe uniquement si toutes les règles passent. C'est plus flexible qu'un seuil de sévérité unique.
 
 ## Structure du rapport
 

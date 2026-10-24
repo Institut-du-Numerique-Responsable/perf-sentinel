@@ -370,7 +370,7 @@ The table holds one PUE per provider, not per datacenter, even where the provide
 
 ### Carbon intensity data
 
-Regional grid carbon intensities (gCO2eq/kWh) are sourced from [Electricity Maps](https://www.electricitymaps.com/) annual averages (2023-2024) and the [Cloud Carbon Footprint](https://www.cloudcarbonfootprint.org/) project. The table covers 17 AWS regions, 12 GCP regions, 6 Azure regions, 24 OVHcloud keys, 13 Scaleway keys, 5 OUTSCALE keys and 20 ISO country codes.
+Regional grid carbon intensities (gCO2eq/kWh) on national grids come from [Ember](https://ember-energy.org/) yearly data (generation-based, latest year per country), regenerated into `carbon_data.rs` by `scripts/refresh-carbon-data.py` and stamped `CARBON_TABLE_VINTAGE`. Subnational rows (North America, Brazil BR-CS) stay hand-maintained in `MANUAL_CARBON_ROWS` from consumption-based zonal sources. [`docs/METHODOLOGY.md`](../METHODOLOGY.md) records the refresh cadence and the accounting difference. The table covers 17 AWS regions, 12 GCP regions, 6 Azure regions, 24 OVHcloud keys, 13 Scaleway keys, 5 OUTSCALE keys and 20 ISO country codes.
 
 OVHcloud names one datacenter three ways depending on the API (the OpenStack Public Cloud region `GRA11`, the zone code `GRA`, the S3 location string `gra`), so several keys can point at the same grid. OUTSCALE keys carry an `outscale-` prefix because OUTSCALE reuses AWS region identifiers for different places: its `eu-west-2` is Paris where the AWS one is London, a factor of five on the same string. An OUTSCALE deployment therefore declares the prefixed key in `[green] default_region` or `[green.service_regions]`.
 
@@ -784,19 +784,20 @@ The design is read-heavy and write-rare:
 
 ## Confidence field on findings (planned perf-lint interop)
 
-A `confidence` field is stamped on every `Finding` in the JSON and SARIF report, indicating the source context of the detection. The value is set by the pipeline caller: `pipeline::analyze_with_traces` always sets `CiBatch` in batch mode, and `daemon::process_traces` derives it from `config.daemon_environment` in streaming mode. Detectors themselves never reason about confidence. They emit `Confidence::default()` and the caller overrides it.
+A `confidence` field is stamped on every `Finding` in the JSON and SARIF report, indicating the source context of the detection. The value is set by the pipeline caller: `pipeline::analyze_with_traces` sets `CiBatch` in batch mode when it detects a CI environment and `LocalBatch` otherwise (`Confidence::batch_for_ci`), and `daemon::process_traces` derives it from `config.daemon.environment` in streaming mode. Detectors themselves never reason about confidence. They emit `Confidence::default()` and the caller overrides it.
 
 Values:
 
 | Confidence          | Source                                                   | SARIF rank |
 |---------------------|----------------------------------------------------------|------------|
-| `CiBatch`           | `analyze` batch mode, always                             | 30         |
+| `LocalBatch`        | `analyze` batch mode, no CI environment detected         | 15         |
+| `CiBatch`           | `analyze` batch mode, CI environment detected            | 30         |
 | `DaemonStaging`     | `watch` daemon with `[daemon] environment="staging"`     | 60         |
 | `DaemonProduction`  | `watch` daemon with `[daemon] environment="production"`  | 90         |
 
 The field surfaces in:
 
-- **JSON report**: every finding object includes `"confidence": "ci_batch"` / `"daemon_staging"` / `"daemon_production"`.
+- **JSON report**: every finding object includes `"confidence": "local_batch"` / `"ci_batch"` / `"daemon_staging"` / `"daemon_production"`.
 - **SARIF v2.1.0**: per-result `properties.confidence` bag entry AND a standard SARIF `rank` value (0-100).
 - **CLI terminal output**: NOT displayed (the terminal stays clean for interactive use).
 

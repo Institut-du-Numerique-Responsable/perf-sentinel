@@ -348,7 +348,8 @@ Values:
 
 | Value                 | When emitted                                                            | SARIF `rank` | Interpretation                                                                      |
 |-----------------------|-------------------------------------------------------------------------|--------------|-------------------------------------------------------------------------------------|
-| `"ci_batch"`          | `perf-sentinel analyze` (batch mode, always)                            | `30`         | Low confidence: the trace came from a controlled CI run with limited traffic shapes |
+| `"local_batch"`       | `perf-sentinel analyze` (batch mode, no CI environment detected)        | `15`         | Lowest confidence: ad-hoc local traces from an uncontrolled run                     |
+| `"ci_batch"`          | `perf-sentinel analyze` (batch mode, CI environment detected)           | `30`         | Low confidence: the trace came from a controlled CI run with limited traffic shapes |
 | `"daemon_staging"`    | `perf-sentinel watch` with `[daemon] environment = "staging"` (default) | `60`         | Medium confidence: real traffic patterns observed on a staging deployment           |
 | `"daemon_production"` | `perf-sentinel watch` with `[daemon] environment = "production"`        | `90`         | Highest confidence: real traffic, real scale, real users                            |
 
@@ -390,9 +391,9 @@ Values:
 environment = "production"
 ```
 
-The value is stamped on every finding emitted by that daemon instance. Invalid values (anything other than `staging`/`production`, case-insensitive) are rejected at config load with a clear error. Batch `analyze` mode ignores this field and always emits `ci_batch`.
+The value is stamped on every finding emitted by that daemon instance. Invalid values (anything other than `staging`/`production`, case-insensitive) are rejected at config load with a clear error. Batch `analyze` mode ignores this field and emits `ci_batch` when it detects a CI environment (`CI` set to anything but `false` or `0`, or `JENKINS_URL` present), `local_batch` otherwise.
 
-**Planned perf-lint interop.** perf-lint (planned as a companion IDE integration, not yet published) will read the `confidence` field on imported runtime findings and apply a severity multiplier: `ci_batch` findings shown as hints, `daemon_staging` as warnings, `daemon_production` as errors. This way a finding that has been observed on real production traffic will surface louder in the IDE than one observed only in a CI fixture.
+**Planned perf-lint interop.** perf-lint (planned as a companion IDE integration, not yet published) will read the `confidence` field on imported runtime findings and apply a severity multiplier: `local_batch` and `ci_batch` findings shown as hints, `daemon_staging` as warnings, `daemon_production` as errors. This way a finding that has been observed on real production traffic will surface louder in the IDE than one observed only in a CI fixture.
 
 ---
 

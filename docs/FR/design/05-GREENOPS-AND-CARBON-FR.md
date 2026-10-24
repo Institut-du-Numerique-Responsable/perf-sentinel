@@ -370,7 +370,7 @@ La table ne porte qu'un PUE par fournisseur, pas par datacenter, même là où l
 
 ### Données d'intensité carbone
 
-Les intensités carbone régionales du réseau électrique (gCO2eq/kWh) proviennent des moyennes annuelles [Electricity Maps](https://www.electricitymaps.com/) (2023-2024) et du projet [Cloud Carbon Footprint](https://www.cloudcarbonfootprint.org/). La table couvre 17 régions AWS, 12 régions GCP, 6 régions Azure, 24 clés OVHcloud, 13 clés Scaleway, 5 clés OUTSCALE et 20 codes pays ISO.
+Les intensités carbone régionales du réseau électrique (gCO2eq/kWh) des réseaux nationaux proviennent des données annuelles [Ember](https://ember-energy.org/) (base génération, dernière année par pays), régénérées dans `carbon_data.rs` par `scripts/refresh-carbon-data.py` et datées par `CARBON_TABLE_VINTAGE`. Les lignes subnationales (Amérique du Nord, Brésil BR-CS) restent maintenues à la main dans `MANUAL_CARBON_ROWS` depuis des sources zonales en base consommation. [`docs/FR/METHODOLOGY-FR.md`](../METHODOLOGY-FR.md) décrit la cadence de rafraîchissement et l'écart de comptabilité. La table couvre 17 régions AWS, 12 régions GCP, 6 régions Azure, 24 clés OVHcloud, 13 clés Scaleway, 5 clés OUTSCALE et 20 codes pays ISO.
 
 OVHcloud nomme un même datacenter de trois façons selon l'API (la région OpenStack Public Cloud `GRA11`, le code de zone `GRA`, la chaîne de localisation S3 `gra`), plusieurs clés peuvent donc pointer le même réseau. Les clés OUTSCALE portent un préfixe `outscale-` parce qu'OUTSCALE réutilise les identifiants de région d'AWS pour d'autres lieux : son `eu-west-2` est Paris là où celui d'AWS est Londres, soit un facteur cinq sur la même chaîne. Un déploiement OUTSCALE déclare donc la clé préfixée dans `[green] default_region` ou `[green.service_regions]`.
 
@@ -784,19 +784,20 @@ La conception privilégie les lectures fréquentes et les écritures rares :
 
 ## Champ de confiance sur les findings (interop perf-lint planifié)
 
-Un champ `confidence` est tamponné sur chaque `Finding` dans le rapport JSON et SARIF, indiquant le contexte source de la détection. La valeur est définie par l'appelant du pipeline : `pipeline::analyze_with_traces` pose toujours `CiBatch` en mode batch, et `daemon::process_traces` la dérive de `config.daemon_environment` en mode streaming. Les détecteurs eux-mêmes ne raisonnent jamais sur la confiance : ils émettent `Confidence::default()` et l'appelant l'écrase.
+Un champ `confidence` est tamponné sur chaque `Finding` dans le rapport JSON et SARIF, indiquant le contexte source de la détection. La valeur est définie par l'appelant du pipeline : `pipeline::analyze_with_traces` pose `CiBatch` en mode batch quand il détecte un environnement de CI et `LocalBatch` sinon (`Confidence::batch_for_ci`), et `daemon::process_traces` la dérive de `config.daemon.environment` en mode streaming. Les détecteurs eux-mêmes ne raisonnent jamais sur la confiance : ils émettent `Confidence::default()` et l'appelant l'écrase.
 
 Valeurs :
 
 | Confidence          | Source                                                   | Rank SARIF |
 |---------------------|----------------------------------------------------------|------------|
-| `CiBatch`           | Mode batch `analyze`, toujours                           | 30         |
+| `LocalBatch`        | Mode batch `analyze`, sans environnement de CI           | 15         |
+| `CiBatch`           | Mode batch `analyze`, environnement de CI détecté        | 30         |
 | `DaemonStaging`     | Daemon `watch` avec `[daemon] environment="staging"`     | 60         |
 | `DaemonProduction`  | Daemon `watch` avec `[daemon] environment="production"`  | 90         |
 
 Le champ apparaît dans :
 
-- **Rapport JSON** : chaque objet finding inclut `"confidence": "ci_batch"` / `"daemon_staging"` / `"daemon_production"`.
+- **Rapport JSON** : chaque objet finding inclut `"confidence": "local_batch"` / `"ci_batch"` / `"daemon_staging"` / `"daemon_production"`.
 - **SARIF v2.1.0** : entrée de bag `properties.confidence` par résultat ET une valeur standard `rank` SARIF (0-100).
 - **Sortie terminal CLI** : NON affiché (le terminal reste propre pour l'usage interactif).
 
