@@ -1254,10 +1254,15 @@
   [data-ps-root][data-persona="tech"] [data-not-tech-rse],[data-ps-root][data-persona="rse"] [data-not-tech-rse]{display:none!important}
 [data-depth="ess"] [data-depth-only="det"],[data-depth="det"] [data-depth-only="ess"]{display:none!important}
 [data-depth-head]{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
-.ps-dsw{display:inline-flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--surface);flex:none}
-.ps-dsw button{font:600 13px/1 "DM Sans",system-ui,sans-serif;letter-spacing:0;color:var(--text-2);background:transparent;border:0;border-radius:999px;padding:8px 13px;min-height:32px;cursor:pointer;transition:background .15s ease,color .15s ease}
+.ps-dsw{position:relative;display:inline-grid;grid-template-columns:1fr 1fr;align-items:center;gap:2px;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--surface);flex:none}
+/* The active pill is one thumb that slides between the two halves, both buttons share a width */
+.ps-dsw::before{content:"";position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 8px) / 2);border-radius:999px;background:#0b523a;transition:transform .26s cubic-bezier(.22,1,.36,1),background-color .2s ease}
+.ps-dsw:has(> button:nth-child(2)[aria-pressed="true"])::before{transform:translateX(calc(100% + 2px))}
+.ps-dsw button{font:600 13px/1 "DM Sans",system-ui,sans-serif;letter-spacing:0;color:var(--text-2);background:transparent;border:0;border-radius:999px;padding:8px 13px;min-height:32px;cursor:pointer;transition:color .2s ease}
 .ps-dsw button:hover{color:var(--text)}
-.ps-dsw button[aria-pressed="true"]{color:var(--on-accent);background:#0b523a}
+.ps-dsw button[aria-pressed="true"]{color:var(--on-accent)}
+@supports not selector(:has(*)){.ps-dsw::before{display:none}.ps-dsw button[aria-pressed="true"]{background:#0b523a}#hub .ps-dsw button[aria-pressed="true"]{background:var(--dotnet)}}
+@media (prefers-reduced-motion:reduce){.ps-dsw::before,.ps-dsw button{transition:none}}
 .ps-dsw button{position:relative}
 .ps-dsw button::before{content:"";position:absolute;left:0;right:0;top:50%;height:44px;transform:translateY(-50%)}
 .ps-dsw button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -1266,7 +1271,8 @@
 .ps-dglobal > span{font-size:15px;font-weight:600;color:var(--text)}
 .ps-dglobal small{font-size:13px;color:var(--text-2)}
 .ps-dmore{display:block;min-height:44px;margin-top:14px;padding:10px 0;font:600 14px "DM Sans",system-ui,sans-serif;text-align:left;color:var(--accent-strong);background:none;border:0;cursor:pointer}
-#hub .ps-dsw button[aria-pressed="true"]{background:var(--dotnet);color:var(--bg)}
+#hub .ps-dsw::before{background:var(--dotnet)}
+#hub .ps-dsw button[aria-pressed="true"]{color:var(--bg)}
 #hub .ps-dsw button:focus-visible,#hub .ps-dmore:focus-visible{outline-color:var(--dotnet)}
 #hub .ps-dmore{color:var(--dotnet)}
 #greenops div:has(> [data-depth-head]){flex:1 1 auto}
