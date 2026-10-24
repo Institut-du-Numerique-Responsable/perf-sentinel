@@ -1256,9 +1256,11 @@
 [data-depth-head]{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
 .ps-dsw{position:relative;display:inline-grid;grid-template-columns:1fr 1fr;align-items:center;gap:2px;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--surface);flex:none}
 /* The active pill is one thumb that slides between the two halves, both buttons share a width */
-.ps-dsw::before{content:"";position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 8px) / 2);border-radius:999px;background:#0b523a;transition:transform .32s cubic-bezier(.65,0,.35,1),background-color .2s ease}
+.ps-dsw::before{content:"";position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 8px) / 2);border-radius:999px;background:#0b523a;transition:transform .2s cubic-bezier(.4,0,.2,1),scale .15s .05s cubic-bezier(0,0,.2,1),background-color .2s cubic-bezier(.4,0,.2,1)}
+/* Vuetify v-switch feel: the thumb swells while pressed, then settles after the slide */
+.ps-dsw:has(> button:active)::before{scale:1.06}
 .ps-dsw:has(> button:nth-child(2)[aria-pressed="true"])::before{transform:translateX(calc(100% + 2px))}
-.ps-dsw button{font:600 13px/1 "DM Sans",system-ui,sans-serif;letter-spacing:0;color:var(--text-2);background:transparent;border:0;border-radius:999px;padding:8px 13px;min-height:32px;cursor:pointer;transition:color .2s ease}
+.ps-dsw button{font:600 13px/1 "DM Sans",system-ui,sans-serif;letter-spacing:0;color:var(--text-2);background:transparent;border:0;border-radius:999px;padding:8px 13px;min-height:32px;cursor:pointer;transition:color .2s cubic-bezier(.4,0,.2,1)}
 .ps-dsw button:hover{color:var(--text)}
 .ps-dsw button[aria-pressed="true"]{color:var(--on-accent)}
 @supports not selector(:has(*)){.ps-dsw::before{display:none}.ps-dsw button[aria-pressed="true"]{background:#0b523a}#hub .ps-dsw button[aria-pressed="true"]{background:var(--dotnet)}}
