@@ -92,11 +92,13 @@ const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, 
 
 // Render a page with the dc-runtime and return the hydrated #dc-root innerHTML,
 // stripped of scripts/iframes/ids so it can't shadow the live DOM. lang=null keeps
-// the default (en); lang='fr' forces the FR dictionary via localStorage.
+// the default (en); lang='fr' forces the FR dictionary via localStorage. The
+// snapshot is taken in the Detailed reading depth: readers without JavaScript
+// cannot switch, so they get the full page.
 async function renderPrerender(browser, path, lang) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   await page.goto(`http://127.0.0.1:${PORT}${path}`, { waitUntil: 'load' });
-  await page.evaluate((l) => { try { localStorage.clear(); if (l) localStorage.setItem('ps-lang', l); } catch (e) {} }, lang);
+  await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('ps-depth', 'det'); if (l) localStorage.setItem('ps-lang', l); } catch (e) {} }, lang);
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(
     () => { const r = document.getElementById('dc-root'); return r && r.children.length && !/\{\{/.test(r.textContent); },
