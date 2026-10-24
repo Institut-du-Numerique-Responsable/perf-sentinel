@@ -156,11 +156,18 @@
 <p class="ps-p">The shared <code class="ps-ic">detect::sort_findings()</code> function sorts findings after scoring with a multi-level key:</p>
 <div class="ps-code"><div class="ps-code-lang">rust</div><pre><code><span style="color:var(--code-cmd);font-weight:600">pub</span>(<span style="color:var(--code-cmd);font-weight:600">crate</span>) <span style="color:var(--code-cmd);font-weight:600">fn</span> sort_findings(findings: &amp;<span style="color:var(--code-cmd);font-weight:600">mut</span> [<span style="color:var(--code-sub)">Finding</span>]) {
     findings.sort_by(|a, b| {
-        a.finding_type.cmp(&amp;b.finding_type)
+        a.finding_type
+            .cmp(&amp;b.finding_type)
             .then_with(|| a.severity.cmp(&amp;b.severity))
             .then_with(|| a.trace_id.cmp(&amp;b.trace_id))
             .then_with(|| a.source_endpoint.cmp(&amp;b.source_endpoint))
             .then_with(|| a.pattern.template.cmp(&amp;b.pattern.template))
+            .then_with(|| a.grouping_identity().cmp(&amp;b.grouping_identity()))
+            .then_with(|| a.first_timestamp.cmp(&amp;b.first_timestamp))
+            .then_with(|| a.service.cmp(&amp;b.service))
+            .then_with(|| a.last_timestamp.cmp(&amp;b.last_timestamp))
+            .then_with(|| a.pattern.occurrences.cmp(&amp;b.pattern.occurrences))
+            .then_with(|| a.code_location.cmp(&amp;b.code_location))
     });
 }</code></pre></div>
 <p class="ps-p">This function is defined in <code class="ps-ic">detect/mod.rs</code> and gives every sink the same deterministic baseline order. Presentation layers sort on top of it rather than replacing it: <code class="ps-ic">--sort</code> on <code class="ps-ic">analyze</code>, <code class="ps-ic">report</code>, <code class="ps-ic">tempo</code> and <code class="ps-ic">jaeger-query</code>, the dashboard's <code class="ps-ic">initial_sort</code>, and the TUI's impact-first opening all reorder a list whose ties this canonical order already settled. It requires <code class="ps-ic">FindingType</code> and <code class="ps-ic">Severity</code> to implement <code class="ps-ic">Ord</code>. The derived <code class="ps-ic">Ord</code> uses variant declaration order, giving a stable sort: <code class="ps-ic">NPlusOneSql &lt; NPlusOneHttp &lt; NPlusOneMessaging &lt; RedundantSql &lt; ... &lt; ExcessiveFanout &lt; ... &lt; SerializedCalls</code>.</p>
@@ -180,7 +187,7 @@
 <li>Scoring to compute <strong>all</strong> metrics regardless of pass/fail</li>
 <li>The quality gate to make a binary pass/fail decision based on <strong>configurable rules</strong></li>
 </ul>
-<p class="ps-p">The four rules (max critical SQL N+1, max warning+ HTTP N+1, max warning+ messaging N+1, max waste ratio) are evaluated independently. The gate passes only if all rules pass. This is more flexible than a single severity threshold.</p>
+<p class="ps-p">The five rules (max critical SQL N+1, max warning+ HTTP N+1, max warning+ messaging N+1, max waste ratio, and the opt-in minimum usable span ratio) are evaluated independently. The gate passes only if all rules pass. This is more flexible than a single severity threshold.</p>
 <h2 id="report-structure" class="ps-h2">Report structure</h2>
 <p class="ps-p">The <code class="ps-ic">Report</code> struct combines four sections:</p>
 <div class="ps-code"><div class="ps-code-lang">rust</div><pre><code><span style="color:var(--code-cmd);font-weight:600">pub</span> <span style="color:var(--code-cmd);font-weight:600">struct</span> <span style="color:var(--code-sub)">Report</span> {
