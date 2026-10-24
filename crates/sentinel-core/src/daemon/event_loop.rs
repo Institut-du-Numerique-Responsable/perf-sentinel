@@ -1757,8 +1757,8 @@ fn sticky_waste_figure<T: Clone>(
 /// Stamps `confidence` on every finding after detection. The
 /// value is derived from `config.daemon.environment` in `run()` and passed
 /// here unchanged. `analyze` batch mode does not call this function. It
-/// uses `pipeline::analyze_with_traces` which hardcodes
-/// `Confidence::CiBatch`.
+/// uses `pipeline::analyze_with_traces`, which stamps
+/// `Confidence::batch_for_ci`.
 async fn process_traces(
     traces: Vec<(String, Vec<normalize::NormalizedEvent>)>,
     mut ctx: ProcessTracesCtx<'_>,

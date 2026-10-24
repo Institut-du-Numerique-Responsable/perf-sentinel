@@ -2,9 +2,9 @@
 //!
 //! Detects the input format (native, OTLP/JSON, Jaeger, Zipkin) and dispatches
 //! to the appropriate parser. Format detection peeks at the JSON structure,
-//! in this order:
-//! - Has `"data"` key with trace objects containing `"spans"` -> Jaeger
-//! - Has `"resourceSpans"` (or `"resource_spans"`) key -> OTLP/JSON
+//! reading only the top-level keys of an object root:
+//! - Has a top-level `"resourceSpans"` (or `"resource_spans"`) key -> OTLP/JSON
+//! - Has a top-level `"data"` key and `"spans"` in the first 4 KiB -> Jaeger
 //! - Is array where items have `"traceId"` + `"localEndpoint"` -> Zipkin
 //! - Otherwise -> native perf-sentinel format
 

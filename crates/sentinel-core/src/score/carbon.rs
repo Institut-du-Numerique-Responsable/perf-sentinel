@@ -2,8 +2,8 @@
 //! table embedded at compile time, no network egress.
 //!
 //! See `docs/design/05-GREENOPS-AND-CARBON.md` for the SCI methodology,
-//! the per-region intensity sources (Cloud Carbon Footprint, Electricity
-//! Maps, ENTSO-E), the per-operation energy coefficients (Xu, Tsirogiannis,
+//! the per-region intensity sources (Ember yearly data in `carbon_data.rs`,
+//! hand-maintained zonal rows in `MANUAL_CARBON_ROWS`), the per-operation energy coefficients (Xu, Tsirogiannis,
 //! `DBJoules`) and the network transport model (Mytton et al. 2024).
 
 use std::collections::HashMap;

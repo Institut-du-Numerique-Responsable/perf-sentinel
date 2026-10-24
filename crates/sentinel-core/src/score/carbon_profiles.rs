@@ -118,15 +118,15 @@ impl HourlyProfile {
 // ---------------------------------------------------------------------------
 
 /// Monthly x hourly profiles. 12 months x 24 UTC hours per region.
-/// Sources cited per entry. Grand mean must be within +/-5% of `CARBON_TABLE`
-/// annual value.
+/// Sources cited per entry. Grand mean must be within +/-5% of the carbon
+/// table annual value.
 pub(crate) static MONTHLY_PROFILES: &[(&str, [[f64; 24]; 12])] = &[
     // France (eu-west-3): nuclear baseload, seasonal gas peaking.
     // Winter: higher intensity from gas peaking for heating demand.
     // Summer: lower intensity, nuclear provides larger share.
     // Shape: ENTSO-E Transparency Platform, RTE eCO2mix. Level rescaled
     // to the Electricity Maps 2023-2024 consumption-based mean (41).
-    // Annual mean in CARBON_TABLE: 41.0. Grand mean target: ~41.
+    // Annual mean in the carbon table: 41.5. Grand mean target: ~41.
     (
         "eu-west-3",
         [
@@ -197,7 +197,7 @@ pub(crate) static MONTHLY_PROFILES: &[(&str, [[f64; 24]; 12])] = &[
     // Shape: ENTSO-E, Fraunhofer ISE energy-charts.info. Level rescaled
     // from the 2022-vintage grand mean (~431, coal-crisis Germany) to the
     // Electricity Maps 2024 consumption-based level (341).
-    // Annual mean in CARBON_TABLE: 338. Grand mean target: ~341.
+    // Annual mean in the carbon table: 329.6. Grand mean target: ~341.
     (
         "eu-central-1",
         [
@@ -265,7 +265,7 @@ pub(crate) static MONTHLY_PROFILES: &[(&str, [[f64; 24]; 12])] = &[
     ),
     // UK (eu-west-2): wind + gas. Winter gas heating, summer more wind.
     // Sources: National Grid ESO Carbon Intensity API, ENTSO-E (2022-2024).
-    // Annual mean in CARBON_TABLE: 217.4. Grand mean target: ~217.4.
+    // Annual mean in the carbon table: 217.4. Grand mean target: ~217.4.
     (
         "eu-west-2",
         [
@@ -334,7 +334,7 @@ pub(crate) static MONTHLY_PROFILES: &[(&str, [[f64; 24]; 12])] = &[
     // US-East (us-east-1, Virginia, PJM territory): gas + coal + nuclear.
     // Summer AC load and winter heating both push intensity above spring/fall.
     // Sources: EIA Open Data API, PJM Interconnection (2022-2024 averages).
-    // Annual mean in CARBON_TABLE: 379. Grand mean target: ~379.
+    // Annual mean in the carbon table: 379. Grand mean target: ~379.
     (
         "us-east-1",
         [
