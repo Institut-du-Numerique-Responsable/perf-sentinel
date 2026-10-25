@@ -87,10 +87,37 @@ function pathToId(p) {
 
 // per-language UI strings baked into the static chrome
 const UI = {
-  en: { navHome: 'Overview', navGuide: 'Guide', search: 'Search…', onPage: 'On this page', switchLabel: 'FR',
+  en: { navHome: 'Overview', navGuide: 'Guide', navSyn: 'Synoptic', search: 'Search…', onPage: 'On this page', switchLabel: 'FR',
     ft: { tagline: 'Protocol-level I/O anti-pattern detector, self-hostable and carbon-aware.', product: 'Product', docs: 'Documentation', project: 'Project', detection: 'Detection', execution: 'Deploy', perf: 'Performance', greenops: 'GreenOps', comparison: 'Comparison', quickstart: 'Quickstart', cli: 'CLI reference', config: 'Configuration', method: 'GreenOps methodology', license: 'AGPL-3.0 license', security: 'Security', copyright: '© 2026 Robin Trassard and contributors · Institut du Numérique Responsable · AGPL-3.0 · Eco-designed page, no tracking script', legal: 'Legal notice', privacy: 'Privacy', credit: 'Logo & banner, ' } },
-  fr: { navHome: 'Vue d’ensemble', navGuide: 'Guide', search: 'Rechercher…', onPage: 'Sur cette page', switchLabel: 'EN',
+  fr: { navHome: 'Vue d’ensemble', navGuide: 'Guide', navSyn: 'Synoptique', search: 'Rechercher…', onPage: 'Sur cette page', switchLabel: 'EN',
     ft: { tagline: 'Détecteur d’anti-patterns d’I/O au niveau protocole, auto-hébergeable et carbon-aware.', product: 'Produit', docs: 'Documentation', project: 'Projet', detection: 'Détection', execution: 'Déploiement', perf: 'Performance', greenops: 'GreenOps', comparison: 'Comparatif', quickstart: 'Démarrage rapide', cli: 'Référence CLI', config: 'Configuration', method: 'Méthodologie GreenOps', license: 'Licence AGPL-3.0', security: 'Sécurité', copyright: '© 2026 Robin Trassard et contributeurs · Institut du Numérique Responsable · AGPL-3.0 · Page éco-conçue, sans script de tracking', legal: 'Mentions légales', privacy: 'Confidentialité', credit: 'Logo & bannière, ' } },
+};
+
+// pages that have a counterpart in the engine synoptic: a banner under their title links to it at the right level
+const SYN = {
+  'ARCHITECTURE': ['#niveau=vue&mode=cli', 'see the engine in the synoptic', 'voir le moteur dans le synoptique'],
+  'CLI': ['#niveau=cli&mode=cli', 'see the CLI level in the synoptic', 'voir le niveau CLI dans le synoptique'],
+  'INTEGRATION': ['#niveau=carte&mode=cli', 'see the deployments on the synoptic map', 'voir les déploiements sur la carte du synoptique'],
+  'HELM-DEPLOYMENT': ['#niveau=carte&mode=cli', 'see the deployments on the synoptic map', 'voir les déploiements sur la carte du synoptique'],
+  'ENERGY': ['#niveau=core&mode=cli&etage=6', 'see the energy stage in the synoptic', 'voir l’étage Énergie dans le synoptique'],
+  'METHODOLOGY': ['#niveau=core&mode=cli&etage=6', 'see the energy stage in the synoptic', 'voir l’étage Énergie dans le synoptique'],
+  'HTML-REPORT': ['#niveau=core&mode=cli&etage=8', 'see the report stage in the synoptic', 'voir l’étage Rapport dans le synoptique'],
+  'SARIF': ['#niveau=core&mode=cli&etage=8', 'see the report stage in the synoptic', 'voir l’étage Rapport dans le synoptique'],
+  'ACKNOWLEDGMENTS': ['#niveau=core&mode=cli&etage=8', 'see the report stage in the synoptic', 'voir l’étage Rapport dans le synoptique'],
+  'design/01-PIPELINE-AND-TYPES': ['#niveau=core&mode=cli', 'see the eight stages in the synoptic', 'voir les huit étages dans le synoptique'],
+  'design/02-NORMALIZATION': ['#niveau=core&mode=cli&etage=2', 'see the normalization stage in the synoptic', 'voir l’étage Normalisation dans le synoptique'],
+  'design/03-CORRELATION-AND-STREAMING': ['#niveau=core&mode=cli&etage=3', 'see the correlation stage in the synoptic', 'voir l’étage Corrélation dans le synoptique'],
+  'design/04-DETECTION': ['#niveau=core&mode=cli&etage=4', 'see the detection stage in the synoptic', 'voir l’étage Détection dans le synoptique'],
+  'design/05-GREENOPS-AND-CARBON': ['#niveau=core&mode=cli&etage=5', 'see the waste, energy and carbon stages in the synoptic', 'voir les étages Gaspillage, Énergie et Carbone dans le synoptique'],
+  'design/06-INGESTION-AND-DAEMON': ['#niveau=core&mode=daemon&etage=1', 'see the ingestion stage in the synoptic', 'voir l’étage Ingestion dans le synoptique'],
+  'design/09-CARBON-ATTRIBUTION': ['#niveau=core&mode=cli&etage=7', 'see the carbon stage in the synoptic', 'voir l’étage Carbone dans le synoptique'],
+};
+const SYN_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></svg>';
+const synBanner = (id, lang) => {
+  const e = SYN[id];
+  if (!e) return '';
+  const fr = lang === 'fr';
+  return `<a class="ps-syn" href="/synoptique/?lang=${lang}${e[0]}" style="display:flex;align-items:center;gap:10px;margin:6px 0 22px;padding:10px 14px;border:1px solid var(--border);border-radius:10px;text-decoration:none;font-size:14px;color:var(--text-2)"><span style="color:var(--accent-strong);flex:none;display:flex">${SYN_ICON}</span><span>${fr ? 'Ce sujet existe en version animée :' : 'This topic exists in an animated version:'} <b style="color:var(--accent-strong);font-weight:600">${fr ? e[2] : e[1]} →</b></span></a>`;
 };
 
 // --- renderer ---
@@ -240,7 +267,7 @@ function buildPage(id, lang) {
   const fr = lang === 'fr';
   const r = PSMD.render(readFileSync(mdSource(id, lang), 'utf8'), { id, lang, theme: 'dark', label: (x) => docLabel(x, lang) });
   const dd = dedupeSlugs(rewriteContentLinks(r.html, lang), r.toc);
-  const content = diagramThemePair(relabelDocPaths(dd.html, lang));
+  const content = diagramThemePair(relabelDocPaths(dd.html, lang)).replace('</h1>', '</h1>' + synBanner(id, lang));
   const toc = dd.toc;
 
   const label = docLabel(id, lang);
@@ -251,7 +278,7 @@ function buildPage(id, lang) {
   const frHref = hrefFor(id, 'fr');
   const switchHref = hrefFor(id, fr ? 'en' : 'fr');
   const ui = UI[lang];
-  const home = fr ? '/fr/' : '/', guide = fr ? '/fr/guide' : '/guide';
+  const home = fr ? '/fr/' : '/', guide = fr ? '/fr/guide' : '/guide', syn = `/synoptique/?lang=${lang}`;
   const hasToc = toc.length > 1;
 
   const head =
@@ -266,7 +293,7 @@ function buildPage(id, lang) {
     `<header class="ps-chrome" style="position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)"><div style="max-width:1320px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:20px;position:relative"><input id="ps-navtoggle" type="checkbox" aria-hidden="true" style="display:none">` +
     `<a href="${home}" style="display:flex;align-items:center;flex:none"><img data-logo="light" src="/assets/logo-h-light.svg" alt="perf sentinel" style="height:38px;width:auto"><img data-logo="dark" src="/assets/logo-h-dark.svg" alt="perf sentinel" style="height:38px;width:auto"></a>` +
     `<span class="ps-hdr-badge" style="font-size:12px;color:var(--text-2);border:1px solid var(--border);border-radius:6px;padding:3px 9px">docs</span>` +
-    `<nav class="ps-hdr-nav" style="display:flex;gap:20px;margin-left:6px;font-size:14.5px;font-weight:500;color:var(--text-2)"><a href="${home}">${ui.navHome} <span style="font-size:11px;opacity:.7">→</span></a><a href="${guide}">${ui.navGuide} <span style="font-size:11px;opacity:.7">→</span></a></nav>` +
+    `<nav class="ps-hdr-nav" style="display:flex;gap:20px;margin-left:6px;font-size:14.5px;font-weight:500;color:var(--text-2)"><a href="${home}">${ui.navHome} <span style="font-size:11px;opacity:.7">→</span></a><a href="${guide}">${ui.navGuide} <span style="font-size:11px;opacity:.7">→</span></a><a href="${syn}">${ui.navSyn} <span style="font-size:11px;opacity:.7">→</span></a></nav>` +
     `<div style="margin-left:auto;display:flex;align-items:center;gap:12px;font-family:'JetBrains Mono',monospace;font-size:12px">` +
     `<div id="psSearchWrap" style="position:relative"><input id="psSearch" type="search" placeholder="${ui.search}" autocomplete="off"><div id="psResults" class="psr" style="display:none"></div></div>` +
     langCtl(switchHref, fr, ui.switchLabel) +
@@ -274,7 +301,7 @@ function buildPage(id, lang) {
     `<a href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" aria-label="Perf Sentinel on GitHub" style="display:flex;align-items:center;gap:8px;height:34px;box-sizing:border-box;font-size:13px;font-weight:600;color:#fff;background:#24292F;border:1px solid rgba(240,246,252,.18);border-radius:8px;padding:0 12px"><svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"></path></svg><span class="gh-txt">GitHub</span></a>` +
     `<label for="ps-navtoggle" data-burger="" aria-label="Menu"><i></i></label>` +
     `</div>` +
-    `<nav data-mobnav="" aria-label="Menu"><a href="${home}">${ui.navHome} <span style="font-size:11px;opacity:.7">→</span></a><a href="${guide}">${ui.navGuide} <span style="font-size:11px;opacity:.7">→</span></a></nav>` +
+    `<nav data-mobnav="" aria-label="Menu"><a href="${home}">${ui.navHome} <span style="font-size:11px;opacity:.7">→</span></a><a href="${guide}">${ui.navGuide} <span style="font-size:11px;opacity:.7">→</span></a><a href="${syn}">${ui.navSyn} <span style="font-size:11px;opacity:.7">→</span></a></nav>` +
     `</div></header>`;
 
   const main =
