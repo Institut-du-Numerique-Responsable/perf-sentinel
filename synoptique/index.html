@@ -1977,7 +1977,8 @@ const ovNotes=[["EN RETRAIT","le daemon tourne seul, la CLI","revient à la comm
  ovNote=k=>ovNotes.forEach((g,j)=>g.style.opacity=j===k?1:0);
 const cb=ovBlock(CORE,"CORE","le moteur, sentinel-core, où vit toute la logique",["analyse en lot : le pipeline","analyse en flux : le daemon","capture : le récepteur OTLP"],()=>ovZoom("core"));
 // a silhouette of the eight stages, without their details
-el("path",{d:`M${CORE.x},${CORE.y+329} H${CORE.x+CORE.w-26}`,class:"rail ovrow",style:"stroke-width:4"},cb);
+// it starts where the batch entry comes down, each mode draws its own way in from the frame
+el("path",{d:`M${CORE.x+10},${CORE.y+329} H${CORE.x+CORE.w-26}`,class:"rail ovrow",style:"stroke-width:4"},cb);
 const ovChips=[...Array(8)].map((_,i)=>{const x=CORE.x+52+i*58;return{cx:x+22,r:el("rect",{x,y:CORE.y+316,width:44,height:28,rx:6,class:"sym"},ovG.chips),t:tx(ovG.chips,x+22,CORE.y+334,String(i+1).padStart(2,"0"),"tiny ovct","middle")}});
 // a stage lights up once a bead has crossed it, and stays lit until the next pass
 const ovLit=on=>ovChips.forEach(c=>{c.r.classList.toggle("ovon",on);c.t.classList.toggle("ovon",on)});
