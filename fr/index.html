@@ -124,7 +124,7 @@
           </div>
           
         </div>
-        <div data-dc-tpl="190" style="margin-top: 12px; font-size: 13px; color: var(--text-2); text-align: center;"><span class="sc-interp">Rapport HTML ou TUI, selon vos préférences. Hub optionnel mais recommandé.</span><br data-dc-tpl="191"><span class="sc-interp">Le synoptique montre le moteur de l'intérieur, de la carte des environnements jusqu'aux règles de détection.</span></div>
+        <div data-dc-tpl="190" style="margin-top: 12px; font-size: 13px; color: var(--text-2); text-align: center;"><span class="sc-interp">Rapport HTML ou TUI, selon vos préférences. Hub optionnel mais recommandé.</span><br data-dc-tpl="191"><span class="sc-interp">Le synoptique montre Perf Sentinel de l'intérieur, de la carte des environnements jusqu'aux règles de détection.</span></div>
       </div>
       
       
@@ -2753,7 +2753,7 @@ class Component extends DCLogic {
         exampleLabel: 'example',
         embedLead: 'Live demo:',
         embedOpen: 'Open in a new tab', embedOpenMobile: 'Open the live demo',
-        embedCaption: 'HTML report or TUI, whichever you prefer. The Hub is optional but recommended.', embedCaptionSyn: 'The synoptic shows the engine from the inside, from the map of environments down to the detection rules.',
+        embedCaption: 'HTML report or TUI, whichever you prefer. The Hub is optional but recommended.', embedCaptionSyn: 'The synoptic shows Perf Sentinel from the inside, from the map of environments down to the detection rules.',
         dfCalls: '12 calls → 1', dfLineA: '11 avoidable calls, fixable at ', dfLineB: '. One finding from the demo below, Findings tab.', dfMore: 'Show details', dfLess: 'Hide details', dfTrace: 'See the full trace',
         dfBarsA: '12 × ', dfBarsB: ' · 110 ms · 1 needed, 11 avoidable', dfWhatT: 'What happens', dfWhat: 'For a single cart, the service calls the catalog one product at a time.', dfCostT: 'What it costs', dfCost: '11 avoidable calls per request, and the endpoint lands in the critical I/O intensity band.', dfFixT: 'Where to fix', dfFixA: 'batch endpoint ', dfFixB: ', 12 calls → 1',
         copy: 'copy', copied: 'copied ✓',
@@ -2975,7 +2975,7 @@ class Component extends DCLogic {
         exampleLabel: 'exemple',
         embedLead: 'Démo interactive\u00a0:',
         embedOpen: 'Ouvrir dans un onglet', embedOpenMobile: 'Ouvrir la démo interactive',
-        embedCaption: 'Rapport HTML ou TUI, selon vos préférences. Hub optionnel mais recommandé.', embedCaptionSyn: 'Le synoptique montre le moteur de l\'intérieur, de la carte des environnements jusqu\'aux règles de détection.',
+        embedCaption: 'Rapport HTML ou TUI, selon vos préférences. Hub optionnel mais recommandé.', embedCaptionSyn: 'Le synoptique montre Perf Sentinel de l\'intérieur, de la carte des environnements jusqu\'aux règles de détection.',
         dfCalls: '12 appels → 1', dfLineA: '11 appels évitables, corrigeable à ', dfLineB: '. Un finding de la démo ci-dessous, onglet Findings.', dfMore: 'Voir le détail', dfLess: 'Masquer le détail', dfTrace: 'Voir la trace complète',
         dfBarsA: '12 × ', dfBarsB: ' · 110 ms · 1 utile, 11 évitables', dfWhatT: 'Ce qui se passe', dfWhat: 'Pour un seul panier, le service appelle le catalogue produit par produit.', dfCostT: 'Ce que ça coûte', dfCost: '11 appels évitables par requête, et l’endpoint passe en bande critique d’intensité I/O.', dfFixT: 'Où corriger', dfFixA: 'endpoint batch ', dfFixB: ', 12 appels → 1',
         copy: 'copier', copied: 'copié ✓',
@@ -3412,7 +3412,7 @@ class Component extends DCLogic {
   // The synoptic takes the theme and follows it live like the dashboard; it needs a taller frame than the demos.
   function synUrl(){return '/synoptique/?lang='+(document.documentElement.lang.indexOf('fr')===0?'fr':'en')+'&theme='+th();}
   var TABS={html:dashUrl,tui:function(){return '/exemple/tui';},hub:hubUrl,syn:synUrl};
-  var FRAME_TITLES={en:{html:'Perf Sentinel HTML report',tui:'Perf Sentinel terminal interface recording',hub:'Perf Sentinel Hub demo',syn:'Perf Sentinel engine synoptic'},fr:{html:'Rapport HTML Perf Sentinel',tui:'Enregistrement de l’interface terminal de Perf Sentinel',hub:'Démo du Hub Perf Sentinel',syn:'Synoptique du moteur Perf Sentinel'}};
+  var FRAME_TITLES={en:{html:'Perf Sentinel HTML report',tui:'Perf Sentinel terminal interface recording',hub:'Perf Sentinel Hub demo',syn:'Perf Sentinel synoptic'},fr:{html:'Rapport HTML Perf Sentinel',tui:'Enregistrement de l’interface terminal de Perf Sentinel',hub:'Démo du Hub Perf Sentinel',syn:'Synoptique de Perf Sentinel'}};
   // Below 600px the iframe stays empty and hidden, the open link carries the demo.
   var small=window.matchMedia?window.matchMedia('(max-width:600px)'):null;
   if(small&&small.addEventListener)small.addEventListener('change',function(){apply(active);});
