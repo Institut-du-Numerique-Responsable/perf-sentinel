@@ -10,6 +10,18 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.35.0]
+
+### Changed
+
+- **`appVersion` moves to `0.35.0`.** The SARIF output of `perf-sentinel analyze`
+  is now valid against the SARIF 2.1.0 schema, a breaking change for SARIF
+  consumers, and the GitLab and Jenkins CI templates are updated. The daemon
+  does not emit SARIF, so there are no daemon behavior changes. See the
+  application `CHANGELOG.md`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.34.1]
 
 ### Changed
