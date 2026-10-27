@@ -40,7 +40,7 @@ finish. See [`CLI.md`](./CLI.md#capture) for both shapes and
 [`INSTRUMENTATION.md`](./INSTRUMENTATION.md) for the per-language
 setup, including the Collector alternative.
 
-Exit code is non-zero if the **quality gate** (a configurable set of pass/fail thresholds, the same idea as a SonarQube quality gate or a coverage gate) fails. Configure thresholds in `.perf-sentinel.toml`:
+Exit code is non-zero if the **quality gate** (a configurable set of pass/fail thresholds, the same idea as a SonarQube quality gate or a coverage gate) fails. The file must exist when `--config` names it: a missing file makes `analyze` exit 75, a tooling error, not a gate result. Without a config file, drop `--config` and the built-in defaults apply. Configure thresholds in `.perf-sentinel.toml`:
 
 ```toml
 [thresholds]

@@ -26,6 +26,10 @@
 //      input, `min_usable_span_ratio` also fails the gate when the spans
 //      arrive without the attributes the detectors need, so a broken
 //      instrumentation cannot pass as a clean run.
+//      The file must exist: `analyze --config` on a missing file exits 75,
+//      which the report steps tolerate, so the job would pass with no
+//      report at all. Commit the file, or drop `--config` to run on the
+//      built-in defaults.
 //
 // Required Jenkins plugins:
 //   - Warnings Next Generation >= 9.11.0 (publishes SARIF as a structured
@@ -151,8 +155,11 @@ pipeline {
                 // misreport a tooling failure as a breach).
                 catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE',
                            message: 'perf-sentinel: download failed, stage marked unstable') {
+                    // `sh` runs /bin/sh, which is dash on Debian and Ubuntu
+                    // agents and rejects `set -o pipefail`, hence `set -eu`
+                    // in every block of this file.
                     sh '''
-                        set -euo pipefail
+                        set -eu
                         BASE_URL="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/download/v${PERF_SENTINEL_VERSION}"
                         curl -sSLf -o perf-sentinel-linux-amd64 "${BASE_URL}/perf-sentinel-linux-amd64"
                         curl -sSLf -o SHA256SUMS.txt            "${BASE_URL}/SHA256SUMS.txt"
@@ -167,7 +174,7 @@ pipeline {
                 script {
                     if (fileExists('perf-sentinel-linux-amd64') && fileExists('SHA256SUMS.txt')) {
                         sh '''
-                            set -euo pipefail
+                            set -eu
                             grep 'perf-sentinel-linux-amd64' SHA256SUMS.txt | sha256sum -c -
                             mv perf-sentinel-linux-amd64 perf-sentinel
                             chmod +x perf-sentinel
@@ -195,7 +202,7 @@ pipeline {
                     // behind and defeat the fileExists() guard on the
                     // 'Quality gate' stage below.
                     sh '''
-                        set -euo pipefail
+                        set -eu
                         ./perf-sentinel analyze \\
                             --input ${PERF_SENTINEL_TRACES} \\
                             --config ${PERF_SENTINEL_CONFIG} \\
@@ -234,7 +241,7 @@ pipeline {
         //             }
         //             withEnv(["BEFORE_OPT=${hasBaseline ? '--before baseline/perf-sentinel-report.json' : ''}"]) {
         //                 sh '''
-        //                     set -euo pipefail
+        //                     set -eu
         //                     ./perf-sentinel report \\
         //                         --input ${PERF_SENTINEL_TRACES} \\
         //                         --config ${PERF_SENTINEL_CONFIG} \\
@@ -274,7 +281,7 @@ pipeline {
                 // builds (env.CHANGE_ID == null) this stage is
                 // skipped and the build stays green.
                 sh '''
-                    set -euo pipefail
+                    set -eu
                     ./perf-sentinel analyze \\
                         --ci \\
                         --input ${PERF_SENTINEL_TRACES} \\

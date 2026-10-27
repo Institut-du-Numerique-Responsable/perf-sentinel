@@ -22,6 +22,10 @@
 #      input, `min_usable_span_ratio` also fails the gate when the spans
 #      arrive without the attributes the detectors need, so a broken
 #      instrumentation cannot pass as a clean run.
+#      The file must exist: `analyze --config` on a missing file exits 75,
+#      which the report steps tolerate, so the job would pass with no
+#      report at all. Commit the file, or drop `--config` to run on the
+#      built-in defaults.
 #   4. Action SHAs: every `uses:` below is pinned to a 40-character commit
 #      SHA (with the human-readable version tag in a trailing comment).
 #      Verify each SHA against the upstream repo before committing this

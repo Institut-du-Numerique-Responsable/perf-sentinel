@@ -41,7 +41,7 @@ une fois les tests terminés. Voir [`CLI-FR.md`](CLI-FR.md#capture) pour
 les deux formes et [`INSTRUMENTATION-FR.md`](INSTRUMENTATION-FR.md) pour
 la configuration par langage, y compris l'alternative du Collector.
 
-Le code de sortie est non-zéro si le **quality gate** (un ensemble configurable de seuils pass/fail, la même idée qu'un quality gate SonarQube ou un gate de couverture) échoue. Configurez les seuils dans `.perf-sentinel.toml` :
+Le code de sortie est non-zéro si le **quality gate** (un ensemble configurable de seuils pass/fail, la même idée qu'un quality gate SonarQube ou un gate de couverture) échoue. Le fichier doit exister quand `--config` le désigne : un fichier absent fait sortir `analyze` en 75, une erreur d'outillage et non un résultat de gate. Sans fichier de configuration, retirez `--config` et les valeurs par défaut s'appliquent. Configurez les seuils dans `.perf-sentinel.toml` :
 
 ```toml
 [thresholds]
