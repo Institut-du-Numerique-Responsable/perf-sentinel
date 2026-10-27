@@ -949,10 +949,10 @@ if (!string.IsNullOrEmpty(otlpEndpoint))
 
 For SQL query detection, add the instrumentation that matches your database access layer:
 
-- **Entity Framework Core** (MySQL, PostgreSQL, SQLite): `.AddEntityFrameworkCoreInstrumentation(o => o.SetDbStatementForText = true)` with `OpenTelemetry.Instrumentation.EntityFrameworkCore`
-- **SqlClient** (SQL Server): `.AddSqlClientInstrumentation(o => o.SetDbStatementForText = true)` with `OpenTelemetry.Instrumentation.SqlClient`
+- **Entity Framework Core** (MySQL, PostgreSQL, SQLite): `.AddEntityFrameworkCoreInstrumentation()` with `OpenTelemetry.Instrumentation.EntityFrameworkCore`
+- **SqlClient** (SQL Server): `.AddSqlClientInstrumentation()` with `OpenTelemetry.Instrumentation.SqlClient`
 
-The `SetDbStatementForText = true` option is required for Perf Sentinel to see the query text. Without it, SQL spans are emitted but `db.statement` is empty.
+Both instrumentations always capture the query text, with literal values replaced by `?`. The `SetDbStatementForText` option that older guides set was removed (SqlClient 1.12.0-beta.3, Entity Framework Core 1.13.0-beta.1) and no longer compiles. SqlClient puts the text in `db.query.text`. Entity Framework Core puts it in `db.statement` by default, or in `db.query.text` with `OTEL_SEMCONV_STABILITY_OPT_IN=database`. Perf Sentinel reads both. A SqlClient stored procedure call carries `db.stored_procedure.name` and no query text, so Perf Sentinel cannot analyze it.
 
 Entity Framework Core uses named bind parameters (`@__param_0`). Since the actual parameter values are not visible in the query template, Perf Sentinel may detect repeated queries as `redundant_sql` (same template, same visible params) rather than `n_plus_one_sql` (same template, different params).
 
@@ -1025,6 +1025,7 @@ opentelemetry-instrumentation-psycopg
 **Initialization (manage.py or wsgi.py):**
 
 ```python
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -1033,6 +1034,7 @@ from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
 
 provider = TracerProvider()
 provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+trace.set_tracer_provider(provider)  # without it, the instrumentors export nothing
 
 DjangoInstrumentor().instrument()
 PsycopgInstrumentor().instrument()
@@ -1067,6 +1069,7 @@ opentelemetry-instrumentation-asyncpg
 **Initialization (main.py):**
 
 ```python
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -1075,9 +1078,10 @@ from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
 provider = TracerProvider()
 provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+trace.set_tracer_provider(provider)  # without it, the instrumentors export nothing
 
 FastAPIInstrumentor.instrument_app(app)
-SQLAlchemyInstrumentor().instrument(engine=engine)
+SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)  # an AsyncEngine is instrumented through its sync engine
 ```
 
 `asyncpg` emits `db.statement` with PostgreSQL native positional parameters (`$1`, `$2`). Perf Sentinel normalizes these to `$?` with empty `params`. The `sqlalchemy` instrumentation scope is in the ORM scope allow-list, so the sanitizer-aware N+1 detection fires via the ORM path for this stack.
