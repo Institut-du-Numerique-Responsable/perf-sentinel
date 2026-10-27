@@ -787,10 +787,10 @@ span.tag(<span style="color:var(--code-num)">"code.line.number"</span>, (<span s
 }</code></pre></div>
 <p class="ps-p">Pour la détection des requêtes SQL, ajoutez l'instrumentation correspondant à votre couche d'accès aux données :</p>
 <ul>
-<li><strong>Entity Framework Core</strong> (MySQL, PostgreSQL, SQLite) : <code class="ps-ic">.AddEntityFrameworkCoreInstrumentation(o =&gt; o.SetDbStatementForText = true)</code> avec <code class="ps-ic">OpenTelemetry.Instrumentation.EntityFrameworkCore</code></li>
-<li><strong>SqlClient</strong> (SQL Server) : <code class="ps-ic">.AddSqlClientInstrumentation(o =&gt; o.SetDbStatementForText = true)</code> avec <code class="ps-ic">OpenTelemetry.Instrumentation.SqlClient</code></li>
+<li><strong>Entity Framework Core</strong> (MySQL, PostgreSQL, SQLite) : <code class="ps-ic">.AddEntityFrameworkCoreInstrumentation()</code> avec <code class="ps-ic">OpenTelemetry.Instrumentation.EntityFrameworkCore</code></li>
+<li><strong>SqlClient</strong> (SQL Server) : <code class="ps-ic">.AddSqlClientInstrumentation()</code> avec <code class="ps-ic">OpenTelemetry.Instrumentation.SqlClient</code></li>
 </ul>
-<p class="ps-p">L'option <code class="ps-ic">SetDbStatementForText = true</code> est requise pour que Perf Sentinel voie le texte des requêtes. Sans elle, les spans SQL sont émis mais <code class="ps-ic">db.statement</code> est vide.</p>
+<p class="ps-p">Les deux instrumentations capturent toujours le texte des requêtes, avec les valeurs littérales remplacées par <code class="ps-ic">?</code>. L'option <code class="ps-ic">SetDbStatementForText</code> que posaient les anciens guides a été supprimée (SqlClient 1.12.0-beta.3, Entity Framework Core 1.13.0-beta.1) et ne compile plus. SqlClient place le texte dans <code class="ps-ic">db.query.text</code>. Entity Framework Core le place dans <code class="ps-ic">db.statement</code> par défaut, ou dans <code class="ps-ic">db.query.text</code> avec <code class="ps-ic">OTEL_SEMCONV_STABILITY_OPT_IN=database</code>. Perf Sentinel lit les deux. Un appel de procédure stockée SqlClient porte <code class="ps-ic">db.stored_procedure.name</code> et aucun texte de requête, donc Perf Sentinel ne peut pas l'analyser.</p>
 <p class="ps-p">Entity Framework Core utilise des paramètres nommés (<code class="ps-ic">@__param_0</code>). Les valeurs réelles n'étant pas visibles dans le template, Perf Sentinel peut détecter des requêtes répétées comme <code class="ps-ic">redundant_sql</code> (même template, mêmes params visibles) plutôt que <code class="ps-ic">n_plus_one_sql</code> (même template, params différents).</p>
 <p class="ps-p"><code class="ps-ic">System.Net.Http</code> masque la query string en <code class="ps-ic">?*</code> par défaut, donc les boucles N+1 HTTP sortantes qui font varier un paramètre de query (<code class="ps-ic">?seq=1</code>, <code class="ps-ic">?seq=2</code>, ...) arrivent à Perf Sentinel comme des URLs identiques et sont détectées comme <code class="ps-ic">redundant_http</code> plutôt que <code class="ps-ic">n_plus_one_http</code>. Pour obtenir <code class="ps-ic">n_plus_one_http</code> sur ces boucles, posez <code class="ps-ic">OTEL_DOTNET_EXPERIMENTAL_HTTPCLIENT_DISABLE_URL_QUERY_REDACTION=true</code> pour conserver la query string, ou modélisez l'identifiant variable comme un segment de chemin (<code class="ps-ic">/api/resource/{id}</code>). Voir <a href="/docs/fr/LIMITATIONS#redaction-de-la-query-string-http-et-visibilité-des-n1">Limites</a> pour le raisonnement complet.</p>
 <hr class="ps-hr">
@@ -831,7 +831,8 @@ opentelemetry-exporter-otlp-proto-grpc
 opentelemetry-instrumentation-django
 opentelemetry-instrumentation-psycopg</code></pre></div>
 <p class="ps-p"><strong>Initialisation (manage.py ou wsgi.py) :</strong></p>
-<div class="ps-code"><div class="ps-code-lang">python</div><pre><code><span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.sdk.trace <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">TracerProvider</span>
+<div class="ps-code"><div class="ps-code-lang">python</div><pre><code><span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry <span style="color:var(--code-cmd);font-weight:600">import</span> trace
+<span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.sdk.trace <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">TracerProvider</span>
 <span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.sdk.trace.export <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">BatchSpanProcessor</span>
 <span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.exporter.otlp.proto.grpc.trace_exporter <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">OTLPSpanExporter</span>
 <span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.instrumentation.django <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">DjangoInstrumentor</span>
@@ -839,6 +840,7 @@ opentelemetry-instrumentation-psycopg</code></pre></div>
 
 provider = <span style="color:var(--code-sub)">TracerProvider</span>()
 provider.add_span_processor(<span style="color:var(--code-sub)">BatchSpanProcessor</span>(<span style="color:var(--code-sub)">OTLPSpanExporter</span>()))
+trace.set_tracer_provider(provider)  <span style="color:var(--term-comment)"># sans cela, les instrumentations n'exportent rien</span>
 
 <span style="color:var(--code-sub)">DjangoInstrumentor</span>().instrument()
 <span style="color:var(--code-sub)">PsycopgInstrumentor</span>().instrument()</code></pre></div>
@@ -857,7 +859,8 @@ opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-sqlalchemy
 opentelemetry-instrumentation-asyncpg</code></pre></div>
 <p class="ps-p"><strong>Initialisation (main.py) :</strong></p>
-<div class="ps-code"><div class="ps-code-lang">python</div><pre><code><span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.sdk.trace <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">TracerProvider</span>
+<div class="ps-code"><div class="ps-code-lang">python</div><pre><code><span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry <span style="color:var(--code-cmd);font-weight:600">import</span> trace
+<span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.sdk.trace <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">TracerProvider</span>
 <span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.sdk.trace.export <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">BatchSpanProcessor</span>
 <span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.exporter.otlp.proto.grpc.trace_exporter <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">OTLPSpanExporter</span>
 <span style="color:var(--code-cmd);font-weight:600">from</span> opentelemetry.instrumentation.fastapi <span style="color:var(--code-cmd);font-weight:600">import</span> <span style="color:var(--code-sub)">FastAPIInstrumentor</span>
@@ -865,9 +868,10 @@ opentelemetry-instrumentation-asyncpg</code></pre></div>
 
 provider = <span style="color:var(--code-sub)">TracerProvider</span>()
 provider.add_span_processor(<span style="color:var(--code-sub)">BatchSpanProcessor</span>(<span style="color:var(--code-sub)">OTLPSpanExporter</span>()))
+trace.set_tracer_provider(provider)  <span style="color:var(--term-comment)"># sans cela, les instrumentations n'exportent rien</span>
 
 <span style="color:var(--code-sub)">FastAPIInstrumentor</span>.instrument_app(app)
-<span style="color:var(--code-sub)">SQLAlchemyInstrumentor</span>().instrument(engine=engine)</code></pre></div>
+<span style="color:var(--code-sub)">SQLAlchemyInstrumentor</span>().instrument(engine=engine.sync_engine)  <span style="color:var(--term-comment)"># un AsyncEngine s'instrumente via son moteur synchrone</span></code></pre></div>
 <p class="ps-p"><code class="ps-ic">asyncpg</code> émet <code class="ps-ic">db.statement</code> avec les paramètres positionnels PostgreSQL natifs (<code class="ps-ic">$1</code>, <code class="ps-ic">$2</code>). Perf Sentinel les normalise en <code class="ps-ic">$?</code> avec des <code class="ps-ic">params</code> vides. Le scope d'instrumentation <code class="ps-ic">sqlalchemy</code> figure dans la liste d'autorisation des scopes ORM, donc la détection N+1 sanitizer-aware se déclenche via le chemin ORM pour cette stack.</p>
 <p class="ps-p"><strong>Variables d'environnement :</strong></p>
 <div class="ps-code"><div class="ps-code-lang">yaml</div><pre><code><span style="color:var(--code-sub)">environment</span>:
