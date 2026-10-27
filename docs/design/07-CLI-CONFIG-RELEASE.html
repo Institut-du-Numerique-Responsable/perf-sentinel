@@ -240,12 +240,16 @@
 <div class="ps-code"><pre><code>    Source:   com.example.OrderService.processItems (OrderService.java:42)</code></pre></div>
 <p class="ps-p">The format is <code class="ps-ic">namespace.function (filepath:lineno)</code>, with each part omitted if absent. The rendering logic builds the string incrementally: namespace and function are joined with a dot, or with <code class="ps-ic">::</code> when the namespace holds <code class="ps-ic">\</code> or <code class="ps-ic">::</code> (PHP, Rust, C++, Ruby), the function stands alone when it already starts with the namespace and a separator, as the stable <code class="ps-ic">code.function.name</code> does, and filepath and lineno are appended in parentheses only when the name portion is also present.</p>
 <h3 id="sarif-physicallocation-enhancement" class="ps-h3">SARIF <code class="ps-ic">physicalLocation</code> enhancement</h3>
-<p class="ps-p">When a finding carries a <code class="ps-ic">CodeLocation</code> with at least a <code class="ps-ic">filepath</code>, the SARIF output includes a <code class="ps-ic">locations</code> array with a <code class="ps-ic">physicalLocation</code> entry:</p>
+<p class="ps-p">Every SARIF result carries a <code class="ps-ic">locations</code> array with exactly one <code class="ps-ic">location</code>. Its <code class="ps-ic">logicalLocations</code> always name the service (<code class="ps-ic">kind: "module"</code>) and the endpoint (<code class="ps-ic">kind: "function"</code>). When the finding carries a <code class="ps-ic">CodeLocation</code> with at least a <code class="ps-ic">filepath</code>, the same <code class="ps-ic">location</code> also gets a <code class="ps-ic">physicalLocation</code>:</p>
 <div class="ps-code"><div class="ps-code-lang">json</div><pre><code>{
   <span style="color:var(--code-sub)">&quot;physicalLocation&quot;</span>: {
     <span style="color:var(--code-sub)">&quot;artifactLocation&quot;</span>: { <span style="color:var(--code-sub)">&quot;uri&quot;</span>: <span style="color:var(--code-num)">&quot;OrderService.java&quot;</span> },
     <span style="color:var(--code-sub)">&quot;region&quot;</span>: { <span style="color:var(--code-sub)">&quot;startLine&quot;</span>: <span style="color:var(--code-num)">42</span> }
-  }
+  },
+  <span style="color:var(--code-sub)">&quot;logicalLocations&quot;</span>: [
+    { <span style="color:var(--code-sub)">&quot;name&quot;</span>: <span style="color:var(--code-num)">&quot;order-svc&quot;</span>, <span style="color:var(--code-sub)">&quot;kind&quot;</span>: <span style="color:var(--code-num)">&quot;module&quot;</span> },
+    { <span style="color:var(--code-sub)">&quot;name&quot;</span>: <span style="color:var(--code-num)">&quot;POST /api/orders/{id}/submit&quot;</span>, <span style="color:var(--code-sub)">&quot;kind&quot;</span>: <span style="color:var(--code-num)">&quot;function&quot;</span> }
+  ]
 }</code></pre></div>
 <p class="ps-p">The <code class="ps-ic">region.startLine</code> field is included only when <code class="ps-ic">lineno</code> is available. This enables inline annotations in GitHub Code Scanning and GitLab SAST when the SARIF report is uploaded as a code scanning result.</p>
 <h3 id="codefilepath-sanitization" class="ps-h3"><code class="ps-ic">code.filepath</code> sanitization</h3>
@@ -259,7 +263,7 @@
 <li>Control characters (newlines, NUL, etc.) that could break a SARIF consumer's tokenizer or inject into logs.</li>
 <li>Unicode BiDi overrides and invisible format characters (<code class="ps-ic">U+061C</code>, <code class="ps-ic">U+180E</code>, <code class="ps-ic">U+202A..U+202E</code>, <code class="ps-ic">U+2066..U+2069</code>, <code class="ps-ic">U+200B..U+200F</code>, <code class="ps-ic">U+FEFF</code>) that can confuse rendered filenames (Trojan Source class of attack, CVE-2021-42574).</li>
 </ul>
-<p class="ps-p">Findings with a rejected filepath still appear in the SARIF report. Only the <code class="ps-ic">physicalLocations</code> array is omitted (the <code class="ps-ic">logicalLocations</code> and other fields remain).</p>
+<p class="ps-p">Findings with a rejected filepath still appear in the SARIF report. Only the <code class="ps-ic">physicalLocation</code> is omitted, the <code class="ps-ic">location</code> keeps its <code class="ps-ic">logicalLocations</code> and the other result fields remain.</p>
 <h2 id="query-subcommand" class="ps-h2"><code class="ps-ic">query</code> subcommand</h2>
 <p class="ps-p"><code class="ps-ic">perf-sentinel query</code> queries a running daemon's HTTP API. It requires the <code class="ps-ic">daemon</code> feature flag.</p>
 <h3 id="sub-actions" class="ps-h3">Sub-actions</h3>
