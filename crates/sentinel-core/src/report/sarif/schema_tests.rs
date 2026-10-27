@@ -5,7 +5,8 @@
 //! <https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json>.
 //! The validator below is a minimal subset of JSON Schema draft-04: it follows
 //! `$ref` to `#/definitions/...` and checks `required`, `additionalProperties:
-//! false`, `items`, `minItems` and `enum`. Other keywords are ignored.
+//! false`, `items`, `minItems`, `enum`, and `minimum` / `maximum` on numbers.
+//! Other keywords are ignored.
 
 use serde_json::{Map, Value};
 
@@ -48,6 +49,22 @@ fn validate(root: &Value, schema: &Value, value: &Value, path: &str, errors: &mu
     }
     if let Some(arr) = value.as_array() {
         check_array(root, schema, arr, path, errors);
+    }
+    if let Some(n) = value.as_f64() {
+        check_number(schema, n, path, errors);
+    }
+}
+
+fn check_number(schema: &Value, n: f64, path: &str, errors: &mut Vec<String>) {
+    if let Some(min) = schema.get("minimum").and_then(Value::as_f64)
+        && n < min
+    {
+        errors.push(format!("{path}: {n} is below the minimum {min}"));
+    }
+    if let Some(max) = schema.get("maximum").and_then(Value::as_f64)
+        && n > max
+    {
+        errors.push(format!("{path}: {n} is above the maximum {max}"));
     }
 }
 
@@ -157,7 +174,15 @@ fn sarif_with_every_optional_field_matches_schema() {
 
 #[test]
 fn findings_to_sarif_matches_schema() {
-    let findings = vec![finding_with_code_location(), acknowledged_finding().finding];
+    let mut line_zero = finding_with_code_location();
+    if let Some(loc) = line_zero.code_location.as_mut() {
+        loc.lineno = Some(0);
+    }
+    let findings = vec![
+        finding_with_code_location(),
+        acknowledged_finding().finding,
+        line_zero,
+    ];
     let sarif = serde_json::to_value(findings_to_sarif(&findings)).unwrap();
     let errors = schema_errors(&sarif);
     assert!(errors.is_empty(), "schema errors: {errors:#?}");
@@ -169,6 +194,7 @@ fn validator_rejects_the_old_result_shape() {
     let result = &mut sarif["runs"][0]["results"][0];
     result["logicalLocations"] = serde_json::json!([{ "name": "order-svc", "kind": "module" }]);
     result["fixes"] = serde_json::json!([{ "description": { "text": "Use JOIN FETCH" } }]);
+    result["locations"][0]["physicalLocation"]["region"]["startLine"] = serde_json::json!(0);
     let errors = schema_errors(&sarif);
     assert!(
         errors
@@ -181,5 +207,11 @@ fn validator_rejects_the_old_result_shape() {
             .iter()
             .any(|e| e.ends_with("missing required property artifactChanges")),
         "fix without artifactChanges not caught: {errors:#?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.ends_with("startLine: 0 is below the minimum 1")),
+        "startLine 0 not caught: {errors:#?}"
     );
 }

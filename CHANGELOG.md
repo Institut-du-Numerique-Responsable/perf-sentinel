@@ -11,6 +11,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 ### Fixed
 
 - SARIF output is valid against the SARIF 2.1.0 schema again. Any file with at least one finding was rejected by schema validation, because `result.logicalLocations` is not a `result` property and a SARIF `fix` requires `artifactChanges`. The service and endpoint now sit under `result.locations[0].logicalLocations`, next to the `physicalLocation` when the finding has a usable `code.filepath`, and every result carries exactly one location, which GitHub code scanning needs to display it. The suggested fix moves from `result.fixes[0].description.text` to the `result.properties.suggestedFix` string. Breaking for SARIF consumers that read the old fields, and for `perf-sentinel-core` library users: `SarifResult` loses `logical_locations` and `fixes`, `SarifFix` is removed, `SarifLocation.physical_location` becomes an `Option` next to a new `logical_locations`, and `SarifProperties` gains `suggested_fix`. A unit test now validates the SARIF output against the vendored OASIS schema, `tests/fixtures/sarif-schema-2.1.0.json`.
+- SARIF no longer emits `region.startLine: 0`, which the schema rejects (`minimum: 1`) and which made GitHub refuse the whole upload. A span with `code.lineno = 0` and a usable filepath now yields a `physicalLocation` without a `region`.
 
 ### Internal
 

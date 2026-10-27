@@ -297,13 +297,17 @@ fn finding_to_result(finding: &Finding) -> SarifResult {
 }
 
 /// Source file and line of the finding, when its `code.filepath` passes
-/// [`sanitize_sarif_filepath`].
+/// [`sanitize_sarif_filepath`]. A line of 0 drops the region, SARIF
+/// `startLine` has `minimum: 1`.
 fn physical_location(finding: &Finding) -> Option<SarifPhysicalLocation> {
     let loc = finding.code_location.as_ref()?;
     let uri = sanitize_sarif_filepath(loc.filepath.as_deref()?)?;
     Some(SarifPhysicalLocation {
         artifact_location: SarifArtifactLocation { uri },
-        region: loc.lineno.map(|ln| SarifRegion { start_line: ln }),
+        region: loc
+            .lineno
+            .filter(|&ln| ln > 0)
+            .map(|ln| SarifRegion { start_line: ln }),
     })
 }
 
@@ -940,6 +944,21 @@ mod tests {
         let physical = result.locations[0].physical_location.as_ref().unwrap();
         assert_eq!(physical.artifact_location.uri, "src/Order.java");
         assert_eq!(physical.region.as_ref().map(|r| r.start_line), Some(42));
+    }
+
+    #[test]
+    fn finding_to_sarif_drops_region_for_line_zero() {
+        let mut f = crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning);
+        f.code_location = Some(crate::event::CodeLocation {
+            function: None,
+            filepath: Some("src/Order.java".to_string()),
+            lineno: Some(0),
+            namespace: None,
+        });
+        let result = finding_to_result(&f);
+        let physical = result.locations[0].physical_location.as_ref().unwrap();
+        assert_eq!(physical.artifact_location.uri, "src/Order.java");
+        assert!(physical.region.is_none(), "startLine must be at least 1");
     }
 
     // --- signature exposed in properties + fingerprints ---
