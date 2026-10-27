@@ -189,7 +189,18 @@ rougir une PR :
   `Quality gate (PR only)` ajoute une condition
   `fileExists('perf-sentinel-results.sarif')` en plus de la garde
   `CHANGE_ID` existante, pour ne lancer le contrôle de seuil qu'une
-  fois que le stage report-only a produit un SARIF.
+  fois que le stage report-only a produit un SARIF. Jenkins réutilise
+  le workspace d'un build à l'autre, donc le stage d'installation
+  supprime d'abord le binaire, la capture et les rapports du build
+  précédent. Sans ça, une étape en échec archiverait les anciens
+  rapports comme ceux de ce build, et sur un build de PR
+  `fileExists()` laisserait le gate tourner dessus. Le téléchargement
+  choisit l'asset de release qui correspond à l'agent (`uname -m`), et
+  une architecture non prise en charge compte comme un souci
+  d'outillage. Le stage commenté `Integration tests` lance quand même
+  les tests sans `capture` quand le binaire manque, et garde rouge une
+  série de tests en échec avec `catchError(buildResult: 'FAILURE')`
+  pendant que le pipeline continue jusqu'au rapport.
 
 Dans les trois cas, un souci d'outillage se manifeste par un
 avertissement visible ou un build unstable/jaune, distinct du build
