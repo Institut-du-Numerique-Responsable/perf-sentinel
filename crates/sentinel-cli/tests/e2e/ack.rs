@@ -264,11 +264,11 @@ fn cli_signature_consistent_across_json_and_sarif() {
     for r in results {
         let key = (
             r["ruleId"].as_str().unwrap().to_string(),
-            r["logicalLocations"][0]["name"]
+            r["locations"][0]["logicalLocations"][0]["name"]
                 .as_str()
                 .unwrap()
                 .to_string(),
-            r["logicalLocations"][1]["name"]
+            r["locations"][0]["logicalLocations"][1]["name"]
                 .as_str()
                 .unwrap()
                 .to_string(),

@@ -535,7 +535,7 @@ pub struct SuggestedFix {
 }
 ```
 
-Sérialisé en JSON comme objet imbriqué sous `finding.suggested_fix`, omis quand absent. Émis en SARIF sous `result.fixes[0].description.text` (forme description-only de l'objet fix SARIF 2.1.0). La CLI l'affiche comme ligne imbriquée `Suggested fix:` juste après la ligne générique `Suggestion:`.
+Sérialisé en JSON comme objet imbriqué sous `finding.suggested_fix`, omis quand absent. Émis en SARIF comme chaîne `result.properties.suggestedFix`. Le tableau SARIF `fixes[]` n'est pas utilisé, son schéma exige `artifactChanges`, un patch source que Perf Sentinel ne produit pas. La CLI l'affiche comme ligne imbriquée `Suggested fix:` juste après la ligne générique `Suggestion:`.
 
 ### Détecteur de framework
 

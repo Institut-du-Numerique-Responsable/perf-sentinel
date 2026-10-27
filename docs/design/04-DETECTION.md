@@ -535,7 +535,7 @@ pub struct SuggestedFix {
 }
 ```
 
-Serialized in JSON as a nested object under `finding.suggested_fix`, skipped when absent. Emitted in SARIF under `result.fixes[0].description.text` (description-only form of the SARIF 2.1.0 fix object). The CLI renders it as a nested `Suggested fix:` line right after the generic `Suggestion:` line.
+Serialized in JSON as a nested object under `finding.suggested_fix`, skipped when absent. Emitted in SARIF as the `result.properties.suggestedFix` string. SARIF `fixes[]` is not used because its schema requires `artifactChanges`, a source patch Perf Sentinel does not produce. The CLI renders it as a nested `Suggested fix:` line right after the generic `Suggestion:` line.
 
 ### Framework detector
 

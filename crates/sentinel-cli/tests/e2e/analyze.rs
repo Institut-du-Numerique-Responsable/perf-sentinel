@@ -987,7 +987,7 @@ fn cli_analyze_text_output_shows_suggested_fix_line() {
 }
 
 #[test]
-fn cli_analyze_sarif_output_includes_fixes_array() {
+fn cli_analyze_sarif_output_includes_suggested_fix() {
     let fixture_path = format!(
         "{}/../../tests/fixtures/n_plus_one_sql_java_jpa.json",
         env!("CARGO_MANIFEST_DIR")
@@ -1005,15 +1005,14 @@ fn cli_analyze_sarif_output_includes_fixes_array() {
     let result = sarif
         .pointer("/runs/0/results/0")
         .expect("SARIF should have at least one result");
-    let fixes = result
-        .get("fixes")
-        .and_then(Value::as_array)
-        .expect("result should have a fixes array when suggested_fix is present");
-    assert!(!fixes.is_empty(), "fixes array should not be empty");
-    let text = fixes[0]
-        .pointer("/description/text")
+    assert!(
+        result.get("fixes").is_none(),
+        "SARIF fixes require artifactChanges, the recommendation goes to properties"
+    );
+    let text = result
+        .pointer("/properties/suggestedFix")
         .and_then(Value::as_str)
-        .expect("fixes[0].description.text must be a string");
+        .expect("properties.suggestedFix must be a string when suggested_fix is present");
     assert!(
         text.contains("JOIN FETCH") || text.contains("EntityGraph"),
         "SARIF fix text should carry the JPA recommendation, got: {text}"
