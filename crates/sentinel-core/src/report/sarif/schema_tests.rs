@@ -8,6 +8,8 @@
 //! false`, `items`, `minItems`, `enum`, and `minimum` / `maximum` on numbers.
 //! Other keywords are ignored.
 
+use std::sync::LazyLock;
+
 use serde_json::{Map, Value};
 
 use super::*;
@@ -16,14 +18,14 @@ use crate::detect::suggestions::SuggestedFix;
 use crate::event::CodeLocation;
 use crate::report::AcknowledgedFinding;
 
-fn load_schema() -> Value {
+static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/fixtures/sarif-schema-2.1.0.json"
     );
     let raw = std::fs::read_to_string(path).expect("read vendored SARIF schema");
     serde_json::from_str(&raw).expect("parse vendored SARIF schema")
-}
+});
 
 fn resolve<'a>(root: &'a Value, schema: &'a Value) -> &'a Value {
     match schema.get("$ref").and_then(Value::as_str) {
@@ -106,9 +108,8 @@ fn check_array(root: &Value, schema: &Value, arr: &[Value], path: &str, errors: 
 }
 
 fn schema_errors(sarif: &Value) -> Vec<String> {
-    let schema = load_schema();
     let mut errors = Vec::new();
-    validate(&schema, &schema, sarif, "", &mut errors);
+    validate(&SCHEMA, &SCHEMA, sarif, "", &mut errors);
     errors
 }
 
@@ -175,9 +176,11 @@ fn sarif_with_every_optional_field_matches_schema() {
 #[test]
 fn findings_to_sarif_matches_schema() {
     let mut line_zero = finding_with_code_location();
-    if let Some(loc) = line_zero.code_location.as_mut() {
-        loc.lineno = Some(0);
-    }
+    line_zero
+        .code_location
+        .as_mut()
+        .expect("the base finding carries a code location")
+        .lineno = Some(0);
     let findings = vec![
         finding_with_code_location(),
         acknowledged_finding().finding,
@@ -192,6 +195,12 @@ fn findings_to_sarif_matches_schema() {
 fn validator_rejects_the_old_result_shape() {
     let mut sarif = serde_json::to_value(report_to_sarif(&full_report())).unwrap();
     let result = &mut sarif["runs"][0]["results"][0];
+    assert!(
+        result
+            .pointer("/locations/0/physicalLocation/region/startLine")
+            .is_some(),
+        "the first result must carry a region, so the startLine case below edits a real one"
+    );
     result["logicalLocations"] = serde_json::json!([{ "name": "order-svc", "kind": "module" }]);
     result["fixes"] = serde_json::json!([{ "description": { "text": "Use JOIN FETCH" } }]);
     result["locations"][0]["physicalLocation"]["region"]["startLine"] = serde_json::json!(0);
