@@ -122,15 +122,21 @@ Mécaniques par fournisseur pour la séparation PR vs trunk :
   dépassement. Le step trunk émet une annotation `::warning::` sans
   faire échouer le job.
 - **GitLab CI** utilise `allow_failure: true` sur la règle
-  `$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH`. Le job retourne quand même
-  le code de sortie 1 sur dépassement, mais le badge de pipeline reste
-  vert et le job apparaît avec une icône d'avertissement jaune.
-  Le job tourne aussi sur la branche par défaut pour une seconde
-  raison : GitLab marque un finding Code Quality comme nouveau ou
-  résolu par rapport à un pipeline de référence sur la branche cible.
-  Le template prend la `signature` du finding comme `fingerprint` Code
-  Quality, stable tant que le finding garde son type, son service, son
-  endpoint et son template (voir
+  `$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH` et sur une dernière règle
+  attrape-tout, pour que seule la règle merge request puisse bloquer.
+  Le job retourne quand même le code de sortie 1 sur dépassement, mais
+  le badge de pipeline reste vert et le job apparaît avec une icône
+  d'avertissement jaune. La règle attrape-tout lance aussi le rapport,
+  et l'archive, sur un push de branche sans merge request ouverte. Une
+  branche avec une merge request ouverte lance alors deux pipelines,
+  un pipeline de branche et un pipeline de merge request. En choisir
+  un relève de `workflow:rules`, une décision à l'échelle du projet
+  que le template vous laisse. Le job tourne aussi sur la branche par
+  défaut pour une seconde raison : GitLab marque un finding Code
+  Quality comme nouveau ou résolu par rapport à un pipeline de
+  référence sur la branche cible. Le template prend la `signature` du
+  finding comme `fingerprint` Code Quality, stable tant que le finding
+  garde son type, son service, son endpoint et son template (voir
   [ACKNOWLEDGMENTS-FR.md](./ACKNOWLEDGMENTS-FR.md#format-de-signature)),
   et son type comme `check_name`. Les findings qui partagent une
   signature apparaissent comme une seule entrée.
@@ -170,36 +176,37 @@ rougir une PR :
   contre ce même piège. Un dernier step `Report tooling failure` émet
   un `::warning::` quand analyze n'a pas réussi, pour qu'un souci
   d'outillage reste visible.
-- **GitLab CI** : chaque commande de téléchargement sort
-  explicitement avec le code `75` (`EX_TEMPFAIL`,
-  [sysexits.h](https://man.openbsd.org/sysexits)) au lieu de
-  propager le code de sortie brut de l'outil qui a échoué.
+- **GitLab CI** : chaque commande de téléchargement sort explicitement
+  avec le code `75` (`EX_TEMPFAIL`,
+  [sysexits.h](https://man.openbsd.org/sysexits)) au lieu de propager
+  le code de sortie brut de l'outil qui a échoué.
   `allow_failure: exit_codes: [75]`, porté par le job, exclut
-  uniquement ce code précis du blocage d'une merge request. Il est
-  sur le job et non dans la règle merge request parce que
-  `rules:allow_failure` n'accepte qu'un booléen : le lint CI de
-  GitLab rejette le fichier entier si une règle porte la forme
-  mapping. La vérification du checksum et la conversion `jq` vers
-  Code Quality sont exclues de cette convention exit-75 : un mauvais
-  checksum signifie une release altérée, et un échec `jq` signifie un
-  bug dans le filtre de conversion. Ni l'un ni l'autre n'est un accroc
-  d'outillage à tolérer. La relance finale avec `--ci` garde son propre
-  code de sortie (normalement `1` sur un vrai dépassement), qui continue
-  de bloquer.
-  Le téléchargement tourne dans son propre job
+  uniquement ce code précis du blocage d'une merge request. Il est sur
+  le job et non dans la règle merge request parce que
+  `rules:allow_failure` n'accepte qu'un booléen : le lint CI de GitLab
+  rejette le fichier entier si une règle porte la forme mapping. La
+  vérification du checksum et la conversion `jq` vers Code Quality
+  sont exclues de cette convention exit-75 : un mauvais checksum
+  signifie une release altérée, et un échec `jq` signifie un bug dans
+  le filtre de conversion. Ni l'un ni l'autre n'est un accroc
+  d'outillage à tolérer. La relance finale avec `--ci` garde son
+  propre code de sortie (normalement `1` sur un vrai dépassement), qui
+  continue de bloquer. Le téléchargement tourne dans son propre job
   `perf-sentinel-install`, au stage `.pre`, avec sa propre image, et
   passe le binaire aux jobs de test et d'analyse en artefact : les
   images de test n'embarquent souvent pas `curl` (`eclipse-temurin`
   n'a ni `curl` ni `wget`), donc une installation dans le job de test
   l'arrêterait avant les tests. Ce job choisit l'asset de release qui
   correspond au runner (`uname -m`), et une architecture non prise en
-  charge sort avec `75`. Ses `rules:` doivent reprendre celles du job
-  de test, car un job absent d'un pipeline ne peut pas figurer dans
-  `dependencies:`. Le job de test commenté lance quand même les tests
-  sans `capture` quand le binaire manque, n'impose aucune option shell
-  à votre commande, et garde sa capture avec `artifacts:when: always`.
-  Le job d'analyse porte `when: always` sur ses règles, pour qu'une
-  série de tests en échec ait quand même son rapport.
+  charge sort avec `75`. Ses `rules:` doivent sélectionner tous les
+  pipelines où tourne le job de test, car un job absent d'un pipeline
+  ne peut pas figurer dans `dependencies:`. Sa dernière règle
+  attrape-tout les couvre tous. Le job de test commenté lance quand
+  même les tests sans `capture` quand le binaire manque, n'impose
+  aucune option shell à votre commande, et garde sa capture avec
+  `artifacts:when: always`. Le job d'analyse porte `when: always` sur
+  ses règles, pour qu'une série de tests en échec ait quand même son
+  rapport.
 - **Jenkins** : la moitié téléchargement du stage
   `Install perf-sentinel` est enrobée dans un
   `catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE')`. La

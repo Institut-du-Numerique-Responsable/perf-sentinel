@@ -23,9 +23,18 @@
 #      which the report steps tolerate, so the job would pass with no
 #      report at all. Commit the file, or drop `--config` to run on the
 #      built-in defaults.
-#   4. The `rules:` of `perf-sentinel-install`: copy your test job's rules.
-#      A job missing from a pipeline cannot be listed in `dependencies:`,
-#      and a job with no `rules:` is left out of merge request pipelines.
+#   4. The `rules:` of `perf-sentinel-install`: they must select at least
+#      every pipeline your test job runs in. A job missing from a pipeline
+#      cannot be listed in `dependencies:`, and a job with no `rules:` is
+#      left out of merge request pipelines. The final catch-all rule
+#      already covers every pipeline, keep it unless your test job's rules
+#      are narrower.
+#
+# The catch-all rules of `perf-sentinel-install` and `perf-sentinel` also
+# mean that a branch with an open merge request runs two pipelines, a
+# branch pipeline and a merge request pipeline, and GitLab warns about it.
+# Choosing one is a project-wide `workflow:rules` decision, outside this
+# template.
 #
 # See docs/CI.md (English) or docs/FR/CI-FR.md (French) for the full CI
 # integration guide and the quality-gate philosophy.
@@ -84,10 +93,12 @@ perf-sentinel-install:
     paths:
       - bin/perf-sentinel
     expire_in: 1 day
-  # Copy your test job's rules here. These match the `perf-sentinel` job.
+  # Must select every pipeline your test job runs in (see item 4 at the
+  # top). The final catch-all already does.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - when: on_success
 
 # Place your integration-test job here. It must produce the trace file at
 # $PERF_SENTINEL_TRACES and publish it as an artifact so the perf-sentinel
@@ -221,8 +232,11 @@ perf-sentinel:
   # It sits on the job, not in a rule: `rules:allow_failure` accepts a
   # boolean only, and GitLab's CI lint rejects the whole file with
   # "rules:rule allow failure should be a boolean value" when a rule
-  # carries the mapping form. The default-branch rule then overrides it
-  # with `true`, which is the one place everything should pass through.
+  # carries the mapping form. The default-branch rule and the final
+  # catch-all then override it with `true`, so only the merge request
+  # rule can block. The catch-all runs the job, and archives its
+  # artifacts, on every other pipeline too, such as a branch push with
+  # no open merge request.
   #
   # `when: always` on each rule runs the job after failing tests, so the
   # report of a red test run is not lost.
@@ -233,6 +247,8 @@ perf-sentinel:
       when: always
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
       when: always
+      allow_failure: true
+    - when: always
       allow_failure: true
 
 # Free-tier compatible alternative: single Pages deployment on the
