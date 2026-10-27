@@ -140,7 +140,7 @@ The same dispatch also covers HTTP outbound groups via `classify_http_group_inde
 
 #### Known limit: query-string redaction
 
-N+1 HTTP detection requires the varying parameter to be visible in the span. An N+1 loop that varies a path segment is detected (distinct extracted params, or the `{id}` placeholder anchors the Strict primary). An N+1 loop that varies a **query parameter** is invisible when the instrumentation redacts the query string before export. OpenTelemetry .NET `System.Net.Http` redacts to `?*` by default, so every call carries a byte-identical `url.full`, `distinct_params` collapses to 1, and the group is correctly classified as `redundant_http`. The distinguishing parameter was destroyed upstream, so no trace consumer can recover it. See `docs/LIMITATIONS.md` § "HTTP query-string redaction and N+1 visibility" for the operator-facing workarounds.
+N+1 HTTP detection requires the varying parameter to be visible in the span. An N+1 loop that varies a path segment is detected (distinct extracted params, or the `{id}` placeholder anchors the Strict primary). An N+1 loop that varies a **query parameter** is invisible when the instrumentation redacts the query string before export. On .NET, `url.full` carries a redacted query by default (the runtime's own `System.Net.Http` activity on .NET 9 and later, the `OpenTelemetry.Instrumentation.Http` package before), so every call carries a byte-identical `url.full`, `distinct_params` collapses to 1, and the group is correctly classified as `redundant_http`. The distinguishing parameter was destroyed upstream, so no trace consumer can recover it. See `docs/LIMITATIONS.md` § "HTTP query-string redaction and N+1 visibility" for the operator-facing workarounds.
 
 ## Redundant detection
 
@@ -535,7 +535,7 @@ pub struct SuggestedFix {
 }
 ```
 
-Serialized in JSON as a nested object under `finding.suggested_fix`, skipped when absent. Emitted in SARIF under `result.fixes[0].description.text` (description-only form of the SARIF 2.1.0 fix object). The CLI renders it as a nested `Suggested fix:` line right after the generic `Suggestion:` line.
+Serialized in JSON as a nested object under `finding.suggested_fix`, skipped when absent. Emitted in SARIF as the `result.properties.suggestedFix` string. SARIF `fixes[]` is not used because its schema requires `artifactChanges`, a source patch Perf Sentinel does not produce. The CLI renders it as a nested `Suggested fix:` line right after the generic `Suggestion:` line.
 
 ### Framework detector
 

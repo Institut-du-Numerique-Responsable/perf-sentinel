@@ -1,8 +1,10 @@
 //! SARIF v2.1.0 report export.
 //!
 //! Generates a [SARIF](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
-//! report from perf-sentinel findings. Uses logical locations (service + endpoint)
-//! since perf-sentinel analyzes traces, not source code.
+//! report from perf-sentinel findings. Every result carries one `location`
+//! with logical locations (service + endpoint), since perf-sentinel analyzes
+//! traces, not source code, plus a physical location when the span carried
+//! a usable `code.filepath`.
 
 use std::collections::BTreeMap;
 
@@ -65,7 +67,6 @@ pub struct SarifResult {
     pub rule_id: String,
     pub level: String,
     pub message: SarifMessage,
-    pub logical_locations: Vec<SarifLogicalLocation>,
     /// SARIF v2.1.0 property bag that exposes the tool-specific
     /// `confidence` field for editor-side interop. Optional, so consumers
     /// that predate it are unaffected.
@@ -78,17 +79,11 @@ pub struct SarifResult {
     /// `daemon_production = 90`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rank: Option<u32>,
-    /// Physical source code locations from `OTel` `code.*` span attributes.
-    /// Enables inline annotations in GitHub/GitLab code scanning when
-    /// the instrumentation agent emits source code attributes.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// Exactly one location: the service and endpoint as logical
+    /// locations, plus the source file when the finding has one. GitHub
+    /// code scanning shows a result inline only when this location has a
+    /// physical location.
     pub locations: Vec<SarifLocation>,
-    /// SARIF v2.1.0 `fixes` array. Populated from the finding's
-    /// `suggested_fix` field when a framework was inferred and a
-    /// recommendation exists. Empty otherwise, so consumers that predate
-    /// the field are unaffected.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub fixes: Vec<SarifFix>,
     /// SARIF v2.1.0 section 3.27.17 `fingerprints`. Single-entry map keyed
     /// by `"perfsentinel/v1"`, value is the canonical finding signature.
     /// Used by GitHub Code Scanning and GitLab SAST for deduplication.
@@ -97,22 +92,15 @@ pub struct SarifResult {
     pub fingerprints: Option<BTreeMap<&'static str, String>>,
 }
 
-/// SARIF v2.1.0 `fix` object. perf-sentinel emits the description-only
-/// form: a free-text recommendation under `description.text`. We do not
-/// emit `artifactChanges` because perf-sentinel infers the fix at the
-/// framework level (e.g. "use JOIN FETCH"), not as a literal source
-/// patch.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SarifFix {
-    pub description: SarifMessage,
-}
-
-/// Wrapper for SARIF `location` objects containing physical locations.
+/// SARIF `location` object. `physical_location` comes from `OTel` `code.*`
+/// span attributes and enables inline annotations in GitHub/GitLab code
+/// scanning. It is skipped when the finding has no usable filepath.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SarifLocation {
-    pub physical_location: SarifPhysicalLocation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub physical_location: Option<SarifPhysicalLocation>,
+    pub logical_locations: Vec<SarifLogicalLocation>,
 }
 
 /// Custom properties attached to a [`SarifResult`].
@@ -126,6 +114,12 @@ pub struct SarifProperties {
     /// Source context of the finding: `"local_batch"`, `"ci_batch"`,
     /// `"daemon_staging"`, or `"daemon_production"`. See [`Confidence`] for semantics.
     pub confidence: &'static str,
+    /// Framework-level remediation from the finding's `suggested_fix`
+    /// (recommendation, then the reference URL when present). Lives here
+    /// rather than in SARIF `fixes`, which requires `artifactChanges`, a
+    /// source patch perf-sentinel cannot produce. Skipped when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_fix: Option<String>,
     /// `true` when the result was emitted from an acknowledged finding
     /// (the operator suppressed it via `.perf-sentinel-acknowledgments.toml`
     /// and re-included it in the output via `--show-acknowledged`).
@@ -276,18 +270,9 @@ fn finding_to_result(finding: &Finding) -> SarifResult {
         rule_id: finding.finding_type.as_str().to_string(),
         level: severity_to_sarif_level(&finding.severity).to_string(),
         message: SarifMessage { text: message },
-        logical_locations: vec![
-            SarifLogicalLocation {
-                name: safe_service.into_owned(),
-                kind: "module".to_string(),
-            },
-            SarifLogicalLocation {
-                name: safe_endpoint.into_owned(),
-                kind: "function".to_string(),
-            },
-        ],
         properties: Some(SarifProperties {
             confidence: finding.confidence.as_str(),
+            suggested_fix: suggested_fix_text(finding),
             acknowledged: None,
             acknowledgment_reason: None,
             acknowledgment_by: None,
@@ -295,38 +280,47 @@ fn finding_to_result(finding: &Finding) -> SarifResult {
             signature,
         }),
         rank: Some(finding.confidence.sarif_rank()),
-        locations: finding
-            .code_location
-            .as_ref()
-            .and_then(|loc| {
-                loc.filepath.as_ref().and_then(|fp| {
-                    sanitize_sarif_filepath(fp).map(|uri| {
-                        vec![SarifLocation {
-                            physical_location: SarifPhysicalLocation {
-                                artifact_location: SarifArtifactLocation { uri },
-                                region: loc.lineno.map(|ln| SarifRegion { start_line: ln }),
-                            },
-                        }]
-                    })
-                })
-            })
-            .unwrap_or_default(),
-        fixes: finding
-            .suggested_fix
-            .as_ref()
-            .map(|fix| {
-                let rec = strip_code_ticks(&fix.recommendation);
-                let text = match fix.reference_url.as_ref() {
-                    Some(url) => format!("{rec} (see: {url})"),
-                    None => rec.into_owned(),
-                };
-                vec![SarifFix {
-                    description: SarifMessage { text },
-                }]
-            })
-            .unwrap_or_default(),
+        locations: vec![SarifLocation {
+            physical_location: physical_location(finding),
+            logical_locations: vec![
+                SarifLogicalLocation {
+                    name: safe_service.into_owned(),
+                    kind: "module".to_string(),
+                },
+                SarifLogicalLocation {
+                    name: safe_endpoint.into_owned(),
+                    kind: "function".to_string(),
+                },
+            ],
+        }],
         fingerprints,
     }
+}
+
+/// Source file and line of the finding, when its `code.filepath` passes
+/// [`sanitize_sarif_filepath`]. A line of 0 drops the region, SARIF
+/// `startLine` has `minimum: 1`.
+fn physical_location(finding: &Finding) -> Option<SarifPhysicalLocation> {
+    let loc = finding.code_location.as_ref()?;
+    let uri = sanitize_sarif_filepath(loc.filepath.as_deref()?)?;
+    Some(SarifPhysicalLocation {
+        artifact_location: SarifArtifactLocation { uri },
+        region: loc
+            .lineno
+            .filter(|&ln| ln > 0)
+            .map(|ln| SarifRegion { start_line: ln }),
+    })
+}
+
+/// Recommendation of the finding's `suggested_fix`, followed by its
+/// reference URL when present.
+fn suggested_fix_text(finding: &Finding) -> Option<String> {
+    let fix = finding.suggested_fix.as_ref()?;
+    let rec = strip_code_ticks(&fix.recommendation);
+    Some(match fix.reference_url.as_ref() {
+        Some(url) => format!("{rec} (see: {url})"),
+        None => rec.into_owned(),
+    })
 }
 
 /// Sanitize a `code.filepath` span attribute before emitting it as a SARIF
@@ -536,6 +530,9 @@ pub enum SarifError {
 }
 
 #[cfg(test)]
+mod schema_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::detect::Confidence;
@@ -610,14 +607,35 @@ mod tests {
         let result = finding_to_result(&finding);
         assert_eq!(result.rule_id, "n_plus_one_sql");
         assert_eq!(result.level, "warning");
-        assert_eq!(result.logical_locations.len(), 2);
-        assert_eq!(result.logical_locations[0].name, "order-svc");
-        assert_eq!(result.logical_locations[0].kind, "module");
+        assert_eq!(result.locations.len(), 1);
+        assert!(result.locations[0].physical_location.is_none());
+        let logical = &result.locations[0].logical_locations;
+        assert_eq!(logical.len(), 2);
+        assert_eq!(logical[0].name, "order-svc");
+        assert_eq!(logical[0].kind, "module");
+        assert_eq!(logical[1].name, "POST /api/orders/42/submit");
+        assert_eq!(logical[1].kind, "function");
+    }
+
+    #[test]
+    fn sarif_suggested_fix_goes_to_properties() {
+        let mut finding = make_finding(FindingType::NPlusOneSql, Severity::Warning);
+        finding.suggested_fix = Some(crate::detect::suggestions::SuggestedFix {
+            pattern: "n_plus_one_sql".to_string(),
+            framework: "java_jpa".to_string(),
+            recommendation: "Use `JOIN FETCH`".to_string(),
+            reference_url: Some("https://example.com/fetch".to_string()),
+        });
+        let value = serde_json::to_value(finding_to_result(&finding)).unwrap();
         assert_eq!(
-            result.logical_locations[1].name,
-            "POST /api/orders/42/submit"
+            value["properties"]["suggestedFix"],
+            "Use JOIN FETCH (see: https://example.com/fetch)"
         );
-        assert_eq!(result.logical_locations[1].kind, "function");
+        assert!(value.get("fixes").is_none());
+
+        finding.suggested_fix = None;
+        let value = serde_json::to_value(finding_to_result(&finding)).unwrap();
+        assert!(value["properties"].get("suggestedFix").is_none());
     }
 
     #[test]
@@ -907,9 +925,10 @@ mod tests {
         });
         let result = finding_to_result(&f);
         assert!(
-            result.locations.is_empty(),
+            result.locations[0].physical_location.is_none(),
             "hostile URI must not be emitted in SARIF"
         );
+        assert_eq!(result.locations[0].logical_locations.len(), 2);
     }
 
     #[test]
@@ -923,10 +942,24 @@ mod tests {
         });
         let result = finding_to_result(&f);
         assert_eq!(result.locations.len(), 1);
-        assert_eq!(
-            result.locations[0].physical_location.artifact_location.uri,
-            "src/Order.java"
-        );
+        let physical = result.locations[0].physical_location.as_ref().unwrap();
+        assert_eq!(physical.artifact_location.uri, "src/Order.java");
+        assert_eq!(physical.region.as_ref().map(|r| r.start_line), Some(42));
+    }
+
+    #[test]
+    fn finding_to_sarif_drops_region_for_line_zero() {
+        let mut f = crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning);
+        f.code_location = Some(crate::event::CodeLocation {
+            function: None,
+            filepath: Some("src/Order.java".to_string()),
+            lineno: Some(0),
+            namespace: None,
+        });
+        let result = finding_to_result(&f);
+        let physical = result.locations[0].physical_location.as_ref().unwrap();
+        assert_eq!(physical.artifact_location.uri, "src/Order.java");
+        assert!(physical.region.is_none(), "startLine must be at least 1");
     }
 
     // --- signature exposed in properties + fingerprints ---

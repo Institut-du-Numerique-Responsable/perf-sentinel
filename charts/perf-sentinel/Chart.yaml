@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.34.1
-appVersion: "0.34.1"
+version: 0.35.0
+appVersion: "0.35.0"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -37,10 +37,10 @@ annotations:
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
     - kind: changed
-      description: "appVersion 0.34.1. Dependency updates only, no daemon behavior changes. No values.yaml key is added or removed, and no template changes."
+      description: "appVersion 0.35.0. The SARIF output of perf-sentinel analyze is now valid against the SARIF 2.1.0 schema, a breaking change for SARIF consumers, and the GitLab and Jenkins CI templates are updated. The daemon does not emit SARIF, so its behavior is unchanged. No values.yaml key is added or removed, and no template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.34.1
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.35.0
       platforms:
         - linux/amd64
         - linux/arm64

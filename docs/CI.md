@@ -40,7 +40,7 @@ finish. See [`CLI.md`](./CLI.md#capture) for both shapes and
 [`INSTRUMENTATION.md`](./INSTRUMENTATION.md) for the per-language
 setup, including the Collector alternative.
 
-Exit code is non-zero if the **quality gate** (a configurable set of pass/fail thresholds, the same idea as a SonarQube quality gate or a coverage gate) fails. Configure thresholds in `.perf-sentinel.toml`:
+Exit code is non-zero if the **quality gate** (a configurable set of pass/fail thresholds, the same idea as a SonarQube quality gate or a coverage gate) fails. The file must exist when `--config` names it: a missing file makes `analyze` exit 75, a tooling error, not a gate result. Without a config file, drop `--config` and the built-in defaults apply. Configure thresholds in `.perf-sentinel.toml`:
 
 ```toml
 [thresholds]
@@ -102,7 +102,7 @@ The recommended setup produces the report once per job, without `--ci` (SARIF + 
 Per-provider PR-vs-trunk wiring:
 
 - **GitHub Actions**: PR step runs when `github.event_name == 'pull_request'` and calls `exit 1` on breach, trunk step emits a `::warning::` annotation without failing.
-- **GitLab CI**: `allow_failure: true` on the `$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH` rule. The job still returns exit 1 on breach, the pipeline badge stays green, the job shows a yellow warning icon.
+- **GitLab CI**: `allow_failure: true` on the `$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH` rule and on a final catch-all rule, so only the merge request rule can block. The job still returns exit 1 on breach, the pipeline badge stays green, the job shows a yellow warning icon. The catch-all also runs the report, and archives it, on a branch push with no open merge request. A branch with an open merge request then runs two pipelines, a branch pipeline and a merge request pipeline. Choosing one is a project-wide `workflow:rules` decision the template leaves to you. The job runs on the default branch for a second reason: GitLab marks a Code Quality finding new or resolved against a baseline pipeline on the target branch. The template uses the finding's `signature` as the Code Quality `fingerprint`, stable while the finding keeps its type, service, endpoint and template (see [ACKNOWLEDGMENTS.md](./ACKNOWLEDGMENTS.md#signature-format)), and its type as `check_name`. Findings sharing a signature show as one entry.
 - **Jenkins**: `when { expression { env.CHANGE_ID != null } }` on the `Quality gate (PR only)` stage. `CHANGE_ID` is populated by MultiBranch Pipeline only on PRs, so branch builds skip the stage. The Warnings NG `qualityGates` follows the same guard so the post block does not reintroduce blocking on trunk.
 
 ### Tooling failures vs quality-gate breaches
@@ -110,8 +110,8 @@ Per-provider PR-vs-trunk wiring:
 A `--ci` exit code of `1` is ambiguous on its own: it can mean a threshold breach, or it can mean Perf Sentinel never ran (a blocked download, a corrupted release, a crash on malformed traces). Treating both the same way lets a flaky network blip on a Friday afternoon block every PR in the repo until someone notices and re-runs CI. All three templates isolate the two failure modes so only a threshold breach can turn a PR red:
 
 - **GitHub Actions**: the download step tolerates failure (`continue-on-error: true`), but the checksum-verification step right after it does not. A tampered or corrupted release must always fail the job, never get folded into the tooling-tolerant bucket. The report-only analyze step also carries `continue-on-error: true`. Every downstream step (SARIF upload, PR comment, the two gate steps) checks `steps.analyze.outcome == 'success'` rather than file existence. Shell `>` redirection creates its target file before the command runs, so a crashed analyze would still leave an empty `findings.sarif` behind and defeat a `hashFiles()` check. The analyze step also writes through a `.tmp` path and renames on success, a second, independent guard against that same trap. A final `Report tooling failure` step emits a `::warning::` when analyze did not succeed, so a tooling problem stays visible.
-- **GitLab CI**: every download command explicitly exits `75` (`EX_TEMPFAIL`, [sysexits.h](https://man.openbsd.org/sysexits)) instead of propagating whatever exit code the underlying tool produced. `allow_failure: exit_codes: [75]` on the job excludes only that specific code from blocking a merge request. It sits on the job rather than inside the merge-request rule because `rules:allow_failure` accepts a boolean and nothing else: GitLab's CI lint rejects the whole file when a rule carries the mapping form. Checksum verification and the Code Quality `jq` conversion are excluded from that exit-75 convention: a checksum mismatch means a tampered release, and a `jq` failure means a bug in the conversion filter. Neither is a tooling blip that should be tolerated. The final `--ci` re-run keeps its own exit code (normally `1` on a real breach), which still blocks.
-- **Jenkins**: the download half of the `Install perf-sentinel` stage is wrapped in `catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE')`. Checksum verification and install run unwrapped right after it, so a bad checksum always fails the build. The `perf-sentinel analyze` stage writes its SARIF/JSON through a `.tmp` path and renames on success for the same reason as GitHub Actions above. Otherwise `fileExists()` could not tell a crash from a real report. The `Quality gate (PR only)` stage adds a `fileExists('perf-sentinel-results.sarif')` condition alongside the existing `CHANGE_ID` check, so it runs the threshold check only after the report-only stage has produced a SARIF.
+- **GitLab CI**: every download command explicitly exits `75` (`EX_TEMPFAIL`, [sysexits.h](https://man.openbsd.org/sysexits)) instead of propagating whatever exit code the underlying tool produced. `allow_failure: exit_codes: [75]` on the job excludes only that specific code from blocking a merge request. It sits on the job rather than inside the merge-request rule because `rules:allow_failure` accepts a boolean and nothing else: GitLab's CI lint rejects the whole file when a rule carries the mapping form. Checksum verification and the Code Quality `jq` conversion are excluded from that exit-75 convention: a checksum mismatch means a tampered release, and a `jq` failure means a bug in the conversion filter. Neither is a tooling blip that should be tolerated. The final `--ci` re-run keeps its own exit code (normally `1` on a real breach), which still blocks. The download runs in its own `perf-sentinel-install` job in the `.pre` stage, with its own image, and hands the binary to the test and analyze jobs as an artifact: test images often ship no `curl` (`eclipse-temurin` has neither `curl` nor `wget`), so an install inside the test job would stop it before the tests run. That job picks the release asset that matches the runner (`uname -m`), and an unsupported architecture exits `75`. Its `rules:` must select every pipeline the test job runs in, since a job missing from a pipeline cannot be listed in `dependencies:`. Its final catch-all rule covers them all. The commented test job still runs the tests without `capture` when the binary is missing, sets no shell options around your command, and keeps its capture with `artifacts:when: always`. The analyze job carries `when: always` on its rules, so a red test run still gets its report.
+- **Jenkins**: the download half of the `Install perf-sentinel` stage is wrapped in `catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE')`. Checksum verification and install run unwrapped right after it, so a bad checksum always fails the build. The `perf-sentinel analyze` stage writes its SARIF/JSON through a `.tmp` path and renames on success for the same reason as GitHub Actions above. Otherwise `fileExists()` could not tell a crash from a real report. The `Quality gate (PR only)` stage adds a `fileExists('perf-sentinel-results.sarif')` condition alongside the existing `CHANGE_ID` check, so it runs the threshold check only after the report-only stage has produced a SARIF. Jenkins reuses the workspace between builds, so the install stage first deletes the previous build's binary, capture and reports. Without that, a failed step would archive the previous reports as this build's, and on a PR build `fileExists()` would let the gate run on them. The download picks the release asset that matches the agent (`uname -m`), and an unsupported architecture counts as a tooling failure. The commented `Integration tests` stage still runs the tests when the binary is missing, without `capture`, and keeps a red test run red through `catchError(buildResult: 'FAILURE')` while the pipeline goes on to the report.
 
 In all three cases, a tooling failure surfaces as a visible warning or an unstable/yellow build, distinct from the red build a threshold breach produces, and it never blocks a merge or a push to trunk on its own. A checksum or conversion-logic failure, in contrast, always blocks, in every trigger context, because it is not the kind of failure this isolation is meant to tolerate.
 
@@ -303,9 +303,10 @@ Pick either block, not both (they would fight over the root deployment).
 1. Enable GitLab Pages under `Settings -> Pages` if not already on.
 2. Uncomment exactly one block in
    [`docs/ci-templates/gitlab-ci.yml`](./ci-templates/gitlab-ci.yml).
-   Both run in the `perf-sentinel` stage and reuse
-   `PERF_SENTINEL_VERSION / PERF_SENTINEL_TRACES / PERF_SENTINEL_CONFIG`
-   already declared for the main job.
+   Both run in the `perf-sentinel` stage, take the binary from the
+   `perf-sentinel-install` job and reuse
+   `PERF_SENTINEL_TRACES / PERF_SENTINEL_CONFIG` already declared for
+   the main job.
 3. For `perf-sentinel-pages`, confirm GitLab 17.9 or later. Not
    required for `perf-sentinel-pages-simple`.
 
@@ -358,10 +359,12 @@ baseline JSON is 10 to 50 KB. With retention active on the
 Premium path, only open MRs plus the current baseline consume space.
 The Free path stores a single deployment.
 
-**Dependencies**. No third-party GitLab CI component. The job uses
-`curl` to install the pinned perf-sentinel release binary and the
-built-in `pages:` keyword for deployment. No deploy token or runner
-token beyond the default `CI_JOB_TOKEN` is required.
+**Dependencies**. No third-party GitLab CI component. The job takes
+the pinned perf-sentinel release binary from the `perf-sentinel-install`
+job and uses the built-in `pages:` keyword for deployment.
+`perf-sentinel-pages` also uses `curl` to fetch the trunk baseline on
+merge requests. No deploy token or runner token beyond the default
+`CI_JOB_TOKEN` is required.
 
 ### Interactive report via Jenkins HTML Publisher
 
@@ -604,7 +607,7 @@ jobs:
   diff:
     runs-on: ubuntu-latest
     env:
-      PERF_SENTINEL_VERSION: "0.34.1"
+      PERF_SENTINEL_VERSION: "0.35.0"
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:

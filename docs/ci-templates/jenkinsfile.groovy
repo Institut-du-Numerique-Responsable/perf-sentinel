@@ -26,6 +26,10 @@
 //      input, `min_usable_span_ratio` also fails the gate when the spans
 //      arrive without the attributes the detectors need, so a broken
 //      instrumentation cannot pass as a clean run.
+//      The file must exist: `analyze --config` on a missing file exits 75,
+//      which the report steps tolerate, so the job would pass with no
+//      report at all. Commit the file, or drop `--config` to run on the
+//      built-in defaults.
 //
 // Required Jenkins plugins:
 //   - Warnings Next Generation >= 9.11.0 (publishes SARIF as a structured
@@ -114,14 +118,75 @@ pipeline {
     }
 
     environment {
-        PERF_SENTINEL_VERSION = '0.34.1'
+        PERF_SENTINEL_VERSION = '0.35.0'
         PERF_SENTINEL_TRACES  = 'target/traces.json'
         PERF_SENTINEL_CONFIG  = '.perf-sentinel.toml'
     }
 
     stages {
-        // Place your integration-test stage here. It must produce the trace
-        // file at $PERF_SENTINEL_TRACES before the perf-sentinel stage runs.
+        stage('Install perf-sentinel') {
+            steps {
+                // Jenkins reuses the workspace between builds and a checkout
+                // keeps untracked files. Without this cleanup, a failing step
+                // archives the previous build's reports as this build's, and
+                // on a PR build the fileExists() guard of the 'Quality gate'
+                // stage then runs the gate on those stale files, turning a
+                // tooling failure red.
+                sh 'rm -f perf-sentinel perf-sentinel-linux-* perf-sentinel.asset SHA256SUMS.txt "$PERF_SENTINEL_TRACES" perf-sentinel-results.sarif perf-sentinel-report.json report.html'
+                // Download only, wrapped in catchError: a broken download,
+                // blocked egress or an unsupported agent architecture is a
+                // tooling problem, not a performance regression. It must
+                // never redden a branch build the same way a real threshold
+                // breach would (the 'Quality gate (PR only)' stage below is
+                // guarded to skip rather than misreport a tooling failure as
+                // a breach). The asset name is written to perf-sentinel.asset
+                // only once both downloads succeeded.
+                catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE',
+                           message: 'perf-sentinel: download failed, stage marked unstable') {
+                    // `sh` runs /bin/sh. On Debian 12 and Ubuntu 24.04 that is
+                    // a dash that rejects `set -o pipefail`, while Debian 13's
+                    // dash accepts it. `set -eu` works on all of them, and no
+                    // block of this file needs pipefail: the only pipe below
+                    // ends in `sha256sum -c -`, which fails on its own when
+                    // grep finds no line. Start a block with #!/bin/bash and
+                    // set -euo pipefail if you add a pipe whose failure matters.
+                    sh '''
+                        set -eu
+                        case "$(uname -m)" in
+                            x86_64) ASSET=perf-sentinel-linux-amd64 ;;
+                            aarch64|arm64) ASSET=perf-sentinel-linux-arm64 ;;
+                            *) echo "perf-sentinel: unsupported architecture $(uname -m)" >&2; exit 1 ;;
+                        esac
+                        BASE_URL="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/download/v${PERF_SENTINEL_VERSION}"
+                        curl -sSLf -o "$ASSET"       "${BASE_URL}/${ASSET}"
+                        curl -sSLf -o SHA256SUMS.txt "${BASE_URL}/SHA256SUMS.txt"
+                        echo "$ASSET" > perf-sentinel.asset
+                    '''
+                }
+                // Verify and install, NOT wrapped in catchError: a checksum
+                // mismatch means a tampered or corrupted release, not a
+                // transient tooling blip. It must always fail the build
+                // hard, on trunk and on PR builds alike. Skipped (not
+                // failed) rather than run against missing files when the
+                // download above did not complete.
+                script {
+                    if (fileExists('perf-sentinel.asset') && fileExists('SHA256SUMS.txt')) {
+                        sh '''
+                            set -eu
+                            ASSET=$(cat perf-sentinel.asset)
+                            grep "$ASSET" SHA256SUMS.txt | sha256sum -c -
+                            mv -f "$ASSET" perf-sentinel
+                            chmod +x perf-sentinel
+                            ./perf-sentinel --version
+                        '''
+                    }
+                }
+            }
+        }
+
+        // Place your integration-test stage here, after the install: it must
+        // produce the trace file at $PERF_SENTINEL_TRACES before the analyze
+        // stage runs.
         // Before agent 2.32.0, Java has no OTLP file exporter, and a forked Maven
         // test JVM cannot hand you its stdout either: Surefire uses it as a
         // command channel and diverts the agent's writes to a .dumpstream. So the
@@ -132,51 +197,27 @@ pipeline {
         // integration suite runs twice. See docs/INSTRUMENTATION.md for the POM
         // side (agent on the failsafe argLine, OTEL_EXPORTER_OTLP_ENDPOINT).
         //
+        // catchError(FAILURE) keeps the build red on failing tests while the
+        // pipeline goes on to the analyze stage, so the report is not lost.
+        // When the download failed there is no binary: the tests still run,
+        // without capture, and the build is already UNSTABLE. The step sets
+        // no shell options: Jenkins already runs `sh` with -xe, and -u could
+        // break your existing command on an unset variable.
+        //
         // stage('Integration tests') {
         //     steps {
-        //         sh '''
-        //             perf-sentinel capture --output "$PERF_SENTINEL_TRACES" \
-        //                 -- mvn verify -DskipUnitTests=false
-        //         '''
+        //         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+        //             sh '''
+        //                 if [ -x ./perf-sentinel ]; then
+        //                     ./perf-sentinel capture --output "$PERF_SENTINEL_TRACES" \
+        //                         -- mvn verify -DskipUnitTests=false
+        //                 else
+        //                     mvn verify -DskipUnitTests=false
+        //                 fi
+        //             '''
+        //         }
         //     }
         // }
-
-        stage('Install perf-sentinel') {
-            steps {
-                // Download only, wrapped in catchError: a broken download or
-                // blocked egress is a tooling problem, not a performance
-                // regression. It must never redden a branch build the same
-                // way a real threshold breach would (the 'Quality gate (PR
-                // only)' stage below is guarded to skip rather than
-                // misreport a tooling failure as a breach).
-                catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE',
-                           message: 'perf-sentinel: download failed, stage marked unstable') {
-                    sh '''
-                        set -euo pipefail
-                        BASE_URL="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/download/v${PERF_SENTINEL_VERSION}"
-                        curl -sSLf -o perf-sentinel-linux-amd64 "${BASE_URL}/perf-sentinel-linux-amd64"
-                        curl -sSLf -o SHA256SUMS.txt            "${BASE_URL}/SHA256SUMS.txt"
-                    '''
-                }
-                // Verify and install, NOT wrapped in catchError: a checksum
-                // mismatch means a tampered or corrupted release, not a
-                // transient tooling blip. It must always fail the build
-                // hard, on trunk and on PR builds alike. Skipped (not
-                // failed) rather than run against missing files when the
-                // download above did not produce both of them.
-                script {
-                    if (fileExists('perf-sentinel-linux-amd64') && fileExists('SHA256SUMS.txt')) {
-                        sh '''
-                            set -euo pipefail
-                            grep 'perf-sentinel-linux-amd64' SHA256SUMS.txt | sha256sum -c -
-                            mv perf-sentinel-linux-amd64 perf-sentinel
-                            chmod +x perf-sentinel
-                            ./perf-sentinel --version
-                        '''
-                    }
-                }
-            }
-        }
 
         stage('perf-sentinel analyze') {
             steps {
@@ -195,7 +236,7 @@ pipeline {
                     // behind and defeat the fileExists() guard on the
                     // 'Quality gate' stage below.
                     sh '''
-                        set -euo pipefail
+                        set -eu
                         ./perf-sentinel analyze \\
                             --input ${PERF_SENTINEL_TRACES} \\
                             --config ${PERF_SENTINEL_CONFIG} \\
@@ -234,7 +275,7 @@ pipeline {
         //             }
         //             withEnv(["BEFORE_OPT=${hasBaseline ? '--before baseline/perf-sentinel-report.json' : ''}"]) {
         //                 sh '''
-        //                     set -euo pipefail
+        //                     set -eu
         //                     ./perf-sentinel report \\
         //                         --input ${PERF_SENTINEL_TRACES} \\
         //                         --config ${PERF_SENTINEL_CONFIG} \\
@@ -274,7 +315,7 @@ pipeline {
                 // builds (env.CHANGE_ID == null) this stage is
                 // skipped and the build stays green.
                 sh '''
-                    set -euo pipefail
+                    set -eu
                     ./perf-sentinel analyze \\
                         --ci \\
                         --input ${PERF_SENTINEL_TRACES} \\

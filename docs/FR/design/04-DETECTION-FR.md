@@ -140,7 +140,7 @@ Le même aiguillage couvre aussi les groupes HTTP sortants via `classify_http_gr
 
 #### Limite connue : redaction de la query string
 
-La détection des N+1 HTTP exige que le paramètre variable soit visible dans le span. Une boucle N+1 qui fait varier un segment de path est détectée (params extraits distincts, ou le placeholder `{id}` ancre le primaire Strict). Une boucle N+1 qui fait varier un **paramètre de query** est invisible quand l'instrumentation masque la query string avant l'export. OpenTelemetry .NET `System.Net.Http` la remplace par `?*` par défaut, donc chaque appel porte un `url.full` identique à l'octet près, `distinct_params` retombe à 1, et le groupe est correctement classé en `redundant_http`. Le paramètre distinctif a été détruit en amont, donc aucun consommateur de traces ne peut le récupérer. Voir `docs/FR/LIMITATIONS-FR.md` § "Redaction de la query string HTTP et visibilité des N+1" pour les contournements côté opérateur.
+La détection des N+1 HTTP exige que le paramètre variable soit visible dans le span. Une boucle N+1 qui fait varier un segment de path est détectée (params extraits distincts, ou le placeholder `{id}` ancre le primaire Strict). Une boucle N+1 qui fait varier un **paramètre de query** est invisible quand l'instrumentation masque la query string avant l'export. Sur .NET, `url.full` porte une query masquée par défaut (l'activité `System.Net.Http` du runtime à partir de .NET 9, le paquet `OpenTelemetry.Instrumentation.Http` avant), donc chaque appel porte un `url.full` identique à l'octet près, `distinct_params` retombe à 1, et le groupe est correctement classé en `redundant_http`. Le paramètre distinctif a été détruit en amont, donc aucun consommateur de traces ne peut le récupérer. Voir `docs/FR/LIMITATIONS-FR.md` § "Redaction de la query string HTTP et visibilité des N+1" pour les contournements côté opérateur.
 
 ## Détection redondante
 
@@ -535,7 +535,7 @@ pub struct SuggestedFix {
 }
 ```
 
-Sérialisé en JSON comme objet imbriqué sous `finding.suggested_fix`, omis quand absent. Émis en SARIF sous `result.fixes[0].description.text` (forme description-only de l'objet fix SARIF 2.1.0). La CLI l'affiche comme ligne imbriquée `Suggested fix:` juste après la ligne générique `Suggestion:`.
+Sérialisé en JSON comme objet imbriqué sous `finding.suggested_fix`, omis quand absent. Émis en SARIF comme chaîne `result.properties.suggestedFix`. Le tableau SARIF `fixes[]` n'est pas utilisé, son schéma exige `artifactChanges`, un patch source que Perf Sentinel ne produit pas. La CLI l'affiche comme ligne imbriquée `Suggested fix:` juste après la ligne générique `Suggestion:`.
 
 ### Détecteur de framework
 

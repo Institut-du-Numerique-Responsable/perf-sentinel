@@ -23,6 +23,7 @@ mod pg_stat;
 #[cfg(feature = "daemon")]
 mod query;
 mod report;
+mod running_example;
 mod tempo;
 mod tui;
 mod watch;
