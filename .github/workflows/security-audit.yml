@@ -58,7 +58,7 @@ jobs:
       # `cargo metadata`, so the runner's cargo (pinned to 1.99.1 by
       # rust-toolchain.toml on first use) suffices, no toolchain step needed.
       # Pinned to match the deny.toml schema target (cargo-deny 0.19.x).
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deny@0.19.8
       - name: cargo deny check
