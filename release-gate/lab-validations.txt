@@ -696,3 +696,15 @@ v0.32.0	96fd3cd	2026-10-21	PASS
 # self-contained. Not run: the cluster scenarios, the hub-*, limit-*,
 # failure-mode-*, template-* and ci-e2e-* families.
 v0.33.0	6349f6f	2026-10-23	PASS
+# v0.35.0: targeted pass on what the release changes (SARIF shape, CI
+# templates), daemon image 0.35.0-dd9016b6 on all three k3d nodes. ci-shift-left
+# now validates the SARIF against the vendored 2.1.0 schema and rejects the
+# 0.34.1 shape, output-formats-coverage, diff-mutated-findings and
+# sql-backtick-redaction green. template-gitlab-ci and template-jenkinsfile
+# check the 0.35.0 structure (both fail the v0.34.1 templates),
+# template-github-actions green, ci-e2e-gitlab, ci-e2e-github and
+# ci-e2e-jenkins green. Skipped: the template-gitlab-ci end-to-end run (needs
+# the published 0.35.0 assets) and the template-jenkinsfile runtime (the
+# jenkinsfile-runner image runs Java 8). Not run: verify-all-scenarios and
+# validate-findings.
+v0.35.0	37de952	2026-10-27	PASS
