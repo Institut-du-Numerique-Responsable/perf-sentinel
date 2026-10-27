@@ -44,7 +44,7 @@ stages:
   - perf-sentinel
 
 variables:
-  PERF_SENTINEL_VERSION: "0.34.1"
+  PERF_SENTINEL_VERSION: "0.35.0"
   PERF_SENTINEL_TRACES: "test-traces.json"
   PERF_SENTINEL_CONFIG: ".perf-sentinel.toml"
 
@@ -193,7 +193,7 @@ perf-sentinel:
           ),
           location: {
             path: (.code_location.filepath // "unknown"),
-            lines: { begin: (.code_location.lineno // 1) }
+            lines: { begin: (if (.code_location.lineno // 0) > 0 then .code_location.lineno else 1 end) }
           }
         }
       ]' perf-sentinel-report.json > gl-code-quality-report.json

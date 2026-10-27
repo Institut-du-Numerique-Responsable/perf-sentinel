@@ -81,7 +81,8 @@ pub struct SarifResult {
     pub rank: Option<u32>,
     /// Exactly one location: the service and endpoint as logical
     /// locations, plus the source file when the finding has one. GitHub
-    /// code scanning needs at least one location to display a result.
+    /// code scanning shows a result inline only when this location has a
+    /// physical location.
     pub locations: Vec<SarifLocation>,
     /// SARIF v2.1.0 section 3.27.17 `fingerprints`. Single-entry map keyed
     /// by `"perfsentinel/v1"`, value is the canonical finding signature.
