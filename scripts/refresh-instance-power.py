@@ -25,7 +25,7 @@ import re
 import sys
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 CCF_REPO = "cloud-carbon-footprint/ccf-coefficients"
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -59,7 +59,7 @@ G_SIZES = ["medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlar
 G_XL_SIZES = G_SIZES + ["24xlarge", "48xlarge"]
 
 
-def aws(prefix: str, sizes: list[str], vcpu: Optional[dict[str, int]] = None) -> list[tuple[str, int]]:
+def aws(prefix: str, sizes: list[str], vcpu: Optional[Dict[str, int]] = None) -> list[tuple[str, int]]:
     counts = {**AWS_VCPU, **(vcpu or {})}
     return [(f"{prefix}.{s}", counts[s]) for s in sizes]
 
