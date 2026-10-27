@@ -8,6 +8,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 - The official public example disclosure, `docs/schemas/examples/example-official-public-G2.json`, moves to perf-sentinel 0.34.1 on schema `perf-sentinel-report/v1.8`, with the `binary_hash` of the published 0.34.1 `perf-sentinel-linux-amd64` binary and a rebaked `content_hash`. The sample disclosure the website shows is signed from this file. `examples/perf-sentinel.toml` names the startup warning and the Hub export setup next to `findings_stdout`.
 
+### Internal
+
+- `tests/fixtures/` gains the running example of the [engine synoptic](https://perf-sentinel.dev/synoptique/), `running_example.json`, and its three fixed variants, `running_example_n1_fixed.json`, `running_example_redundant_fixed.json` and `running_example_fixed.json`, synthetic teaching data like `demo.json`. `crates/sentinel-cli/tests/e2e/running_example.rs` pins every report figure the synoptic shows for each file: spans, I/O per route, avoidable I/O, waste ratio, energy, carbon, top offender, the ordered findings, gate thresholds and failed rules, and the `--ci` exit code, plus the four finding signatures and the acknowledged N+1, which keeps its waste. An engine change that moves one of them now fails CI, and the synoptic is then republished.
+
 ## [0.34.1] - 2026-10-23
 
 ### Changed

@@ -1,0 +1,357 @@
+{
+ "resourceSpans": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "order-svc"
+      }
+     },
+     {
+      "key": "cloud.region",
+      "value": {
+       "stringValue": "eu-west-3"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "io.opentelemetry.tomcat-10.0"
+     },
+     "spans": [
+      {
+       "traceId": "abc1235f0e7d41a9c2b8e60d3f71c4b2",
+       "spanId": "0000000000000001",
+       "name": "GET /orders/{id}",
+       "kind": 2,
+       "startTimeUnixNano": "1768500240000000000",
+       "endTimeUnixNano": "1768500240160000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "http.route",
+         "value": {
+          "stringValue": "/orders/{id}"
+         }
+        }
+       ]
+      },
+      {
+       "traceId": "7f2e90c3b1a4d58e6f2079b1c4d3e2f5",
+       "spanId": "0000000000000008",
+       "name": "GET /customers/{id}",
+       "kind": 2,
+       "startTimeUnixNano": "1768500240040000000",
+       "endTimeUnixNano": "1768500240100000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "http.route",
+         "value": {
+          "stringValue": "/customers/{id}"
+         }
+        }
+       ]
+      },
+      {
+       "traceId": "c41d079a8b7c6d5e4f30211a2b3c4d5e",
+       "spanId": "000000000000000c",
+       "name": "POST /checkout",
+       "kind": 2,
+       "startTimeUnixNano": "1768500240080000000",
+       "endTimeUnixNano": "1768500240170000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "http.route",
+         "value": {
+          "stringValue": "/checkout"
+         }
+        }
+       ]
+      },
+      {
+       "traceId": "abc1235f0e7d41a9c2b8e60d3f71c4b2",
+       "spanId": "0000000000000005",
+       "name": "OrderMapper.toDto",
+       "kind": 1,
+       "startTimeUnixNano": "1768500240150000000",
+       "endTimeUnixNano": "1768500240151000000",
+       "attributes": [
+        {
+         "key": "code.function",
+         "value": {
+          "stringValue": "OrderMapper.toDto"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000001"
+      },
+      {
+       "traceId": "abc1235f0e7d41a9c2b8e60d3f71c4b2",
+       "spanId": "0000000000000006",
+       "name": "PriceFormatter.format",
+       "kind": 1,
+       "startTimeUnixNano": "1768500240152000000",
+       "endTimeUnixNano": "1768500240153000000",
+       "attributes": [
+        {
+         "key": "code.function",
+         "value": {
+          "stringValue": "PriceFormatter.format"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000001"
+      },
+      {
+       "traceId": "abc1235f0e7d41a9c2b8e60d3f71c4b2",
+       "spanId": "0000000000000007",
+       "name": "OrderView.render",
+       "kind": 1,
+       "startTimeUnixNano": "1768500240154000000",
+       "endTimeUnixNano": "1768500240155000000",
+       "attributes": [
+        {
+         "key": "code.function",
+         "value": {
+          "stringValue": "OrderView.render"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000001"
+      },
+      {
+       "traceId": "7f2e90c3b1a4d58e6f2079b1c4d3e2f5",
+       "spanId": "000000000000000b",
+       "name": "CustomerMapper.toDto",
+       "kind": 1,
+       "startTimeUnixNano": "1768500240090000000",
+       "endTimeUnixNano": "1768500240091000000",
+       "attributes": [
+        {
+         "key": "code.function",
+         "value": {
+          "stringValue": "CustomerMapper.toDto"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000008"
+      },
+      {
+       "traceId": "c41d079a8b7c6d5e4f30211a2b3c4d5e",
+       "spanId": "000000000000000f",
+       "name": "ReceiptBuilder.build",
+       "kind": 1,
+       "startTimeUnixNano": "1768500240150000000",
+       "endTimeUnixNano": "1768500240151000000",
+       "attributes": [
+        {
+         "key": "code.function",
+         "value": {
+          "stringValue": "ReceiptBuilder.build"
+         }
+        }
+       ],
+       "parentSpanId": "000000000000000c"
+      }
+     ]
+    },
+    {
+     "scope": {
+      "name": "io.opentelemetry.hibernate-6.0"
+     },
+     "spans": [
+      {
+       "traceId": "abc1235f0e7d41a9c2b8e60d3f71c4b2",
+       "spanId": "0000000000000002",
+       "name": "db-query",
+       "kind": 3,
+       "startTimeUnixNano": "1768500240002000000",
+       "endTimeUnixNano": "1768500240006000000",
+       "attributes": [
+        {
+         "key": "db.system",
+         "value": {
+          "stringValue": "postgresql"
+         }
+        },
+        {
+         "key": "db.statement",
+         "value": {
+          "stringValue": "SELECT * FROM orders WHERE id = 42"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000001"
+      },
+      {
+       "traceId": "abc1235f0e7d41a9c2b8e60d3f71c4b2",
+       "spanId": "0000000000000003",
+       "name": "db-query",
+       "kind": 3,
+       "startTimeUnixNano": "1768500240010000000",
+       "endTimeUnixNano": "1768500240022000000",
+       "attributes": [
+        {
+         "key": "db.system",
+         "value": {
+          "stringValue": "postgresql"
+         }
+        },
+        {
+         "key": "db.statement",
+         "value": {
+          "stringValue": "SELECT * FROM products WHERE id IN (101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112)"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000001"
+      },
+      {
+       "traceId": "7f2e90c3b1a4d58e6f2079b1c4d3e2f5",
+       "spanId": "0000000000000009",
+       "name": "db-query",
+       "kind": 3,
+       "startTimeUnixNano": "1768500240042000000",
+       "endTimeUnixNano": "1768500240047000000",
+       "attributes": [
+        {
+         "key": "db.system",
+         "value": {
+          "stringValue": "postgresql"
+         }
+        },
+        {
+         "key": "db.statement",
+         "value": {
+          "stringValue": "SELECT * FROM customers WHERE id = 7"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000008"
+      },
+      {
+       "traceId": "7f2e90c3b1a4d58e6f2079b1c4d3e2f5",
+       "spanId": "000000000000000a",
+       "name": "db-query",
+       "kind": 3,
+       "startTimeUnixNano": "1768500240070000000",
+       "endTimeUnixNano": "1768500240075000000",
+       "attributes": [
+        {
+         "key": "db.system",
+         "value": {
+          "stringValue": "postgresql"
+         }
+        },
+        {
+         "key": "db.statement",
+         "value": {
+          "stringValue": "SELECT * FROM addresses WHERE customer_id = 7"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000008"
+      },
+      {
+       "traceId": "c41d079a8b7c6d5e4f30211a2b3c4d5e",
+       "spanId": "000000000000000d",
+       "name": "db-query",
+       "kind": 3,
+       "startTimeUnixNano": "1768500240084000000",
+       "endTimeUnixNano": "1768500240090000000",
+       "attributes": [
+        {
+         "key": "db.system",
+         "value": {
+          "stringValue": "postgresql"
+         }
+        },
+        {
+         "key": "db.statement",
+         "value": {
+          "stringValue": "INSERT INTO orders (customer_id, total) VALUES (7, 129.90)"
+         }
+        }
+       ],
+       "parentSpanId": "000000000000000c"
+      }
+     ]
+    },
+    {
+     "scope": {
+      "name": "io.opentelemetry.java-http-client"
+     },
+     "spans": [
+      {
+       "traceId": "abc1235f0e7d41a9c2b8e60d3f71c4b2",
+       "spanId": "0000000000000004",
+       "name": "GET",
+       "kind": 3,
+       "startTimeUnixNano": "1768500240135000000",
+       "endTimeUnixNano": "1768500240147000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.full",
+         "value": {
+          "stringValue": "http://pricing-svc:8080/api/prices/42?currency=EUR"
+         }
+        }
+       ],
+       "parentSpanId": "0000000000000001"
+      },
+      {
+       "traceId": "c41d079a8b7c6d5e4f30211a2b3c4d5e",
+       "spanId": "000000000000000e",
+       "name": "POST",
+       "kind": 3,
+       "startTimeUnixNano": "1768500240100000000",
+       "endTimeUnixNano": "1768500240140000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.full",
+         "value": {
+          "stringValue": "http://payment-svc:8080/api/payments"
+         }
+        }
+       ],
+       "parentSpanId": "000000000000000c"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
