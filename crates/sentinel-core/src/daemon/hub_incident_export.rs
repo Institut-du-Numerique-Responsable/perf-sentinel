@@ -110,6 +110,16 @@ pub(crate) mod tests {
         incidents: u16,
         correlations: u16,
     ) -> (String, Seen) {
+        fake_hub_routes4(findings, incidents, correlations, incidents).await
+    }
+
+    /// `fake_hub_paths`, with the detection import answered `detections`.
+    pub(crate) async fn fake_hub_routes4(
+        findings: u16,
+        incidents: u16,
+        correlations: u16,
+        detections: u16,
+    ) -> (String, Seen) {
         let seen: Seen = Arc::new(Mutex::new(Vec::new()));
         let store = seen.clone();
         let app = axum::Router::new().fallback(
@@ -123,6 +133,7 @@ pub(crate) mod tests {
                     let status = match uri.path() {
                         "/api/import/findings" => findings,
                         "/api/import/correlations" => correlations,
+                        "/api/import/detections" => detections,
                         _ => incidents,
                     };
                     store

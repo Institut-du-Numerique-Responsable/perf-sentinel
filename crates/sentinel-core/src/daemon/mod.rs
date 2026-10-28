@@ -18,6 +18,7 @@ pub mod traces_store;
 mod detection_ledger;
 mod event_loop;
 mod hub_correlation_export;
+mod hub_detection_export;
 mod hub_export;
 mod hub_incident_export;
 mod hub_table;
@@ -305,6 +306,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         config.daemon.incidents.enabled,
         correlator.clone(),
         &config.daemon.correlation,
+        detection_ledger.clone(),
     )?;
     let hub_export_buffer = hub_export.as_ref().map(hub_export::HubExporter::buffer);
     // Masked span trees for the findings the store keeps, so an exported

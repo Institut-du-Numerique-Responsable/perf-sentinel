@@ -978,13 +978,13 @@ request_timeout_secs = 10
 max_pending = 10000
 ```
 
-`request_timeout_secs` s'applique aux envois de findings, d'incidents et de corrélations.
-Augmentez-le pour un Hub qui répond lentement pendant un rattrapage, plutôt que de laisser
-chaque envoi expirer, reculer jusqu'à cinq minutes et remplir la table en attente. Un arrêt
-propre laisse toujours 10 secondes à la vidange, donc un délai plus long peut y couper un
-envoi. Une seule tâche envoie les trois sortes à tour de rôle : tant qu'un envoi attend le
-Hub, les incidents et les lectures de corrélations attendent avec lui. Donnez au Hub le
-temps qu'il lui faut, pas davantage.
+`request_timeout_secs` s'applique aux envois de findings, d'incidents, de corrélations et de
+détections. Augmentez-le pour un Hub qui répond lentement pendant un rattrapage, plutôt que
+de laisser chaque envoi expirer, reculer jusqu'à cinq minutes et remplir la table en
+attente. Un arrêt propre laisse toujours 10 secondes à la vidange, donc un délai plus long
+peut y couper un envoi. Une seule tâche envoie les quatre sortes à tour de rôle : tant qu'un
+envoi attend le Hub, les autres sortes et les lectures de corrélations attendent avec lui.
+Donnez au Hub le temps qu'il lui faut, pas davantage.
 
 La structure en attente est une table de dernières valeurs, pas une file
 illimitée. Une signature est envoyée dès sa première découverte ou si sa
@@ -1033,6 +1033,19 @@ tentative : mettez d'abord le Hub en PerfSentinelHub 0.6.0.
 `perf_sentinel_hub_export_correlations_pending` et
 `perf_sentinel_hub_export_correlations_dropped_total` comptent ce qui attend et ce qui est
 abandonné.
+
+Avec `[daemon.detections]` actif aussi, le défaut, le daemon pousse son registre de
+détections vers `/api/import/detections` à côté d'`endpoint`, avec la même clé et le même
+identifiant de source, depuis 0.37.0. Chaque tour envoie chaque jour dont les comptes ont
+bougé depuis que le Hub l'a accepté pour la dernière fois, toutes ses lignes, en pages de la
+forme d'une page de `GET /api/detections`, au plus 5 000 lignes et 4 Mio chacune, l'entrée
+`days` du jour sur sa dernière page. Un jour ne repart qu'une fois modifié, retenté avec le
+même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
+pousse une dernière fois. Une page que le Hub rejette avec un 4xx non rejouable est
+abandonnée, ses lignes comptées dans `perf_sentinel_hub_export_dropped_total`, et son jour
+passé à `gap = true` dans le registre. Un Hub qui répond 404 ou 405 sur cette route la
+précède : le daemon journalise un avertissement et cesse de pousser les comptes de
+détections jusqu'à son redémarrage, tandis que les autres exports continuent.
 
 À l'arrêt propre (SIGTERM, `helm upgrade`, redémarrage progressif), l'exporteur
 vide ce qu'il détient encore avant que le processus ne se termine, pendant au

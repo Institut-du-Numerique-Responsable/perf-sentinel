@@ -9,11 +9,13 @@ use serde::Serialize;
 use super::ack::{AckEntry, AckStore};
 // The event loop's clock, not a second one: `push_batch` stamps findings with
 // it and the hourly re-send suppression compares against those stamps.
+use super::detection_ledger::DetectionLedger;
 use super::event_loop::current_time_ms as unix_time_ms;
 use super::findings_store::StoredFinding;
 use super::hub_correlation_export::{
     CorrelationExport, CorrelationExportBuffer, correlations_endpoint,
 };
+use super::hub_detection_export::{DetectionExport, detections_endpoint};
 use super::hub_incident_export::{
     IncidentExport, IncidentExportBuffer, incident_capacity, incidents_endpoint,
 };
@@ -91,6 +93,7 @@ pub(super) struct HubExporter {
 const SHUTDOWN_DRAIN_BUDGET: Duration = Duration::from_secs(10);
 
 impl HubExporter {
+    #[allow(clippy::too_many_arguments)] // one optional half per daemon section it pushes
     pub(super) fn spawn(
         config: &DaemonHubExportConfig,
         metrics: Arc<MetricsState>,
@@ -99,6 +102,7 @@ impl HubExporter {
         push_incidents: bool,
         correlator: Option<Arc<tokio::sync::Mutex<CrossTraceCorrelator>>>,
         correlation: &CorrelationConfig,
+        detection_ledger: Option<Arc<DetectionLedger>>,
     ) -> Result<Option<Self>, super::DaemonError> {
         if !config.enabled {
             return Ok(None);
@@ -140,6 +144,12 @@ impl HubExporter {
             })
             .transpose()?;
         let correlation_buffer = correlations.as_ref().map(CorrelationExport::buffer);
+        let detections = detection_ledger
+            .map(|ledger| {
+                source_uri(&detections_endpoint(endpoint), source_id)
+                    .map(|uri| DetectionExport::new(ledger, uri))
+            })
+            .transpose()?;
         let shutdown = Arc::new(tokio::sync::Notify::new());
         let handle = tokio::spawn(run_exporter(
             buffer.clone(),
@@ -156,6 +166,7 @@ impl HubExporter {
             },
             incidents,
             correlations,
+            detections,
         ));
         Ok(Some(Self {
             buffer,
@@ -206,7 +217,7 @@ impl HubExporter {
             tracing::warn!(
                 pending = self.pending(),
                 budget_secs = SHUTDOWN_DRAIN_BUDGET.as_secs(),
-                "Hub export drain timed out, the findings, incidents and correlation episodes still pending are dropped"
+                "Hub export drain timed out, the findings, incidents, correlation episodes and detection counts still pending are dropped"
             );
         } else if pending > 0 {
             tracing::info!(pending, "Hub export drained before shutdown");
@@ -483,6 +494,7 @@ async fn run_exporter(
     acks: AckSources,
     incidents: Option<IncidentExport>,
     correlations: Option<CorrelationExport>,
+    detections: Option<DetectionExport>,
 ) {
     let start = tokio::time::Instant::now();
     let mut halves = Halves {
@@ -496,6 +508,7 @@ async fn run_exporter(
         },
         incidents,
         correlations,
+        detections,
     };
     halves.start_at(start + flush_interval);
     // Once shutdown fires the loop stops waiting for any half's next round
@@ -527,12 +540,13 @@ async fn run_exporter(
     }
 }
 
-/// The exporter task's three halves, findings always, incidents and
-/// correlations when configured.
+/// The exporter task's halves, findings always, incidents, correlations
+/// and detections when configured.
 struct Halves {
     findings: FindingsExport,
     incidents: Option<IncidentExport>,
     correlations: Option<CorrelationExport>,
+    detections: Option<DetectionExport>,
 }
 
 impl Halves {
@@ -544,6 +558,9 @@ impl Halves {
         if let Some(export) = self.correlations.as_mut() {
             export.start_at(at);
         }
+        if let Some(export) = self.detections.as_mut() {
+            export.start_at(at);
+        }
     }
 
     /// The earliest of the halves' next rounds.
@@ -553,6 +570,9 @@ impl Halves {
             wake = wake.min(export.due);
         }
         if let Some(export) = &self.correlations {
+            wake = wake.min(export.due());
+        }
+        if let Some(export) = &self.detections {
             wake = wake.min(export.due());
         }
         wake
@@ -582,6 +602,11 @@ impl Halves {
             sent |= export.round(client, api_key, metrics, flush_interval).await;
         }
         if let Some(export) = self.correlations.as_mut() {
+            sent |= export
+                .round(client, api_key, metrics, flush_interval, draining)
+                .await;
+        }
+        if let Some(export) = self.detections.as_mut() {
             sent |= export
                 .round(client, api_key, metrics, flush_interval, draining)
                 .await;
@@ -856,7 +881,7 @@ pub(super) fn jitter_seed() -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::daemon::query_api::{AckSource, ResolvedTomlAck};
     use crate::detect::{Confidence, Finding, FindingType, Pattern, Severity};
@@ -905,7 +930,7 @@ mod tests {
         );
     }
 
-    fn finding(signature: &str, trace_id: &str) -> Finding {
+    pub(crate) fn finding(signature: &str, trace_id: &str) -> Finding {
         Finding {
             finding_type: FindingType::NPlusOneSql,
             severity: Severity::Warning,
@@ -1196,6 +1221,7 @@ mod tests {
             acks(None),
             None,
             None,
+            None,
         ));
 
         // Let the task reach its wait before signalling, so the test covers
@@ -1229,6 +1255,7 @@ mod tests {
             Duration::from_hours(1),
             HubClient::new(Duration::from_secs(10)),
             acks(None),
+            None,
             None,
             None,
         ));
@@ -1278,6 +1305,7 @@ mod tests {
                     .expect("uri"),
             )),
             None,
+            None,
         ));
         tokio::task::yield_now().await;
         shutdown.notify_one();
@@ -1322,7 +1350,10 @@ mod tests {
         );
     }
 
-    fn count(seen: &crate::daemon::hub_incident_export::tests::Seen, path: &str) -> usize {
+    pub(crate) fn count(
+        seen: &crate::daemon::hub_incident_export::tests::Seen,
+        path: &str,
+    ) -> usize {
         seen.lock()
             .expect("lock")
             .iter()
@@ -1355,6 +1386,7 @@ mod tests {
                     .parse()
                     .expect("uri"),
             )),
+            None,
             None,
         ));
         (handle, shutdown)
@@ -1403,7 +1435,7 @@ mod tests {
     }
 
     /// Poll `done` every 20 ms, five seconds at most.
-    async fn wait_for(mut done: impl FnMut() -> bool) {
+    pub(crate) async fn wait_for(mut done: impl FnMut() -> bool) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while !done() && tokio::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1433,6 +1465,31 @@ mod tests {
         assert_eq!(1, count(&seen, "/api/import/incidents"));
         assert_eq!(2, count(&seen, "/api/import/findings"));
         assert!(incidents.is_unsupported());
+    }
+
+    /// The exporter task with its findings and detection halves.
+    pub(crate) fn spawn_with_detections(
+        base: &str,
+        findings: &Arc<HubExportBuffer>,
+        detections: DetectionExport,
+        flush_interval: Duration,
+    ) -> (tokio::task::JoinHandle<()>, Arc<tokio::sync::Notify>) {
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        let handle = tokio::spawn(run_exporter(
+            findings.clone(),
+            shutdown.clone(),
+            Arc::new(MetricsState::new()),
+            route(base, "/api/import/findings"),
+            "k".repeat(32),
+            100,
+            flush_interval,
+            HubClient::new(Duration::from_secs(10)),
+            acks(None),
+            None,
+            None,
+            Some(detections),
+        ));
+        (handle, shutdown)
     }
 
     fn route(base: &str, path: &str) -> http_client::Uri {
@@ -1469,6 +1526,7 @@ mod tests {
                 correlations.clone(),
                 route(base, "/api/import/correlations"),
             )),
+            None,
         ));
         (handle, shutdown)
     }
@@ -1574,6 +1632,7 @@ mod tests {
                 false,
                 correlator,
                 &CorrelationConfig::default(),
+                None,
             )
             .expect("spawn")
             .expect("enabled")

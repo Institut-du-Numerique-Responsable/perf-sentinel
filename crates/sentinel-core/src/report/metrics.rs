@@ -617,7 +617,7 @@ impl MetricsState {
 
         let hub_export_dropped_total = IntCounter::new(
             "perf_sentinel_hub_export_dropped_total",
-            "Signatures evicted or rejected by the bounded PerfSentinelHub export buffer",
+            "Signatures evicted or rejected by the bounded PerfSentinelHub export buffer, and detection ledger rows the Hub rejected",
         )
         .expect("metric creation should not fail");
 

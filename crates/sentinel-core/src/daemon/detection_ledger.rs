@@ -170,6 +170,15 @@ pub(crate) struct DayRow {
     pub(crate) sampling_rate: f64,
 }
 
+/// One day as the Hub push sends it, copied under the lock.
+#[derive(Debug)]
+pub(crate) struct DaySnapshot {
+    pub(crate) day: u32,
+    pub(crate) rev: u64,
+    pub(crate) rows: Vec<CountRow>,
+    pub(crate) meta: DayRow,
+}
+
 #[derive(Debug)]
 pub(crate) struct DetectionLedger {
     ledger_id: String,
@@ -370,6 +379,41 @@ impl DetectionLedger {
             }
         }
         page
+    }
+
+    /// A full copy of every day whose `rev` moved past `acked_rev`.
+    pub(crate) fn dirty_days(&self) -> Vec<DaySnapshot> {
+        let state = self.lock();
+        state
+            .days
+            .iter()
+            .filter(|(_, bucket)| bucket.rev > bucket.acked_rev)
+            .map(|(&day, bucket)| DaySnapshot {
+                day,
+                rev: bucket.rev,
+                rows: bucket
+                    .counts
+                    .iter()
+                    .map(|(signature, tally)| self.count_row(day, signature, tally))
+                    .collect(),
+                meta: self.day_row(day, bucket),
+            })
+            .collect()
+    }
+
+    /// The Hub holds `day` as of `rev`.
+    pub(crate) fn ack_day(&self, day: u32, rev: u64) {
+        if let Some(bucket) = self.lock().days.get_mut(&day) {
+            bucket.acked_rev = bucket.acked_rev.max(rev);
+        }
+    }
+
+    /// Flags `day` incomplete without making it dirty, so a page the Hub
+    /// refused is not sent again and again.
+    pub(crate) fn mark_gap_quiet(&self, day: u32) {
+        if let Some(bucket) = self.lock().days.get_mut(&day) {
+            bucket.gap = true;
+        }
     }
 
     fn count_row(&self, day: u32, signature: &str, tally: &Tally) -> CountRow {
