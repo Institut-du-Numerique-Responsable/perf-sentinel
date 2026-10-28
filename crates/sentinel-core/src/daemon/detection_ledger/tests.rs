@@ -277,3 +277,16 @@ fn page_stops_at_the_byte_budget() {
     let last = &page.counts[fits - 1].signature;
     assert_eq!(page.next_after, Some(format!("3:{last}")));
 }
+
+#[test]
+fn page_bytes_count_the_json_escapes() {
+    let ledger = ledger_at(3, true);
+    let batch: Vec<Finding> = (0..4000)
+        .map(|i| finding(&format!("{i:04}{}", "\"".repeat(996)), 0))
+        .collect();
+    ledger.record(&batch, 3 * DAY_MS);
+    let page = ledger.page(None, None, 5000);
+    assert!(page.next_after.is_some(), "the budget must cut the page");
+    let body = serde_json::to_vec(&page).expect("serialize");
+    assert!(body.len() <= MAX_PAGE_BYTES, "{} bytes", body.len());
+}
