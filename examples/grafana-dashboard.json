@@ -986,7 +986,7 @@
       "type": "stat",
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 50
       },
@@ -1045,8 +1045,8 @@
       "type": "stat",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 5,
+        "x": 4,
         "y": 50
       },
       "datasource": {
@@ -1072,8 +1072,8 @@
       "type": "stat",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 5,
+        "x": 9,
         "y": 50
       },
       "datasource": {
@@ -1116,8 +1116,8 @@
       "type": "stat",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 5,
+        "x": 14,
         "y": 50
       },
       "datasource": {
@@ -1167,6 +1167,33 @@
         "colorMode": "background",
         "graphMode": "area",
         "textMode": "value_and_name"
+      }
+    },
+    {
+      "title": "Detection ledger signatures",
+      "description": "Signature rows the detection ledger holds across its retained days, one per signature and day, from `perf_sentinel_detection_ledger_signatures`. The ledger is the count behind `GET /api/detections`, kept in memory and set once a minute.\n\nIt climbs while each day's signatures are discovered, then levels off. Its ceiling is `[daemon.detections] retained_days` times `max_signatures_per_day`, and a day that reaches its own cap starts feeding the Cardinality caps panel instead. No data when `[daemon.detections] enabled = false`.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 50
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "perf_sentinel_detection_ledger_signatures{job=~\"$job\", namespace=~\"$namespace\"}",
+          "refId": "A",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
       }
     },
     {
@@ -1551,7 +1578,7 @@
     },
     {
       "title": "Cardinality caps (overflow)",
-      "description": "Attributions per second turned away by a per-run cardinality cap. Five of the six fold into `service=\"_other\"` or `grouping=\"_other\"`, so totals stay exact and only newly seen services or groupings coarsen. The ingest I/O 1024-service cap leaves the service out instead, undercounting its throughput and measured-energy attribution.\n\nA flat zero is normal and nothing here alerts. A climb means more services or groupings than the cap, the Service and Grouping variables show the folded ones under `_other`.\n\nCaps hold until the daemon restarts, so a burst of one-off service names keeps folding every service that came after.",
+      "description": "Attributions per second turned away by a per-run cardinality cap. Five of the six service and grouping caps fold into `service=\"_other\"` or `grouping=\"_other\"`, so totals stay exact and only newly seen services or groupings coarsen. The ingest I/O 1024-service cap leaves the service out instead, undercounting its throughput and measured-energy attribution.\n\nThe detection ledger is the seventh series: detections per second counted in their day's overflow instead of under their signature, because the signature is new past `[daemon.detections] max_signatures_per_day`, longer than 1024 bytes or carries a control character. The day's total stays exact and only the signature is lost. That cap is per UTC day, it clears at midnight.\n\nA flat zero is normal and nothing here alerts. A climb means more services or groupings than the cap, the Service and Grouping variables show the folded ones under `_other`.\n\nThe service and grouping caps hold until the daemon restarts, so a burst of one-off service names keeps folding every service that came after.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1593,6 +1620,11 @@
           "expr": "sum(rate(perf_sentinel_slow_duration_grouping_overflow_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "slow histogram, 256 pairs",
           "refId": "F"
+        },
+        {
+          "expr": "sum(rate(perf_sentinel_detection_ledger_overflow_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]))",
+          "legendFormat": "detection ledger, per-day signatures",
+          "refId": "G"
         }
       ],
       "fieldConfig": {
@@ -2011,6 +2043,6 @@
   "timezone": "browser",
   "title": "perf-sentinel overview",
   "uid": "perf-sentinel-overview",
-  "version": 11,
+  "version": 12,
   "refresh": "1m"
 }

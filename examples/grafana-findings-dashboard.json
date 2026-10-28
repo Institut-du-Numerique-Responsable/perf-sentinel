@@ -626,6 +626,45 @@
         "options": [],
         "hide": 0,
         "description": "Origin of the Hub launcher as your browser reaches it, for example https://hub.example.internal, without a trailing slash. The Ack links of the three findings tables use it to open the Hub's ack page. Empty leaves those links dead."
+      },
+      {
+        "name": "today",
+        "label": "Today (UTC day)",
+        "type": "query",
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "${DS_INFINITY}"
+        },
+        "query": {
+          "refId": "today",
+          "queryType": "infinity",
+          "infinityQuery": {
+            "refId": "today",
+            "type": "json",
+            "source": "url",
+            "parser": "backend",
+            "format": "table",
+            "url": "/api/status",
+            "url_options": {
+              "method": "GET"
+            },
+            "root_selector": "",
+            "columns": [
+              {
+                "selector": "detection_ledger.current_day",
+                "text": "day",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": {},
+        "options": [],
+        "hide": 2,
+        "description": "UTC epoch day of the Detections today table, read from the daemon's own clock on GET /api/status (detection_ledger.current_day), so it is the day the daemon is counting. Hidden, nothing to set by hand. Empty when the detection ledger is disabled."
       }
     ]
   },
@@ -830,7 +869,7 @@
     {
       "type": "table",
       "title": "Findings",
-      "description": "One row per distinct problem, folded by the signature acknowledgments use. Filter with the column headers.\n\n'Traces' counts retained detections: it falls as they age out and resets on restart, so it measures presence, not a lifetime total. 'Occurrences' is the repeats inside the trace shown. 'Est. impact (ops)' is Traces x Ops/trace, the avoidable I/O to rank by, 0 for the types that waste none.\n\n'Suggestion' is the fix for the framework or broker inferred from the trace when there is one, the generic hint otherwise, and 'Fix for' names that technology, blank when the hint is generic. 'Code' is the call site from the span's code.* attributes, the function then file:line as the CLI prints them, either one alone when the other is missing, blank when the instrumentation sends none.\n\n'Acked via' needs Include acked true: toml is the CI baseline file, daemon the runtime store. Grouping, Service and Finding type narrow the request, so a tenant is complete up to Max rows, and Skip rows reads on.",
+      "description": "One row per distinct problem, folded by the signature acknowledgments use. Filter with the column headers.\n\n'Retained' counts the detections the daemon still holds for the problem: it falls as they age out of the ring and resets on restart, so it is not the volume, Detections today is. 'Occurrences' is the repeats inside the trace shown. 'Est. impact (ops)' is Retained x Ops/trace, the avoidable I/O to rank by, 0 for the types that waste none.\n\n'Suggestion' is the fix for the framework or broker inferred from the trace when there is one, the generic hint otherwise, and 'Fix for' names that technology, blank when the hint is generic. 'Code' is the call site from the span's code.* attributes, the function then file:line as the CLI prints them, either one alone when the other is missing, blank when the instrumentation sends none.\n\n'Acked via' needs Include acked true: toml is the CI baseline file, daemon the runtime store. Grouping, Service and Finding type narrow the request, so a tenant is complete up to Max rows, and Skip rows reads on.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "${DS_INFINITY}"
@@ -885,7 +924,7 @@
             },
             {
               "selector": "seen_count",
-              "text": "Traces",
+              "text": "Retained",
               "type": "number"
             },
             {
@@ -1091,12 +1130,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Traces"
+              "options": "Retained"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 80
+                "value": 100
               }
             ]
           },
@@ -1200,7 +1239,7 @@
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "Traces",
+            "displayName": "Retained",
             "desc": true
           }
         ]
@@ -1211,7 +1250,7 @@
           "options": {
             "mode": "binary",
             "binary": {
-              "left": "Traces",
+              "left": "Retained",
               "operator": "*",
               "right": "Ops/trace"
             },
@@ -1229,7 +1268,7 @@
               "Service": 3,
               "Grouping": 4,
               "Endpoint": 5,
-              "Traces": 6,
+              "Retained": 6,
               "Occurrences": 7,
               "Ops/trace": 8,
               "Est. impact (ops)": 9,
@@ -1249,6 +1288,101 @@
     },
     {
       "type": "table",
+      "title": "Detections today",
+      "description": "GET /api/detections?since_day=<today>, one row per signature the daemon detected since 00:00 UTC and how many times. It is the daemon's own count of every detection, whatever the ring still holds, so it can exceed Retained in the Findings table above. A restart starts a new ledger, so the day then counts only what the new run saw. 'Extra I/O ops' sums the avoidable I/O of those detections, blank when green scoring is off.\n\nA detection whose signature is new past [daemon.detections] max_signatures_per_day, or longer than 1024 bytes, is counted in the day's overflow and absent here, so the rows can sum to less than the day's total. The table lists the first 5000 signatures in signature order. The time picker and the variables of the Findings table do not apply.\n\nNeeds daemon 0.37.0 or later. With [daemon.detections] enabled = false the route answers 503 and the panel shows the error.",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "parser": "backend",
+          "format": "table",
+          "url": "/api/detections?since_day=${today}&limit=5000",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "$count(counts[day = $$.current_day]) > 0 ? counts[day = $$.current_day][] : []",
+          "columns": [
+            {
+              "selector": "signature",
+              "text": "Signature",
+              "type": "string"
+            },
+            {
+              "selector": "detections",
+              "text": "Detections",
+              "type": "number"
+            },
+            {
+              "selector": "extra_io_ops",
+              "text": "Extra I/O ops",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Signature"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 420
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Detections",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "Signature": 0,
+              "Detections": 1,
+              "Extra I/O ops": 2
+            },
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
       "title": "Correlations",
       "description": "GET /api/correlations: source-target pairs of findings fired together across services in the same grouping, the target within lag_threshold_ms of the source. Empty until [daemon.correlation] enabled is true. Pairs are not persisted: gone window_minutes after the last co-occurrence and on restart.\n\nConfidence is Co-occurrences over Source total, 100% when the target always followed. Median lag is the typical delay. Operation columns are SQL or HTTP templates, not routes. Source trace and Target trace are the two sides of the latest co-occurrence, for /api/explain.\n\nGrouping and Service do not narrow this table, the headers do. Capped at 1000 rows, highest confidence first.",
       "datasource": {
@@ -1259,7 +1393,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 28
       },
       "targets": [
         {
@@ -1654,7 +1788,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 40
       },
       "targets": [
         {
@@ -1739,7 +1873,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 48
       },
       "targets": [
         {
@@ -1811,7 +1945,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -2022,7 +2156,7 @@
     {
       "type": "table",
       "title": "Incident findings",
-      "description": "The findings frozen for the incident selected above, from GET /api/incidents?id=, whatever page the Incidents table shows. A daemon before 0.24.0 ignores id and answers the Incidents table's page, where a clicked row is found too. Empty until a row is clicked or Incident holds an id. The time picker does not apply.\n\nOne row per signature folded over the incident's window alone, so Traces and First seen describe the window, not the whole ring. The settle pass can add rows and raise counts, never remove. A First seen after Started fired only after the restart.\n\nSent with [daemon] read_api_key as X-API-Key. Est. impact, Suggestion, Fix for, Code and the column order follow the Findings table above.",
+      "description": "The findings frozen for the incident selected above, from GET /api/incidents?id=, whatever page the Incidents table shows. A daemon before 0.24.0 ignores id and answers the Incidents table's page, where a clicked row is found too. Empty until a row is clicked or Incident holds an id. The time picker does not apply.\n\nOne row per signature folded over the incident's window alone, so Retained and First seen describe the window, not the whole ring. The settle pass can add rows and raise counts, never remove. A First seen after Started fired only after the restart.\n\nSent with [daemon] read_api_key as X-API-Key. Est. impact, Suggestion, Fix for, Code and the column order follow the Findings table above.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "${DS_INFINITY}"
@@ -2031,7 +2165,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 64
       },
       "targets": [
         {
@@ -2077,7 +2211,7 @@
             },
             {
               "selector": "seen_count",
-              "text": "Traces",
+              "text": "Retained",
               "type": "number"
             },
             {
@@ -2283,12 +2417,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Traces"
+              "options": "Retained"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 80
+                "value": 100
               }
             ]
           },
@@ -2392,7 +2526,7 @@
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "Traces",
+            "displayName": "Retained",
             "desc": true
           }
         ]
@@ -2403,7 +2537,7 @@
           "options": {
             "mode": "binary",
             "binary": {
-              "left": "Traces",
+              "left": "Retained",
               "operator": "*",
               "right": "Ops/trace"
             },
@@ -2421,7 +2555,7 @@
               "Service": 3,
               "Grouping": 4,
               "Endpoint": 5,
-              "Traces": 6,
+              "Retained": 6,
               "Occurrences": 7,
               "Ops/trace": 8,
               "Est. impact (ops)": 9,
@@ -2448,7 +2582,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 76
       },
       "panels": [
         {
@@ -3179,7 +3313,7 @@
     }
   ],
   "timezone": "browser",
-  "version": 15,
+  "version": 16,
   "annotations": {
     "list": [
       {

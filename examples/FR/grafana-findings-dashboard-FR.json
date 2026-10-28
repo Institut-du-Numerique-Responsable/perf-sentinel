@@ -626,6 +626,45 @@
         "options": [],
         "hide": 0,
         "description": "Origine du lanceur du Hub telle que votre navigateur l'atteint, par exemple https://hub.example.internal, sans barre oblique finale. Les liens Acquitter des trois tableaux de findings l'utilisent pour ouvrir la page d'acquittement du Hub. Vide, ces liens ne mènent nulle part."
+      },
+      {
+        "name": "today",
+        "label": "Aujourd'hui (jour UTC)",
+        "type": "query",
+        "datasource": {
+          "type": "yesoreyeram-infinity-datasource",
+          "uid": "${DS_INFINITY}"
+        },
+        "query": {
+          "refId": "today",
+          "queryType": "infinity",
+          "infinityQuery": {
+            "refId": "today",
+            "type": "json",
+            "source": "url",
+            "parser": "backend",
+            "format": "table",
+            "url": "/api/status",
+            "url_options": {
+              "method": "GET"
+            },
+            "root_selector": "",
+            "columns": [
+              {
+                "selector": "detection_ledger.current_day",
+                "text": "day",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": {},
+        "options": [],
+        "hide": 2,
+        "description": "Jour epoch UTC du tableau Détections du jour, lu sur l'horloge du daemon par GET /api/status (detection_ledger.current_day), donc c'est le jour que le daemon est en train de compter. Masquée, rien à régler à la main. Vide quand le registre de détections est désactivé."
       }
     ]
   },
@@ -830,7 +869,7 @@
     {
       "type": "table",
       "title": "Findings",
-      "description": "Une ligne par problème distinct, regroupée sur la signature qu'utilisent les acquittements. Filtrer avec les en-têtes de colonnes.\n\n'Traces' compte les détections retenues : il baisse à mesure qu'elles expirent et repart de zéro au redémarrage, donc il mesure la présence et non un total depuis toujours. 'Occurrences' est le nombre de répétitions à l'intérieur de la trace affichée. 'Impact est. (ops)' vaut Traces x Ops/trace, soit les I/O évitables sur lesquelles trier, et 0 pour les types qui n'en gaspillent aucune.\n\n'Suggestion' est le correctif pour le framework ou le broker déduit de la trace quand il y en a un, sinon le conseil générique, et 'Correctif pour' nomme cette technologie, vide quand le conseil est générique. 'Code' est l'emplacement de l'appel lu dans les attributs code.* du span : la fonction puis fichier:ligne, comme les affiche la CLI, l'un des deux seul quand l'autre manque, vide quand l'instrumentation n'envoie rien.\n\n'Acquitté via' ne se remplit que si Inclure les acquittés vaut true : toml est le fichier de référence de la CI, daemon le stock d'exécution. Namespace des services, Service et Type de finding restreignent la requête, donc un tenant est complet jusqu'à Lignes max, et Lignes à sauter lit la suite.",
+      "description": "Une ligne par problème distinct, regroupée sur la signature qu'utilisent les acquittements. Filtrer avec les en-têtes de colonnes.\n\n'Retenues' compte les détections que le daemon garde encore pour ce problème : il baisse à mesure qu'elles sortent du tampon et repart de zéro au redémarrage, donc ce n'est pas le volume, c'est Détections du jour. 'Occurrences' est le nombre de répétitions à l'intérieur de la trace affichée. 'Impact est. (ops)' vaut Retenues x Ops/trace, soit les I/O évitables sur lesquelles trier, et 0 pour les types qui n'en gaspillent aucune.\n\n'Suggestion' est le correctif pour le framework ou le broker déduit de la trace quand il y en a un, sinon le conseil générique, et 'Correctif pour' nomme cette technologie, vide quand le conseil est générique. 'Code' est l'emplacement de l'appel lu dans les attributs code.* du span : la fonction puis fichier:ligne, comme les affiche la CLI, l'un des deux seul quand l'autre manque, vide quand l'instrumentation n'envoie rien.\n\n'Acquitté via' ne se remplit que si Inclure les acquittés vaut true : toml est le fichier de référence de la CI, daemon le stock d'exécution. Namespace des services, Service et Type de finding restreignent la requête, donc un tenant est complet jusqu'à Lignes max, et Lignes à sauter lit la suite.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "${DS_INFINITY}"
@@ -885,7 +924,7 @@
             },
             {
               "selector": "seen_count",
-              "text": "Traces",
+              "text": "Retenues",
               "type": "number"
             },
             {
@@ -1091,12 +1130,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Traces"
+              "options": "Retenues"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 80
+                "value": 100
               }
             ]
           },
@@ -1200,7 +1239,7 @@
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "Traces",
+            "displayName": "Retenues",
             "desc": true
           }
         ]
@@ -1211,7 +1250,7 @@
           "options": {
             "mode": "binary",
             "binary": {
-              "left": "Traces",
+              "left": "Retenues",
               "operator": "*",
               "right": "Ops/trace"
             },
@@ -1229,7 +1268,7 @@
               "Service": 3,
               "Namespace des services": 4,
               "Endpoint": 5,
-              "Traces": 6,
+              "Retenues": 6,
               "Occurrences": 7,
               "Ops/trace": 8,
               "Impact est. (ops)": 9,
@@ -1249,6 +1288,101 @@
     },
     {
       "type": "table",
+      "title": "Détections du jour",
+      "description": "GET /api/detections?since_day=<today>, une ligne par signature que le daemon a détectée depuis 00:00 UTC, avec le nombre de fois. C'est le compte propre du daemon pour chaque détection, quoi que le tampon garde encore, donc il peut dépasser Retenues dans le tableau Findings ci-dessus. Un redémarrage ouvre un nouveau registre, le jour ne compte alors que ce qu'a vu la nouvelle exécution. 'Ops I/O évitables' additionne les I/O évitables de ces détections, vide quand le scoring green est coupé.\n\nUne détection dont la signature est nouvelle au-delà de [daemon.detections] max_signatures_per_day, ou plus longue que 1024 octets, est comptée dans le débordement du jour et absente ici, donc les lignes peuvent totaliser moins que le jour. Le tableau liste les 5000 premières signatures dans l'ordre des signatures. Le sélecteur de temps et les variables du tableau Findings ne s'appliquent pas.\n\nIl faut un daemon 0.37.0 ou plus récent. Avec [daemon.detections] enabled = false la route répond 503 et le panneau affiche l'erreur.",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "${DS_INFINITY}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${DS_INFINITY}"
+          },
+          "type": "json",
+          "source": "url",
+          "parser": "backend",
+          "format": "table",
+          "url": "/api/detections?since_day=${today}&limit=5000",
+          "url_options": {
+            "method": "GET"
+          },
+          "root_selector": "$count(counts[day = $$.current_day]) > 0 ? counts[day = $$.current_day][] : []",
+          "columns": [
+            {
+              "selector": "signature",
+              "text": "Signature",
+              "type": "string"
+            },
+            {
+              "selector": "detections",
+              "text": "Détections",
+              "type": "number"
+            },
+            {
+              "selector": "extra_io_ops",
+              "text": "Ops I/O évitables",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Signature"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 420
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Détections",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "Signature": 0,
+              "Détections": 1,
+              "Ops I/O évitables": 2
+            },
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
       "title": "Corrélations",
       "description": "GET /api/correlations : paires source-cible de findings déclenchés ensemble entre services d'un même regroupement, la cible à moins de lag_threshold_ms de la source. Vide tant que [daemon.correlation] enabled ne vaut pas true. Les paires ne sont pas persistées : elles disparaissent window_minutes après la dernière co-occurrence, et au redémarrage.\n\nConfiance vaut Co-occurrences divisé par Total source, 100 % quand la cible a toujours suivi. Délai médian donne le délai habituel. Les colonnes d'opération sont des modèles SQL ou HTTP, pas des routes. Trace source et Trace cible sont les deux côtés de la dernière co-occurrence, pour /api/explain.\n\nNamespace des services et Service ne restreignent pas ce tableau, ce sont les en-têtes qui le font. Plafonné à 1000 lignes, par confiance décroissante.",
       "datasource": {
@@ -1259,7 +1393,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 28
       },
       "targets": [
         {
@@ -1654,7 +1788,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 40
       },
       "targets": [
         {
@@ -1739,7 +1873,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 48
       },
       "targets": [
         {
@@ -1811,7 +1945,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -2022,7 +2156,7 @@
     {
       "type": "table",
       "title": "Findings de l'incident",
-      "description": "Les findings figés pour l'incident sélectionné ci-dessus, lus depuis GET /api/incidents?id=, quelle que soit la page affichée par le tableau Incidents. Un daemon antérieur à la 0.24.0 ignore id et renvoie la page du tableau Incidents, où une ligne cliquée se trouve aussi. Vide jusqu'à ce qu'une ligne soit cliquée ou qu'Incident porte un id. Le sélecteur de temps ne s'applique pas.\n\nUne ligne par signature, repliée sur la seule fenêtre de l'incident, donc Traces et Première détection décrivent la fenêtre et non tout le tampon. La passe de stabilisation peut ajouter des lignes et augmenter des compteurs, jamais en retirer. Une ligne dont la Première détection est postérieure au Début ne s'est déclenchée qu'après le redémarrage.\n\nRequête envoyée avec [daemon] read_api_key en X-API-Key. Impact est., Suggestion, Correctif pour, Code et l'ordre des colonnes suivent le tableau Findings ci-dessus.",
+      "description": "Les findings figés pour l'incident sélectionné ci-dessus, lus depuis GET /api/incidents?id=, quelle que soit la page affichée par le tableau Incidents. Un daemon antérieur à la 0.24.0 ignore id et renvoie la page du tableau Incidents, où une ligne cliquée se trouve aussi. Vide jusqu'à ce qu'une ligne soit cliquée ou qu'Incident porte un id. Le sélecteur de temps ne s'applique pas.\n\nUne ligne par signature, repliée sur la seule fenêtre de l'incident, donc Retenues et Première détection décrivent la fenêtre et non tout le tampon. La passe de stabilisation peut ajouter des lignes et augmenter des compteurs, jamais en retirer. Une ligne dont la Première détection est postérieure au Début ne s'est déclenchée qu'après le redémarrage.\n\nRequête envoyée avec [daemon] read_api_key en X-API-Key. Impact est., Suggestion, Correctif pour, Code et l'ordre des colonnes suivent le tableau Findings ci-dessus.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "${DS_INFINITY}"
@@ -2031,7 +2165,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 64
       },
       "targets": [
         {
@@ -2077,7 +2211,7 @@
             },
             {
               "selector": "seen_count",
-              "text": "Traces",
+              "text": "Retenues",
               "type": "number"
             },
             {
@@ -2283,12 +2417,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Traces"
+              "options": "Retenues"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 80
+                "value": 100
               }
             ]
           },
@@ -2392,7 +2526,7 @@
         "showHeader": true,
         "sortBy": [
           {
-            "displayName": "Traces",
+            "displayName": "Retenues",
             "desc": true
           }
         ]
@@ -2403,7 +2537,7 @@
           "options": {
             "mode": "binary",
             "binary": {
-              "left": "Traces",
+              "left": "Retenues",
               "operator": "*",
               "right": "Ops/trace"
             },
@@ -2421,7 +2555,7 @@
               "Service": 3,
               "Namespace des services": 4,
               "Endpoint": 5,
-              "Traces": 6,
+              "Retenues": 6,
               "Occurrences": 7,
               "Ops/trace": 8,
               "Impact est. (ops)": 9,
@@ -2448,7 +2582,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 76
       },
       "panels": [
         {
@@ -3179,7 +3313,7 @@
     }
   ],
   "timezone": "browser",
-  "version": 15,
+  "version": 16,
   "annotations": {
     "list": [
       {
