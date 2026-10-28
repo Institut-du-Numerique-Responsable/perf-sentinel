@@ -847,18 +847,28 @@ async fn run_action(hub: Option<&str>, action: HubAction) -> Result<(), String> 
             put("lookback", lookback.map(Into::into));
             put("trace_id", trace_id.map(Into::into));
             put("max_traces", max_traces.map(Into::into));
-            put("from_ms", window.from.as_deref().map(epoch_ms).transpose()?);
-            put("to_ms", window.to.as_deref().map(epoch_ms).transpose()?);
+            put(
+                "from_ms",
+                window
+                    .from
+                    .as_deref()
+                    .map(parse_hub_time)
+                    .transpose()?
+                    .map(Into::into),
+            );
+            put(
+                "to_ms",
+                window
+                    .to
+                    .as_deref()
+                    .map(parse_hub_time)
+                    .transpose()?
+                    .map(Into::into),
+            );
             let body = serde_json::json!({"source_id": source_id, "request": request});
             analyze(&target, &body, output).await
         }
     }
-}
-
-fn epoch_ms(iso: &str) -> Result<serde_json::Value, String> {
-    chrono::DateTime::parse_from_rfc3339(iso)
-        .map(|t| t.timestamp_millis().into())
-        .map_err(|e| format!("Invalid --from/--to `{iso}`: {e}"))
 }
 
 /// A `--from`/`--to` value as epoch milliseconds: RFC 3339 or the number itself.
