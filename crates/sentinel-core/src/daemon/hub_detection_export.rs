@@ -507,6 +507,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_refused_page_leaves_the_rest_of_the_day_to_go_out_flagged_gap() {
+        let (base, seen) = fake_hub_sequence(vec![400, 200]).await;
+        let ledger = ledger_at(DAY);
+        ledger.tick((DAY + 1) * DAY_MS, 0, 0);
+        // The Hub already holds the sealed day, so the 400 lands on the large one.
+        for day in ledger.dirty_days() {
+            ledger.ack_day(day.day, day.rev);
+        }
+        let signatures: Vec<String> = (0..5_001).map(|i| format!("s{i:05}")).collect();
+        let refs: Vec<&str> = signatures.iter().map(String::as_str).collect();
+        record(&ledger, DAY + 1, &["s00000"]);
+        assert!(!day_row(&ledger, DAY + 1).gap);
+        record(&ledger, DAY + 1, &refs);
+        let metrics = MetricsState::new();
+
+        assert_eq!(2, rounds(&mut export(&base, &ledger), &metrics).await);
+
+        let pages = bodies(&seen);
+        assert_eq!(2, pages.len());
+        assert_eq!("s05000", pages[1]["counts"][0]["signature"]);
+        assert_eq!(DAY + 1, pages[1]["days"][0]["day"]);
+        assert_eq!(true, pages[1]["days"][0]["gap"]);
+        assert_eq!(5_000, metrics.hub_export_dropped_total.get());
+        assert_eq!(0, ledger.dirty_days().len());
+    }
+
+    #[tokio::test]
+    async fn a_drain_against_a_hub_without_the_route_probes_once_and_ends() {
+        let (base, seen) = fake_hub_routes4(200, 200, 200, 404).await;
+        let ledger = ledger_at(DAY);
+        record(&ledger, DAY, &["a"]);
+        let (handle, shutdown) = spawn_with_detections(
+            &base,
+            &Arc::new(HubExportBuffer::new(10)),
+            export(&base, &ledger),
+            Duration::from_hours(1),
+        );
+        shutdown.notify_one();
+
+        // Far inside the 10 s drain budget.
+        tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("the drain ends on the missing route")
+            .expect("exporter task panicked");
+        assert_eq!(1, count(&seen, "/api/import/detections"));
+        // Not dropped as a refused page: the day waits for a Hub that has the route.
+        assert_eq!(1, ledger.dirty_days().len());
+    }
+
+    #[tokio::test]
     async fn a_drain_forces_one_last_push_and_returns() {
         let (base, seen) = fake_hub(200).await;
         let now = crate::daemon::event_loop::current_time_ms();
