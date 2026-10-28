@@ -720,3 +720,17 @@ v0.35.0	37de952	2026-10-27	PASS
 # Skipped: both template runtimes. Not run: the cluster scenarios,
 # verify-all-scenarios and validate-findings, the daemon does not emit SARIF.
 v0.36.0	61eb01a	2026-10-28	PASS
+# v0.37.0: targeted pass on what the release adds (detection ledger, its
+# route and its push), local release binary built from 7a7932d4, no cluster.
+# detection-volume: the planted N+1 counted 12 times past a findings ring of
+# 5, the same total through a limit=1 cursor walk, current_day is today, a
+# restart opens a new ledger with today gap=true and nothing carried over,
+# the push to a fake PerfSentinelHub carries the 12 detections and a day
+# object, and 3 more posted just before SIGTERM reach it through the drain's
+# forced push (15). FAIL on 0.36.0 (route 404). template-jenkinsfile and
+# template-github-actions structural PASS at 0.37.0. Lab findings dashboard
+# copy follows the renamed Retained column. Skipped: both template runtimes.
+# Not run: the cluster scenarios (grafana-dashboard panel render included),
+# verify-all-scenarios and validate-findings; the Hub side of the volume
+# ships with Hub 0.8.6 and its own lab scenario.
+v0.37.0	22f50d7	2026-10-28	PASS
