@@ -356,7 +356,7 @@ perf-sentinel hub analyze --source-id tempo --service order-svc --lookback 1h -o
 
 | Action | Appels | Options |
 |---|---|---|
-| `findings` | `GET /api/findings` | `--service`, `--finding-type`, `--severity`, `--status`, `--source-id`, `--environment`, `--limit` (50), `--format text\|json` |
+| `findings` | `GET /api/findings` | `--service`, `--finding-type`, `--severity`, `--status`, `--source-id`, `--environment`, `--from`/`--to` (RFC 3339 UTC comme `2026-10-21T00:00:00Z`, ou millisecondes epoch ; un `--from` postérieur à `--to` est refusé avant toute requête), `--offset`, `--include-acked true\|false` (le défaut du Hub s'il est omis), `--signature`, `--limit` (50), `--format text\|json` |
 | `incidents [ID]` | `GET /api/incidents[/{id}]` | `--service`, `--namespace`, `--source-id`, `--environment`, `--offset`, `--limit` (50), `--format` |
 | `ack` | `POST /api/sources/{source_id}/acks` | `--source-id`, `-s/--signature` (stdin s'il est omis), `-r/--reason`, `--expires`. Pas de `--by` : le Hub vous nomme |
 | `unack` | `POST /api/sources/{source_id}/acks/revoke` | `--source-id`, `-s/--signature` |

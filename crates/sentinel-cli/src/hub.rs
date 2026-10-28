@@ -67,6 +67,23 @@ pub(crate) enum HubAction {
         /// Only what the sources of this environment reported.
         #[arg(long)]
         environment: Option<String>,
+        /// Only findings seen since this time (RFC 3339 UTC such as
+        /// `2026-10-21T00:00:00Z`, or epoch milliseconds).
+        #[arg(long, value_name = "TIME", value_parser = parse_hub_time)]
+        from: Option<u64>,
+        /// Only findings seen up to this time (same formats as `--from`).
+        #[arg(long, value_name = "TIME", value_parser = parse_hub_time)]
+        to: Option<u64>,
+        /// Skip this many findings.
+        #[arg(long)]
+        offset: Option<usize>,
+        /// Whether acknowledged findings are listed (true or false). The
+        /// Hub's default applies when omitted.
+        #[arg(long, value_name = "BOOL")]
+        include_acked: Option<bool>,
+        /// Only this finding signature.
+        #[arg(long)]
+        signature: Option<String>,
         /// Maximum number of results.
         #[arg(long, default_value = "50")]
         limit: usize,
@@ -708,9 +725,15 @@ async fn run_action(hub: Option<&str>, action: HubAction) -> Result<(), String> 
             status,
             source_id,
             environment,
+            from,
+            to,
+            offset,
+            include_acked,
+            signature,
             limit,
             format,
         } => {
+            check_window(from, to)?;
             let path = with_query(
                 "/api/findings",
                 &[
@@ -721,6 +744,11 @@ async fn run_action(hub: Option<&str>, action: HubAction) -> Result<(), String> 
                     ("status", status),
                     ("source_id", source_id),
                     ("environment", environment),
+                    ("from", from.map(|v| v.to_string())),
+                    ("to", to.map(|v| v.to_string())),
+                    ("offset", offset.map(|v| v.to_string())),
+                    ("include_acked", include_acked.map(|v| v.to_string())),
+                    ("signature", signature),
                 ],
             );
             let body = get(&target, &path).await?;
@@ -831,6 +859,28 @@ fn epoch_ms(iso: &str) -> Result<serde_json::Value, String> {
     chrono::DateTime::parse_from_rfc3339(iso)
         .map(|t| t.timestamp_millis().into())
         .map_err(|e| format!("Invalid --from/--to `{iso}`: {e}"))
+}
+
+/// A `--from`/`--to` value as epoch milliseconds: RFC 3339 or the number itself.
+fn parse_hub_time(s: &str) -> Result<u64, String> {
+    if let Ok(ms) = s.parse::<u64>() {
+        return Ok(ms);
+    }
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map_err(|e| format!("`{s}` is neither RFC 3339 UTC nor epoch milliseconds ({e})"))
+        .and_then(|t| {
+            u64::try_from(t.timestamp_millis()).map_err(|_| format!("`{s}` is before 1970"))
+        })
+}
+
+/// The Hub rejects an inverted window: say so before any request.
+fn check_window(from: Option<u64>, to: Option<u64>) -> Result<(), String> {
+    match (from, to) {
+        (Some(from), Some(to)) if from > to => {
+            Err("--from must not be later than --to.".to_string())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn with_query(path: &str, params: &[(&str, Option<String>)]) -> String {
@@ -1154,5 +1204,27 @@ mod tests {
             refusal("GET /api/findings", 500, b"oops"),
             "GET /api/findings failed: HTTP 500."
         );
+    }
+
+    #[test]
+    fn hub_time_is_epoch_ms_or_rfc3339() {
+        assert_eq!(parse_hub_time("1793145600000"), Ok(1_793_145_600_000));
+        assert_eq!(
+            parse_hub_time("2026-10-21T00:00:00Z"),
+            Ok(1_792_540_800_000)
+        );
+        assert_eq!(
+            parse_hub_time("2026-10-21T02:00:00+02:00"),
+            Ok(1_792_540_800_000)
+        );
+        assert!(
+            parse_hub_time("1969-12-31T23:59:59Z")
+                .unwrap_err()
+                .contains("1970")
+        );
+        assert!(parse_hub_time("yesterday").is_err());
+        assert!(check_window(Some(2), Some(1)).is_err());
+        assert!(check_window(Some(1), Some(1)).is_ok());
+        assert!(check_window(Some(2), None).is_ok());
     }
 }
