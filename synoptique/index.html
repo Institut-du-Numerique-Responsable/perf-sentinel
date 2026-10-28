@@ -2435,7 +2435,7 @@ const mFit=f=>{f();document.fonts.ready.then(f);document.fonts.addEventListener(
 const MY={code:812,src:682,ps:552,out:412,top:76};
 // entities: [x, y, kind, icon, name, sub, mode, mode label]
 const ME={dev:[150,MY.code,"actor","user","Développeur · DevOps","écrit, teste, corrige"],git:[400,MY.code,"","git","Dépôt Git","code applicatif"],
- ws:[150,MY.src,"","laptop","Poste de travail","curl · k6 · tests perf"],apiD:[320,MY.src,"out","api","API HTTP","du daemon"],psLB:[115,MY.ps,"ps","","Perf Sentinel","","cli","batch"],psLD:[290,MY.ps,"ps","","Perf Sentinel","","daemon","daemon"],outDev:[205,MY.out,"out","file","Sorties locales",""],
+ ws:[150,MY.src,"","laptop","Poste de travail","curl · k6 · tests perf"],apiD:[320,MY.src,"out","api","API HTTP","du daemon"],psLB:[115,MY.ps,"ps","","Perf Sentinel","","cli","batch"],psLD:[290,MY.ps,"ps","","Perf Sentinel","","daemon","daemon"],outDev:[208,MY.out,"out","file","Sorties locales",""],
  run:[525,MY.src,"","runner","Runner CI","k6 · JMeter · tests"],sut:[730,MY.src,"","app","Service testé","exporte ses traces"],psCI:[540,MY.ps,"ps","","Perf Sentinel","","cli","batch"],psCap:[730,MY.ps,"ps","","Perf Sentinel","","capture","capture"],
  gate:[540,MY.out,"","","",""],hubHtml:[420,150,"out","file","Rapports HTML","dans le navigateur"],plugins:[420,216,"out","laptop","Plugins IDE (à venir)","JetBrains · VS Code"],outCI:[730,MY.out,"out","file","SARIF · HTML","MR · Jenkins"],
  hub:[1010,172,"","hub","Hub","lanceur"],psH:[1075,140,"ps","","Perf Sentinel","","cli","batch"],logs:[1180,172,"infra","","Logs",""],graf:[1430,172,"infra","","Grafana","tableaux"],
@@ -2443,7 +2443,7 @@ const ME={dev:[150,MY.code,"actor","user","Développeur · DevOps","écrit, test
  psP:[1054,MY.ps,"ps","","Perf Sentinel","","daemon","daemon"],
  api:[1173,MY.out,"out","api","API HTTP","du daemon"],html:[1305,MY.out,"out","file","Rapport HTML","autonome"],prom:[1438,MY.out,"infra","","Prometheus","scrape"],
  sre:[1177,MY.top,"actor","user","QA · SRE","valident les RC, trient, acquittent, mènent les post-mortems"]};
-const MSZ=id=>id==="psH"?[40,40]:id==="psA"?[96,96]:ME[id][2]==="ps"?[120,120]:id==="gate"?[60,60]:id==="hub"?[150,64]:id==="sre"?[654,52]:["logs","api","html","prom","graf"].includes(id)?[124,52]:["svc","col","store","db"].includes(id)?[140,52]:id==="outDev"?[330,52]:id==="apiD"?[130,52]:["ws","run","sut","outCI"].includes(id)?[160,52]:[176,52];
+const MSZ=id=>id==="psH"?[40,40]:id==="psA"?[96,96]:ME[id][2]==="ps"?[120,120]:id==="gate"?[60,60]:id==="hub"?[150,64]:id==="sre"?[654,52]:["logs","api","html","prom","graf"].includes(id)?[124,52]:["svc","col","store","db"].includes(id)?[140,52]:id==="outDev"?[346,52]:id==="apiD"?[130,52]:["ws","run","sut","outCI"].includes(id)?[160,52]:[176,52];
 const MT=id=>ME[id][1]-MSZ(id)[1]/2-(id==="gate"?12:0),MB=id=>ME[id][1]+MSZ(id)[1]/2+(id==="gate"?12:0),ML=id=>ME[id][0]-MSZ(id)[0]/2-(id==="gate"?12:0),MR=id=>ME[id][0]+MSZ(id)[0]/2;
 const m1=(MT("ws")+MB("psLB"))/2,m2=(MT("psLB")+MB("outDev"))/2,LX=22,mid=(a,b)=>(a+b)/2;
 // flows: from, to, kind, label, waypoints (horizontal and vertical only), label anchor, step, both ways, bridges as x on a horizontal run
@@ -2551,8 +2551,9 @@ for(const id in ME){if(ME[id][2]==="ghost")continue;const [x,y,kind,icon,n,s,mod
   g.setAttribute("tabindex","0");g.setAttribute("role","button");g.setAttribute("aria-label",`Ouvrir Perf Sentinel (${ml}), ${MZONE[id]}`);const go=()=>mapZoom(id);
   g.addEventListener("click",go);g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go()}})}
  else if(id==="outDev"){el("rect",{x:-w/2,y:-h/2,width:w,height:h,rx:10,class:"mbx mgrp"},g);tx(g,-w/2+14,-7,n,"mn");
-  const pills=[["rapport ","HTML"],["","TUI · logs"],["","JSON · SARIF"]].map(([a,b])=>{const pg=el("g",{},g),t=tx(pg,0,15,"","mpillt");if(a)el("tspan",{class:"mpilla"},t).textContent=a;el("tspan",{},t).textContent=b;return[pg,t]});
-  mFit(()=>{let px=-w/2+14;pills.forEach(([pg,t])=>{const L=t.getComputedTextLength();pg.querySelector("rect")?.remove();t.setAttribute("x",px+8);pg.insertBefore(el("rect",{x:px,y:3,width:L+16,height:17,rx:8.5,class:"mpill"}),t);px+=L+24})})}
+  // English puts the noun last, tr_ would read "rapport" alone as the first line of "rapport\npériodique"
+  const pills=[LANG==="en"?[["HTML "],["report","mpilla"]]:[["rapport ","mpilla"],["HTML"]],[["TUI · logs"]],[["JSON · SARIF"]]].map(segs=>{const pg=el("g",{},g),t=tx(pg,0,15,"","mpillt");segs.forEach(([v,c])=>{el("tspan",c?{class:c}:{},t).textContent=v});return[pg,t]});
+  mFit(()=>{const ls=pills.map(([,t])=>t.getComputedTextLength());let px=-(ls.reduce((a,L)=>a+L+24,0)-8)/2;pills.forEach(([pg,t],i)=>{const L=ls[i];pg.querySelector("rect")?.remove();t.setAttribute("x",px+8);pg.insertBefore(el("rect",{x:px,y:3,width:L+16,height:17,rx:8.5,class:"mpill"}),t);px+=L+24})})}
  else if(id==="hub"){g.classList.add("hub");el("rect",{x:-w/2,y:-h/2,width:w,height:h,style:"fill:none;stroke:none"},g);g.setAttribute("tabindex","0");g.setAttribute("role","button");g.setAttribute("aria-label","Ouvrir la vue d'ensemble du Hub");g.style.cursor="zoom-in";g.addEventListener("click",()=>hubZoom());g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();hubZoom()}});const k=h/2*.577;el("polygon",{points:`${-w/2},0 ${-w/2+k},${-h/2} ${w/2-k},${-h/2} ${w/2},0 ${w/2-k},${h/2} ${-w/2+k},${h/2}`,class:"mbx"},g);
   mPs(g,-w/2+20,-15,30);tx(g,-w/2+58,s?-2:6,n,"mn");if(s)tx(g,-w/2+58,14,s,"ms");
   // zoomable like the instances: the same ⊕ badge, in the Hub's colour
