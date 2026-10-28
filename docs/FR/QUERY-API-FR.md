@@ -1549,7 +1549,8 @@ findings acquittés même dans le chemin par défaut.
 | Clé absente ou fausse sur une route gardée         | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                    |
 | Méthode autre que GET                             | 405    | erreur en texte brut générée par axum                                                                   |
 
-L'API n'émet pas de 5xx en fonctionnement normal. Un crash du processus
+Hors ce `503` sur un registre de détections désactivé, l'API n'émet pas
+de 5xx en fonctionnement normal. Un crash du processus
 retourne ce que la pile TCP émet (connection reset).
 
 ## Cas d'usage

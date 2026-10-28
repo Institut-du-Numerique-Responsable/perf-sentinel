@@ -515,7 +515,7 @@ as incomplete (`multi_instance`). Two setups give complete counts:
   address instead of the Service. Only `StatefulSet` gives pods a stable
   one, through its headless Service:
   `perf-sentinel-0.perf-sentinel-headless.observability.svc.cluster.local:4318`
-  for the first pod of the [TL;DR](#tldr) install. Scaling the
+  for the first pod of a `workload.kind=StatefulSet` install. Scaling the
   StatefulSet then means declaring the new pods in the Hub.
 
 A restart opens a new ledger in every mode, and its first day is a gap.

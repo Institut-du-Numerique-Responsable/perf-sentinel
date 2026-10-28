@@ -1494,7 +1494,8 @@ path.
 | Missing or wrong key on a gated route            | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                 |
 | Method other than GET                            | 405    | axum-generated plain-text error                                                                      |
 
-The API does not emit 5xx on normal operation. A process crash returns
+Apart from that `503` on a disabled detection ledger, the API does not
+emit 5xx on normal operation. A process crash returns
 whatever the TCP stack emits (connection reset).
 
 ## Use cases
