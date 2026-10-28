@@ -25,7 +25,6 @@ import re
 import sys
 import urllib.request
 from pathlib import Path
-from typing import Dict, Optional
 
 CCF_REPO = "cloud-carbon-footprint/ccf-coefficients"
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -45,7 +44,7 @@ AWS_VCPU = {
 
 # A Graviton `.medium` is 1 vCPU (AWS instance type specifications), the
 # t families keep the 2 vCPU of the default map.
-GRAVITON_VCPU = {"medium": 1}
+GRAVITON_VCPU = {**AWS_VCPU, "medium": 1}
 
 T_SIZES = ["nano", "micro", "small", "medium", "large", "xlarge", "2xlarge"]
 M5_SIZES = ["large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge", "24xlarge"]
@@ -59,9 +58,8 @@ G_SIZES = ["medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlar
 G_XL_SIZES = G_SIZES + ["24xlarge", "48xlarge"]
 
 
-def aws(prefix: str, sizes: list[str], vcpu: Optional[Dict[str, int]] = None) -> list[tuple[str, int]]:
-    counts = {**AWS_VCPU, **(vcpu or {})}
-    return [(f"{prefix}.{s}", counts[s]) for s in sizes]
+def aws(prefix: str, sizes: list[str], vcpu: dict[str, int] = AWS_VCPU) -> list[tuple[str, int]]:
+    return [(f"{prefix}.{s}", vcpu[s]) for s in sizes]
 
 
 def gcp(prefix: str, sizes: "list[int]") -> "list[tuple[str, int]]":
