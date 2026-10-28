@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-28
+
 ### Added
 
 - The daemon counts how many times it detected each finding, exactly. A new in-memory detection ledger records, per UTC day and per finding signature, every finding detection emits with a signature, plus the sum of their avoidable I/O operations when green scoring is on. It counts past the findings ring: `max_retained_findings`, even `0`, ring eviction, the one-hour suppression of `[daemon.hub_export]` and acknowledgments leave it unchanged. Each day also carries its overflow, its shed traces, its OTLP requests refused for a full queue or memory pressure, its lowest `sampling_rate`, and whether it is sealed or holds a gap. Nothing is persisted: each start opens a new ledger with a new `ledger_id` whose first day is a gap, and a graceful shutdown marks the current day as one. `docs/LIMITATIONS.md` lists what a count covers, and `docs/HELM-DEPLOYMENT.md` how to keep counts complete with several pods.
