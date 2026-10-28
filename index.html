@@ -3386,7 +3386,7 @@ class Component extends DCLogic {
   // the same way the dashboard does; the TUI is a terminal cast with its colours
   // baked in, so it stays out of the sync below.
   // The synoptic takes the theme and follows it live like the dashboard; it needs a taller frame than the demos.
-  function synUrl(){var r=liveRoot(),p=r&&r.getAttribute('data-persona');return '/synoptique/?lang='+(document.documentElement.lang.indexOf('fr')===0?'fr':'en')+'&theme='+th()+(p&&p!=='tech'?'#lecture=det':'');}
+  function synUrl(){return '/synoptique/?lang='+(document.documentElement.lang.indexOf('fr')===0?'fr':'en')+'&theme='+th();}
   var TABS={html:dashUrl,tui:function(){return '/exemple/tui';},hub:hubUrl,syn:synUrl};
   var FRAME_TITLES={en:{html:'Perf Sentinel HTML report',tui:'Perf Sentinel terminal interface recording',hub:'Perf Sentinel Hub demo',syn:'Perf Sentinel synoptic'},fr:{html:'Rapport HTML Perf Sentinel',tui:'Enregistrement de l’interface terminal de Perf Sentinel',hub:'Démo du Hub Perf Sentinel',syn:'Synoptique de Perf Sentinel'}};
   // Below 600px the iframe stays empty and hidden, the open link carries the demo.
