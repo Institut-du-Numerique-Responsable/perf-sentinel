@@ -7,9 +7,9 @@ use chrono::Utc;
 use serde::Serialize;
 
 use super::ack::{AckEntry, AckStore};
+use super::detection_ledger::DetectionLedger;
 // The event loop's clock, not a second one: `push_batch` stamps findings with
 // it and the hourly re-send suppression compares against those stamps.
-use super::detection_ledger::DetectionLedger;
 use super::event_loop::current_time_ms as unix_time_ms;
 use super::findings_store::StoredFinding;
 use super::hub_correlation_export::{
