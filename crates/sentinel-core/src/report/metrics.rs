@@ -190,6 +190,10 @@ pub struct MetricsState {
     pub hub_export_pending: Gauge,
     /// Signatures evicted or rejected by the bounded Hub export buffer.
     pub hub_export_dropped_total: IntCounter,
+    /// Signature keys held by the detection ledger across its retained days.
+    pub detection_ledger_signatures: IntGauge,
+    /// Detections counted in a day's overflow instead of their signature.
+    pub detection_ledger_overflow_total: IntCounter,
     /// Distinct incidents waiting for Hub export.
     pub hub_export_incidents_pending: Gauge,
     /// Incidents evicted, oversized, rejected or abandoned for a Hub without the route.
@@ -613,7 +617,13 @@ impl MetricsState {
 
         let hub_export_dropped_total = IntCounter::new(
             "perf_sentinel_hub_export_dropped_total",
-            "Signatures evicted or rejected by the bounded PerfSentinelHub export buffer",
+            "Signatures evicted or rejected by the bounded PerfSentinelHub export buffer, and detection ledger rows the Hub rejected",
+        )
+        .expect("metric creation should not fail");
+
+        let detection_ledger_overflow_total = IntCounter::new(
+            "perf_sentinel_detection_ledger_overflow_total",
+            "Detections counted in a day's overflow of the detection ledger instead of their signature",
         )
         .expect("metric creation should not fail");
 
@@ -833,6 +843,9 @@ impl MetricsState {
             .expect("registration should not fail");
         registry
             .register(Box::new(hub_export_dropped_total.clone()))
+            .expect("registration should not fail");
+        registry
+            .register(Box::new(detection_ledger_overflow_total.clone()))
             .expect("registration should not fail");
         registry
             .register(Box::new(hub_export_incidents_pending.clone()))
@@ -1063,6 +1076,10 @@ impl MetricsState {
         let archive_last_closed_day_seconds = rollup_gauge(
             "perf_sentinel_archive_last_closed_day_timestamp_seconds",
             "Newest closed UTC day in the disclosure archive's daily rollups, epoch seconds at 00:00",
+        );
+        let detection_ledger_signatures = rollup_gauge(
+            "perf_sentinel_detection_ledger_signatures",
+            "Signature keys held by the detection ledger across its retained days",
         );
 
         let otlp_spans_received_total = IntCounter::new(
@@ -1305,6 +1322,8 @@ impl MetricsState {
             stored_findings,
             hub_export_pending,
             hub_export_dropped_total,
+            detection_ledger_signatures,
+            detection_ledger_overflow_total,
             hub_export_incidents_pending,
             hub_export_incidents_dropped_total,
             hub_export_correlations_pending,

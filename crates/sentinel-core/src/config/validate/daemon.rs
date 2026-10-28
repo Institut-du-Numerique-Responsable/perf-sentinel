@@ -355,6 +355,24 @@ impl Config {
         Ok(())
     }
 
+    /// Validate `[daemon.detections]`. The bounds hold even when disabled.
+    pub(super) fn validate_daemon_detections(&self) -> Result<(), String> {
+        let detections = &self.daemon.detections;
+        check_range(
+            "[daemon.detections] retained_days",
+            &detections.retained_days,
+            &2,
+            &31,
+        )?;
+        // The ceiling keeps a typo from sizing the ledger past memory.
+        check_range(
+            "[daemon.detections] max_signatures_per_day",
+            &detections.max_signatures_per_day,
+            &1,
+            &1_000_000,
+        )
+    }
+
     /// Validate TLS configuration: both paths must be set or both absent.
     /// When set, verify the files exist and warn if the key is
     /// world-readable on Unix.

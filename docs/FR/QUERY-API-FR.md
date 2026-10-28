@@ -38,6 +38,7 @@ surface produit de premier plan, avec un contrat de stabilité.
 | GET     | `/api/acks`                     | Lister les acks runtime actifs                                                             |
 | POST    | `/api/incidents`                | Enregistrer un incident depuis un webhook Alertmanager et figer sa fenêtre (depuis 0.20.0) |
 | GET     | `/api/incidents`                | Lister les incidents enregistrés avec leurs findings figés (depuis 0.20.0)                 |
+| GET     | `/api/detections`               | Détections par jour UTC et par signature, paginées par curseur (depuis 0.37.0)             |
 
 Tous les endpoints retournent du `application/json`. Pas de couche
 d'identité, seulement trois secrets partagés optionnels. `[daemon.ack]
@@ -90,7 +91,7 @@ derrière une clé. Désactivé, rien ne change sur cette page.
 
 | Route                                                                                                                                                                      | Clés acceptées                                                                   |
 |----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------|
-| `GET /api/findings`, `/api/findings/{trace_id}`, `/api/explain/{trace_id}`, `/api/correlations`, `/api/export/report`, `/api/acks`, `/api/status`, `/api/config`, `/api/energy` | `[daemon] read_api_key` ou `[daemon.ack] api_key`                                |
+| `GET /api/findings`, `/api/findings/{trace_id}`, `/api/explain/{trace_id}`, `/api/correlations`, `/api/export/report`, `/api/acks`, `/api/status`, `/api/config`, `/api/energy`, `/api/detections` | `[daemon] read_api_key` ou `[daemon.ack] api_key`                                |
 | `GET /api/incidents`                                                                                                                                                       | `[daemon] read_api_key` ou `[daemon.incidents] api_key`, jamais la clé d'ack     |
 | `POST` et `DELETE`                                                                                                                                                         | inchangés : leur propre clé d'écriture, jamais la clé de lecture                 |
 
@@ -160,7 +161,7 @@ La règle appliquée par le proxy :
 
 | Chemin                                                                                                  | GET                          | POST / DELETE                |
 |---------------------------------------------------------------------------------------------------------|------------------------------|------------------------------|
-| `/api/findings`, `/api/explain/...`, `/api/correlations`, `/api/status`, `/api/config`, `/api/energy`   | tout utilisateur authentifié | sans objet                   |
+| `/api/findings`, `/api/explain/...`, `/api/correlations`, `/api/status`, `/api/config`, `/api/energy`, `/api/detections` | tout utilisateur authentifié | sans objet                   |
 | `/api/acks`                                                                                             | groupe privilégié uniquement | sans objet                   |
 | `/api/incidents`                                                                                        | groupe privilégié uniquement | groupe privilégié uniquement |
 | `/api/findings/{signature}/ack`                                                                         | sans objet                   | groupe privilégié uniquement |
@@ -318,6 +319,7 @@ ou comme moyen le moins coûteux de vérifier que le daemon tourne.
 | `oldest_finding_ms`       | number | Instant de détection du plus ancien finding retenu, absent si le ring est vide (depuis 0.20.0) |
 | `findings_stored_total`   | number | Findings entrés dans le ring depuis le démarrage du daemon, évincés compris, remis à zéro par un redémarrage (depuis 0.31.2) |
 | `disclosure_archive`      | object | Jours détenus en cumuls quotidiens, `{ oldest_day, days, last_closed_day }` (depuis 0.28.0)    |
+| `detection_ledger`        | object | Horizon du registre de détections, `{ ledger_id, started_ms, retained_days, oldest_day, current_day, sealed_through }` (depuis 0.37.0) |
 
 Les trois paires gauge/plafond alimentent le graphe Headroom de
 l'onglet Trends de `perf-sentinel query monitor` : chaque paire se lit
@@ -338,6 +340,12 @@ porte les trois mêmes valeurs sous
 `perf_sentinel_archive_rollup_days` et
 `perf_sentinel_archive_last_closed_day_timestamp_seconds`. Voir
 [REPORTING-FR.md](REPORTING-FR.md#les-cumuls-quotidiens-tiennent-une-période-0280).
+
+`detection_ledger` porte les mêmes champs que la tête d'une page de
+[`GET /api/detections`](#get-apidetections), plus `retained_days`. Les
+jours sont des jours epoch UTC, et `sealed_through` vaut `null` tant
+qu'aucun jour n'est scellé. L'objet est absent avec
+`[daemon.detections] enabled = false`.
 
 **Exemple :**
 
@@ -361,6 +369,14 @@ curl -sS http://127.0.0.1:4318/api/status
     "oldest_day": "2025-07-01",
     "days": 65,
     "last_closed_day": "2025-09-03"
+  },
+  "detection_ledger": {
+    "ledger_id": "6f1c2a9e-3b4d-4e8f-9a7b-1c2d3e4f5a6b",
+    "started_ms": 1793092440000,
+    "retained_days": 8,
+    "oldest_day": 20753,
+    "current_day": 20754,
+    "sealed_through": 20753
   }
 }
 ```
@@ -1326,6 +1342,168 @@ et recharge dans le ring le dernier enregistrement de chaque id, jusqu'à
 archive le ring meurt avec le daemon : collectez cet endpoint si
 l'enregistrement doit survivre au nœud.
 
+### GET /api/detections
+
+Combien de fois chaque signature de finding a été détectée, par jour UTC
+(depuis 0.37.0). `/api/findings` replie une signature en une ligne,
+cette route compte chaque détection que le daemon en a faite. Les
+comptes vivent dans le registre de détections en mémoire du daemon,
+configuré par `[daemon.detections]` (actif par défaut, voir
+[CONFIGURATION-FR.md](CONFIGURATION-FR.md#daemondetections-optionnel-depuis-0370)).
+Derrière la même clé de lecture que `/api/findings`. Avec
+`[daemon.detections] enabled = false`, la route répond `503` avec
+`{"error": "detection ledger disabled"}`.
+
+Un jour est un jour epoch UTC, les millisecondes Unix divisées par
+`86400000`, lues sur l'horloge du daemon au moment où le lot est
+analysé. Le registre garde `retained_days` jours, aujourd'hui compris,
+et abandonne les plus anciens. Un redémarrage ouvre un nouveau registre
+avec un nouveau `ledger_id`, dont le premier jour est un `gap`.
+
+**Paramètres de requête :**
+
+- `since_day` : premier jour du parcours, le `oldest_day` du registre
+  quand il est absent.
+- `after` : le `next_after` de la page précédente, `<jour>:<signature>`.
+  La page commence strictement après cette ligne. Le daemon le coupe à
+  son premier `:`, puisqu'une signature porte ses propres deux-points.
+  Encodez-le en pourcent : un nom de service ou d'endpoint peut contenir
+  un caractère que la query string réserve, comme `&`, `#`, `+` ou `%`.
+  Sans `:` ou avec un jour qui n'est pas un nombre, `400`.
+- `limit` : lignes par page, 1000 par défaut. Aucune page ne porte plus
+  de 5000 lignes, et un `limit` à 0 ou au-delà de 5000 répond `400`. Une
+  page s'arrête aussi vers 4 Mio de JSON, avant `limit` quand les
+  signatures sont longues.
+
+**Forme de la réponse :** un objet :
+
+| Champ            | Type           | Description                                                                          |
+|------------------|----------------|--------------------------------------------------------------------------------------|
+| `ledger_id`      | string         | UUID de ce registre, nouveau à chaque démarrage du daemon                            |
+| `started_ms`     | number         | Démarrage de ce registre, en millisecondes epoch Unix                                |
+| `current_day`    | number         | Jour le plus récent que détient le registre                                          |
+| `oldest_day`     | number         | Jour le plus ancien que détient le registre                                          |
+| `sealed_through` | number ou null | Dernier jour scellé au moment de la page, `null` avant le premier                    |
+| `counts`         | array          | `{ day, signature, detections, extra_io_ops }`, par ordre croissant (jour, signature) |
+| `days`           | array          | Un objet par jour, voir plus bas                                                     |
+| `next_after`     | string ou null | Curseur de la page suivante, `null` sur la dernière                                  |
+
+`extra_io_ops` additionne les opérations d'I/O évitables des détections
+comptées. Il est absent quand le scoring green est coupé, ce qui dit que
+l'I/O est inconnue, pas nulle.
+
+Chaque objet de `days` :
+
+| Champ                   | Type    | Description                                                                                  |
+|-------------------------|---------|----------------------------------------------------------------------------------------------|
+| `day`                   | number  | Le jour epoch UTC                                                                            |
+| `sealed`                | boolean | Le jour est terminé et ses comptes ne bougent plus                                           |
+| `gap`                   | boolean | Le daemon n'a pas tourné toute la journée, les comptes sont donc une borne basse             |
+| `overflow_detections`   | number  | Détections comptées sans leur signature, voir plus bas                                       |
+| `overflow_extra_io_ops` | number  | I/O évitables de ces détections, absent quand le scoring green est coupé                     |
+| `shed_traces`           | number  | Traces délestées par l'analyse ce jour-là, jamais analysées                                  |
+| `ingest_rejected`       | number  | Requêtes OTLP refusées à l'ingestion ce jour-là, file pleine ou pression mémoire             |
+| `sampling_rate`         | number  | `[daemon] sampling_rate` : les comptes couvrent cette part des traces                        |
+
+Une détection va dans le débordement de son jour quand sa signature est
+nouvelle au-delà de `[daemon.detections] max_signatures_per_day`, dépasse
+1024 octets ou porte un caractère de contrôle. Les pertes vues par le
+tick qui passe minuit sont comptées sur les deux jours, puisqu'elles
+peuvent appartenir à l'un comme à l'autre.
+
+L'objet d'un jour arrive sur la page qui porte la dernière ligne
+`counts` de ce jour, ou, pour un jour sans ligne, sur la page dont le
+parcours le dépasse. Les comptes d'un jour ne sont définitifs que si ce
+jour est inférieur ou égal au `sealed_through` lu sur la première page
+de votre parcours. Un jour que le registre scelle pendant votre parcours
+peut gagner des lignes derrière votre curseur, et un jour plus récent,
+aujourd'hui compris, change encore : relisez-les au parcours suivant.
+
+**Exemple :** deux jours de trois signatures, lus deux lignes à la fois.
+
+```bash
+curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode limit=2
+```
+
+```json
+{
+  "ledger_id": "6f1c2a9e-3b4d-4e8f-9a7b-1c2d3e4f5a6b",
+  "started_ms": 1793092440000,
+  "current_day": 20754,
+  "oldest_day": 20753,
+  "sealed_through": 20753,
+  "counts": [
+    {"day": 20753, "signature": "n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "detections": 14, "extra_io_ops": 52},
+    {"day": 20753, "signature": "redundant_sql:order-svc:_api_v1_orders:cccccccccccccccccccccccccccccccc", "detections": 3, "extra_io_ops": 6}
+  ],
+  "days": [],
+  "next_after": "20753:redundant_sql:order-svc:_api_v1_orders:cccccccccccccccccccccccccccccccc"
+}
+```
+
+La deuxième page renvoie ce curseur, encodé en pourcent par `curl` :
+
+```bash
+curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode limit=2 \
+  --data-urlencode "after=20753:redundant_sql:order-svc:_api_v1_orders:cccccccccccccccccccccccccccccccc"
+```
+
+```json
+{
+  "ledger_id": "6f1c2a9e-3b4d-4e8f-9a7b-1c2d3e4f5a6b",
+  "started_ms": 1793092440000,
+  "current_day": 20754,
+  "oldest_day": 20753,
+  "sealed_through": 20753,
+  "counts": [
+    {"day": 20753, "signature": "slow_sql:billing-svc:GET__invoices:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "detections": 2, "extra_io_ops": 0},
+    {"day": 20754, "signature": "n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "detections": 9, "extra_io_ops": 31}
+  ],
+  "days": [
+    {
+      "day": 20753,
+      "sealed": true,
+      "gap": true,
+      "overflow_detections": 0,
+      "overflow_extra_io_ops": 0,
+      "shed_traces": 0,
+      "ingest_rejected": 0,
+      "sampling_rate": 1.0
+    }
+  ],
+  "next_after": "20754:n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
+```
+
+La troisième page clôt le parcours, `next_after` vaut `null` :
+
+```json
+{
+  "ledger_id": "6f1c2a9e-3b4d-4e8f-9a7b-1c2d3e4f5a6b",
+  "started_ms": 1793092440000,
+  "current_day": 20754,
+  "oldest_day": 20753,
+  "sealed_through": 20753,
+  "counts": [
+    {"day": 20754, "signature": "redundant_sql:order-svc:_api_v1_orders:cccccccccccccccccccccccccccccccc", "detections": 1, "extra_io_ops": 2},
+    {"day": 20754, "signature": "slow_sql:billing-svc:GET__invoices:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "detections": 5, "extra_io_ops": 0}
+  ],
+  "days": [
+    {
+      "day": 20754,
+      "sealed": false,
+      "gap": false,
+      "overflow_detections": 0,
+      "overflow_extra_io_ops": 0,
+      "shed_traces": 0,
+      "ingest_rejected": 0,
+      "sampling_rate": 1.0
+    }
+  ],
+  "next_after": null
+}
+```
+
 ### Interop TOML et JSONL
 
 Le daemon lit `.perf-sentinel-acknowledgments.toml` (chemin
@@ -1365,11 +1543,15 @@ findings acquittés même dans le chemin par défaut.
 | Corrélations désactivées ou corrélateur inactif   | 200    | `[]`                                                                                                    |
 | `/api/export/report` sur daemon cold-start        | 200    | enveloppe Report vide avec `warnings: ["daemon has not yet processed any events"]` (avant 0.5.16 : 503) |
 | Paramètre de requête malformé (ex. `limit=abc`)   | 400    | erreur en texte brut générée par axum                                                                   |
+| `limit` à 0 ou au-delà de 5000 sur `/api/detections` | 400 | `{"error": "limit must be between 1 and 5000"}`                                                      |
+| `after` autre que `<jour>:<signature>` sur `/api/detections` | 400 | `{"error": "after must be <day>:<signature>"}`                                               |
+| `/api/detections` avec `[daemon.detections] enabled = false` | 503 | `{"error": "detection ledger disabled"}`                                                     |
 | Chemin inconnu (ex. `/api/does-not-exist`)        | 404    | corps vide                                                                                              |
 | Clé absente ou fausse sur une route gardée         | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                    |
 | Méthode autre que GET                             | 405    | erreur en texte brut générée par axum                                                                   |
 
-L'API n'émet pas de 5xx en fonctionnement normal. Un crash du processus
+Hors ce `503` sur un registre de détections désactivé, l'API n'émet pas
+de 5xx en fonctionnement normal. Un crash du processus
 retourne ce que la pile TCP émet (connection reset).
 
 ## Cas d'usage

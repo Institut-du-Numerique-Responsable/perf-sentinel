@@ -316,6 +316,64 @@ fn hub_findings_without_a_credential_sends_no_authorization() {
 }
 
 #[test]
+fn hub_findings_relays_the_window_paging_and_signature() {
+    let home = tempfile::tempdir().unwrap();
+    let (base, rx) = spawn_hub(vec![(200, fixture("hub_findings.json"))]);
+    let out = run(
+        home.path(),
+        &[
+            "hub",
+            "--hub",
+            &base,
+            "findings",
+            "--from",
+            "2026-10-21T00:00:00Z",
+            "--to",
+            "1793145600000",
+            "--offset",
+            "100",
+            "--include-acked",
+            "false",
+            "--signature",
+            "n_plus_one_sql:svc:GET /x:abc",
+        ],
+        &[],
+    );
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!(
+        next(&rx).line,
+        "GET /api/findings?limit=50&from=1792540800000&to=1793145600000&offset=100&include_acked=false&signature=n_plus_one_sql%3Asvc%3AGET%20%2Fx%3Aabc HTTP/1.1"
+    );
+}
+
+#[test]
+fn hub_findings_refuses_from_after_to() {
+    let home = tempfile::tempdir().unwrap();
+    let (base, rx) = spawn_hub(vec![(200, fixture("hub_findings.json"))]);
+    let out = run(
+        home.path(),
+        &[
+            "hub",
+            "--hub",
+            &base,
+            "findings",
+            "--from",
+            "2026-10-28T00:00:00Z",
+            "--to",
+            "2026-10-21T00:00:00Z",
+        ],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = text(&out.stderr);
+    assert!(
+        stderr.contains("--from") && stderr.contains("--to"),
+        "{stderr}"
+    );
+    assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
+}
+
+#[test]
 fn hub_findings_sends_the_stored_token_and_prints_json_unchanged() {
     let home = tempfile::tempdir().unwrap();
     let body = fixture("hub_findings.json");

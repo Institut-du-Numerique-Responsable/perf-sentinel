@@ -21,6 +21,7 @@
 - [Long-running traces and TTL eviction in daemon mode](#long-running-traces-and-ttl-eviction-in-daemon-mode): why sparse-burst traces undercount in streaming mode.
 - [Analysis backpressure and load shedding](#analysis-backpressure-and-load-shedding): why a slow analysis worker sheds whole batches, explicitly metered.
 - [Daemon state model: in-memory, single-process, no shared state](#daemon-state-model-in-memory-single-process-no-shared-state): why replicas do not share state and an ungraceful kill drops the in-flight window.
+- [Detection ledger: what a count covers](#detection-ledger-what-a-count-covers): the unit counted, the strict mode, the losses no day reports, and several pods behind a Service.
 - [Field length limits at ingestion](#field-length-limits-at-ingestion): per-field byte caps applied at the ingestion boundary.
 - [Binary size](#binary-size): release-binary target and what contributes to it.
 - [HTML dashboard: CSV formula-injection guard](#html-dashboard-csv-formula-injection-guard): OWASP CSV-injection neutralization in exported CSVs.
@@ -333,6 +334,26 @@ The practical impact is small. What is in flight at that moment is incomplete tr
 
 - **Per-trace detectors** (`n_plus_one` and friends) are correct under multiple replicas *only* if the collector load-balances by `trace_id` so all spans of a trace reach the same instance. The OTel Collector `loadbalancingexporter` with `routing_key: traceID` does this, and the [sharded topology](./HELM-DEPLOYMENT.md#deployment-default) relies on it.
 - **Cross-service correlation** has no distributed answer today. It only sees what one process buffers, so it must run on a single daemon that receives all the relevant services, or you accept partial correlation. Routing by `trace_id` does not help here, because cross-service correlation spans *different* traces.
+
+## Detection ledger: what a count covers
+
+Since 0.37.0 the daemon counts how many times it detected each finding signature per UTC day, served on [`GET /api/detections`](QUERY-API.md#get-apidetections) and pushed by `[daemon.hub_export]`. The count is exact for what the daemon analyzed, and says nothing about what it did not see. Read it with these limits.
+
+**The unit is one emitted finding.** A detection is counted each time detection emits a finding with a signature, before the findings ring, the Hub export and the acknowledgments see it. `max_retained_findings` (even `0`), ring eviction, the one-hour suppression of `[daemon.hub_export]` and acks leave the count unchanged. The `seen_count` of `/api/findings` stays what it was: the detections the ring still retains, not a volume. Consequences:
+
+- An acknowledged finding still counts, as its waste stays in `io_waste_ratio`.
+- One trace can yield several findings of one signature, and each counts: `redundant_*` findings with different parameters, `excessive_fanout` and `serialized_calls` once per parent span, one finding per grouping value.
+- Slow findings across traces and those of the sliding slow window count, with 0 avoidable I/O.
+- A trace fragment analyzed again after [TTL eviction](#long-running-traces-and-ttl-eviction-in-daemon-mode) counts as the detector emitted it.
+- `extra_io_ops` is the exact sum of each detection's `green_impact.estimated_extra_io_ops`, not the count times one representative. It is absent when green scoring is off.
+
+**Strict mode, no persistence.** The ledger lives in memory only. Every stop of the daemon, clean or not, is a gap: nothing is analyzed while it is down, and it cannot tell whether the collector replayed spans meanwhile. Each start opens a new ledger with a new `ledger_id`, and its first day carries `gap = true`. A graceful shutdown sets `gap = true` on the current day after the last batch is analyzed. A day the daemon stopped before midnight is never sealed, so it stays incomplete for good. The ledger keeps `[daemon.detections] retained_days` days (8 by default): a reader that does not come back within that span loses the oldest ones.
+
+**No extrapolation.** The counts cover what reached detection. Each day reports the lowest `sampling_rate` in force, the traces the analysis shed (`shed_traces`) and the OTLP requests refused for a full queue or memory pressure (`ingest_rejected`). None of them is added back into the counts. A new signature past `max_signatures_per_day`, or one longer than 1024 bytes or holding a control character, counts in the day's overflow, without its signature.
+
+**Some losses are not reported.** Ingest losses that no metric counts today leave no mark on the day: an OTLP HTTP body refused with `413`, an oversized gRPC message, a line dropped on the JSON socket, the events a trace loses past [`max_events_per_trace`](#maximum-events-per-trace). With one of them, a day can read complete and still be a lower bound.
+
+**Several pods behind one Service.** Each daemon keeps its own ledger. A Hub that polls a Service reaches one pod per request, so it never reads every pod's ledger, and it flags the counts it builds from them as incomplete (`multi_instance`). Two setups give complete counts: one Hub source per pod, each polling that pod's own address, or `[daemon.hub_export]` on every pod, so each pod pushes its own ledger and the Hub adds them up. See [HELM-DEPLOYMENT.md](./HELM-DEPLOYMENT.md#detection-counts-with-several-pods).
 
 ## Field length limits at ingestion
 

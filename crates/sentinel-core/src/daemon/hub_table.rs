@@ -292,7 +292,7 @@ impl<V: Keyed + Clone + 'static> RouteExport<V> {
 }
 
 /// A Hub that predates the route answers it as any unmapped path.
-fn is_missing_route(status: hyper::StatusCode) -> bool {
+pub(crate) fn is_missing_route(status: hyper::StatusCode) -> bool {
     matches!(
         status,
         hyper::StatusCode::NOT_FOUND | hyper::StatusCode::METHOD_NOT_ALLOWED

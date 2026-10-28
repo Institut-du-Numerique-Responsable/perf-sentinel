@@ -13,7 +13,7 @@ Pour une alternative sans Helm, voir les manifests bruts dans [`docs/FR/INSTRUME
 - [Chaîne d'approvisionnement logicielle](#chaîne-dapprovisionnement-logicielle) : signatures Cosign keyless, provenance SLSA, SBOM, attestation public-good.
 - [Installation depuis un checkout local](#installation-depuis-un-checkout-local) : pour les contributeurs et le bisect.
 - [Couper une nouvelle release de chart](#couper-une-nouvelle-release-de-chart) : tâche mainteneur, renvoie vers RELEASE-PROCEDURE.
-- [Modes de workload](#modes-de-workload) : trois valeurs de `workload.kind` au choix.
+- [Modes de workload](#modes-de-workload) : trois valeurs de `workload.kind` au choix, et [les comptes de détections avec plusieurs pods](#comptes-de-détections-avec-plusieurs-pods).
 - [Surface de configuration](#surface-de-configuration) : valeurs du chart pour `.perf-sentinel.toml`, plus [fragments](#fragments-de-configuration), secrets, TLS, NetworkPolicy et l'[Ingress](#ingress) optionnel.
 - [Observabilité](#observabilité) : Prometheus ServiceMonitor, les tableaux de bord Grafana (métriques et [la table des findings](#grafana-sur-lapi-de-requête-table-des-findings)), alertes et exemplars.
 - [Mise à jour](#mise-à-jour) : flux `helm upgrade`.
@@ -375,6 +375,15 @@ Le chemin de montage est figé à `/var/lib/perf-sentinel`, `persistence` n'acce
 En mode `Deployment` et `DaemonSet`, les acks runtime sont indisponibles, pas seulement éphémères. Le chemin de stockage par défaut est résolu via `dirs::data_local_dir()`, et l'image du conteneur est `FROM scratch` sans `HOME` ni `/etc/passwd`, donc le chemin ne peut pas être résolu du tout. Le daemon journalise un WARN au démarrage, reste debout, et les deux routes d'écriture d'ack renvoient `503 Service Unavailable`. `GET /api/acks` n'est gardé que par l'authentification et répond toujours `200` avec une liste vide : ce n'est donc pas une sonde valable pour détecter cet état.
 
 Choisissez le mode de workload en tenant compte de cet arbitrage. Si vos opérateurs doivent acquitter des findings au runtime, depuis le dashboard, la CLI `ack` ou une alerte à 3h du matin, la topologie par défaut en est incapable et c'est `StatefulSet` avec `persistence.enabled` qu'il vous faut installer. La baseline TOML CI ne s'y substitue pas : elle porte les décisions permanentes de l'équipe, revues en pull request et partagées par tous les environnements, pas le report d'astreinte pendant un incident. Elle couvre en revanche le cas où chaque acquittement est une décision durable d'équipe, et elle n'a besoin d'aucun PVC puisqu'elle est en lecture seule au runtime. Voir [`docs/FR/ACK-WORKFLOW-FR.md`](./ACK-WORKFLOW-FR.md#choisir-entre-toml-et-daemon) pour savoir quel acquittement va où.
+
+### Comptes de détections avec plusieurs pods
+
+Depuis 0.37.0, chaque daemon compte ses détections par jour UTC dans son propre registre en mémoire (`[daemon.detections]`, actif par défaut). Un seul pod a un seul registre et n'a besoin de rien de plus. Avec plusieurs pods, un `Deployment` dont `workload.replicas` dépasse 1 ou un `DaemonSet`, un PerfSentinelHub qui interroge le Service `ClusterIP` du chart atteint un pod par requête. Il lit une partie des registres des pods et marque les comptes comme incomplets (`multi_instance`). Deux montages donnent des comptes complets :
+
+- **Le push depuis chaque pod.** Activez `[daemon.hub_export]` dans `config.toml`. Chaque pod pousse son propre registre sous le même `source_id`, et le Hub additionne les registres. Cela marche dans tous les modes de workload.
+- **Une source du Hub par pod.** Pointez une source du Hub sur l'adresse propre de chaque pod plutôt que sur le Service. Seul `StatefulSet` donne aux pods une adresse stable, par son Service headless : `perf-sentinel-0.perf-sentinel-headless.observability.svc.cluster.local:4318` pour le premier pod d'une installation `workload.kind=StatefulSet`. Passer le StatefulSet à l'échelle demande alors de déclarer les nouveaux pods dans le Hub.
+
+Un redémarrage ouvre un nouveau registre dans tous les modes, et son premier jour est un trou. La liste complète de ce que couvre un compte est dans [LIMITATIONS-FR.md](./LIMITATIONS-FR.md#registre-de-détections--ce-que-couvre-un-compte).
 
 ## Surface de configuration
 
@@ -911,7 +920,7 @@ parce qu'une NetworkPolicy refuse en silence.
 
 La table affiche une ligne par problème distinct plutôt qu'une par
 détection, puisque `/api/findings` replie par la signature qu'utilisent
-les acquittements, et sa colonne `Traces` est le compte de ce repli. Il
+les acquittements, et sa colonne `Retenues` est le compte de ce repli. Il
 compte les détections encore retenues dans le tampon circulaire du
 daemon, il baisse donc quand les plus anciennes expirent et repart de
 zéro au redémarrage du daemon. La sévérité se filtre par l'en-tête de

@@ -959,12 +959,12 @@ request_timeout_secs = 10
 max_pending = 10000
 ```
 
-`request_timeout_secs` applies to the findings, incidents and correlations pushes alike.
-Raise it for a Hub that answers slowly while it catches up, rather than let every push
-time out, back off up to five minutes and fill the pending table. A graceful shutdown
-still gives the drain 10 seconds, so a longer timeout can leave a push cut off there. One
-task sends the three kinds in turn, so while a push waits on the Hub the incidents and the
-correlation reads wait with it: give the Hub the time it needs and no more.
+`request_timeout_secs` applies to the findings, incidents, correlations and detections
+pushes alike. Raise it for a Hub that answers slowly while it catches up, rather than let
+every push time out, back off up to five minutes and fill the pending table. A graceful
+shutdown still gives the drain 10 seconds, so a longer timeout can leave a push cut off
+there. One task sends the four kinds in turn, so while a push waits on the Hub the other
+kinds and the correlation reads wait with it: give the Hub the time it needs and no more.
 
 The pending structure is a latest-value table, not an unbounded queue. A
 signature is sent immediately when first discovered or when its severity
@@ -1005,6 +1005,19 @@ correlations until it restarts, while findings and incidents keep flowing. An ol
 sign-in on answers 401 instead, so the daemon keeps retrying and logs each retry: upgrade the
 Hub to PerfSentinelHub 0.6.0 first. `perf_sentinel_hub_export_correlations_pending` and
 `perf_sentinel_hub_export_correlations_dropped_total` count what waits and what is dropped.
+
+With `[daemon.detections]` enabled too, the default, the daemon pushes its detection ledger
+to `/api/import/detections` beside `endpoint`, with the same key and source id, from 0.37.0.
+Each round sends every day whose counts moved since the Hub last accepted it, only the rows
+that changed since then, in pages shaped like a `GET /api/detections` page, at most 5,000
+rows and 4 MiB each, the day's `days` entry on its last page. The Hub keeps the larger count
+of each row, so the unchanged ones need not travel again. Rounds start at most once a
+minute, or once per `flush_interval_secs` when that is longer, and a failed page is retried
+with the same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
+and pushes once more. A page the Hub rejects with an unretryable 4xx is dropped, its rows
+counted in `perf_sentinel_hub_export_dropped_total`, and its day set to `gap = true` in the
+ledger. A Hub that answers 404 or 405 on that route predates it: the daemon logs one warning
+and stops pushing detection counts until it restarts, while the other exports keep flowing.
 
 On a graceful shutdown (SIGTERM, `helm upgrade`, a rolling restart) the
 exporter flushes what it still holds before the process exits, for up to
@@ -1052,6 +1065,26 @@ bounds, so `seen_count` and `first_seen_ms` on the frozen findings
 describe the window rather than the whole retained history. See
 [QUERY-API.md](QUERY-API.md) for why the window closes after the incident
 and for the settle pass that fills its tail.
+
+#### `[daemon.detections]` (optional, since 0.37.0)
+
+Exact per-day volume of what the daemon detected. For each UTC day, the daemon
+counts every detection by finding signature, so the figure stays exact where the
+`[daemon] max_retained_findings` ring evicts. The ledger lives in memory only,
+and a restart starts a new one. On by default. Daemon-only.
+
+| Field                    | Type    | Default | Description                                                                                                                                                                                                                                                                                                               |
+|--------------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`                | boolean | `true`  | Record every detection in the per-day ledger. `false` skips the ledger, and the bounds below are still checked                                                                                                                                                                                                            |
+| `retained_days`          | integer | `8`     | Days of ledger kept in memory, today included, 2 to 31. The older days are dropped                                                                                                                                                                                                                                        |
+| `max_signatures_per_day` | integer | `10000` | Distinct finding signatures tracked per day, 1 to 1000000. A new signature past it counts in the day's overflow, never in another signature. A signature longer than 1024 bytes or holding a control character is not tracked and counts in the overflow too. The ceiling keeps a typo from sizing the ledger past memory |
+
+```toml
+[daemon.detections]
+enabled = true
+retained_days = 8
+max_signatures_per_day = 10000
+```
 
 #### `[daemon.cors]` (optional, since 0.5.23)
 
@@ -1237,6 +1270,12 @@ memory_high_water_pct = 0
 # enabled = true
 # window_minutes = 10
 # lag_threshold_ms = 5000
+
+# Optional: per-day ledger of detections, in memory (default on)
+# [daemon.detections]
+# enabled = true
+# retained_days = 8
+# max_signatures_per_day = 10000
 ```
 
 ## Migration from 0.5.x

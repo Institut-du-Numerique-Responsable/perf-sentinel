@@ -20,9 +20,9 @@ use crate::score::carbon::DEFAULT_EMBODIED_CARBON_PER_REQUEST_GCO2;
 use super::validate::has_control_char;
 use super::{
     Config, DEFAULT_FULCIO_URL, DEFAULT_REKOR_URL, DaemonAckConfig, DaemonArchiveConfig,
-    DaemonConfig, DaemonCorsConfig, DaemonEnvironment, DaemonHubExportConfig,
-    DaemonIncidentsConfig, DaemonTlsConfig, DetectionConfig, GreenConfig, ReportingConfig,
-    SigstoreConfig, ThresholdsConfig,
+    DaemonConfig, DaemonCorsConfig, DaemonDetectionsConfig, DaemonEnvironment,
+    DaemonHubExportConfig, DaemonIncidentsConfig, DaemonTlsConfig, DetectionConfig, GreenConfig,
+    ReportingConfig, SigstoreConfig, ThresholdsConfig,
 };
 
 #[derive(Deserialize, Default)]
@@ -352,6 +352,7 @@ pub(super) struct DaemonSection {
     correlation: CorrelationSection,
     ack: DaemonAckSection,
     incidents: DaemonIncidentsSection,
+    detections: DaemonDetectionsSection,
     cors: DaemonCorsSection,
     archive: ArchiveSection,
     hub_export: HubExportSection,
@@ -404,6 +405,15 @@ struct DaemonIncidentsSection {
     kind_label: Option<String>,
     namespace_label: Option<String>,
     archive_path: Option<String>,
+}
+
+/// Raw deserialization target for `[daemon.detections]`.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct DaemonDetectionsSection {
+    enabled: Option<bool>,
+    retained_days: Option<u32>,
+    max_signatures_per_day: Option<usize>,
 }
 
 /// Raw deserialization target for `[daemon.cors]`.
@@ -807,6 +817,23 @@ impl From<RawConfig> for Config {
                         .hub_export
                         .max_pending
                         .unwrap_or(daemon_defaults.hub_export.max_pending),
+                },
+                detections: DaemonDetectionsConfig {
+                    enabled: raw
+                        .daemon
+                        .detections
+                        .enabled
+                        .unwrap_or(daemon_defaults.detections.enabled),
+                    retained_days: raw
+                        .daemon
+                        .detections
+                        .retained_days
+                        .unwrap_or(daemon_defaults.detections.retained_days),
+                    max_signatures_per_day: raw
+                        .daemon
+                        .detections
+                        .max_signatures_per_day
+                        .unwrap_or(daemon_defaults.detections.max_signatures_per_day),
                 },
             },
             reporting: ReportingConfig {

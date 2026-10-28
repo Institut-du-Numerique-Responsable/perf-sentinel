@@ -426,6 +426,11 @@ export PERF_SENTINEL_HUB_TOKEN="$HUB_TOKEN"   # depuis le coffre de secrets de l
 perf-sentinel hub findings --environment production --status active --severity critical --format json
 ```
 
+`hub findings` accepte aussi `--from` et `--to` (RFC 3339 UTC ou
+millisecondes epoch), `--offset`, `--include-acked true|false` et
+`--signature`, pour lire une fenêtre, la parcourir par pages ou suivre un
+finding précis.
+
 Le jeton part en `Authorization: Bearer`, uniquement en `https` (ou en
 `http` simple vers la boucle locale), et jamais sur la ligne de commande.
 Un jeton machine ne fait que lire : `hub ack`, `hub unack` et

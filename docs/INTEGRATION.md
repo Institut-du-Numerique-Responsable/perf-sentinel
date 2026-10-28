@@ -426,6 +426,10 @@ export PERF_SENTINEL_HUB_TOKEN="$HUB_TOKEN"   # from the CI secret store
 perf-sentinel hub findings --environment production --status active --severity critical --format json
 ```
 
+`hub findings` also takes `--from` and `--to` (RFC 3339 UTC or epoch
+milliseconds), `--offset`, `--include-acked true|false` and `--signature`,
+to read one window, page through it or follow one finding.
+
 The token is sent as `Authorization: Bearer`, only over `https` (or plain
 `http` to loopback), and never on the command line. A machine token only
 reads: `hub ack`, `hub unack` and `hub analyze` need a person's
