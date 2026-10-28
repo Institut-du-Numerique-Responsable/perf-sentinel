@@ -4,6 +4,14 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.37.1] - 2026-10-28
+
+### Fixed
+
+- A graceful shutdown no longer lets the detection push spend the Hub export's 10 s drain budget before the findings. The drain sent one findings batch, then every page of every changed ledger day, before the next findings batch, so after a long Hub outage the findings still pending could be dropped behind several days of detection pages. The ledger's last push now waits until the findings, incidents and correlation episodes are sent.
+- A `GET /api/detections` page now stays near its 4 MiB budget when signatures hold `"` or `\`. The page size estimate counted a signature's raw bytes and missed the JSON escapes, so 5000 such signatures could serve a body about twice the budget.
+- `perf-sentinel hub analyze --from` and `--to` accept epoch milliseconds, as `hub findings` does. They took RFC 3339 only, with a parser of their own.
+
 ## [0.37.0] - 2026-10-28
 
 ### Added
