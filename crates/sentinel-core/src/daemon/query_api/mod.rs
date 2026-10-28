@@ -700,10 +700,9 @@ async fn handle_detections(
         .after
         .as_deref()
         .map(|raw| {
-            parse_after(raw).ok_or(ErrorResponse::new(
-                StatusCode::BAD_REQUEST,
-                "after must be <day>:<signature>",
-            ))
+            parse_after(raw).ok_or_else(|| {
+                ErrorResponse::new(StatusCode::BAD_REQUEST, "after must be <day>:<signature>")
+            })
         })
         .transpose()?;
     Ok(Json(ledger.page(params.since_day, after, limit)).into_response())
