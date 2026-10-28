@@ -612,6 +612,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_drain_sends_every_findings_batch_before_the_detections() {
+        let (base, seen) = fake_hub(200).await;
+        let ledger = ledger_at(DAY);
+        record(&ledger, DAY, &["a"]);
+        let findings = Arc::new(HubExportBuffer::new(300));
+        // Batches of 100: three findings rounds before the queue is empty.
+        let batch: Vec<_> = (0..250)
+            .map(|i| finding(&format!("f{i}"), "trace"))
+            .collect();
+        findings.push_batch(&batch, 1);
+        let (handle, shutdown) = spawn_with_detections(
+            &base,
+            &findings,
+            export(&base, &ledger),
+            Duration::from_hours(1),
+        );
+        shutdown.notify_one();
+
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("the drain ends once everything is sent")
+            .expect("exporter task panicked");
+        let paths: Vec<String> = seen
+            .lock()
+            .expect("lock")
+            .iter()
+            .map(|(uri, _, _)| uri.clone())
+            .collect();
+        let last_findings = paths
+            .iter()
+            .rposition(|p| p.starts_with("/api/import/findings"))
+            .expect("findings were sent");
+        let first_detections = paths
+            .iter()
+            .position(|p| p.starts_with("/api/import/detections"))
+            .expect("the ledger was sent");
+        assert_eq!(3, count(&seen, "/api/import/findings"));
+        assert!(last_findings < first_detections, "{paths:?}");
+    }
+
+    #[tokio::test]
     async fn a_drain_forces_one_last_push_and_returns() {
         let (base, seen) = fake_hub(200).await;
         let now = crate::daemon::event_loop::current_time_ms();

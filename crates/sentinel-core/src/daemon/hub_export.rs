@@ -606,7 +606,11 @@ impl Halves {
                 .round(client, api_key, metrics, flush_interval, draining)
                 .await;
         }
-        if let Some(export) = self.detections.as_mut() {
+        // While draining, the ledger's pass waits until the other halves are
+        // empty: it can run many pages and must not spend their drain budget.
+        if let Some(export) = self.detections.as_mut()
+            && !(draining && sent)
+        {
             sent |= export
                 .round(client, api_key, metrics, flush_interval, draining)
                 .await;

@@ -1014,7 +1014,8 @@ rows and 4 MiB each, the day's `days` entry on its last page. The Hub keeps the 
 of each row, so the unchanged ones need not travel again. Rounds start at most once a
 minute, or once per `flush_interval_secs` when that is longer, and a failed page is retried
 with the same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
-and pushes once more. A page the Hub rejects with an unretryable 4xx is dropped, its rows
+and pushes once more, after the findings, incidents and episodes still pending, so a long
+ledger never spends their drain budget. A page the Hub rejects with an unretryable 4xx is dropped, its rows
 counted in `perf_sentinel_hub_export_dropped_total`, and its day set to `gap = true` in the
 ledger. A Hub that answers 404 or 405 on that route predates it: the daemon logs one warning
 and stops pushing detection counts until it restarts, while the other exports keep flowing.
