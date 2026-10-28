@@ -1171,7 +1171,7 @@
     },
     {
       "title": "Detection ledger signatures",
-      "description": "Signature rows the detection ledger holds across its retained days, one per signature and day, from `perf_sentinel_detection_ledger_signatures`. The ledger is the count behind `GET /api/detections`, kept in memory and set once a minute.\n\nIt climbs while each day's signatures are discovered, then levels off. Its ceiling is `[daemon.detections] retained_days` times `max_signatures_per_day`, and a day that reaches its own cap starts feeding the Cardinality caps panel instead. No data when `[daemon.detections] enabled = false`.",
+      "description": "Signature rows the detection ledger holds across its retained days, one per signature and day, from `perf_sentinel_detection_ledger_signatures`. The ledger is the count behind `GET /api/detections`, kept in memory and set once a minute.\n\nIt climbs while each day's signatures are discovered, then levels off. Its ceiling is `[daemon.detections] retained_days` times `max_signatures_per_day`, and a day that reaches its own cap starts feeding the Cardinality caps panel instead. Reads 0 when `[daemon.detections] enabled = false`.",
       "type": "stat",
       "gridPos": {
         "h": 4,
