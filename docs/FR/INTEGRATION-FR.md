@@ -338,7 +338,7 @@ Pour l'intégration avec GitHub ou GitLab code scanning, exportez les findings e
 perf-sentinel analyze --input traces.json --format sarif > results.sarif
 ```
 
-Envoyez le fichier SARIF vers votre tableau de bord code scanning. Chaque finding est mappé vers un résultat SARIF avec `ruleId`, `level`, une entrée `locations` portant les `logicalLocations` (service + endpoint), un tag personnalisé `properties.confidence` et une valeur standard `rank` SARIF (0-100) dérivée de la confiance.
+Envoyez le fichier SARIF vers votre tableau de bord code scanning. Chaque finding est mappé vers un résultat SARIF avec `ruleId`, `level`, le service et l'endpoint dans `properties.service` et `properties.endpoint`, une entrée `locations` quand le finding a un fichier source, un tag personnalisé `properties.confidence` et une valeur standard `rank` SARIF (0-100) dérivée de la confiance.
 
 ## Champ de confiance sur les findings
 

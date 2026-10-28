@@ -863,6 +863,12 @@ fn format_relative(delta: chrono::Duration) -> String {
     if total <= 0 {
         return "expired".to_string();
     }
+    if total < 60 {
+        return "in less than a minute".to_string();
+    }
+    // The delta is taken a moment after the expiry was set, so a 7-day
+    // expiry arrives a few seconds short: round up to the minute.
+    let total = (total + 59) / 60 * 60;
     let days = total / 86_400;
     let hours = (total % 86_400) / 3600;
     let minutes = (total % 3600) / 60;
@@ -1371,5 +1377,23 @@ mod tests {
         assert_eq!(format_relative(chrono::Duration::hours(3)), "in 3h");
         assert_eq!(format_relative(chrono::Duration::minutes(15)), "in 15min");
         assert_eq!(format_relative(chrono::Duration::seconds(-1)), "expired");
+    }
+
+    #[test]
+    fn format_relative_rounds_up_a_delta_taken_just_after_the_expiry() {
+        let short = |d: chrono::Duration| d - chrono::Duration::seconds(3);
+        assert_eq!(
+            format_relative(short(chrono::Duration::days(7))),
+            "in 7 days"
+        );
+        assert_eq!(
+            format_relative(short(chrono::Duration::days(1))),
+            "in 1 day"
+        );
+        assert_eq!(format_relative(short(chrono::Duration::hours(3))), "in 3h");
+        assert_eq!(
+            format_relative(chrono::Duration::seconds(30)),
+            "in less than a minute"
+        );
     }
 }

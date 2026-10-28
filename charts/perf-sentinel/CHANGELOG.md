@@ -10,6 +10,19 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.36.0]
+
+### Changed
+
+- **`appVersion` moves to `0.36.0`.** The SARIF output of `perf-sentinel analyze`
+  reads again in Jenkins Warnings NG: a result carries a `location` only when it
+  has a source file, and the service and endpoint move to `properties.service`
+  and `properties.endpoint`, a breaking change for SARIF consumers. The daemon
+  does not emit SARIF, so there are no daemon behavior changes. See the
+  application `CHANGELOG.md`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.35.0]
 
 ### Changed
