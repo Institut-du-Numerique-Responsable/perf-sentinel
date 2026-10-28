@@ -1199,7 +1199,7 @@ error, because a NetworkPolicy denies silently.
 
 The table shows one row per distinct problem rather than one per
 detection, since `/api/findings` folds by the signature acknowledgments
-use, and its `Traces` column is that fold's count. It counts detections
+use, and its `Retained` column is that fold's count. It counts detections
 still held in the daemon's ring buffer, so it falls as older ones age out
 and resets when the daemon restarts. Severity is filtered with the column
 header, so no request can ask the API for a severity it does not know.

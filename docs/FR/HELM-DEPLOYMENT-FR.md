@@ -920,7 +920,7 @@ parce qu'une NetworkPolicy refuse en silence.
 
 La table affiche une ligne par problème distinct plutôt qu'une par
 détection, puisque `/api/findings` replie par la signature qu'utilisent
-les acquittements, et sa colonne `Traces` est le compte de ce repli. Il
+les acquittements, et sa colonne `Retenues` est le compte de ce repli. Il
 compte les détections encore retenues dans le tampon circulaire du
 daemon, il baisse donc quand les plus anciennes expirent et repart de
 zéro au redémarrage du daemon. La sévérité se filtre par l'en-tête de
