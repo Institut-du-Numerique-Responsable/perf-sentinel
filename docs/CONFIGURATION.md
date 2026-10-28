@@ -1053,6 +1053,26 @@ describe the window rather than the whole retained history. See
 [QUERY-API.md](QUERY-API.md) for why the window closes after the incident
 and for the settle pass that fills its tail.
 
+#### `[daemon.detections]` (optional, since 0.37.0)
+
+Exact per-day volume of what the daemon detected. For each UTC day, the daemon
+counts every detection by finding signature, so the figure stays exact where the
+`[daemon] max_retained_findings` ring evicts. The ledger lives in memory only,
+and a restart starts a new one. On by default. Daemon-only.
+
+| Field                    | Type    | Default | Description                                                                                                                                                                                                                                                                                                               |
+|--------------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`                | boolean | `true`  | Record every detection in the per-day ledger. `false` skips the ledger, and the bounds below are still checked                                                                                                                                                                                                            |
+| `retained_days`          | integer | `8`     | Days of ledger kept in memory, today included, 2 to 31. The older days are dropped                                                                                                                                                                                                                                        |
+| `max_signatures_per_day` | integer | `10000` | Distinct finding signatures tracked per day, 1 to 1000000. A new signature past it counts in the day's overflow, never in another signature. A signature longer than 1024 bytes or holding a control character is not tracked and counts in the overflow too. The ceiling keeps a typo from sizing the ledger past memory |
+
+```toml
+[daemon.detections]
+enabled = true
+retained_days = 8
+max_signatures_per_day = 10000
+```
+
 #### `[daemon.cors]` (optional, since 0.5.23)
 
 Cross-origin resource sharing for the daemon's `/api/*` query
@@ -1237,6 +1257,12 @@ memory_high_water_pct = 0
 # enabled = true
 # window_minutes = 10
 # lag_threshold_ms = 5000
+
+# Optional: per-day ledger of detections, in memory (default on)
+# [daemon.detections]
+# enabled = true
+# retained_days = 8
+# max_signatures_per_day = 10000
 ```
 
 ## Migration from 0.5.x

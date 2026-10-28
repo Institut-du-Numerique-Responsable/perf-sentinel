@@ -388,6 +388,8 @@ pub struct DaemonConfig {
     pub archive: Option<DaemonArchiveConfig>,
     /// Optional batched exporter to `PerfSentinelHub`.
     pub hub_export: DaemonHubExportConfig,
+    /// Per-day ledger of the finding signatures the daemon detected.
+    pub detections: DaemonDetectionsConfig,
 }
 
 /// Bounded, opt-in export of live daemon findings to `PerfSentinelHub`.
@@ -402,6 +404,20 @@ pub struct DaemonHubExportConfig {
     /// How long one push may take before the daemon gives up and retries.
     pub request_timeout_secs: u64,
     pub max_pending: usize,
+}
+
+/// Per-day ledger of the finding signatures the daemon detected, kept in
+/// memory. A restart starts a new ledger.
+#[derive(Debug, Clone)]
+pub struct DaemonDetectionsConfig {
+    /// Whether the daemon records detections. Default `true`. The bounds are
+    /// validated even when `false`.
+    pub enabled: bool,
+    /// Days of ledger kept, today included. 2 to 31, default 8.
+    pub retained_days: u32,
+    /// Distinct signatures tracked per day, the rest counted as overflow.
+    /// 1 to 1,000,000, default 10,000.
+    pub max_signatures_per_day: usize,
 }
 
 /// TLS material. Both fields must be set together (or both `None`).
@@ -675,6 +691,17 @@ impl Default for DaemonConfig {
             correlation: crate::detect::correlate_cross::CorrelationConfig::default(),
             archive: None,
             hub_export: DaemonHubExportConfig::default(),
+            detections: DaemonDetectionsConfig::default(),
+        }
+    }
+}
+
+impl Default for DaemonDetectionsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            retained_days: 8,
+            max_signatures_per_day: 10_000,
         }
     }
 }

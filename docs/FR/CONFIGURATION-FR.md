@@ -1084,6 +1084,27 @@ la fenêtre plutôt que l'historique retenu entier. Voir
 après l'incident et pour la passe de consolidation qui en remplit la
 queue.
 
+#### `[daemon.detections]` (optionnel, depuis 0.37.0)
+
+Volume exact, par jour, de ce que le daemon a détecté. Pour chaque jour UTC,
+le daemon compte chaque détection par signature de finding, si bien que le
+chiffre reste exact là où le ring de `[daemon] max_retained_findings` évince.
+Le registre ne vit qu'en mémoire, et un redémarrage en commence un nouveau.
+Actif par défaut. Daemon uniquement.
+
+| Champ                    | Type    | Défaut  | Description                                                                                                                                                                                                                                                                                                                                                                           |
+|--------------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`                | booléen | `true`  | Enregistre chaque détection dans le registre par jour. `false` saute le registre, et les bornes ci-dessous restent vérifiées                                                                                                                                                                                                                                                          |
+| `retained_days`          | entier  | `8`     | Jours de registre gardés en mémoire, aujourd'hui compris, de 2 à 31. Les jours plus anciens sont abandonnés                                                                                                                                                                                                                                                                           |
+| `max_signatures_per_day` | entier  | `10000` | Signatures de findings distinctes suivies par jour, de 1 à 1000000. Une nouvelle signature au-delà compte dans l'overflow du jour, jamais dans une autre signature. Une signature de plus de 1024 octets ou contenant un caractère de contrôle n'est pas suivie et compte aussi en overflow. Le plafond évite qu'une faute de frappe ne dimensionne le registre au-delà de la mémoire |
+
+```toml
+[daemon.detections]
+enabled = true
+retained_days = 8
+max_signatures_per_day = 10000
+```
+
 #### `[daemon.cors]` (optionnel, depuis 0.5.23)
 
 Cross-origin resource sharing pour les endpoints de requêtage `/api/*`
@@ -1276,6 +1297,12 @@ memory_high_water_pct = 0
 # enabled = true
 # window_minutes = 10
 # lag_threshold_ms = 5000
+
+# Optionnel : registre des détections par jour, en mémoire (actif par défaut)
+# [daemon.detections]
+# enabled = true
+# retained_days = 8
+# max_signatures_per_day = 10000
 ```
 
 ## Migration depuis 0.5.x

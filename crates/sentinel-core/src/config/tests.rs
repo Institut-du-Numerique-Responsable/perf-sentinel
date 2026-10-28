@@ -5485,6 +5485,55 @@ namespace_label = \"\"
 }
 
 #[test]
+fn detections_defaults_are_enabled_8_days_10000_signatures() {
+    let cfg = load_from_str("").unwrap();
+    assert!(cfg.daemon.detections.enabled);
+    assert_eq!(cfg.daemon.detections.retained_days, 8);
+    assert_eq!(cfg.daemon.detections.max_signatures_per_day, 10_000);
+}
+
+#[test]
+fn parse_daemon_detections_section() {
+    let cfg = load_from_str(
+        "
+[daemon.detections]
+enabled = false
+retained_days = 3
+max_signatures_per_day = 500
+",
+    )
+    .unwrap();
+    assert!(!cfg.daemon.detections.enabled);
+    assert_eq!(cfg.daemon.detections.retained_days, 3);
+    assert_eq!(cfg.daemon.detections.max_signatures_per_day, 500);
+}
+
+#[test]
+fn validate_daemon_detections_bounds() {
+    let cases = [
+        (
+            "retained_days = 1",
+            "[daemon.detections] retained_days must be >= 2",
+        ),
+        ("retained_days = 32", "must be <= 31"),
+        ("max_signatures_per_day = 0", ">= 1"),
+        ("max_signatures_per_day = 1_000_001", "<= 1000000"),
+    ];
+    for enabled in [true, false] {
+        for (line, expected) in cases {
+            let toml = format!("[daemon.detections]\nenabled = {enabled}\n{line}\n");
+            let msg = format!("{}", load_from_str(&toml).unwrap_err());
+            assert!(msg.contains(expected), "enabled={enabled} {line}: {msg}");
+        }
+    }
+}
+
+#[test]
+fn detections_unknown_key_is_rejected() {
+    assert!(load_from_str("[daemon.detections]\nretention_days = 8\n").is_err());
+}
+
+#[test]
 fn parse_daemon_read_api_key() {
     assert!(Config::default().daemon.read_api_key.is_none());
     let cfg = load_from_str("[daemon]\nread_api_key = \"a-long-enough-read-key\"").unwrap();

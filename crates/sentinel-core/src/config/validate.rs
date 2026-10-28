@@ -240,6 +240,7 @@ impl Config {
         self.validate_daemon_cors()?;
         self.validate_daemon_archive()?;
         self.validate_daemon_hub_export()?;
+        self.validate_daemon_detections()?;
         self.validate_reporting()?;
         self.validate_cross_section_consistency()?;
         Ok(())
