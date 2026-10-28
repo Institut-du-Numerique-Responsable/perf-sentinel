@@ -169,6 +169,7 @@ fn test_ctx<'a>(
         confidence: Confidence::DaemonStaging,
         findings_store,
         hub_export: None,
+        detection_ledger: None,
         correlator: None,
         green_summary_cell,
         archive_tx: None,
@@ -218,6 +219,55 @@ async fn process_traces_with_n_plus_one() {
         test_ctx(&detect_config, &ctx, &metrics, &store, true, &cell),
     )
     .await;
+}
+
+#[tokio::test]
+async fn ledger_counts_even_with_zero_retention() {
+    let events = || -> Vec<_> {
+        (1..=6)
+            .map(|i| {
+                make_normalized(
+                    "t1",
+                    &format!("SELECT * FROM order_item WHERE order_id = {i}"),
+                )
+            })
+            .collect()
+    };
+    let metrics = MetricsState::new();
+    let ctx = empty_carbon_ctx();
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    // A retaining run only to learn the N+1 signature.
+    let probe = findings_store::FindingsStore::new(100);
+    process_traces(
+        vec![("t1".to_string(), events())],
+        test_ctx(&detect_config, &ctx, &metrics, &probe, true, &cell),
+    )
+    .await;
+    let filter = findings_store::FindingsFilter {
+        finding_type: Some("n_plus_one_sql".to_string()),
+        limit: 10,
+        ..Default::default()
+    };
+    let probed = probe.query(&filter).await;
+    assert_eq!(probed.len(), 1);
+    let signature = probed[0].finding.signature.clone();
+
+    let now = current_time_ms();
+    let ledger = super::super::detection_ledger::DetectionLedger::new(
+        &crate::config::DaemonDetectionsConfig::default(),
+        false,
+        1.0,
+        now,
+    );
+    let store = findings_store::FindingsStore::new(0);
+    let mut tctx = test_ctx(&detect_config, &ctx, &metrics, &store, true, &cell);
+    tctx.detection_ledger = Some(&ledger);
+    process_traces(vec![("t1".to_string(), events())], tctx).await;
+
+    let today = u32::try_from(now / super::super::detection_ledger::DAY_MS).expect("day fits");
+    assert_eq!(ledger.tally(today, &signature), Some((1, None)));
+    assert_eq!(store.len().await, 0);
 }
 
 #[tokio::test]
@@ -2494,6 +2544,7 @@ fn test_worker_ctx(
         metrics: metrics.clone(),
         findings_store: findings_store.clone(),
         hub_export: None,
+        detection_ledger: None,
         correlator: None,
         green_summary_cell: green_summary_cell.clone(),
         archive_tx: None,

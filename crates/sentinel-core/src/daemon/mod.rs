@@ -14,7 +14,7 @@ pub mod incidents;
 pub mod query_api;
 pub mod traces_store;
 
-#[expect(dead_code, reason = "wired into the event loop by a later commit")]
+#[expect(dead_code, reason = "read by the query API in a later commit")]
 mod detection_ledger;
 mod event_loop;
 mod hub_correlation_export;
@@ -229,6 +229,27 @@ fn publish_config_caps(metrics: &MetricsState, daemon: &crate::config::DaemonCon
         .set(daemon.max_retained_findings as f64);
 }
 
+/// The per-day detection ledger, `None` when `[daemon.detections]` is off.
+/// I/O is tracked only when green scoring fills `green_impact`.
+fn build_detection_ledger(config: &Config) -> Option<Arc<detection_ledger::DetectionLedger>> {
+    let cfg = &config.daemon.detections;
+    cfg.enabled.then(|| {
+        Arc::new(detection_ledger::DetectionLedger::new(
+            cfg,
+            config.green.enabled,
+            config.daemon.sampling_rate,
+            event_loop::current_time_ms(),
+        ))
+    })
+}
+
+/// The last batch is analyzed: today's counts stop before midnight.
+fn mark_detection_drain_gap(ledger: Option<&detection_ledger::DetectionLedger>) {
+    if let Some(ledger) = ledger {
+        ledger.mark_drain_gap(event_loop::current_time_ms());
+    }
+}
+
 /// Run the daemon: start all listeners and process events in a loop.
 ///
 /// # Errors
@@ -262,6 +283,11 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     let findings_store = Arc::new(findings_store::FindingsStore::new(
         config.daemon.max_retained_findings,
     ));
+    let detection_ledger = build_detection_ledger(&config);
+    // Aborts on drop, like the memory watcher above.
+    let _detection_tick = detection_ledger
+        .clone()
+        .map(|ledger| detection_ledger::spawn_ticker(ledger, metrics.clone()));
     // Shared with the Hub exporter: a pushed envelope must carry the same
     // acknowledgment annotation the query API adds to a polled one.
     let (toml_acks, ack_store) = init_ack_resources(&config).await?;
@@ -409,6 +435,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         metrics,
         findings_store,
         hub_export_buffer,
+        detection_ledger.clone(),
         traces_store,
         correlator,
         &detect_config,
@@ -437,6 +464,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         archive_handle.as_ref().map(|h| h.tx.clone()),
     )
     .await;
+    mark_detection_drain_gap(detection_ledger.as_deref());
 
     // Drain the Hub exporter before the archive, for the same reason the
     // archive is drained at all: what the loop produced but has not shipped

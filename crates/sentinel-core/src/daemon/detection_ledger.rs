@@ -7,11 +7,13 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use serde::Serialize;
 
 use crate::config::DaemonDetectionsConfig;
 use crate::detect::Finding;
+use crate::report::metrics::MetricsState;
 
 pub(crate) const DAY_MS: u64 = 86_400_000;
 /// Longer signatures are counted in the day's overflow, never tracked.
@@ -294,6 +296,31 @@ impl DetectionLedger {
             .get(&day)
             .map_or(0, |b| b.overflow.detections)
     }
+}
+
+/// Ticks the ledger once a minute and publishes the tracked-key gauge.
+pub(super) fn spawn_ticker(
+    ledger: Arc<DetectionLedger>,
+    metrics: Arc<MetricsState>,
+) -> super::task_guard::AbortOnDrop {
+    super::task_guard::AbortOnDrop(tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_mins(1));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        ticker.tick().await; // the first tick fires immediately, skip it
+        loop {
+            ticker.tick().await;
+            tick_once(&ledger, &metrics, super::event_loop::current_time_ms());
+        }
+    }))
+}
+
+fn tick_once(ledger: &DetectionLedger, metrics: &MetricsState, now_ms: u64) {
+    let rejected =
+        metrics.otlp_rejected_channel_full.get() + metrics.otlp_rejected_memory_pressure.get();
+    let tracked = ledger.tick(now_ms, metrics.analysis_shed_traces_total.get(), rejected);
+    metrics
+        .detection_ledger_signatures
+        .set(i64::try_from(tracked).unwrap_or(i64::MAX));
 }
 
 #[cfg(test)]

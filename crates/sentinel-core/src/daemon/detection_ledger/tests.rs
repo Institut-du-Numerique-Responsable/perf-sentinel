@@ -144,3 +144,19 @@ fn drain_marks_today_as_a_gap() {
     ledger.mark_drain_gap(4 * DAY_MS + 1);
     assert!(bucket(&ledger, 4, |b| b.gap));
 }
+
+#[test]
+fn tick_once_carries_metric_losses_and_sets_the_gauge() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[finding("a", 1), finding("b", 1)], 3 * DAY_MS);
+    let metrics = MetricsState::new();
+    metrics.analysis_shed_traces_total.inc_by(4);
+    metrics.otlp_rejected_channel_full.inc_by(2);
+    metrics.otlp_rejected_memory_pressure.inc();
+    tick_once(&ledger, &metrics, 3 * DAY_MS + 1);
+    assert_eq!(
+        bucket(&ledger, 3, |b| (b.shed_traces, b.ingest_rejected)),
+        (4, 3)
+    );
+    assert_eq!(metrics.detection_ledger_signatures.get(), 2);
+}

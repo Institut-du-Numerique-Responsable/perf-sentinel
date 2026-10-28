@@ -25,6 +25,7 @@ use crate::score::scaphandre::ScaphandreState;
 use detect::sanitizer_aware::SanitizerAwareMode;
 use detect::{Confidence, DetectConfig};
 
+use super::detection_ledger::DetectionLedger;
 use super::findings_store;
 use super::hub_export::HubExportBuffer;
 use super::sampling::{apply_sampling, should_sample};
@@ -161,6 +162,7 @@ struct AnalysisWorkerCtx {
     metrics: Arc<MetricsState>,
     findings_store: Arc<findings_store::FindingsStore>,
     hub_export: Option<Arc<HubExportBuffer>>,
+    detection_ledger: Option<Arc<DetectionLedger>>,
     traces_store: Arc<super::traces_store::TracesStore>,
     correlator: Option<Arc<Mutex<detect::correlate_cross::CrossTraceCorrelator>>>,
     green_summary_cell: Arc<RwLock<GreenSummary>>,
@@ -189,6 +191,7 @@ pub(super) async fn run_event_loop(
     metrics: Arc<MetricsState>,
     findings_store: Arc<findings_store::FindingsStore>,
     hub_export: Option<Arc<HubExportBuffer>>,
+    detection_ledger: Option<Arc<DetectionLedger>>,
     traces_store: Arc<super::traces_store::TracesStore>,
     correlator: Option<Arc<Mutex<detect::correlate_cross::CrossTraceCorrelator>>>,
     detect_config: &DetectConfig,
@@ -215,6 +218,7 @@ pub(super) async fn run_event_loop(
             metrics: metrics.clone(),
             findings_store,
             hub_export,
+            detection_ledger,
             traces_store,
             correlator,
             green_summary_cell,
@@ -369,6 +373,7 @@ async fn run_analysis_worker(mut work_rx: mpsc::Receiver<AnalysisBatch>, wctx: A
                 confidence: wctx.confidence,
                 findings_store: &wctx.findings_store,
                 hub_export: wctx.hub_export.as_deref(),
+                detection_ledger: wctx.detection_ledger.as_deref(),
                 traces_store: &wctx.traces_store,
                 correlator: wctx.correlator.as_deref(),
                 green_summary_cell: &wctx.green_summary_cell,
@@ -1668,6 +1673,8 @@ struct ProcessTracesCtx<'a> {
     confidence: Confidence,
     findings_store: &'a findings_store::FindingsStore,
     hub_export: Option<&'a HubExportBuffer>,
+    /// Per-day detection counts, `None` when `[daemon.detections]` is off.
+    detection_ledger: Option<&'a DetectionLedger>,
     traces_store: &'a super::traces_store::TracesStore,
     correlator: Option<&'a Mutex<detect::correlate_cross::CrossTraceCorrelator>>,
     green_summary_cell: &'a Arc<RwLock<GreenSummary>>,
@@ -1805,6 +1812,12 @@ async fn process_traces(
     // `report --input` carries usable signatures for ack matching.
     crate::acknowledgments::enrich_with_signatures(&mut findings);
     let findings = findings;
+
+    // Before the store push: a zero-retention store still counts here.
+    if let Some(ledger) = ctx.detection_ledger {
+        let overflow = ledger.record(&findings, now_ms);
+        ctx.metrics.detection_ledger_overflow_total.inc_by(overflow);
+    }
 
     if !findings.is_empty() {
         if let Some(export) = ctx.hub_export {
