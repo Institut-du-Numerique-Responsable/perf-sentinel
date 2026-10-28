@@ -1813,13 +1813,12 @@ async fn process_traces(
     crate::acknowledgments::enrich_with_signatures(&mut findings);
     let findings = findings;
 
-    // Before the store push: a zero-retention store still counts here.
-    if let Some(ledger) = ctx.detection_ledger {
-        let overflow = ledger.record(&findings, now_ms);
-        ctx.metrics.detection_ledger_overflow_total.inc_by(overflow);
-    }
-
     if !findings.is_empty() {
+        // Before the store push: a zero-retention store still counts here.
+        if let Some(ledger) = ctx.detection_ledger {
+            let overflow = ledger.record(&findings, now_ms);
+            ctx.metrics.detection_ledger_overflow_total.inc_by(overflow);
+        }
         if let Some(export) = ctx.hub_export {
             let dropped = export.push_batch(&findings, now_ms);
             ctx.metrics.hub_export_dropped_total.inc_by(dropped);
