@@ -14,7 +14,6 @@ pub mod incidents;
 pub mod query_api;
 pub mod traces_store;
 
-#[expect(dead_code, reason = "read by the query API in a later commit")]
 mod detection_ledger;
 mod event_loop;
 mod hub_correlation_export;
