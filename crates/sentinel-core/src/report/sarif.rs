@@ -1,10 +1,10 @@
 //! SARIF v2.1.0 report export.
 //!
 //! Generates a [SARIF](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
-//! report from perf-sentinel findings. Every result carries one `location`
-//! with logical locations (service + endpoint), since perf-sentinel analyzes
-//! traces, not source code, plus a physical location when the span carried
-//! a usable `code.filepath`.
+//! report from perf-sentinel findings. The service and endpoint of every
+//! result sit in its `properties`, since perf-sentinel analyzes traces, not
+//! source code. A result carries a `location` only when the span had a usable
+//! `code.filepath`.
 
 use std::collections::BTreeMap;
 
@@ -79,10 +79,11 @@ pub struct SarifResult {
     /// `daemon_production = 90`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rank: Option<u32>,
-    /// Exactly one location: the service and endpoint as logical
-    /// locations, plus the source file when the finding has one. GitHub
-    /// code scanning shows a result inline only when this location has a
-    /// physical location.
+    /// One location when the finding has a source file, none otherwise. A
+    /// location without `physicalLocation` is valid SARIF, but the Jenkins
+    /// Warnings NG parser (violations-lib) throws on it and drops the whole file.
+    /// GitHub code scanning shows a result only when it has a physical location.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub locations: Vec<SarifLocation>,
     /// SARIF v2.1.0 section 3.27.17 `fingerprints`. Single-entry map keyed
     /// by `"perfsentinel/v1"`, value is the canonical finding signature.
@@ -94,12 +95,11 @@ pub struct SarifResult {
 
 /// SARIF `location` object. `physical_location` comes from `OTel` `code.*`
 /// span attributes and enables inline annotations in GitHub/GitLab code
-/// scanning. It is skipped when the finding has no usable filepath.
+/// scanning. The logical locations repeat the service and endpoint.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SarifLocation {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub physical_location: Option<SarifPhysicalLocation>,
+    pub physical_location: SarifPhysicalLocation,
     pub logical_locations: Vec<SarifLogicalLocation>,
 }
 
@@ -114,6 +114,10 @@ pub struct SarifProperties {
     /// Source context of the finding: `"local_batch"`, `"ci_batch"`,
     /// `"daemon_staging"`, or `"daemon_production"`. See [`Confidence`] for semantics.
     pub confidence: &'static str,
+    /// Service that emitted the offending spans.
+    pub service: String,
+    /// Endpoint (`source_endpoint`) the offending spans ran under.
+    pub endpoint: String,
     /// Framework-level remediation from the finding's `suggested_fix`
     /// (recommendation, then the reference URL when present). Lives here
     /// rather than in SARIF `fixes`, which requires `artifactChanges`, a
@@ -272,6 +276,8 @@ fn finding_to_result(finding: &Finding) -> SarifResult {
         message: SarifMessage { text: message },
         properties: Some(SarifProperties {
             confidence: finding.confidence.as_str(),
+            service: safe_service.to_string(),
+            endpoint: safe_endpoint.to_string(),
             suggested_fix: suggested_fix_text(finding),
             acknowledged: None,
             acknowledgment_reason: None,
@@ -280,19 +286,22 @@ fn finding_to_result(finding: &Finding) -> SarifResult {
             signature,
         }),
         rank: Some(finding.confidence.sarif_rank()),
-        locations: vec![SarifLocation {
-            physical_location: physical_location(finding),
-            logical_locations: vec![
-                SarifLogicalLocation {
-                    name: safe_service.into_owned(),
-                    kind: "module".to_string(),
-                },
-                SarifLogicalLocation {
-                    name: safe_endpoint.into_owned(),
-                    kind: "function".to_string(),
-                },
-            ],
-        }],
+        locations: physical_location(finding)
+            .map(|physical_location| SarifLocation {
+                physical_location,
+                logical_locations: vec![
+                    SarifLogicalLocation {
+                        name: safe_service.into_owned(),
+                        kind: "module".to_string(),
+                    },
+                    SarifLogicalLocation {
+                        name: safe_endpoint.into_owned(),
+                        kind: "function".to_string(),
+                    },
+                ],
+            })
+            .into_iter()
+            .collect(),
         fingerprints,
     }
 }
@@ -602,19 +611,18 @@ mod tests {
     }
 
     #[test]
-    fn sarif_result_has_logical_locations() {
+    fn sarif_result_without_file_has_no_location() {
         let finding = make_finding(FindingType::NPlusOneSql, Severity::Warning);
-        let result = finding_to_result(&finding);
-        assert_eq!(result.rule_id, "n_plus_one_sql");
-        assert_eq!(result.level, "warning");
-        assert_eq!(result.locations.len(), 1);
-        assert!(result.locations[0].physical_location.is_none());
-        let logical = &result.locations[0].logical_locations;
-        assert_eq!(logical.len(), 2);
-        assert_eq!(logical[0].name, "order-svc");
-        assert_eq!(logical[0].kind, "module");
-        assert_eq!(logical[1].name, "POST /api/orders/42/submit");
-        assert_eq!(logical[1].kind, "function");
+        let value = serde_json::to_value(finding_to_result(&finding)).unwrap();
+        assert_eq!(value["ruleId"], "n_plus_one_sql");
+        assert_eq!(value["level"], "warning");
+        // Warnings NG (violations-lib) throws on a location without physicalLocation.
+        assert!(value.get("locations").is_none());
+        assert_eq!(value["properties"]["service"], "order-svc");
+        assert_eq!(
+            value["properties"]["endpoint"],
+            "POST /api/orders/42/submit"
+        );
     }
 
     #[test]
@@ -925,10 +933,9 @@ mod tests {
         });
         let result = finding_to_result(&f);
         assert!(
-            result.locations[0].physical_location.is_none(),
+            result.locations.is_empty(),
             "hostile URI must not be emitted in SARIF"
         );
-        assert_eq!(result.locations[0].logical_locations.len(), 2);
     }
 
     #[test]
@@ -942,9 +949,18 @@ mod tests {
         });
         let result = finding_to_result(&f);
         assert_eq!(result.locations.len(), 1);
-        let physical = result.locations[0].physical_location.as_ref().unwrap();
+        let physical = &result.locations[0].physical_location;
         assert_eq!(physical.artifact_location.uri, "src/Order.java");
         assert_eq!(physical.region.as_ref().map(|r| r.start_line), Some(42));
+        let logical = &result.locations[0].logical_locations;
+        assert_eq!(
+            (logical[0].name.as_str(), logical[0].kind.as_str()),
+            (f.service.as_str(), "module")
+        );
+        assert_eq!(
+            (logical[1].name.as_str(), logical[1].kind.as_str()),
+            (f.source_endpoint.as_str(), "function")
+        );
     }
 
     #[test]
@@ -957,7 +973,7 @@ mod tests {
             namespace: None,
         });
         let result = finding_to_result(&f);
-        let physical = result.locations[0].physical_location.as_ref().unwrap();
+        let physical = &result.locations[0].physical_location;
         assert_eq!(physical.artifact_location.uri, "src/Order.java");
         assert!(physical.region.is_none(), "startLine must be at least 1");
     }

@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Fixed
+
+- The SARIF output reads again in Jenkins Warnings NG. Since 0.35.0 every result carried one `location`, with no `physicalLocation` when the finding has no usable `code.filepath`. That is valid SARIF, but the Warnings NG parser (violations-lib 3.0.2, analysis-model 14.20.0) throws a `NullPointerException` on it and rejects the whole file, so a report with one structural finding (`chatty_service`, `excessive_fanout`, `pool_saturation`, `serialized_calls`) or one finding without source attributes lost all its issues. A result now has a `location` only when it has a `physicalLocation`, whose `logicalLocations` still name the service and endpoint. Every result carries both in the new `properties.service` and `properties.endpoint`. **Breaking** for SARIF consumers that read `locations[0].logicalLocations` on findings without a source file, and for `perf-sentinel-core` library users: `SarifLocation.physical_location` is no longer an `Option`, and `SarifProperties` gains `service` and `endpoint`.
+
 ## [0.35.0] - 2026-10-27
 
 ### Changed

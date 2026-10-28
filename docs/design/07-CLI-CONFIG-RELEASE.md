@@ -204,7 +204,7 @@ The format is `namespace.function (filepath:lineno)`, with each part omitted if 
 
 ### SARIF `physicalLocation` enhancement
 
-Every SARIF result carries a `locations` array with exactly one `location`. Its `logicalLocations` always name the service (`kind: "module"`) and the endpoint (`kind: "function"`). When the finding carries a `CodeLocation` with at least a `filepath`, the same `location` also gets a `physicalLocation`:
+Every SARIF result carries the service and endpoint in `properties.service` and `properties.endpoint`. When the finding carries a `CodeLocation` with at least a `filepath`, the result also gets a `locations` array with exactly one `location`, holding a `physicalLocation` and `logicalLocations` that repeat the service (`kind: "module"`) and the endpoint (`kind: "function"`):
 
 ```json
 {
@@ -233,7 +233,7 @@ The `code.filepath` OTel attribute is attacker-controlled (a hostile span can se
 - Control characters (newlines, NUL, etc.) that could break a SARIF consumer's tokenizer or inject into logs.
 - Unicode BiDi overrides and invisible format characters (`U+061C`, `U+180E`, `U+202A..U+202E`, `U+2066..U+2069`, `U+200B..U+200F`, `U+FEFF`) that can confuse rendered filenames (Trojan Source class of attack, CVE-2021-42574).
 
-Findings with a rejected filepath still appear in the SARIF report. Only the `physicalLocation` is omitted, the `location` keeps its `logicalLocations` and the other result fields remain.
+Findings with a rejected filepath still appear in the SARIF report. They have no `locations`, and the other result fields remain. A `location` without `physicalLocation` would be valid SARIF, but the Warnings NG parser (Jenkins, violations-lib) then rejects the whole file.
 
 ## `query` subcommand
 
