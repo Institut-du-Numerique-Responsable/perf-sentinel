@@ -164,6 +164,8 @@ fn metrics_state_creates_successfully() {
     assert!(output.contains("perf_sentinel_analysis_queue_capacity"));
     assert!(output.contains("perf_sentinel_max_retained_findings"));
     assert!(output.contains("perf_sentinel_stored_findings"));
+    assert!(output.contains("perf_sentinel_detection_ledger_signatures 0"));
+    assert!(output.contains("perf_sentinel_detection_ledger_overflow_total 0"));
 }
 
 #[test]

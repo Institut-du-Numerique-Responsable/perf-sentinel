@@ -14,6 +14,8 @@ pub mod incidents;
 pub mod query_api;
 pub mod traces_store;
 
+#[expect(dead_code, reason = "wired into the event loop by a later commit")]
+mod detection_ledger;
 mod event_loop;
 mod hub_correlation_export;
 mod hub_export;
