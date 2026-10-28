@@ -265,7 +265,8 @@ async fn ledger_counts_even_with_zero_retention() {
     tctx.detection_ledger = Some(&ledger);
     process_traces(vec![("t1".to_string(), events())], tctx).await;
 
-    let today = u32::try_from(now / super::super::detection_ledger::DAY_MS).expect("day fits");
+    // The day the run recorded on, so a run straddling 00:00 UTC still matches.
+    let today = ledger.status().current_day;
     assert_eq!(ledger.tally(today, &signature), Some((1, None)));
     assert_eq!(store.len().await, 0);
 }
