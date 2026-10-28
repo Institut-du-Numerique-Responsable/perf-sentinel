@@ -18,7 +18,7 @@ For a non-Helm alternative, see the raw manifests in
 - [Software supply chain](#software-supply-chain): Cosign keyless signatures, SLSA provenance, SBOM, public-good attestation.
 - [Install from a local checkout](#install-from-a-local-checkout): for contributors and bisecting.
 - [Cutting a new chart release](#cutting-a-new-chart-release): maintainer task, points to RELEASE-PROCEDURE.
-- [Workload modes](#workload-modes): the three `workload.kind` values to pick from.
+- [Workload modes](#workload-modes): the three `workload.kind` values to pick from, and [detection counts with several pods](#detection-counts-with-several-pods).
 - [Config surface](#config-surface): chart values mapping `.perf-sentinel.toml`, plus [fragments](#config-fragments), secrets, TLS, NetworkPolicy and the optional [Ingress](#ingress).
 - [Observability](#observability): Prometheus ServiceMonitor, the Grafana dashboards (metrics and [the findings table](#grafana-on-the-query-api-findings-table)), alerts and exemplars.
 - [Upgrading](#upgrading): `helm upgrade` flow.
@@ -497,6 +497,30 @@ not an oncall defer during an incident. It does cover the case where
 every acknowledgment is a durable team-level decision, and it needs no
 PVC, being read-only at runtime. See [`docs/ACK-WORKFLOW.md`](./ACK-WORKFLOW.md#choosing-between-toml-and-daemon)
 for which acknowledgment belongs where.
+
+### Detection counts with several pods
+
+Since 0.37.0 each daemon counts its detections per UTC day in its own
+in-memory ledger (`[daemon.detections]`, on by default). A single pod
+has a single ledger and needs nothing more. With several pods, a
+`Deployment` with `workload.replicas` above 1 or a `DaemonSet`, a
+PerfSentinelHub that polls the chart's `ClusterIP` Service reaches one
+pod per request. It reads part of the pods' ledgers and flags the counts
+as incomplete (`multi_instance`). Two setups give complete counts:
+
+- **Push from every pod.** Enable `[daemon.hub_export]` in `config.toml`.
+  Every pod pushes its own ledger under the same `source_id`, and the Hub
+  adds the ledgers up. This works in every workload mode.
+- **One Hub source per pod.** Point one Hub source at each pod's own
+  address instead of the Service. Only `StatefulSet` gives pods a stable
+  one, through its headless Service:
+  `perf-sentinel-0.perf-sentinel-headless.observability.svc.cluster.local:4318`
+  for the first pod of the [TL;DR](#tldr) install. Scaling the
+  StatefulSet then means declaring the new pods in the Hub.
+
+A restart opens a new ledger in every mode, and its first day is a gap.
+The full list of what a count covers is in
+[LIMITATIONS.md](./LIMITATIONS.md#detection-ledger-what-a-count-covers).
 
 ## Config surface
 

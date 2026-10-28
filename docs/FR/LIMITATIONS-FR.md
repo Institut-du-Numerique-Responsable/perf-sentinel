@@ -21,6 +21,7 @@
 - [Traces longues et éviction TTL en mode daemon](#traces-longues-et-éviction-ttl-en-mode-daemon) : pourquoi les traces à rafales espacées sous-comptent en mode streaming.
 - [Contre-pression d'analyse et délestage de charge](#contre-pression-danalyse-et-délestage-de-charge) : pourquoi un worker d'analyse lent déleste des lots entiers, de façon explicite et métrée.
 - [Modèle d'état du daemon, en mémoire, mono-processus, sans état partagé](#modèle-détat-du-daemon-en-mémoire-mono-processus-sans-état-partagé) : pourquoi les replicas ne partagent pas d'état et un kill non gracieux perd la fenêtre en vol.
+- [Registre de détections : ce que couvre un compte](#registre-de-détections--ce-que-couvre-un-compte) : l'unité comptée, le mode strict, les pertes qu'aucun jour ne signale, et plusieurs pods derrière un Service.
 - [Limites de longueur des champs à l'ingestion](#limites-de-longueur-des-champs-à-lingestion) : plafonds en octets appliqués à la frontière d'ingestion.
 - [Taille du binaire](#taille-du-binaire) : cible de la release et ce qui contribue à la taille.
 - [Dashboard HTML : guard formula-injection CSV](#dashboard-html--guard-formula-injection-csv) : neutralisation OWASP CSV-injection dans les CSVs exportés.
@@ -342,6 +343,26 @@ L'impact pratique est faible. Ce qui est en vol à cet instant, ce sont des trac
 
 - **Les détecteurs par trace** (`n_plus_one` et consorts) sont corrects avec plusieurs replicas *seulement* si le collecteur répartit par `trace_id` afin que toutes les spans d'une trace atteignent la même instance. Le `loadbalancingexporter` du Collector OTel avec `routing_key: traceID` fait cela, et la [topologie shardée](./HELM-DEPLOYMENT-FR.md#deployment-par-défaut) en dépend.
 - **La corrélation cross-service** n'a pas de réponse distribuée aujourd'hui. Elle ne voit que ce qu'un processus met en tampon, donc elle doit tourner sur un daemon unique qui reçoit tous les services concernés, ou vous acceptez une corrélation partielle. La répartition par `trace_id` n'aide pas ici, car la corrélation cross-service couvre des traces *différentes*.
+
+## Registre de détections : ce que couvre un compte
+
+Depuis 0.37.0, le daemon compte combien de fois il a détecté chaque signature de finding par jour UTC, servi sur [`GET /api/detections`](QUERY-API-FR.md#get-apidetections) et poussé par `[daemon.hub_export]`. Le compte est exact pour ce que le daemon a analysé, et ne dit rien de ce qu'il n'a pas vu. Lisez-le avec ces limites.
+
+**L'unité est un finding émis.** Une détection est comptée chaque fois que la détection émet un finding doté d'une signature, avant que l'anneau de findings, l'export vers le Hub et les acquittements ne le voient. `max_retained_findings` (même à `0`), l'éviction de l'anneau, la suppression d'une heure de `[daemon.hub_export]` et les acks ne changent pas le compte. Le `seen_count` de `/api/findings` reste ce qu'il était : les détections que l'anneau retient encore, pas un volume. Conséquences :
+
+- Un finding acquitté compte quand même, comme son gaspillage reste dans `io_waste_ratio`.
+- Une trace peut produire plusieurs findings d'une même signature, et chacun compte : des findings `redundant_*` à paramètres différents, `excessive_fanout` et `serialized_calls` une fois par span parent, un finding par valeur de grouping.
+- Les findings lents inter-traces et ceux de la fenêtre glissante des lents comptent, avec 0 I/O évitable.
+- Un fragment de trace analysé de nouveau après une [éviction TTL](#traces-longues-et-éviction-ttl-en-mode-daemon) compte tel que le détecteur l'a émis.
+- `extra_io_ops` est la somme exacte des `green_impact.estimated_extra_io_ops` de chaque détection, pas le compte multiplié par un représentant. Il est absent quand le scoring green est coupé.
+
+**Mode strict, sans persistance.** Le registre vit en mémoire seulement. Tout arrêt du daemon, propre ou non, est un trou : rien n'est analysé pendant qu'il est arrêté, et il ne peut pas savoir si le collecteur a rejoué des spans entre-temps. Chaque démarrage ouvre un nouveau registre avec un nouveau `ledger_id`, et son premier jour porte `gap = true`. Un arrêt gracieux met `gap = true` sur le jour courant une fois le dernier lot analysé. Un jour où le daemon s'est arrêté avant minuit n'est jamais scellé, il reste donc incomplet pour de bon. Le registre garde `[daemon.detections] retained_days` jours (8 par défaut) : un lecteur qui ne revient pas dans ce délai perd les plus anciens.
+
+**Pas d'extrapolation.** Les comptes couvrent ce qui a atteint la détection. Chaque jour rapporte le plus petit `sampling_rate` en vigueur, les traces délestées par l'analyse (`shed_traces`) et les requêtes OTLP refusées pour file pleine ou pression mémoire (`ingest_rejected`). Aucun d'eux n'est rajouté aux comptes. Une nouvelle signature au-delà de `max_signatures_per_day`, ou une signature de plus de 1024 octets ou contenant un caractère de contrôle, compte dans l'overflow du jour, sans sa signature.
+
+**Certaines pertes ne sont pas signalées.** Les pertes d'ingestion qu'aucune métrique ne compte aujourd'hui ne laissent aucune marque sur le jour : un corps OTLP HTTP refusé en `413`, un message gRPC trop gros, une ligne rejetée sur le socket JSON, les événements qu'une trace perd au-delà de [`max_events_per_trace`](#nombre-maximum-dévénements-par-trace). Avec l'une d'elles, un jour peut se lire complet et rester une borne basse.
+
+**Plusieurs pods derrière un même Service.** Chaque daemon tient son propre registre. Un Hub qui interroge un Service atteint un pod par requête, il ne lit donc jamais le registre de chaque pod, et il marque les comptes qu'il en tire comme incomplets (`multi_instance`). Deux montages donnent des comptes complets : une source du Hub par pod, chacune interrogeant l'adresse propre de son pod, ou `[daemon.hub_export]` sur chaque pod, pour que chaque pod pousse son propre registre et que le Hub les additionne. Voir [HELM-DEPLOYMENT-FR.md](./HELM-DEPLOYMENT-FR.md#comptes-de-détections-avec-plusieurs-pods).
 
 ## Limites de longueur des champs à l'ingestion
 
