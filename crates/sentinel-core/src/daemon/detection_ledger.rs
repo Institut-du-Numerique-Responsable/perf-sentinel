@@ -24,6 +24,12 @@ pub(crate) const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 /// Estimated JSON bytes of a `CountRow` beside its signature.
 const ROW_OVERHEAD_BYTES: usize = 96;
 
+/// The JSON length of a tracked signature. Control characters never reach a
+/// key (they go to the overflow), so `"` and `\` are the only escapes.
+fn json_string_len(s: &str) -> usize {
+    s.len() + s.bytes().filter(|b| matches!(b, b'"' | b'\\')).count()
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Tally {
     pub(crate) detections: u64,
@@ -365,7 +371,7 @@ impl DetectionLedger {
             let rows = bucket.counts.range::<str, _>((from, Bound::Unbounded));
             let before = page.counts.len();
             for (signature, tally) in rows {
-                let size = signature.len() + ROW_OVERHEAD_BYTES;
+                let size = json_string_len(signature) + ROW_OVERHEAD_BYTES;
                 if page.counts.len() >= limit || bytes + size > MAX_PAGE_BYTES {
                     if let Some(last) = page.counts.last() {
                         // Empty days past the cursor ride the next page, not both.

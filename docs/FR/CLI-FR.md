@@ -360,7 +360,7 @@ perf-sentinel hub analyze --source-id tempo --service order-svc --lookback 1h -o
 | `incidents [ID]` | `GET /api/incidents[/{id}]` | `--service`, `--namespace`, `--source-id`, `--environment`, `--offset`, `--limit` (50), `--format` |
 | `ack` | `POST /api/sources/{source_id}/acks` | `--source-id`, `-s/--signature` (stdin s'il est omis), `-r/--reason`, `--expires`. Pas de `--by` : le Hub vous nomme |
 | `unack` | `POST /api/sources/{source_id}/acks/revoke` | `--source-id`, `-s/--signature` |
-| `analyze` | `POST /api/analyses`, `GET /api/analyses/{id}` toutes les 2 s, puis `GET /reports/{id}.html` | `--source-id`, `--service`, `--lookback`, `--from`/`--to` (envoyés en `from_ms`/`to_ms`), `--trace-id`, `--max-traces`, `-o/--output` (par défaut `hub-report-<id>.html`) |
+| `analyze` | `POST /api/analyses`, `GET /api/analyses/{id}` toutes les 2 s, puis `GET /reports/{id}.html` | `--source-id`, `--service`, `--lookback`, `--from`/`--to` (RFC 3339 UTC ou millisecondes epoch, envoyés en `from_ms`/`to_ms`), `--trace-id`, `--max-traces`, `-o/--output` (par défaut `hub-report-<id>.html`) |
 
 La sortie texte reprend les mises en page de `query findings` et
 `query incidents`. Une liste d'incidents ne porte pas leurs findings :

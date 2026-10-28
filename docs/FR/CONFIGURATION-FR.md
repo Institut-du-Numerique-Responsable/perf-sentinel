@@ -1043,7 +1043,8 @@ depuis, en pages de la forme d'une page de `GET /api/detections`, au plus 5 000 
 compte de chaque ligne, les lignes inchangées n'ont donc pas à repartir. Les tours démarrent
 au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus long, et
 une page en échec est retentée avec le même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
-pousse une dernière fois. Une page que le Hub rejette avec un 4xx non rejouable est
+pousse une dernière fois, après les findings, incidents et épisodes encore en attente, pour
+qu'un long registre ne consomme pas leur budget de vidange. Une page que le Hub rejette avec un 4xx non rejouable est
 abandonnée, ses lignes comptées dans `perf_sentinel_hub_export_dropped_total`, et son jour
 passé à `gap = true` dans le registre. Un Hub qui répond 404 ou 405 sur cette route la
 précède : le daemon journalise un avertissement et cesse de pousser les comptes de
