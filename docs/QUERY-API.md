@@ -1359,8 +1359,10 @@ carries a control character. Losses seen by the tick that crosses
 midnight are counted on both days, since they may belong to either.
 
 A day's object rides on the page that carries the day's last `counts`
-row, or, for a day with no row, on the page whose walk passes it. Read a
-day as complete once its object has arrived.
+row, or, for a day with no row, on the page whose walk passes it. A
+day's object has arrived once the walk passed it. Its counts are final
+only when `sealed` is `true`; an unsealed day, today included, keeps
+changing and must be read again.
 
 **Example:** two days of three signatures, read two rows at a time.
 

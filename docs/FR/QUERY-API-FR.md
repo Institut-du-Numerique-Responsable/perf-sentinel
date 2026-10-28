@@ -1413,7 +1413,10 @@ peuvent appartenir à l'un comme à l'autre.
 
 L'objet d'un jour arrive sur la page qui porte la dernière ligne
 `counts` de ce jour, ou, pour un jour sans ligne, sur la page dont le
-parcours le dépasse. Tenez un jour pour complet une fois son objet reçu.
+parcours le dépasse. L'objet d'un jour est arrivé une fois que le
+parcours l'a dépassé. Ses comptes ne sont définitifs que quand `sealed`
+vaut `true` ; un jour non scellé, aujourd'hui compris, change encore et
+doit être relu.
 
 **Exemple :** deux jours de trois signatures, lus deux lignes à la fois.
 
