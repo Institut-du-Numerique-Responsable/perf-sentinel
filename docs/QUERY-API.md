@@ -1360,9 +1360,10 @@ midnight are counted on both days, since they may belong to either.
 
 A day's object rides on the page that carries the day's last `counts`
 row, or, for a day with no row, on the page whose walk passes it. A
-day's object has arrived once the walk passed it. Its counts are final
-only when `sealed` is `true`; an unsealed day, today included, keeps
-changing and must be read again.
+day's counts are final only when that day is at or below the
+`sealed_through` your walk read on its first page. A day the ledger
+seals while you walk it can gain rows behind your cursor, and a later
+day, today included, keeps changing: read both again on the next walk.
 
 **Example:** two days of three signatures, read two rows at a time.
 
