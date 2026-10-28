@@ -315,7 +315,8 @@ proptest! {
     fn backslash_escaped_quotes_never_leak(
         (shape, eq, list, _) in statement(),
         note in bs_str_lit(),
-        db_system in prop_oneof![Just(""), Just("mysql")],
+        // `select`, not `prop_oneof!`: RustRover splits a nested macro's commas here (RsTypeCheck).
+        db_system in prop::sample::select(vec!["", "mysql"]),
     ) {
         let first = normalize_sql_for(&render(&shape, &eq, &list, &note), db_system);
 
