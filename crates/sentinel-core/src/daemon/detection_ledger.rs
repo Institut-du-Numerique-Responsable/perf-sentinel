@@ -353,10 +353,12 @@ impl DetectionLedger {
             for (signature, tally) in rows {
                 let size = signature.len() + ROW_OVERHEAD_BYTES;
                 if page.counts.len() >= limit || bytes + size > MAX_PAGE_BYTES {
-                    page.next_after = page
-                        .counts
-                        .last()
-                        .map(|r| format!("{}:{}", r.day, r.signature));
+                    if let Some(last) = page.counts.last() {
+                        // Empty days past the cursor ride the next page, not both.
+                        let last_day = last.day;
+                        page.days.retain(|d| d.day <= last_day);
+                        page.next_after = Some(format!("{}:{}", last.day, last.signature));
+                    }
                     return page;
                 }
                 bytes += size;

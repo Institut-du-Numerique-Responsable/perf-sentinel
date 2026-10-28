@@ -234,6 +234,23 @@ fn an_empty_day_still_gets_its_row() {
 }
 
 #[test]
+fn an_empty_day_rides_one_page_only() {
+    let ledger = ledger_at(3, true);
+    ledger.record(
+        &[finding("a", 1), finding("b", 1), finding("c", 1)],
+        3 * DAY_MS,
+    );
+    ledger.tick(4 * DAY_MS, 0, 0);
+    ledger.record(&[finding("a", 1)], 5 * DAY_MS);
+    let first = ledger.page(None, None, 3);
+    assert_eq!(first.next_after.as_deref(), Some("3:c"));
+    let second = ledger.page(None, Some((3, "c")), 3);
+    assert_eq!(keys(&second), ["5:a"]);
+    let all: Vec<u32> = [&first, &second].into_iter().flat_map(page_days).collect();
+    assert_eq!(all, [3, 4, 5]);
+}
+
+#[test]
 fn page_starts_at_since_day() {
     let ledger = two_full_days();
     let page = ledger.page(Some(4), None, 10);
