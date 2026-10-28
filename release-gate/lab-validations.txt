@@ -708,3 +708,15 @@ v0.33.0	6349f6f	2026-10-23	PASS
 # jenkinsfile-runner image runs Java 8). Not run: verify-all-scenarios and
 # validate-findings.
 v0.35.0	37de952	2026-10-27	PASS
+# v0.36.0: targeted pass on what the release changes (SARIF location shape),
+# local image perf-sentinel:0.36.0-a00e037a, Docker only. New scenario
+# sarif-warnings-ng hands the SARIF of the demo fixture to the Warnings NG
+# parser (analysis-model 14.20.0, violations-lib 3.0.2): 11 of 11 issues read
+# and the 7 file:line pairs match, while 0.35.0 fails on the
+# NullPointerException. ci-shift-left holds the SARIF to the 0.36.0 shape (no
+# location without physicalLocation, service and endpoint in properties) and
+# the 2.1.0 schema, and rejects 0.35.0; output-formats-coverage green.
+# template-jenkinsfile and template-github-actions structural PASS at 0.36.0.
+# Skipped: both template runtimes. Not run: the cluster scenarios,
+# verify-all-scenarios and validate-findings, the daemon does not emit SARIF.
+v0.36.0	61eb01a	2026-10-28	PASS
