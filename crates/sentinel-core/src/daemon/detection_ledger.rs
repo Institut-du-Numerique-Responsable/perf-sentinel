@@ -28,12 +28,15 @@ const ROW_OVERHEAD_BYTES: usize = 96;
 pub(crate) struct Tally {
     pub(crate) detections: u64,
     pub(crate) extra_io_ops: u64,
+    /// The day's `rev` at this row's last change.
+    pub(crate) rev: u64,
 }
 
 impl Tally {
-    fn add(&mut self, extra_io_ops: u64) {
+    fn add(&mut self, extra_io_ops: u64, rev: u64) {
         self.detections += 1;
         self.extra_io_ops += extra_io_ops;
+        self.rev = rev;
     }
 }
 
@@ -46,7 +49,8 @@ pub(crate) struct DayBucket {
     pub(crate) shed_traces: u64,
     pub(crate) ingest_rejected: u64,
     pub(crate) sampling_rate: f64,
-    /// Bumped on every mutation, compared to `acked_rev` by the Hub push.
+    /// Bumped on every mutation, compared to `acked_rev` by the Hub push,
+    /// which sends only the rows whose own `rev` passed `acked_rev`.
     pub(crate) rev: u64,
     pub(crate) acked_rev: u64,
 }
@@ -233,6 +237,7 @@ impl DetectionLedger {
     pub(crate) fn record(&self, findings: &[Finding], now_ms: u64) -> u64 {
         let mut state = self.lock();
         let day = state.effective_day(now_ms);
+        let rev = state.bucket(day, self.sampling_rate).rev + 1;
         let mut overflowed = 0;
         let mut changed = false;
         for finding in findings.iter().filter(|f| !f.signature.is_empty()) {
@@ -244,26 +249,26 @@ impl DetectionLedger {
             } else {
                 0
             };
-            if !self.count(&mut state, day, &finding.signature, io) {
+            if !self.count(&mut state, day, &finding.signature, io, rev) {
                 overflowed += 1;
             }
             changed = true;
         }
         if changed {
-            state.bucket(day, self.sampling_rate).rev += 1;
+            state.bucket(day, self.sampling_rate).rev = rev;
         }
         overflowed
     }
 
     /// Adds one detection to `day`, `false` when it went to overflow.
-    fn count(&self, state: &mut LedgerState, day: u32, signature: &str, io: u64) -> bool {
+    fn count(&self, state: &mut LedgerState, day: u32, signature: &str, io: u64, rev: u64) -> bool {
         let bucket = state.bucket(day, self.sampling_rate);
         if let Some(tally) = bucket.counts.get_mut(signature) {
-            tally.add(io);
+            tally.add(io, rev);
             return true;
         }
         if bucket.counts.len() >= self.max_signatures_per_day || !is_trackable(signature) {
-            bucket.overflow.add(io);
+            bucket.overflow.add(io, rev);
             return false;
         }
         let key = state.shared_key(signature);
@@ -272,7 +277,7 @@ impl DetectionLedger {
             .counts
             .entry(key)
             .or_default()
-            .add(io);
+            .add(io, rev);
         true
     }
 
@@ -381,7 +386,9 @@ impl DetectionLedger {
         page
     }
 
-    /// A full copy of every day whose `rev` moved past `acked_rev`.
+    /// Every day whose `rev` moved past `acked_rev`, with only the rows
+    /// that changed since then: the Hub keeps the larger count per row, so
+    /// the others need not travel again.
     pub(crate) fn dirty_days(&self) -> Vec<DaySnapshot> {
         let state = self.lock();
         state
@@ -394,6 +401,7 @@ impl DetectionLedger {
                 rows: bucket
                     .counts
                     .iter()
+                    .filter(|(_, tally)| tally.rev > bucket.acked_rev)
                     .map(|(signature, tally)| self.count_row(day, signature, tally))
                     .collect(),
                 meta: self.day_row(day, bucket),

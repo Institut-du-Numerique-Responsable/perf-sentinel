@@ -1037,10 +1037,12 @@ abandonné.
 Avec `[daemon.detections]` actif aussi, le défaut, le daemon pousse son registre de
 détections vers `/api/import/detections` à côté d'`endpoint`, avec la même clé et le même
 identifiant de source, depuis 0.37.0. Chaque tour envoie chaque jour dont les comptes ont
-bougé depuis que le Hub l'a accepté pour la dernière fois, toutes ses lignes, en pages de la
-forme d'une page de `GET /api/detections`, au plus 5 000 lignes et 4 Mio chacune, l'entrée
-`days` du jour sur sa dernière page. Un jour ne repart qu'une fois modifié, retenté avec le
-même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
+bougé depuis que le Hub l'a accepté pour la dernière fois, seulement les lignes modifiées
+depuis, en pages de la forme d'une page de `GET /api/detections`, au plus 5 000 lignes et
+4 Mio chacune, l'entrée `days` du jour sur sa dernière page. Le Hub garde le plus grand
+compte de chaque ligne, les lignes inchangées n'ont donc pas à repartir. Les tours démarrent
+au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus long, et
+une page en échec est retentée avec le même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
 pousse une dernière fois. Une page que le Hub rejette avec un 4xx non rejouable est
 abandonnée, ses lignes comptées dans `perf_sentinel_hub_export_dropped_total`, et son jour
 passé à `gap = true` dans le registre. Un Hub qui répond 404 ou 405 sur cette route la

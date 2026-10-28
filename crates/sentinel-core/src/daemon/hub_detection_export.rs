@@ -1,5 +1,6 @@
-//! The detection ledger on its way to the Hub: each day whose counts moved
-//! since the Hub last accepted it, in pages shaped like `GET /api/detections`.
+//! The detection ledger on its way to the Hub: the rows of each day that
+//! moved since the Hub last accepted it, in pages shaped like
+//! `GET /api/detections`, at most one snapshot a minute outside the drain.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -17,6 +18,9 @@ use crate::report::metrics::MetricsState;
 
 /// Count rows per push page, the Hub's cap.
 const MAX_PUSH_ROWS: usize = 5_000;
+/// The shortest wait between two snapshots, whatever `flush_interval` says:
+/// today's counts move with every batch.
+const MIN_SNAPSHOT_INTERVAL: Duration = Duration::from_mins(1);
 
 /// The detection import beside the configured findings import.
 pub(super) fn detections_endpoint(findings_endpoint: &str) -> String {
@@ -161,8 +165,9 @@ impl DetectionExport {
         metrics: &MetricsState,
         flush_interval: Duration,
     ) -> bool {
+        let pace = flush_interval.max(MIN_SNAPSHOT_INTERVAL);
         if self.unsupported || !self.refill() {
-            self.due = tokio::time::Instant::now() + flush_interval;
+            self.due = tokio::time::Instant::now() + pace;
             return false;
         }
         let Some((rows, body)) = next_page(&self.header, &self.queue[0], self.sent) else {
@@ -174,13 +179,16 @@ impl DetectionExport {
         let outcome = match post_batch(client, &self.uri, api_key, body).await {
             Ok(status) if is_missing_route(status) => {
                 self.unsupported();
-                self.due = tokio::time::Instant::now() + flush_interval;
+                self.due = tokio::time::Instant::now() + pace;
                 return false;
             }
             Ok(status) => classify(status),
             Err(reason) => ExportOutcome::Retry(reason),
         };
-        let delay = self.apply(&outcome, rows, metrics, flush_interval);
+        let mut delay = self.apply(&outcome, rows, metrics, flush_interval);
+        if self.queue.is_empty() {
+            delay = delay.max(pace);
+        }
         self.due = tokio::time::Instant::now() + delay;
         true
     }
@@ -386,6 +394,53 @@ mod tests {
             assert!(page["next_after"].is_null());
         }
         assert_eq!(0, ledger.dirty_days().len());
+    }
+
+    #[tokio::test]
+    async fn only_rows_changed_since_the_last_ack_are_pushed() {
+        let (base, seen) = fake_hub(200).await;
+        let ledger = ledger_at(DAY);
+        record(&ledger, DAY, &["a", "b"]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        record(&ledger, DAY, &["a"]);
+        export.start_at(tokio::time::Instant::now());
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        let pages = bodies(&seen);
+        assert_eq!(2, pages[0]["counts"].as_array().expect("counts").len());
+        let counts = pages[1]["counts"].as_array().expect("counts");
+        assert_eq!(1, counts.len());
+        assert_eq!("a", counts[0]["signature"]);
+        assert_eq!(2, counts[0]["detections"]);
+        assert_eq!(DAY, pages[1]["days"][0]["day"]);
+        assert_eq!(0, ledger.dirty_days().len());
+    }
+
+    #[tokio::test]
+    async fn the_detection_half_waits_at_least_a_minute_between_rounds() {
+        let (base, _seen) = fake_hub(200).await;
+        let ledger = ledger_at(DAY);
+        record(&ledger, DAY, &["a"]);
+        let client = HubClient::new(Duration::from_secs(10));
+        let mut export = export(&base, &ledger);
+
+        let before = tokio::time::Instant::now();
+        assert!(
+            export
+                .round(
+                    &client,
+                    &"k".repeat(32),
+                    &MetricsState::new(),
+                    Duration::from_secs(5),
+                    false
+                )
+                .await
+        );
+        assert_eq!(0, ledger.dirty_days().len());
+        assert!(export.due() >= before + Duration::from_mins(1));
     }
 
     #[tokio::test]

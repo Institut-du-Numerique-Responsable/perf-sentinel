@@ -1008,10 +1008,12 @@ Hub to PerfSentinelHub 0.6.0 first. `perf_sentinel_hub_export_correlations_pendi
 
 With `[daemon.detections]` enabled too, the default, the daemon pushes its detection ledger
 to `/api/import/detections` beside `endpoint`, with the same key and source id, from 0.37.0.
-Each round sends every day whose counts moved since the Hub last accepted it, all of its
-rows, in pages shaped like a `GET /api/detections` page, at most 5,000 rows and 4 MiB each,
-the day's `days` entry on its last page. A day goes again only once it changes, retried with
-the same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
+Each round sends every day whose counts moved since the Hub last accepted it, only the rows
+that changed since then, in pages shaped like a `GET /api/detections` page, at most 5,000
+rows and 4 MiB each, the day's `days` entry on its last page. The Hub keeps the larger count
+of each row, so the unchanged ones need not travel again. Rounds start at most once a
+minute, or once per `flush_interval_secs` when that is longer, and a failed page is retried
+with the same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
 and pushes once more. A page the Hub rejects with an unretryable 4xx is dropped, its rows
 counted in `perf_sentinel_hub_export_dropped_total`, and its day set to `gap = true` in the
 ledger. A Hub that answers 404 or 405 on that route predates it: the daemon logs one warning
