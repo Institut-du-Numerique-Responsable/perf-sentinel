@@ -6,6 +6,7 @@
 //! is always a gap. The lock is never held across an `.await`.
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -18,6 +19,10 @@ use crate::report::metrics::MetricsState;
 pub(crate) const DAY_MS: u64 = 86_400_000;
 /// Longer signatures are counted in the day's overflow, never tracked.
 pub(crate) const MAX_TRACKED_SIGNATURE_BYTES: usize = 1024;
+/// Estimated JSON bytes one page may carry.
+pub(crate) const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
+/// Estimated JSON bytes of a `CountRow` beside its signature.
+const ROW_OVERHEAD_BYTES: usize = 96;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Tally {
@@ -128,6 +133,41 @@ pub(crate) struct DetectionLedgerStatus {
     pub(crate) oldest_day: u32,
     pub(crate) current_day: u32,
     pub(crate) sealed_through: Option<u32>,
+}
+
+/// One page of `GET /api/detections`, the body of a Hub push page too.
+#[derive(Debug, Serialize)]
+pub(crate) struct DetectionsPage {
+    pub(crate) ledger_id: String,
+    pub(crate) started_ms: u64,
+    pub(crate) current_day: u32,
+    pub(crate) oldest_day: u32,
+    pub(crate) sealed_through: Option<u32>,
+    pub(crate) counts: Vec<CountRow>,
+    pub(crate) days: Vec<DayRow>,
+    pub(crate) next_after: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct CountRow {
+    pub(crate) day: u32,
+    pub(crate) signature: String,
+    pub(crate) detections: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) extra_io_ops: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DayRow {
+    pub(crate) day: u32,
+    pub(crate) sealed: bool,
+    pub(crate) gap: bool,
+    pub(crate) overflow_detections: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) overflow_extra_io_ops: Option<u64>,
+    pub(crate) shed_traces: u64,
+    pub(crate) ingest_rejected: u64,
+    pub(crate) sampling_rate: f64,
 }
 
 #[derive(Debug)]
@@ -266,7 +306,10 @@ impl DetectionLedger {
     }
 
     pub(crate) fn status(&self) -> DetectionLedgerStatus {
-        let state = self.lock();
+        self.status_of(&self.lock())
+    }
+
+    fn status_of(&self, state: &LedgerState) -> DetectionLedgerStatus {
         let oldest_day = state.days.keys().next().copied();
         let current_day = state.days.keys().next_back().copied();
         DetectionLedgerStatus {
@@ -276,6 +319,76 @@ impl DetectionLedger {
             oldest_day: oldest_day.unwrap_or(state.last_tick_day),
             current_day: current_day.unwrap_or(state.last_tick_day),
             sealed_through: state.sealed_through(),
+        }
+    }
+
+    /// Rows strictly after `after`, from `since_day` on, in (day, signature)
+    /// order. A day's `DayRow` rides with its last count row, or with the
+    /// page that passes it when it has none.
+    pub(crate) fn page(
+        &self,
+        since_day: Option<u32>,
+        after: Option<(u32, &str)>,
+        limit: usize,
+    ) -> DetectionsPage {
+        let state = self.lock();
+        let status = self.status_of(&state);
+        let start = since_day.unwrap_or(0).max(after.map_or(0, |(day, _)| day));
+        let mut page = DetectionsPage {
+            ledger_id: status.ledger_id,
+            started_ms: status.started_ms,
+            current_day: status.current_day,
+            oldest_day: status.oldest_day,
+            sealed_through: status.sealed_through,
+            counts: Vec::new(),
+            days: Vec::new(),
+            next_after: None,
+        };
+        let mut bytes = 0;
+        for (&day, bucket) in state.days.range(start..) {
+            let cursor = after.filter(|(d, _)| *d == day).map(|(_, sig)| sig);
+            let from = cursor.map_or(Bound::Unbounded, Bound::Excluded);
+            let rows = bucket.counts.range::<str, _>((from, Bound::Unbounded));
+            let before = page.counts.len();
+            for (signature, tally) in rows {
+                let size = signature.len() + ROW_OVERHEAD_BYTES;
+                if page.counts.len() >= limit || bytes + size > MAX_PAGE_BYTES {
+                    page.next_after = page
+                        .counts
+                        .last()
+                        .map(|r| format!("{}:{}", r.day, r.signature));
+                    return page;
+                }
+                bytes += size;
+                page.counts.push(self.count_row(day, signature, tally));
+            }
+            // The cursor's own day went out with the page holding its last row.
+            if cursor.is_none() || page.counts.len() > before {
+                page.days.push(self.day_row(day, bucket));
+            }
+        }
+        page
+    }
+
+    fn count_row(&self, day: u32, signature: &str, tally: &Tally) -> CountRow {
+        CountRow {
+            day,
+            signature: signature.to_string(),
+            detections: tally.detections,
+            extra_io_ops: self.io_tracked.then_some(tally.extra_io_ops),
+        }
+    }
+
+    fn day_row(&self, day: u32, bucket: &DayBucket) -> DayRow {
+        DayRow {
+            day,
+            sealed: bucket.sealed,
+            gap: bucket.gap,
+            overflow_detections: bucket.overflow.detections,
+            overflow_extra_io_ops: self.io_tracked.then_some(bucket.overflow.extra_io_ops),
+            shed_traces: bucket.shed_traces,
+            ingest_rejected: bucket.ingest_rejected,
+            sampling_rate: bucket.sampling_rate,
         }
     }
 

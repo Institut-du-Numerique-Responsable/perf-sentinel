@@ -76,6 +76,7 @@ pub(super) async fn spawn_listeners(
     incident_store: Option<Arc<super::incidents::IncidentStore>>,
     incident_archive: Option<mpsc::Sender<Vec<u8>>>,
     incident_export: Option<Arc<super::hub_incident_export::IncidentExportBuffer>>,
+    detection_ledger: Option<Arc<super::detection_ledger::DetectionLedger>>,
 ) -> Result<
     (
         tokio::task::JoinHandle<()>,
@@ -130,6 +131,7 @@ pub(super) async fn spawn_listeners(
         incident_store,
         incident_archive,
         incident_export,
+        detection_ledger,
     );
     let http_handle = spawn_http_listener(http_listener, http_addr, tls_acceptor, http_router);
     let json_socket_handle = spawn_json_socket_listener(config, tx, over_memory);
@@ -412,6 +414,7 @@ fn build_http_router(
     incident_store: Option<Arc<super::incidents::IncidentStore>>,
     incident_archive: Option<mpsc::Sender<Vec<u8>>>,
     incident_export: Option<Arc<super::hub_incident_export::IncidentExportBuffer>>,
+    detection_ledger: Option<Arc<super::detection_ledger::DetectionLedger>>,
 ) -> axum::Router {
     let metrics_sink: Arc<dyn crate::ingest::otlp::MetricsSink> = metrics.clone();
     let otlp_router = crate::ingest::otlp::otlp_http_router_for_daemon(
@@ -473,6 +476,7 @@ fn build_http_router(
             daemon_config: config.daemon.clone(),
             thresholds: config.thresholds.clone(),
             energy_backends: energy_backends_configured,
+            detection_ledger,
         });
         // CORS scoped to /api/* only, never to OTLP/metrics/health.
         // Locked by `cors_layer_does_not_leak_to_otlp_or_metrics_or_health_routes`.

@@ -53,6 +53,11 @@ const MAX_CORRELATIONS_LIMIT: usize = 1000;
 #[doc(hidden)]
 pub const MAX_ACKS_RESPONSE: usize = 1000;
 
+/// Upper bound for `?limit=` on `/api/detections`, larger values answer 400.
+const MAX_DETECTIONS_LIMIT: usize = 5000;
+/// Rows per `/api/detections` page without `?limit=`.
+const DEFAULT_DETECTIONS_LIMIT: usize = 1000;
+
 /// Shared state for query API route handlers.
 pub struct QueryApiState {
     pub findings_store: Arc<FindingsStore>,
@@ -124,6 +129,9 @@ pub struct QueryApiState {
     /// inferring it from zero-valued metrics (the gauges are
     /// pre-registered at 0 whether or not a backend exists).
     pub energy_backends: EnergyBackendsConfigured,
+    /// Per-day detection ledger. `None` when `[daemon.detections] enabled =
+    /// false`, in which case `/api/detections` returns 503.
+    pub(crate) detection_ledger: Option<Arc<super::detection_ledger::DetectionLedger>>,
 }
 
 /// Configured-or-not flags for the five scraped energy backends and the
@@ -185,6 +193,7 @@ pub fn query_api_router(state: Arc<QueryApiState>) -> Router {
     let mut router = Router::new()
         .route("/api/findings", get(handle_findings))
         .route("/api/findings/{trace_id}", get(handle_findings_by_trace))
+        .route("/api/detections", get(handle_detections))
         .route("/api/explain/{trace_id}", get(handle_explain))
         .route("/api/correlations", get(handle_correlations))
         .route("/api/status", get(handle_status))
@@ -280,6 +289,15 @@ struct FindingsParams {
     /// findings, with `acknowledged_by` populated for acked ones.
     #[serde(default)]
     include_acked: bool,
+}
+
+#[derive(Deserialize, Default)]
+struct DetectionsParams {
+    /// First UTC epoch day of the walk, the ledger's oldest when absent.
+    since_day: Option<u32>,
+    /// `<day>:<signature>` of the last row already read.
+    after: Option<String>,
+    limit: Option<usize>,
 }
 
 #[derive(Deserialize, Default)]
@@ -418,6 +436,10 @@ struct StatusResponse {
     /// disclosed officially from this archive. Additive since 0.28.0.
     #[serde(skip_serializing_if = "Option::is_none")]
     disclosure_archive: Option<DisclosureArchiveStatus>,
+    /// The per-day detection ledger's horizon, absent when
+    /// `[daemon.detections]` is off. Additive since 0.37.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detection_ledger: Option<super::detection_ledger::DetectionLedgerStatus>,
 }
 
 #[derive(Serialize)]
@@ -649,7 +671,49 @@ async fn handle_status(State(state): State<Arc<QueryApiState>>) -> Json<StatusRe
         oldest_finding_ms,
         findings_stored_total,
         disclosure_archive: disclosure_archive_status(&state.metrics),
+        detection_ledger: state.detection_ledger.as_ref().map(|l| l.status()),
     })
+}
+
+async fn handle_detections(
+    State(state): State<Arc<QueryApiState>>,
+    params: Result<Query<DetectionsParams>, QueryRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Some(ledger) = state.detection_ledger.as_ref() else {
+        return Err(ErrorResponse::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "detection ledger disabled",
+        ));
+    };
+    let params = match params {
+        Ok(Query(params)) => params,
+        Err(rejection) => return Ok(rejection.into_response()),
+    };
+    let limit = params.limit.unwrap_or(DEFAULT_DETECTIONS_LIMIT);
+    if !(1..=MAX_DETECTIONS_LIMIT).contains(&limit) {
+        return Err(ErrorResponse::new(
+            StatusCode::BAD_REQUEST,
+            "limit must be between 1 and 5000",
+        ));
+    }
+    let after = params
+        .after
+        .as_deref()
+        .map(|raw| {
+            parse_after(raw).ok_or(ErrorResponse::new(
+                StatusCode::BAD_REQUEST,
+                "after must be <day>:<signature>",
+            ))
+        })
+        .transpose()?;
+    Ok(Json(ledger.page(params.since_day, after, limit)).into_response())
+}
+
+/// Splits a `<day>:<signature>` cursor at its first `:`, since signatures
+/// carry colons of their own.
+fn parse_after(raw: &str) -> Option<(u32, &str)> {
+    let (day, signature) = raw.split_once(':')?;
+    Some((day.parse().ok()?, signature))
 }
 
 /// `GET /api/config` response: the daemon's effective `[daemon]`

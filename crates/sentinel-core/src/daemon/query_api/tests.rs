@@ -3,6 +3,11 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
+use crate::daemon::detection_ledger::{DAY_MS, DetectionLedger};
+
+/// The UTC epoch day the test ledger opens on.
+const LEDGER_DAY: u32 = 3;
+
 /// Build a `QueryApiState` for tests, wiring an optional correlator.
 fn make_state_with_correlator(
     correlator: Option<Arc<tokio::sync::Mutex<CrossTraceCorrelator>>>,
@@ -42,6 +47,12 @@ fn make_state_with_correlator(
         daemon_config: crate::config::DaemonConfig::default(),
         thresholds: crate::config::ThresholdsConfig::default(),
         energy_backends: EnergyBackendsConfigured::default(),
+        detection_ledger: Some(Arc::new(DetectionLedger::new(
+            &crate::config::DaemonDetectionsConfig::default(),
+            true,
+            1.0,
+            u64::from(LEDGER_DAY) * DAY_MS,
+        ))),
     })
 }
 
@@ -142,6 +153,115 @@ async fn status_reports_the_rollup_horizon_once_a_day_closed() {
     assert_eq!(
         body["disclosure_archive"],
         serde_json::json!({"oldest_day": "2026-01-01", "days": 2, "last_closed_day": "2026-01-02"})
+    );
+}
+
+#[tokio::test]
+async fn status_reports_the_detection_ledger() {
+    let state = make_state();
+    let ledger_id = state.detection_ledger.as_ref().unwrap().status().ledger_id;
+    let body = status_json(query_api_router(state)).await;
+    assert_eq!(
+        body["detection_ledger"],
+        serde_json::json!({
+            "ledger_id": ledger_id,
+            "started_ms": u64::from(LEDGER_DAY) * DAY_MS,
+            "retained_days": 8,
+            "oldest_day": LEDGER_DAY,
+            "current_day": LEDGER_DAY,
+            "sealed_through": null,
+        })
+    );
+    let mut off = make_state().clone_for_test();
+    off.detection_ledger = None;
+    let body = status_json(query_api_router(Arc::new(off))).await;
+    assert!(body.get("detection_ledger").is_none(), "absent when off");
+}
+
+/// Status and JSON body of one `GET`.
+async fn get_json(app: Router, path: &str) -> (StatusCode, serde_json::Value) {
+    let resp = app.oneshot(get_request(path)).await.unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    (status, serde_json::from_slice(&body).unwrap())
+}
+
+#[tokio::test]
+async fn detections_limit_outside_1_to_5000_is_a_400() {
+    let app = query_api_router(make_state());
+    for limit in [0, 5001] {
+        let (status, body) = get_json(app.clone(), &format!("/api/detections?limit={limit}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "limit={limit}");
+        assert_eq!(
+            body,
+            serde_json::json!({"error": "limit must be between 1 and 5000"})
+        );
+    }
+    let (status, _) = get_json(app, "/api/detections?limit=5000").await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn detections_cursor_without_a_colon_is_a_400() {
+    let app = query_api_router(make_state());
+    for after in ["3", "x:sig"] {
+        let (status, body) = get_json(app.clone(), &format!("/api/detections?after={after}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "after={after}");
+        assert_eq!(
+            body,
+            serde_json::json!({"error": "after must be <day>:<signature>"})
+        );
+    }
+}
+
+#[tokio::test]
+async fn detections_cursor_splits_at_the_first_colon() {
+    let state = make_state();
+    let findings: Vec<_> = ["abb", "abc", "abd"]
+        .into_iter()
+        .map(|tail| {
+            let mut f = crate::test_helpers::make_finding(
+                detect::FindingType::NPlusOneSql,
+                detect::Severity::Warning,
+            );
+            f.signature = format!("n_plus_one_sql:svc:GET /x:{tail}");
+            f.green_impact.as_mut().unwrap().estimated_extra_io_ops = 4;
+            f
+        })
+        .collect();
+    let ledger = state.detection_ledger.as_ref().unwrap();
+    ledger.record(&findings, u64::from(LEDGER_DAY) * DAY_MS);
+    let (status, body) = get_json(
+        query_api_router(state.clone()),
+        "/api/detections?after=3:n_plus_one_sql:svc:GET%20%2Fx:abc",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["counts"],
+        serde_json::json!([{
+            "day": 3,
+            "signature": "n_plus_one_sql:svc:GET /x:abd",
+            "detections": 1,
+            "extra_io_ops": 4,
+        }])
+    );
+    assert_eq!(body["days"][0]["day"], 3);
+    assert_eq!(body["next_after"], serde_json::Value::Null);
+    assert_eq!(body["ledger_id"], ledger.status().ledger_id);
+}
+
+#[tokio::test]
+async fn detections_answers_503_when_disabled() {
+    let mut off = make_state().clone_for_test();
+    off.detection_ledger = None;
+    let (status, body) = get_json(query_api_router(Arc::new(off)), "/api/detections").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body,
+        serde_json::json!({"error": "detection ledger disabled"})
     );
 }
 
@@ -2991,6 +3111,7 @@ impl QueryApiState {
             daemon_config: self.daemon_config.clone(),
             thresholds: self.thresholds.clone(),
             energy_backends: self.energy_backends,
+            detection_ledger: self.detection_ledger.clone(),
         }
     }
 }
@@ -3382,8 +3503,9 @@ async fn a_read_key_alone_gates_nothing() {
 
 /// Every `GET` of the query router, the set `[daemon] require_read_key`
 /// gates. A route added to `query_api_router` belongs here too.
-const GATED_GETS: [&str; 10] = [
+const GATED_GETS: [&str; 11] = [
     "/api/findings",
+    "/api/detections",
     "/api/findings/trace-1",
     "/api/explain/trace-1",
     "/api/correlations",

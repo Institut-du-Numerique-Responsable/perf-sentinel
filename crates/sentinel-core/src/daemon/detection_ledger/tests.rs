@@ -160,3 +160,103 @@ fn tick_once_carries_metric_losses_and_sets_the_gauge() {
     );
     assert_eq!(metrics.detection_ledger_signatures.get(), 2);
 }
+
+/// Days 3 and 4, each with signatures `a`, `b`, `c`.
+fn two_full_days() -> DetectionLedger {
+    let ledger = ledger_at(3, true);
+    let batch = [finding("a", 1), finding("b", 2), finding("c", 3)];
+    ledger.record(&batch, 3 * DAY_MS);
+    ledger.record(&batch, 4 * DAY_MS);
+    ledger
+}
+
+fn keys(page: &DetectionsPage) -> Vec<String> {
+    page.counts
+        .iter()
+        .map(|r| format!("{}:{}", r.day, r.signature))
+        .collect()
+}
+
+fn page_days(page: &DetectionsPage) -> Vec<u32> {
+    page.days.iter().map(|d| d.day).collect()
+}
+
+#[test]
+fn page_walks_days_and_signatures_in_order() {
+    let ledger = two_full_days();
+    let first = ledger.page(None, None, 2);
+    assert_eq!(first.next_after.as_deref(), Some("3:b"));
+    let second = ledger.page(None, Some((3, "b")), 2);
+    assert_eq!(second.next_after.as_deref(), Some("4:a"));
+    let third = ledger.page(None, Some((4, "a")), 2);
+    assert_eq!(third.next_after, None);
+    let all: Vec<String> = [&first, &second, &third]
+        .into_iter()
+        .flat_map(keys)
+        .collect();
+    assert_eq!(all, ["3:a", "3:b", "3:c", "4:a", "4:b", "4:c"]);
+    assert_eq!(third.counts[0].detections, 1);
+    assert_eq!(third.counts[0].extra_io_ops, Some(2));
+    assert_eq!((third.oldest_day, third.current_day), (3, 4));
+    assert_eq!(third.ledger_id, ledger.status().ledger_id);
+}
+
+#[test]
+fn day_rows_follow_their_last_count() {
+    let ledger = two_full_days();
+    assert_eq!(page_days(&ledger.page(None, None, 2)), Vec::<u32>::new());
+    let second = ledger.page(None, Some((3, "b")), 2);
+    assert_eq!(page_days(&second), [3]);
+    assert!(second.days[0].gap, "day 3 opened the ledger");
+    assert_eq!(page_days(&ledger.page(None, Some((4, "a")), 2)), [4]);
+    // A page ending on day 3's last row carries day 3, the next one never.
+    let ends_on_3 = ledger.page(None, None, 3);
+    assert_eq!(
+        (keys(&ends_on_3).len(), page_days(&ends_on_3)),
+        (3, vec![3])
+    );
+    assert_eq!(page_days(&ledger.page(None, Some((3, "c")), 3)), [4]);
+}
+
+#[test]
+fn an_empty_day_still_gets_its_row() {
+    let ledger = ledger_at(3, false);
+    ledger.tick(4 * DAY_MS, 7, 0);
+    ledger.record(&[finding("a", 1)], 5 * DAY_MS);
+    let page = ledger.page(None, None, 10);
+    assert_eq!(keys(&page), ["5:a"]);
+    assert_eq!(page_days(&page), [3, 4, 5]);
+    assert_eq!(page.days[1].shed_traces, 7);
+    assert!(page.days[0].sealed && !page.days[2].sealed);
+    assert_eq!(page.counts[0].extra_io_ops, None, "green off");
+    assert_eq!(page.days[2].overflow_extra_io_ops, None);
+    assert_eq!(page.sealed_through, Some(3), "day 4 seals on the next tick");
+}
+
+#[test]
+fn page_starts_at_since_day() {
+    let ledger = two_full_days();
+    let page = ledger.page(Some(4), None, 10);
+    assert_eq!(keys(&page), ["4:a", "4:b", "4:c"]);
+    assert_eq!(page_days(&page), [4]);
+    assert_eq!(
+        page.oldest_day, 3,
+        "the horizon is the ledger's, not the page's"
+    );
+    assert!(ledger.page(Some(5), None, 10).counts.is_empty());
+}
+
+#[test]
+fn page_stops_at_the_byte_budget() {
+    let ledger = ledger_at(3, true);
+    let batch: Vec<Finding> = (0..4000)
+        .map(|i| finding(&format!("{i:04}{}", "x".repeat(996)), 0))
+        .collect();
+    ledger.record(&batch, 3 * DAY_MS);
+    let page = ledger.page(None, None, 5000);
+    let fits = MAX_PAGE_BYTES / (1000 + ROW_OVERHEAD_BYTES);
+    assert_eq!(page.counts.len(), fits);
+    assert!(page.days.is_empty(), "day 3 has rows left");
+    let last = &page.counts[fits - 1].signature;
+    assert_eq!(page.next_after, Some(format!("3:{last}")));
+}

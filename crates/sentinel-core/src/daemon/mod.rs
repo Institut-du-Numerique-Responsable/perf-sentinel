@@ -345,6 +345,7 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
         hub_export
             .as_ref()
             .and_then(hub_export::HubExporter::incident_buffer),
+        detection_ledger.clone(),
     )
     .await?;
 
