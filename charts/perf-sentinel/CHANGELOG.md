@@ -10,6 +10,19 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.38.0]
+
+### Added
+
+- **`appVersion` moves to `0.38.0`.** Each day of the daemon's detection ledger,
+  served on `GET /api/detections` and pushed to PerfSentinelHub, carries the
+  day's avoidable CO2 and I/O totals when green scoring is on. PerfSentinelHub
+  0.9.0 reads them to show a finding's CO2 as an order of magnitude in its
+  review recap. Upgrade the Hub before or with this daemon: an older Hub drops
+  the new fields. See the application `CHANGELOG.md`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.37.1]
 
 ### Fixed
