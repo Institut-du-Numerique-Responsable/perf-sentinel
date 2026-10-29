@@ -46,6 +46,15 @@ impl Tally {
     }
 }
 
+/// One batch's (or one day's summed) operational avoidable carbon and I/O.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct DayCarbon {
+    pub(crate) gco2_mid: f64,
+    pub(crate) gco2_low: f64,
+    pub(crate) avoidable_io_ops: u64,
+    pub(crate) total_io_ops: u64,
+}
+
 #[derive(Debug)]
 pub(crate) struct DayBucket {
     pub(crate) counts: BTreeMap<Arc<str>, Tally>,
@@ -55,6 +64,8 @@ pub(crate) struct DayBucket {
     pub(crate) shed_traces: u64,
     pub(crate) ingest_rejected: u64,
     pub(crate) sampling_rate: f64,
+    /// The day's sums, `None` until a scored batch brings them.
+    pub(crate) avoidable: Option<DayCarbon>,
     /// Bumped on every mutation, compared to `acked_rev` by the Hub push,
     /// which sends only the rows whose own `rev` passed `acked_rev`.
     pub(crate) rev: u64,
@@ -71,6 +82,7 @@ impl DayBucket {
             shed_traces: 0,
             ingest_rejected: 0,
             sampling_rate,
+            avoidable: None,
             // A new day is unsent, so it starts ahead of `acked_rev`.
             rev: 1,
             acked_rev: 0,
@@ -178,6 +190,14 @@ pub(crate) struct DayRow {
     pub(crate) shed_traces: u64,
     pub(crate) ingest_rejected: u64,
     pub(crate) sampling_rate: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) avoidable_gco2: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) avoidable_gco2_low: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) avoidable_io_ops: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) total_io_ops: Option<u64>,
 }
 
 /// One day as the Hub push sends it, copied under the lock.
@@ -264,6 +284,29 @@ impl DetectionLedger {
             state.bucket(day, self.sampling_rate).rev = rev;
         }
         overflowed
+    }
+
+    /// Adds one scored batch's avoidable carbon to its day, which the push
+    /// then resends.
+    pub(crate) fn record_avoidable(&self, batch: DayCarbon, now_ms: u64) {
+        // NaN serializes as JSON `null` and the sums must only grow.
+        if !(batch.gco2_mid.is_finite() && batch.gco2_low.is_finite())
+            || batch.gco2_mid < 0.0
+            || batch.gco2_low < 0.0
+        {
+            return;
+        }
+        let mut state = self.lock();
+        let day = state.effective_day(now_ms);
+        let bucket = state.bucket(day, self.sampling_rate);
+        let sum = bucket.avoidable.unwrap_or_default();
+        bucket.avoidable = Some(DayCarbon {
+            gco2_mid: sum.gco2_mid + batch.gco2_mid,
+            gco2_low: sum.gco2_low + batch.gco2_low,
+            avoidable_io_ops: sum.avoidable_io_ops + batch.avoidable_io_ops,
+            total_io_ops: sum.total_io_ops + batch.total_io_ops,
+        });
+        bucket.rev += 1;
     }
 
     /// Adds one detection to `day`, `false` when it went to overflow.
@@ -449,6 +492,10 @@ impl DetectionLedger {
             shed_traces: bucket.shed_traces,
             ingest_rejected: bucket.ingest_rejected,
             sampling_rate: bucket.sampling_rate,
+            avoidable_gco2: bucket.avoidable.map(|c| c.gco2_mid),
+            avoidable_gco2_low: bucket.avoidable.map(|c| c.gco2_low),
+            avoidable_io_ops: bucket.avoidable.map(|c| c.avoidable_io_ops),
+            total_io_ops: bucket.avoidable.map(|c| c.total_io_ops),
         }
     }
 

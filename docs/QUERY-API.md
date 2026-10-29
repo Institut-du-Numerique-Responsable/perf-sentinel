@@ -1352,6 +1352,16 @@ Each `days` object:
 | `shed_traces`           | number  | Traces the analysis shed that day, never analyzed                                              |
 | `ingest_rejected`       | number  | OTLP requests refused at ingest that day, queue full or memory pressure                        |
 | `sampling_rate`         | number  | `[daemon] sampling_rate`: the counts cover that share of the traces                            |
+| `avoidable_gco2`        | number  | Avoidable CO₂ of the day's analyzed batches, in gCO₂eq: the operational estimate of `green_summary.co2.avoidable.mid`. Absent when green scoring is off, no batch resolved a region or no batch brought it |
+| `avoidable_gco2_low`    | number  | The low bound of the same estimate (`green_summary.co2.avoidable.low`), for a conservative "at least" figure |
+| `avoidable_io_ops`      | number  | Avoidable I/O of the same batches, deduplicated per batch like `green_summary.avoidable_io_ops` |
+| `total_io_ops`          | number  | Total I/O of the same batches (`green_summary.total_io_ops`). `avoidable_io_ops / total_io_ops` is the day's waste ratio, which does not move with traffic the way an absolute volume does |
+
+The four carbon fields are present together or absent together. Their
+ratio, `avoidable_gco2 / avoidable_io_ops`, is the day's grams per
+avoidable I/O operation. Applied to a signature's `extra_io_ops` it gives
+an order of magnitude only, since `extra_io_ops` is not deduplicated
+across findings the way a batch's `avoidable_io_ops` is.
 
 A detection goes to its day's overflow when its signature is new past
 `[daemon.detections] max_signatures_per_day`, longer than 1024 bytes, or
@@ -1414,7 +1424,11 @@ curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode limit=2 \
       "overflow_extra_io_ops": 0,
       "shed_traces": 0,
       "ingest_rejected": 0,
-      "sampling_rate": 1.0
+      "sampling_rate": 1.0,
+      "avoidable_gco2": 0.0042,
+      "avoidable_gco2_low": 0.0021,
+      "avoidable_io_ops": 55,
+      "total_io_ops": 610
     }
   ],
   "next_after": "20754:n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1443,7 +1457,11 @@ The third page ends the walk, `next_after` is `null`:
       "overflow_extra_io_ops": 0,
       "shed_traces": 0,
       "ingest_rejected": 0,
-      "sampling_rate": 1.0
+      "sampling_rate": 1.0,
+      "avoidable_gco2": 0.0025,
+      "avoidable_gco2_low": 0.0012,
+      "avoidable_io_ops": 31,
+      "total_io_ops": 402
     }
   ],
   "next_after": null
