@@ -1,0 +1,26 @@
+#!/usr/bin/expect -f
+# Records `perf-sentinel demo --tui` as an asciicast v2 for the vitrine:
+# Analyze -> Inspect -> Explain with four Enters, then back up with Esc, Esc, q.
+# Usage: expect rec-tui.exp <perf-sentinel binary> <output.cast>
+# Then set the header to {version, width, height, timestamp, command: "perf-sentinel demo --tui"}:
+# asciinema writes the binary's local path and the shell into it, and the cast is public.
+set bin [lindex $argv 0]
+set out [lindex $argv 1]
+set timeout 2
+set stty_init "rows 30 columns 126"
+spawn env RUST_LOG=off asciinema rec --quiet --overwrite -f asciicast-v2 -c "$bin demo --tui" $out
+set timeout 3
+expect timeout {}
+set timeout 2
+foreach key {"\r" "\r" "\r" "\r"} {
+    send -- $key
+    expect timeout {}
+}
+expect timeout {}
+foreach key {"\033" "\033"} {
+    send -- $key
+    expect timeout {}
+}
+send -- "q"
+set timeout 5
+expect eof
