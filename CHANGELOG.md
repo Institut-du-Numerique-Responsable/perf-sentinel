@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- Each `days` object of `GET /api/detections`, and of the ledger push to PerfSentinelHub, gains `avoidable_gco2`, `avoidable_gco2_low`, `avoidable_io_ops` and `total_io_ops`: the day's sums over its analyzed batches of the operational avoidable CO₂ (`green_summary.co2.avoidable.mid` and `.low`, gCO₂eq), of the batch's `avoidable_io_ops` and of its `total_io_ops`. All four are absent when green scoring is off, no batch resolved a region or no batch brought them. `avoidable_gco2 / avoidable_io_ops` is the day's grams per avoidable I/O operation, which PerfSentinelHub uses to estimate a finding's CO₂ as an order of magnitude, and `avoidable_io_ops / total_io_ops` is the day's waste ratio.
+
 ### Changed
 
 - The official public example disclosure, `docs/schemas/examples/example-official-public-G2.json`, moves to perf-sentinel 0.37.1 on schema `perf-sentinel-report/v1.8`, with the `binary_hash` of the published 0.37.1 `perf-sentinel-linux-amd64` binary and a rebaked `content_hash`. The sample disclosure the website shows is signed from this file.

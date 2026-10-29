@@ -25,7 +25,7 @@ use crate::score::scaphandre::ScaphandreState;
 use detect::sanitizer_aware::SanitizerAwareMode;
 use detect::{Confidence, DetectConfig};
 
-use super::detection_ledger::DetectionLedger;
+use super::detection_ledger::{DayCarbon, DetectionLedger};
 use super::findings_store;
 use super::hub_export::HubExportBuffer;
 use super::sampling::{apply_sampling, should_sample};
@@ -1813,11 +1813,15 @@ async fn process_traces(
     crate::acknowledgments::enrich_with_signatures(&mut findings);
     let findings = findings;
 
+    // Every scored batch, findings or not, so `total_io_ops` counts the clean ones.
+    if let Some(ledger) = ctx.detection_ledger {
+        record_carbon_in_ledger(ledger, &green_summary, now_ms);
+    }
+
     if !findings.is_empty() {
         // Before the store push: a zero-retention store still counts here.
         if let Some(ledger) = ctx.detection_ledger {
-            let overflow = ledger.record(&findings, now_ms);
-            ctx.metrics.detection_ledger_overflow_total.inc_by(overflow);
+            record_in_ledger(ledger, &findings, now_ms, ctx.metrics);
         }
         if let Some(export) = ctx.hub_export {
             let dropped = export.push_batch(&findings, now_ms);
@@ -1894,6 +1898,34 @@ async fn process_traces(
             report,
         };
         super::archive::try_send(archive_tx, archive, ctx.metrics);
+    }
+}
+
+/// Counts a batch's detections in the ledger.
+fn record_in_ledger(
+    ledger: &DetectionLedger,
+    findings: &[detect::Finding],
+    now_ms: u64,
+    metrics: &MetricsState,
+) {
+    let overflow = ledger.record(findings, now_ms);
+    metrics.detection_ledger_overflow_total.inc_by(overflow);
+}
+
+/// Adds a batch's operational avoidable carbon to the ledger's day.
+fn record_carbon_in_ledger(ledger: &DetectionLedger, green_summary: &GreenSummary, now_ms: u64) {
+    // Without a resolved region `avoidable.mid` is `0.0` whatever the avoidable
+    // I/O, which would read as `0 g` in the Hub.
+    if let Some(co2) = &green_summary.co2
+        && green_summary.accounted_io_ops > 0
+    {
+        let batch = DayCarbon {
+            gco2_mid: co2.avoidable.mid,
+            gco2_low: co2.avoidable.low,
+            avoidable_io_ops: green_summary.avoidable_io_ops as u64,
+            total_io_ops: green_summary.total_io_ops as u64,
+        };
+        ledger.record_avoidable(batch, now_ms);
     }
 }
 
