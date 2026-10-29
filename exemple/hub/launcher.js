@@ -1430,7 +1430,8 @@
      * daemon below 0.24.0 never has a listing and one failed read proves
      * nothing, while the relay would still answer, so the daemon is left to
      * refuse the button that does not apply.
-     * @param {{sources?: Array<{id: string, name: string, environment: string}>,
+     * @param {{sources?: Array<{id: string, name: string, environment: string,
+     *   producer_version?: string | null}>,
      *   acks?: Array<{source_id: string, source: string}>}} finding
      * @param {Array<import('../types').Source> | null | undefined} sources
      * @param {{sourceId?: string | null, environment?: string | null} | null | undefined} scope
@@ -1441,7 +1442,11 @@
     function ackRows(finding, sources, scope) {
         const sourceId = (scope && scope.sourceId) || null;
         const environment = (scope && scope.environment) || null;
-        const rows = (finding.sources || []).map(function (carrier) {
+        // A source that only counted the finding holds no copy to ack or revoke.
+        const copies = (finding.sources || []).filter(function (carrier) {
+            return carrier.producer_version !== null;
+        });
+        const rows = copies.map(function (carrier) {
             const source = (sources || []).find(function (candidate) {
                 return candidate.id === carrier.id;
             });
@@ -1481,6 +1486,53 @@
             else row.checked = actionable.length === 1;
         });
         return rows;
+    }
+
+    /**
+     * A detection count as the page shows it: `?` when no day of the window is
+     * known, `at least N` when a reason keeps it short, `N` when it is whole.
+     * @param {number | null | undefined} detections
+     * @param {boolean | null | undefined} complete
+     * @returns {string}
+     */
+    function formatDetections(detections, complete) {
+        if (detections === null || detections === undefined) return '?';
+        const count = detections.toLocaleString('en');
+        return complete === false ? '\u2265 ' + count : count;
+    }
+
+    /**
+     * The from and to of a windowed read counting `days` whole UTC days, today the last.
+     * The Hub counts every day from the from day to the to day, so `now - days` would
+     * count one day more.
+     * @param {number} nowMs
+     * @param {number} days
+     * @returns {{from: number, to: number}}
+     */
+    function detectionWindow(nowMs, days) {
+        const dayMs = 86400000;
+        return {from: (Math.floor(nowMs / dayMs) - days + 1) * dayMs, to: nowMs};
+    }
+
+    const GAP_LABEL = {
+        uncovered_days: 'days the ledger does not cover',
+        open_day: 'a day still open',
+        restart: 'a daemon restart',
+        sampling: 'sampled traces',
+        shed: 'traces shed under memory pressure',
+        ingest_rejected: 'rejected ingest',
+        overflow: 'a full ledger',
+        multi_instance: 'several instances behind one source'
+    };
+
+    /**
+     * Why a detection count falls short, in a few words. A reason a newer
+     * engine adds is returned as it was sent.
+     * @param {string} reason
+     * @returns {string}
+     */
+    function gapLabel(reason) {
+        return Object.prototype.hasOwnProperty.call(GAP_LABEL, reason) ? GAP_LABEL[reason] : reason;
     }
 
     /**
@@ -2243,6 +2295,9 @@
         ackEntryHash,
         readAckRoute,
         ackRows,
+        formatDetections,
+        detectionWindow,
+        gapLabel,
         ackExpiry,
         ackExpiryLine,
         ackChecked,

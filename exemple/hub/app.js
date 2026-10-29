@@ -5626,6 +5626,8 @@
 
     // ------------------------------------------------- screen: ack one finding
 
+    const ACK_WINDOW_DAYS = 7;
+
     /**
      * Reads the finding the link names, and the sources again, since they say
      * which daemons relay and how much each one's ack listing is worth. After a
@@ -5641,12 +5643,23 @@
         const ack = state.ack;
         const path = '/api/findings?signature=' + encodeURIComponent(route.signature)
             + '&include_acked=true&limit=1';
-        Promise.all([getJson(path), reloadSources()]).then(function (answers) {
-            // Matched again here: the page must never offer a finding its link did
-            // not name, whatever the Hub made of the filter.
-            ack.finding = answers[0].find(function (row) {
+        // Matched again here: the page must never offer a finding its link did
+        // not name, whatever the Hub made of the filter.
+        const named = function (rows) {
+            return rows.find(function (row) {
                 return row.finding && row.finding.signature === route.signature;
             }) || null;
+        };
+        // A second, windowed read adds the detections. Any failure of it, a refused read or
+        // a body that is not a list, must not hide the card.
+        const span = PSL.detectionWindow(Date.now(), ACK_WINDOW_DAYS);
+        const windowed = getJson('/api/findings?signature=' + encodeURIComponent(route.signature)
+            + '&from=' + span.from + '&to=' + span.to + '&limit=1').then(named).catch(function () {
+            return undefined;
+        });
+        Promise.all([getJson(path), reloadSources(), windowed]).then(function (answers) {
+            ack.finding = named(answers[0]);
+            ack.volume = answers[2];
             ack.error = false;
         }).catch(function () {
             ack.error = true;
@@ -5706,7 +5719,7 @@
             ]));
             return section;
         }
-        section.appendChild(ackFindingCard(ack.finding));
+        section.appendChild(ackFindingCard(ack.finding, ack.volume));
         // The route is the scope: the source or the environment it names sets the default ticks.
         section.appendChild(ackForm(PSL.ackRows(ack.finding, state.sources, route)));
         return section;
@@ -5718,7 +5731,42 @@
         }));
     }
 
-    function ackFindingCard(envelope) {
+    /**
+     * The detections of the last seven days, from the windowed read: its
+     * finding, null when the window holds no detection the Hub knows, undefined
+     * when the read failed.
+     */
+    function ackDetectionFacts(volume) {
+        if (!volume) return [];
+        const facts = [['Detections (7 days)', PSL.formatDetections(volume.detections, volume.detections_complete)]];
+        if (volume.avoidable_io_ops != null) {
+            facts.push(['Avoidable I/O (7 days)',
+                PSL.formatDetections(volume.avoidable_io_ops, volume.detections_complete)]);
+        }
+        return facts;
+    }
+
+    /** One line per source with its count, and what keeps it short. */
+    function ackDetectionLines(volume) {
+        if (volume === undefined) {
+            return [el('p', {class: 'field-note', text: 'The Hub could not read the detections of the last 7 days.'})];
+        }
+        if (volume === null) {
+            return [el('p', {class: 'field-note', text: 'No detection known in the last 7 days'})];
+        }
+        return (volume.sources || []).map(function (source) {
+            const gaps = (source.detections_gaps || []).map(PSL.gapLabel);
+            const io = source.avoidable_io_ops == null ? ''
+                : ', ' + PSL.formatDetections(source.avoidable_io_ops, source.detections_complete) + ' avoidable I/O';
+            return el('p', {
+                class: 'field-note',
+                text: source.name + ': ' + PSL.formatDetections(source.detections, source.detections_complete) + io
+                    + (gaps.length > 0 ? ' (' + gaps.join(', ') + ')' : '')
+            });
+        });
+    }
+
+    function ackFindingCard(envelope, volume) {
         const finding = envelope.finding || {};
         const template = (finding.pattern || {}).template;
         const facts = [
@@ -5728,7 +5776,7 @@
             ['last seen', PSL.dtHuman(envelope.last_seen)],
             // The API's enum, worded: not_observed reads "not observed".
             ['status', String(envelope.status || '?').replace(/_/g, ' ')]
-        ];
+        ].concat(ackDetectionFacts(volume));
         return el('div', {class: 'card params-panel'}, [
             el('div', {class: 'run-card-line'}, [
                 el('span', {class: 'run-card-name', text: PSL.FINDING_TYPE_LABEL[finding.type] || finding.type || '?'}),
@@ -5741,7 +5789,7 @@
                     el('span', {class: 'fact-v', text: fact[1], title: fact[1]})
                 ]);
             }))
-        ]);
+        ].concat(ackDetectionLines(volume)));
     }
 
     /** What the two buttons would do with the form as it stands. */

@@ -332,6 +332,15 @@ const PATCH = `<script>
       }).slice(0, Number(q.get('limit')) || undefined));
     }
 
+    // The ack card's windowed read takes from and to off the clock, so the capture
+    // holds it once under window=7d and answers it for any from and to.
+    if (path.indexOf('/api/findings?') === 0) {
+      var w = new URLSearchParams(path.split('?')[1]);
+      var windowKey = '/api/findings?signature=' + encodeURIComponent(w.get('signature') || '')
+        + '&window=7d&limit=' + w.get('limit');
+      if (w.has('from') && w.has('to') && ROUTES[windowKey]) return json(shift(ROUTES[windowKey]));
+    }
+
     var pdf = path.match(/^\\/api\\/disclosures\\/([0-9a-f]{16})\\/files\\/report\\.pdf$/);
     if (pdf && PDFS.indexOf(pdf[1]) !== -1) return realFetch('files/' + pdf[1] + '.pdf');
 
