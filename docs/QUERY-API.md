@@ -1361,7 +1361,9 @@ The four carbon fields are present together or absent together. Their
 ratio, `avoidable_gco2 / avoidable_io_ops`, is the day's grams per
 avoidable I/O operation. Applied to a signature's `extra_io_ops` it gives
 an order of magnitude only, since `extra_io_ops` is not deduplicated
-across findings the way a batch's `avoidable_io_ops` is.
+across findings the way a batch's `avoidable_io_ops` is. Like the counts,
+the four sums cover the `sampling_rate` share of the traces: the ratios
+hold as they are, an absolute figure needs dividing by `sampling_rate`.
 
 A detection goes to its day's overflow when its signature is new past
 `[daemon.detections] max_signatures_per_day`, longer than 1024 bytes, or

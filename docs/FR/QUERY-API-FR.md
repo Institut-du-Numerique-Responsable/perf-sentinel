@@ -1414,7 +1414,9 @@ Leur rapport, `avoidable_gco2 / avoidable_io_ops`, donne les grammes par
 opération d'I/O évitable du jour. Appliqué au `extra_io_ops` d'une
 signature, il ne donne qu'un ordre de grandeur, puisque `extra_io_ops`
 n'est pas dédupliqué entre findings comme le `avoidable_io_ops` d'un
-lot.
+lot. Comme les compteurs, les quatre sommes couvrent la part
+`sampling_rate` des traces : les rapports valent tels quels, un chiffre
+absolu se divise par `sampling_rate`.
 
 Une détection va dans le débordement de son jour quand sa signature est
 nouvelle au-delà de `[daemon.detections] max_signatures_per_day`, dépasse
