@@ -6,9 +6,9 @@
     "integrity_level": "hash-only",
     "generated_at": "2026-04-05T12:00:00Z",
     "generated_by": "daemon",
-    "perf_sentinel_version": "0.34.1",
+    "perf_sentinel_version": "0.37.1",
     "report_uuid": "00000000-0000-4000-8000-000000000002",
-    "binary_version": "0.34.1"
+    "binary_version": "0.37.1"
   },
   "organisation": {
     "name": "Example SAS",
@@ -58,7 +58,7 @@
   },
   "methodology": {
     "sci_specification": "ISO/IEC 21031:2024",
-    "perf_sentinel_version": "0.34.1",
+    "perf_sentinel_version": "0.37.1",
     "enabled_patterns": [
       "n_plus_one_sql",
       "n_plus_one_http",
@@ -156,7 +156,7 @@
     },
     "period_coverage": 0.91,
     "binary_versions": [
-      "0.34.1"
+      "0.37.1"
     ],
     "runtime_windows_count": 164,
     "fallback_windows_count": 16,
@@ -216,9 +216,9 @@
     }
   ],
   "integrity": {
-    "content_hash": "sha256:94ecf480171fc50afe97e0e02010539aac616422f4e0e488fba25e510f15f3c7",
-    "binary_hash": "sha256:00b10721a8de28d49de8c3f34566ac95a023d44687b24de8112de0bc771230e7",
-    "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.34.1",
+    "content_hash": "sha256:e0a62a7cf26582098c89389d521cd1d2cb6b51f3e499d6a31ce9e950c34f3015",
+    "binary_hash": "sha256:f5890b7cda00b80d5e01f9df7bacd556c49763014c6198a0694d7247874bb532",
+    "binary_verification_url": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/tag/v0.37.1",
     "trace_integrity_chain": {
       "breaks": 0,
       "breaks_outside_period": 0,
