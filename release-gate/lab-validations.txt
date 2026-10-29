@@ -739,3 +739,9 @@ v0.37.0	22f50d7	2026-10-28	PASS
 # drain push included) and hub-detection-volume (H1-H6, against Hub 0.8.6)
 # PASS with the 0.37.1 binary. A unit test pins the drain order itself.
 v0.37.1	8faf9a4	2026-10-28	PASS
+# v0.38.0: targeted pass on the day carbon of the detection ledger.
+# detection-carbon (C1-C6, new) PASS with the 0.38.0 binary: the four keys on
+# /api/detections and in the Hub push, a clean batch moving total_io_ops only,
+# a carbon-only change resending an acknowledged day, none of the keys with
+# green scoring off. detection-volume (V1-V6) PASS as a regression check.
+v0.38.0	d63192e	2026-10-29	PASS

@@ -1404,6 +1404,19 @@ Chaque objet de `days` :
 | `shed_traces`           | number  | Traces délestées par l'analyse ce jour-là, jamais analysées                                  |
 | `ingest_rejected`       | number  | Requêtes OTLP refusées à l'ingestion ce jour-là, file pleine ou pression mémoire             |
 | `sampling_rate`         | number  | `[daemon] sampling_rate` : les comptes couvrent cette part des traces                        |
+| `avoidable_gco2`        | number  | CO₂ évitable des lots analysés du jour, en gCO₂eq : l'estimation opérationnelle de `green_summary.co2.avoidable.mid`. Absent quand le scoring green est coupé, qu'aucun lot n'a résolu de région ou qu'aucun lot ne l'a apporté |
+| `avoidable_gco2_low`    | number  | La borne basse de la même estimation (`green_summary.co2.avoidable.low`), pour un chiffre prudent de type « au moins » |
+| `avoidable_io_ops`      | number  | I/O évitables des mêmes lots, dédupliquées par lot comme `green_summary.avoidable_io_ops` |
+| `total_io_ops`          | number  | I/O totales des mêmes lots (`green_summary.total_io_ops`). `avoidable_io_ops / total_io_ops` est le ratio de gaspillage du jour, qui ne bouge pas avec le trafic comme un volume absolu |
+
+Les quatre champs carbone sont présents ensemble ou absents ensemble.
+Leur rapport, `avoidable_gco2 / avoidable_io_ops`, donne les grammes par
+opération d'I/O évitable du jour. Appliqué au `extra_io_ops` d'une
+signature, il ne donne qu'un ordre de grandeur, puisque `extra_io_ops`
+n'est pas dédupliqué entre findings comme le `avoidable_io_ops` d'un
+lot. Comme les compteurs, les quatre sommes couvrent la part
+`sampling_rate` des traces : les rapports valent tels quels, un chiffre
+absolu se divise par `sampling_rate`.
 
 Une détection va dans le débordement de son jour quand sa signature est
 nouvelle au-delà de `[daemon.detections] max_signatures_per_day`, dépasse
@@ -1468,7 +1481,11 @@ curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode limit=2 \
       "overflow_extra_io_ops": 0,
       "shed_traces": 0,
       "ingest_rejected": 0,
-      "sampling_rate": 1.0
+      "sampling_rate": 1.0,
+      "avoidable_gco2": 0.0042,
+      "avoidable_gco2_low": 0.0021,
+      "avoidable_io_ops": 55,
+      "total_io_ops": 610
     }
   ],
   "next_after": "20754:n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1497,7 +1514,11 @@ La troisième page clôt le parcours, `next_after` vaut `null` :
       "overflow_extra_io_ops": 0,
       "shed_traces": 0,
       "ingest_rejected": 0,
-      "sampling_rate": 1.0
+      "sampling_rate": 1.0,
+      "avoidable_gco2": 0.0025,
+      "avoidable_gco2_low": 0.0012,
+      "avoidable_io_ops": 31,
+      "total_io_ops": 402
     }
   ],
   "next_after": null

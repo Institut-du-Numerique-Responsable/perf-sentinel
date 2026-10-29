@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.37.1
-appVersion: "0.37.1"
+version: 0.38.0
+appVersion: "0.38.0"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -36,11 +36,11 @@ annotations:
     - name: Helm deployment guide
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
-    - kind: fixed
-      description: "appVersion 0.37.1. On a graceful shutdown the daemon pushes its detection ledger to PerfSentinelHub only after the findings, incidents and correlation episodes, so a long ledger no longer spends their drain budget. Raise terminationGracePeriodSeconds above the 10 s drain as before. No values.yaml key is added or removed, and no template changes."
+    - kind: added
+      description: "appVersion 0.38.0. Each day of the detection ledger, served on GET /api/detections and pushed to PerfSentinelHub, carries the day's avoidable CO2 and I/O totals when green scoring is on, so the Hub can show a finding's CO2 as an order of magnitude. Upgrade PerfSentinelHub to 0.9.0 before or with this daemon. No values.yaml key is added or removed, and no template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.37.1
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.38.0
       platforms:
         - linux/amd64
         - linux/arm64

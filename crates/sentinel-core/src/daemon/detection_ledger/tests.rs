@@ -290,3 +290,110 @@ fn page_bytes_count_the_json_escapes() {
     let body = serde_json::to_vec(&page).expect("serialize");
     assert!(body.len() <= MAX_PAGE_BYTES, "{} bytes", body.len());
 }
+
+fn day_row(ledger: &DetectionLedger, day: u32) -> DayRow {
+    ledger
+        .page(None, None, 5000)
+        .days
+        .into_iter()
+        .find(|row| row.day == day)
+        .expect("day")
+}
+
+fn carbon(mid: f64, low: f64, avoidable: u64, total: u64) -> DayCarbon {
+    DayCarbon {
+        gco2_mid: mid,
+        gco2_low: low,
+        avoidable_io_ops: avoidable,
+        total_io_ops: total,
+    }
+}
+
+#[test]
+fn avoidable_carbon_sums_across_the_batches_of_a_day() {
+    let ledger = ledger_at(3, true);
+    ledger.record_avoidable(carbon(0.5, 0.25, 10, 40), 3 * DAY_MS + 1);
+    ledger.record_avoidable(carbon(0.25, 0.125, 5, 20), 3 * DAY_MS + 2);
+    let row = day_row(&ledger, 3);
+    assert_eq!(row.avoidable_gco2, Some(0.75));
+    assert_eq!(row.avoidable_gco2_low, Some(0.375));
+    assert_eq!(row.avoidable_io_ops, Some(15));
+    assert_eq!(row.total_io_ops, Some(60));
+}
+
+#[test]
+fn avoidable_carbon_is_absent_until_a_batch_brings_it() {
+    let ledger = ledger_at(3, true);
+    let row = day_row(&ledger, 3);
+    assert_eq!(row.avoidable_gco2, None);
+    assert_eq!(row.avoidable_gco2_low, None);
+    assert_eq!(row.avoidable_io_ops, None);
+    assert_eq!(row.total_io_ops, None);
+    let json = serde_json::to_value(&row).expect("serialize");
+    for key in [
+        "avoidable_gco2",
+        "avoidable_gco2_low",
+        "avoidable_io_ops",
+        "total_io_ops",
+    ] {
+        assert!(json.get(key).is_none(), "{key}");
+    }
+}
+
+#[test]
+fn a_batch_without_avoidable_io_still_reports_zero() {
+    let ledger = ledger_at(3, true);
+    ledger.record_avoidable(carbon(0.0, 0.0, 0, 12), 3 * DAY_MS);
+    let row = day_row(&ledger, 3);
+    assert_eq!(row.avoidable_gco2, Some(0.0));
+    assert_eq!(row.avoidable_gco2_low, Some(0.0));
+    assert_eq!(row.avoidable_io_ops, Some(0));
+    assert_eq!(row.total_io_ops, Some(12));
+}
+
+#[test]
+fn avoidable_carbon_never_lands_on_a_sealed_day() {
+    let ledger = ledger_at(3, true);
+    ledger.record_avoidable(carbon(1.0, 0.5, 2, 8), 3 * DAY_MS);
+    ledger.tick(4 * DAY_MS, 0, 0);
+    ledger.record_avoidable(carbon(1.0, 0.5, 2, 8), 3 * DAY_MS + 100);
+    for day in [3, 4] {
+        let row = day_row(&ledger, day);
+        assert_eq!(row.avoidable_gco2, Some(1.0), "day {day}");
+        assert_eq!(row.total_io_ops, Some(8), "day {day}");
+    }
+}
+
+#[test]
+fn non_finite_or_negative_carbon_is_ignored() {
+    let ledger = ledger_at(3, true);
+    for bad in [
+        carbon(f64::NAN, 0.1, 3, 9),
+        carbon(f64::INFINITY, 0.1, 3, 9),
+        carbon(-1.0, 0.1, 3, 9),
+        carbon(0.1, f64::NAN, 3, 9),
+        carbon(0.1, -1.0, 3, 9),
+    ] {
+        ledger.record_avoidable(bad, 3 * DAY_MS);
+    }
+    let row = day_row(&ledger, 3);
+    assert_eq!(row.avoidable_gco2, None);
+    assert_eq!(row.avoidable_gco2_low, None);
+    assert_eq!(row.avoidable_io_ops, None);
+    assert_eq!(row.total_io_ops, None);
+}
+
+#[test]
+fn avoidable_carbon_makes_an_acked_day_dirty() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[finding("a", 1)], 3 * DAY_MS);
+    let snapshot = ledger.dirty_days().remove(0);
+    ledger.ack_day(3, snapshot.rev);
+    assert!(ledger.dirty_days().is_empty());
+    ledger.record_avoidable(carbon(0.5, 0.25, 1, 4), 3 * DAY_MS);
+    let dirty = ledger.dirty_days();
+    assert_eq!(dirty.len(), 1);
+    assert_eq!(dirty[0].day, 3);
+    assert!(dirty[0].rows.is_empty());
+    assert_eq!(dirty[0].meta.avoidable_gco2, Some(0.5));
+}

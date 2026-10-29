@@ -271,6 +271,134 @@ async fn ledger_counts_even_with_zero_retention() {
     assert_eq!(store.len().await, 0);
 }
 
+fn n_plus_one_batch() -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
+    let events = (1..=6)
+        .map(|i| {
+            make_normalized(
+                "t1",
+                &format!("SELECT * FROM order_item WHERE order_id = {i}"),
+            )
+        })
+        .collect();
+    vec![("t1".to_string(), events)]
+}
+
+fn clean_batch() -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
+    let events = vec![
+        make_normalized("t2", "SELECT * FROM users WHERE id = 1"),
+        make_normalized("t2", "SELECT * FROM orders WHERE id = 2"),
+    ];
+    vec![("t2".to_string(), events)]
+}
+
+fn region_ctx() -> score::carbon::CarbonContext {
+    score::carbon::CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        ..empty_carbon_ctx()
+    }
+}
+
+/// Runs `batches` through `process_traces` with a ledger whose `io_tracked`
+/// follows `green_enabled`, and returns the ledger with the green cell.
+async fn run_ledger_batches(
+    green_enabled: bool,
+    ctx: &score::carbon::CarbonContext,
+    batches: Vec<Vec<(String, Vec<normalize::NormalizedEvent>)>>,
+) -> (DetectionLedger, Arc<RwLock<GreenSummary>>) {
+    let metrics = MetricsState::new();
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    let ledger = DetectionLedger::new(
+        &crate::config::DaemonDetectionsConfig::default(),
+        green_enabled,
+        1.0,
+        current_time_ms(),
+    );
+    let store = findings_store::FindingsStore::new(100);
+    for batch in batches {
+        let mut tctx = test_ctx(&detect_config, ctx, &metrics, &store, green_enabled, &cell);
+        tctx.detection_ledger = Some(&ledger);
+        process_traces(batch, tctx).await;
+    }
+    (ledger, cell)
+}
+
+/// The ledger's current day row, read the way the Hub push reads it.
+fn current_day_row(ledger: &DetectionLedger) -> super::super::detection_ledger::DayRow {
+    let today = ledger.status().current_day;
+    let page = ledger.page(Some(today), None, 5000);
+    page.days
+        .into_iter()
+        .find(|row| row.day == today)
+        .expect("the current day has a row")
+}
+
+fn assert_no_carbon(row: &super::super::detection_ledger::DayRow) {
+    assert_eq!(row.avoidable_gco2, None);
+    assert_eq!(row.avoidable_gco2_low, None);
+    assert_eq!(row.avoidable_io_ops, None);
+    assert_eq!(row.total_io_ops, None);
+}
+
+#[tokio::test]
+async fn ledger_accumulates_the_batch_avoidable_carbon() {
+    let (ledger, cell) = run_ledger_batches(true, &region_ctx(), vec![n_plus_one_batch()]).await;
+    let live = cell.read().await;
+    let co2 = live.co2.as_ref().expect("green scoring produced carbon");
+    assert!(live.avoidable_io_ops > 0);
+    let row = current_day_row(&ledger);
+    assert_eq!(row.avoidable_gco2, Some(co2.avoidable.mid));
+    assert!(row.avoidable_gco2.unwrap() > 0.0);
+    assert_eq!(row.avoidable_gco2_low, Some(co2.avoidable.low));
+    assert_eq!(row.avoidable_io_ops, Some(live.avoidable_io_ops as u64));
+    assert_eq!(row.total_io_ops, Some(live.total_io_ops as u64));
+}
+
+#[tokio::test]
+async fn ledger_carries_no_carbon_when_green_is_off() {
+    let (ledger, _cell) = run_ledger_batches(false, &region_ctx(), vec![n_plus_one_batch()]).await;
+    let today = ledger.status().current_day;
+    assert_no_carbon(&current_day_row(&ledger));
+    let page = ledger.page(Some(today), None, 5000);
+    assert_eq!(page.counts.len(), 1);
+    assert!(page.counts[0].signature.starts_with("n_plus_one_sql:"));
+    assert_eq!(page.counts[0].detections, 1);
+}
+
+#[tokio::test]
+async fn a_clean_batch_counts_in_total_io_only() {
+    let ctx = region_ctx();
+    let (ledger, cell) = run_ledger_batches(true, &ctx, vec![n_plus_one_batch()]).await;
+    let after_n_plus_one = current_day_row(&ledger);
+
+    // Same ledger, one more batch with no finding.
+    let metrics = MetricsState::new();
+    let detect_config = default_detect_config();
+    let store = findings_store::FindingsStore::new(100);
+    let mut tctx = test_ctx(&detect_config, &ctx, &metrics, &store, true, &cell);
+    tctx.detection_ledger = Some(&ledger);
+    process_traces(clean_batch(), tctx).await;
+    let clean_total = cell.read().await.total_io_ops as u64;
+
+    let row = current_day_row(&ledger);
+    assert_eq!(
+        row.total_io_ops,
+        Some(after_n_plus_one.total_io_ops.unwrap() + clean_total)
+    );
+    assert!(clean_total > 0);
+    assert_eq!(row.avoidable_gco2, after_n_plus_one.avoidable_gco2);
+    assert_eq!(row.avoidable_gco2_low, after_n_plus_one.avoidable_gco2_low);
+    assert_eq!(row.avoidable_io_ops, after_n_plus_one.avoidable_io_ops);
+}
+
+#[tokio::test]
+async fn ledger_carries_no_carbon_without_a_resolved_region() {
+    let (ledger, cell) =
+        run_ledger_batches(true, &empty_carbon_ctx(), vec![n_plus_one_batch()]).await;
+    assert!(cell.read().await.co2.is_some());
+    assert_no_carbon(&current_day_row(&ledger));
+}
+
 #[tokio::test]
 async fn process_traces_clean_no_finding() {
     // 2 events with different templates produce no finding

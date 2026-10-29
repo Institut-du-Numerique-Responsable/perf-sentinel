@@ -286,7 +286,7 @@ mod tests {
 
     use super::*;
     use crate::config::DaemonDetectionsConfig;
-    use crate::daemon::detection_ledger::{DAY_MS, DetectionLedger};
+    use crate::daemon::detection_ledger::{DAY_MS, DayCarbon, DetectionLedger};
     use crate::daemon::hub_export::HubClient;
     use crate::daemon::hub_export::HubExportBuffer;
     use crate::daemon::hub_export::tests::{count, finding, spawn_with_detections, wait_for};
@@ -416,6 +416,72 @@ mod tests {
         assert_eq!("a", counts[0]["signature"]);
         assert_eq!(2, counts[0]["detections"]);
         assert_eq!(DAY, pages[1]["days"][0]["day"]);
+        assert_eq!(0, ledger.dirty_days().len());
+    }
+
+    fn some_carbon() -> DayCarbon {
+        DayCarbon {
+            gco2_mid: 0.5,
+            gco2_low: 0.25,
+            avoidable_io_ops: 4,
+            total_io_ops: 16,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_day_row_carries_the_avoidable_carbon() {
+        let (base, seen) = fake_hub(200).await;
+        let ledger = ledger_at(DAY);
+        record(&ledger, DAY, &["a"]);
+        ledger.record_avoidable(some_carbon(), DAY * DAY_MS + 1);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        let day = &bodies(&seen)[0]["days"][0];
+        assert_eq!(0.5, day["avoidable_gco2"]);
+        assert_eq!(0.25, day["avoidable_gco2_low"]);
+        assert_eq!(4, day["avoidable_io_ops"]);
+        assert_eq!(16, day["total_io_ops"]);
+    }
+
+    #[tokio::test]
+    async fn a_day_without_carbon_pushes_no_carbon_keys() {
+        let (base, seen) = fake_hub(200).await;
+        let ledger = ledger_at(DAY);
+        record(&ledger, DAY, &["a"]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        let day = &bodies(&seen)[0]["days"][0];
+        for key in [
+            "avoidable_gco2",
+            "avoidable_gco2_low",
+            "avoidable_io_ops",
+            "total_io_ops",
+        ] {
+            assert!(day.get(key).is_none(), "{key}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_carbon_only_change_resends_the_day_row() {
+        let (base, seen) = fake_hub(200).await;
+        let ledger = ledger_at(DAY);
+        record(&ledger, DAY, &["a"]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        ledger.record_avoidable(some_carbon(), DAY * DAY_MS + 1);
+        export.start_at(tokio::time::Instant::now());
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        let pages = bodies(&seen);
+        assert_eq!(2, pages.len());
+        assert_eq!(pages[1]["counts"], serde_json::json!([]));
+        assert_eq!(4, pages[1]["days"][0]["avoidable_io_ops"]);
         assert_eq!(0, ledger.dirty_days().len());
     }
 
