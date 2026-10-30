@@ -1090,7 +1090,7 @@ fn hook_page(payload: &FullPayload, room: f32) -> Block {
         Angle::Story => room_fit(room, PAGE_HEROES, PAGE_SENTENCES, |hero_size, sentence| {
             let mut b = Block::new(MARGIN, CONTENT);
             if let Some(title) = quoted_title(payload) {
-                b.para(Face::Regular, 44.0, 54.0, TEXT_2, &title);
+                b.para(Face::Regular, 34.0, 42.0, TEXT_2, &title);
                 b.gap(24.0);
             }
             let figure = super::copy::cited_figure(payload);
