@@ -497,12 +497,29 @@ fn hero(b: &mut Block, figure: &str, size: f32) {
     b.ops
         .push(text_op(b.x, y, Face::Bold, size, BRAND_DEEP, number));
     if let Some(unit) = unit {
-        let x = b.x + text_width(Face::Bold, size, number) + 16.0 * size / 170.0;
-        let unit_size = (size * 64.0 / 170.0).round();
+        let x = b.x + text_width(Face::Bold, size, number) + unit_gap(size);
         b.ops
-            .push(text_op(x, y, Face::Bold, unit_size, BRAND_DEEP, unit));
+            .push(text_op(x, y, Face::Bold, unit_size(size), BRAND_DEEP, unit));
     }
     b.y += HERO_LINE * size;
+}
+
+/// The unit word scales with the hero: 64 px beside a 170 px figure.
+fn unit_size(size: f32) -> f32 {
+    (size * 64.0 / 170.0).round()
+}
+
+fn unit_gap(size: f32) -> f32 {
+    16.0 * size / 170.0
+}
+
+/// The width [`hero`] draws `figure` at `size`, unit word included.
+fn hero_width(figure: &str, size: f32) -> f32 {
+    let (number, unit) = hero_parts(figure);
+    let width = text_width(Face::Bold, size, number);
+    unit.map_or(width, |unit| {
+        width + unit_gap(size) + text_width(Face::Bold, unit_size(size), unit)
+    })
 }
 
 /// `wanted`, stepped down through `sizes` until the hero and its unit fit
@@ -517,12 +534,10 @@ fn fitted_hero(figure: &str, sizes: &[f32], wanted: f32) -> f32 {
 
 /// The largest of `sizes` at which the hero and its unit fit the width.
 fn hero_sizes<'a>(figure: &str, sizes: &'a [f32]) -> &'a [f32] {
-    let (number, unit) = hero_parts(figure);
-    let room = unit.map_or(CONTENT, |unit| {
-        CONTENT - text_width(Face::Bold, 64.0, unit) - 16.0
-    });
-    let widest = step_size(number, Face::Bold, sizes, room, 1);
-    let start = sizes.iter().position(|&s| s <= widest).unwrap_or(0);
+    let start = sizes
+        .iter()
+        .position(|&size| hero_width(figure, size) <= CONTENT)
+        .unwrap_or(sizes.len().saturating_sub(1));
     &sizes[start..]
 }
 
@@ -1723,6 +1738,25 @@ mod tests {
             let text = joined(&ops);
             for word in ["Regional", "Payments", "history", "lighter"] {
                 assert!(text.contains(word), "{word} cut from {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_duration_hero_and_its_unit_stay_in_the_margins() {
+        for lang in LANGS {
+            for input in [
+                story_input(FindingType::SlowHttp),
+                story_input_with_threshold(FindingType::SlowHttp),
+            ] {
+                let input = in_lang(input, lang);
+                let mut pages = carousel(&input);
+                pages.push(image(&input));
+                for op in pages.iter().flatten() {
+                    if matches!(op, Op::Text { .. }) {
+                        assert!(bounds(op).2 <= RIGHT + 0.5, "past the margin: {op:?}");
+                    }
+                }
             }
         }
     }

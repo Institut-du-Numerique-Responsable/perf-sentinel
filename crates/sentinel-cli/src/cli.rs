@@ -1151,6 +1151,36 @@ pub(crate) enum CardAction {
         #[arg(long, value_name = "DIR")]
         out_dir: PathBuf,
     },
+    /// Render and sign a share card from the Hub's `card.json`.
+    ///
+    /// Writes `<DIR>/card.png` (the image) or `<DIR>/card.pdf` (the
+    /// four-page carousel), each carrying its signed payload, and prints
+    /// the key fingerprint and the verify URL its QR code holds. Nothing
+    /// is written unless the card renders.
+    Render {
+        /// The `card.json` to render.
+        #[arg(long, value_name = "PATH")]
+        input: PathBuf,
+        /// The `.pk8` key from `card keygen`, mode 0600.
+        #[arg(long, value_name = "PATH")]
+        signing_key: PathBuf,
+        /// The directory to write the card into. It must exist.
+        #[arg(long, value_name = "DIR")]
+        out_dir: PathBuf,
+        /// The file to render.
+        #[arg(long, value_enum)]
+        format: CardFormatArg,
+    },
+}
+
+/// What `card render` writes.
+#[cfg(feature = "card")]
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub(crate) enum CardFormatArg {
+    /// The single 1080 x 1350 image, `card.png`.
+    Png,
+    /// The four-page carousel, `card.pdf`.
+    Pdf,
 }
 
 /// Sub-actions for the `query` subcommand.
@@ -1434,9 +1464,17 @@ Exit codes, with one JSON line on stdout:
   # Generate a signing key; keep the .pk8 file private, publish the public key
   perf-sentinel card keygen --out-dir ~/.config/perf-sentinel/keys
 
+  # Render and sign the image of a card.json exported by the Hub
+  perf-sentinel card render --input card.json \\
+    --signing-key ~/.config/perf-sentinel/keys/<fingerprint>.pk8 --out-dir . --format png
+
 Exit codes, with one JSON line on stdout:
-  0  done, {\"fingerprint\":\"ps1:...\",\"public_key\":\"...\"} for keygen
-  3  input error (key_exists, output_unwritable)";
+  0  done: {\"fingerprint\",\"public_key\"} for keygen,
+     {\"result\":\"rendered\",\"files\",\"fingerprint\",\"compact_url\"} for render
+  1  refused, the card would claim what its figures do not show (volume_not_avoidable, ...)
+  3  input error (missing_file, file_too_large, malformed_input, signing_key_permissions,
+     signing_key_unreadable, key_exists, output_unwritable)
+  5  cannot render (compact_too_large, unsupported_characters with \"field\", ...)";
 
     pub const HASH_BAKE: &str = "Examples:
   # Bake the canonical content hash into a report in place

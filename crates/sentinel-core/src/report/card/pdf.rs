@@ -34,7 +34,6 @@ fn export_failed(detail: impl Into<String>) -> CardError {
 /// # Errors
 ///
 /// `pdf_export_failed` when krilla refuses the document.
-#[cfg_attr(not(test), expect(dead_code, reason = "called by render_card, Task 8"))]
 pub(crate) fn render_carousel_pdf(
     pages: &[Vec<Op>],
     envelope: &str,

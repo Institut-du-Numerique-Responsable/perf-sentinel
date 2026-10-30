@@ -622,6 +622,23 @@ async fn dispatch_command(command: Commands) {
             cli::CardAction::Keygen { out_dir } => {
                 std::process::exit(card::cmd_card_keygen(&out_dir));
             }
+            cli::CardAction::Render {
+                input,
+                signing_key,
+                out_dir,
+                format,
+            } => {
+                let format = match format {
+                    cli::CardFormatArg::Png => sentinel_core::report::card::CardFormat::Png,
+                    cli::CardFormatArg::Pdf => sentinel_core::report::card::CardFormat::Pdf,
+                };
+                std::process::exit(card::cmd_card_render(&card::RenderArgs {
+                    input: &input,
+                    signing_key: &signing_key,
+                    out_dir: &out_dir,
+                    format,
+                }));
+            }
         },
         Commands::HashBake {
             report,

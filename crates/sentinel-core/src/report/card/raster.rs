@@ -38,7 +38,6 @@ fn encode_failed(detail: impl Into<String>) -> CardError {
 /// # Errors
 ///
 /// `png_encode_failed` when the pixmap cannot be allocated.
-#[cfg_attr(not(test), expect(dead_code, reason = "called by render_card, Task 8"))]
 pub(crate) fn rasterize(ops: &[Op]) -> Result<Pixmap, CardError> {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 1080 x 1350
     let mut pixmap = Pixmap::new(CARD_WIDTH as u32, CARD_HEIGHT as u32)
@@ -56,7 +55,6 @@ pub(crate) fn rasterize(ops: &[Op]) -> Result<Pixmap, CardError> {
 /// # Errors
 ///
 /// `png_encode_failed` when the encoder refuses the chunk or the pixels.
-#[cfg_attr(not(test), expect(dead_code, reason = "called by render_card, Task 8"))]
 pub(crate) fn encode_png(pixmap: &Pixmap, envelope: &str) -> Result<Vec<u8>, CardError> {
     let rgb: Vec<u8> = pixmap
         .pixels()
