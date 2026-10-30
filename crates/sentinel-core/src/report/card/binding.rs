@@ -237,8 +237,9 @@ struct DohRecord {
 ///
 /// # Errors
 ///
-/// `binding_check_failed` when a lookup failed and none found a key list,
-/// since the missing one might have revoked the key.
+/// `binding_check_failed` when a lookup failed and none found a key (an
+/// empty list counts as none), since the missing one might have revoked
+/// the key.
 pub fn merge_lookups(
     dns: Lookup,
     well_known: Lookup,
@@ -250,7 +251,8 @@ pub fn merge_lookups(
         let Lookup::Found(keys) = lookup else {
             continue;
         };
-        found = true;
+        // An empty list proves nothing when the other lookup failed.
+        found |= !keys.is_empty();
         for key in keys {
             match merged.iter_mut().find(|m| m.fingerprint == key.fingerprint) {
                 Some(entry) => restrict(entry, key),
@@ -599,6 +601,8 @@ mod tests {
             (Lookup::Failed, Lookup::Absent),
             (Lookup::Absent, Lookup::Failed),
             (Lookup::Failed, Lookup::Failed),
+            (Lookup::Failed, Lookup::Found(vec![])),
+            (Lookup::Found(vec![]), Lookup::Failed),
         ] {
             assert_eq!(merge_lookups(dns, well_known), Err("binding_check_failed"));
         }
