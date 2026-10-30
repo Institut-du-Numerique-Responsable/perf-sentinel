@@ -745,3 +745,17 @@ v0.37.1	8faf9a4	2026-10-28	PASS
 # a carbon-only change resending an acknowledged day, none of the keys with
 # green scoring off. detection-volume (V1-V6) PASS as a regression check.
 v0.38.0	d63192e	2026-10-29	PASS
+# v0.39.0: targeted pass on the card signal and the share card commands,
+# local release binary 0.39.0, no cluster. Scenarios run: card-signal,
+# card-cli, detection-carbon, detection-volume, and no other.
+# card-signal (S1-S7, new) PASS: a fake Hub's watch list gives
+# below_threshold_passes 8 on a detections: 0 slow_sql row, thresholds on
+# the day in the API and the push, nothing without watch, the list lost on
+# restart until the next accepted reply. card-cli (K1-K8, new) PASS: keygen,
+# 3 angles x png/pdf/svg/jxl rendered and verified offline, a retouched PNG
+# content_modified, C3 refusals, --online via a fake DoH and well-known
+# origin (level 2, key_revoked, binding_check_failed, binding_partial).
+# detection-carbon (C1-C6) and detection-volume (V1-V6) PASS as regression
+# checks. Not run: the cluster scenarios, verify-all-scenarios and
+# validate-findings.
+v0.39.0	5c1d26a	2026-10-30	PASS
