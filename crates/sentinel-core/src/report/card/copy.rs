@@ -124,6 +124,8 @@ pub(crate) struct Words {
     pub(crate) check_title: &'static str,
     pub(crate) method: &'static str,
     pub(crate) method_url: &'static str,
+    /// The PDF title when the card has no free title.
+    pub(crate) pdf_title: &'static str,
     why: [&'static str; 2],
 }
 
@@ -240,6 +242,7 @@ const EN: Words = Words {
     check_title: "Check these figures",
     method: "Method:",
     method_url: "github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/SHARE-CARD.md",
+    pdf_title: "Perf Sentinel card",
     why: [
         "Every unnecessary operation costs server time, energy and sometimes waiting.",
         "Measuring them shows where the application can do the same work with less.",
@@ -359,6 +362,7 @@ const FR: Words = Words {
     check_title: "Vérifiez ces chiffres",
     method: "Méthode\u{a0}:",
     method_url: "github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/FR/SHARE-CARD-FR.md",
+    pdf_title: "Carte Perf Sentinel",
     why: [
         "Chaque opération inutile coûte du temps de serveur, de l'énergie et parfois de l'attente.",
         "Les mesurer montre où l'application peut faire le même travail avec moins.",

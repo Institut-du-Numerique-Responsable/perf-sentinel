@@ -22,8 +22,8 @@ use crate::report::periodic::pdf::pages::{Op, Outline, Rgb};
 pub const CARD_PAYLOAD_KEYWORD: &str = "perf-sentinel-card";
 /// The largest PNG `verify-card` reads.
 pub const MAX_CARD_PNG_BYTES: usize = 16 * 1024 * 1024;
-/// The largest envelope a chunk may hold.
-const MAX_ENVELOPE_BYTES: usize = 64 * 1024;
+/// The largest envelope a PNG chunk or a PDF attachment may hold.
+pub(crate) const MAX_ENVELOPE_BYTES: usize = 64 * 1024;
 
 fn input_error(reason: &'static str, detail: impl Into<String>) -> CardError {
     CardError::new(CardResult::InputError, reason, detail)
