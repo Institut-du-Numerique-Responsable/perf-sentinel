@@ -1525,14 +1525,31 @@
         multi_instance: 'several instances behind one source'
     };
 
+    /** The same reasons in a Management reader's words, as RecapText's twin. */
+    const GAP_LABEL_PILOTAGE = {
+        uncovered_days: 'days with no data',
+        open_day: 'a day not finished yet',
+        restart: 'a restart of the measuring tool',
+        sampling: 'only part of the traffic was looked at',
+        shed: 'some activity was dropped under load',
+        ingest_rejected: 'some data was refused',
+        overflow: 'too many problems to count them all',
+        multi_instance: 'several copies of one service'
+    };
+
     /**
      * Why a detection count falls short, in a few words. A reason a newer
-     * engine adds is returned as it was sent.
+     * engine adds is returned as it was sent, or as a plain stand-in for Management.
      * @param {string} reason
+     * @param {string} [view] `pilotage` for the Management words
      * @returns {string}
      */
-    function gapLabel(reason) {
-        return Object.prototype.hasOwnProperty.call(GAP_LABEL, reason) ? GAP_LABEL[reason] : reason;
+    function gapLabel(reason, view) {
+        const own = Object.prototype.hasOwnProperty;
+        if (view === 'pilotage') {
+            return own.call(GAP_LABEL_PILOTAGE, reason) ? GAP_LABEL_PILOTAGE[reason] : 'another measurement gap';
+        }
+        return own.call(GAP_LABEL, reason) ? GAP_LABEL[reason] : reason;
     }
 
     /**
@@ -1970,7 +1987,7 @@
         if (route === '') return 'new';
         if (route.indexOf('disclosures/') === 0) return 'disclosure';
         // `ack` has no tab: it is reached by link only.
-        return ['new', 'recent', 'sources', 'incidents', 'correlations', 'disclosures', 'ack'].indexOf(route) >= 0
+        return ['new', 'recent', 'sources', 'incidents', 'correlations', 'recap', 'disclosures', 'ack'].indexOf(route) >= 0
             ? route
             : 'missing';
     }
@@ -2204,6 +2221,466 @@
         return sameNetwork || armed ? 'send' : 'arm';
     }
 
+    /**
+     * An action owner as a person reads it. The name the SSO gave wins, with the full identity
+     * on hover. A machine owner or one typed by hand (a space or an upper-case letter) shows
+     * as it is, and an identity (`alice.martin@acme.com`, `local:alice`) is turned into a name.
+     * @param {string | null | undefined} owner
+     * @param {string | null | undefined} ownerDisplay
+     * @returns {{text: string, title: string | null}}
+     */
+    function ownerLabel(owner, ownerDisplay) {
+        if (ownerDisplay) return {text: ownerDisplay, title: owner || null};
+        if (!owner) return {text: '', title: null};
+        if (owner.startsWith('machine:') || /\s|\p{Lu}/u.test(owner)) return {text: owner, title: null};
+        const upper = (word) => {
+            const first = String.fromCodePoint(word.codePointAt(0));
+            return first.toLocaleUpperCase() + word.slice(first.length);
+        };
+        const name = owner.replace(/^local:/, '').split('@')[0].split(/[._]/).filter(Boolean)
+            .map((word) => word.split('-').filter(Boolean).map(upper).join('-')).join(' ');
+        return name ? {text: name, title: owner} : {text: owner, title: null};
+    }
+
+    // ----------------------------------------------------------- the recap screen
+
+    /**
+     * Labels that differ by audience. Management reads none of the engine's words: the same
+     * figure is "Unnecessary operations" there and "Avoidable I/O" for the engineers. The
+     * carbon and action tiles keep one label.
+     */
+    const RECAP_LABELS = {
+        tech: {io: 'Avoidable I/O', findings: 'Active findings', moved: 'What moved'},
+        pilotage: {io: 'Unnecessary operations', findings: 'Open problems', moved: 'What changed'}
+    };
+
+    /**
+     * The text behind the seven "?" of the recap, one set per audience. It is copy, pinned by a
+     * test: the Management set may not use the engine's words, and the frozen report (no
+     * script, so no "?") prints the same sentences in its closing section.
+     */
+    const RECAP_HELP = {
+        tech: {
+            period: 'A week runs Monday to Sunday and a month is a calendar month, both counted in UTC '
+                + 'days. While the period is in progress, trends compare its closed days with the same days of '
+                + 'the previous period; today counts in the tiles only. Times elsewhere on the page are in '
+                + 'your local time, with the zone.',
+            io: 'Extra database, HTTP and messaging calls the engine counted as avoidable on this period, '
+                + 'summed over the detections. Measured, not estimated.',
+            co2: 'An order of magnitude, never a ranking key: each finding\'s avoidable calls times the day\'s '
+                + 'grams per avoidable call the daemon reports. "At least" when some sources send no coefficient.',
+            findings: 'Findings seen on this period and not acknowledged. Acknowledged ones are counted apart '
+                + 'and left out of the priorities.',
+            actions: 'Declared by the team, checked by the engine: confirmed after a sealed day with no '
+                + 'detection, still detected when it shows up after the done day.',
+            prio: 'Findings with avoidable calls first, by volume; then the others by severity. Trends compare '
+                + 'closed days only.',
+            moved: 'Gone means not detected this period: a presumption, not proof that the fix shipped.'
+        },
+        pilotage: {
+            period: 'A week runs Monday to Sunday, counted in UTC days. While it is not over, comparisons only '
+                + 'use the days already finished. Times elsewhere on the page are in your local time, with '
+                + 'the zone.',
+            io: 'Work the application did for nothing on this period, counted by Perf Sentinel. Measured, not '
+                + 'estimated.',
+            co2: 'A rough estimate of the carbon this unnecessary work cost. It gives a scale, not an exact '
+                + 'figure.',
+            findings: 'Problems seen on this period that the team has not set aside.',
+            actions: 'What the team said it would fix, and whether the measurements confirm it.',
+            prio: 'The problems that cost the most come first. A team can name its services and steps in the '
+                + 'Hub, so this report speaks its language.',
+            moved: '"Gone" means it was not seen this period: probably fixed, but not proven.'
+        }
+    };
+
+    const RECAP_PERIODS = ['day', 'week', 'month'];
+
+    /**
+     * A service as a row shows it: by the business name a team gave it, with the technical name
+     * beside it once named (Engineering), the name alone where a Management reader sees it.
+     * @param {string} service
+     * @param {string | null | undefined} serviceLabel
+     * @returns {{name: string, code: string | null}}
+     */
+    function serviceParts(service, serviceLabel) {
+        return serviceLabel ? {name: serviceLabel, code: service} : {name: service, code: null};
+    }
+
+    /**
+     * Whether the card at `index` is the first of its service in `rows`: only that one offers to
+     * name the service, so a list of one service's steps does not repeat the button.
+     * @param {Array<{service: string}>} rows
+     * @param {number} index
+     * @returns {boolean}
+     */
+    function namesService(rows, index) {
+        return rows.findIndex(function (row) {
+            return row.service === rows[index].service;
+        }) === index;
+    }
+
+    /**
+     * What a `#/recap?…` hash names. Anything it does not know reads as the default, and a filter
+     * that is blank, past 256 characters or carries a control character as none.
+     * @param {string | null | undefined} hash
+     * @returns {{period: 'day' | 'week' | 'month', at: string | null, environment: string | null,
+     *   service: string | null, grouping: string | null, view: 'tech' | 'pilotage'}}
+     */
+    function readRecapRoute(hash) {
+        const text = String(hash || '');
+        const query = text.indexOf('#/recap?') === 0 ? text.slice('#/recap?'.length) : '';
+        const params = new URLSearchParams(query);
+        const filter = function (key) {
+            const value = (params.get(key) || '').trim();
+            return value === '' || value.length > 256 || /\p{Cc}/u.test(value) ? null : value;
+        };
+        const period = params.get('period') || '';
+        const at = params.get('at') || '';
+        return {
+            period: RECAP_PERIODS.indexOf(period) >= 0 ? /** @type {'day' | 'week' | 'month'} */ (period) : 'week',
+            at: /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : null,
+            environment: filter('environment'),
+            service: filter('service'),
+            grouping: filter('grouping'),
+            view: params.get('view') === 'pilotage' ? 'pilotage' : 'tech'
+        };
+    }
+
+    /**
+     * The route of a recap read: `#/recap` and only the values that differ from the defaults.
+     * @param {ReturnType<typeof readRecapRoute>} route
+     * @returns {string}
+     */
+    function recapHash(route) {
+        const parts = [];
+        if (route.period !== 'week') parts.push('period=' + encodeURIComponent(route.period));
+        ['at', 'environment', 'service', 'grouping'].forEach(function (key) {
+            if (route[key]) parts.push(key + '=' + encodeURIComponent(route[key]));
+        });
+        if (route.view !== 'tech') parts.push('view=' + encodeURIComponent(route.view));
+        return parts.length ? '#/recap?' + parts.join('&') : '#/recap';
+    }
+
+    /**
+     * The API read for a route: the period and the view always, the filters when set.
+     * @param {ReturnType<typeof readRecapRoute>} route
+     * @returns {string}
+     */
+    function recapPath(route) {
+        let path = '/api/recap?period=' + encodeURIComponent(route.period)
+            + '&view=' + encodeURIComponent(route.view);
+        ['at', 'environment', 'service', 'grouping'].forEach(function (key) {
+            if (route[key]) path += '&' + key + '=' + encodeURIComponent(route[key]);
+        });
+        return path;
+    }
+
+    /**
+     * The line that names a frozen report: its period as the recap prints it, then the
+     * subscription that made it or the person who asked, and a mark when it is not whole.
+     * @param {{subscription: string | null, created_by?: string | null, complete: boolean,
+     *   period: {kind: string, from: string, to: string}}} report
+     * @returns {string}
+     */
+    function recapReportLabel(report) {
+        const kind = report.period.kind.charAt(0).toUpperCase() + report.period.kind.slice(1);
+        const origin = report.subscription || 'on demand by ' + (report.created_by || 'someone');
+        return kind + ' ' + periodText(report.period) + ' · ' + origin + (report.complete ? '' : ' · incomplete');
+    }
+
+    /** The fixed copy of the Reports section, pinned with the Management words test. */
+    const RECAP_REPORTS_COPY = {
+        title: 'Reports',
+        hint: 'frozen when written',
+        help: 'A report is a copy of a closed period that no later read changes. A subscription writes one when '
+            + 'its period ends; Generate a report freezes the period and filters above, in your name, '
+            + 'and sends it nowhere.',
+        generate: 'Generate a report',
+        generating: 'Generating\u2026',
+        none: 'No report yet.',
+        failed: 'The Hub did not return the reports.',
+        refused: 'The Hub did not make the report. Check the period and filters, or ask whoever runs the Hub for access.'
+    };
+
+    /**
+     * What Generate a report would freeze for a route.
+     * @param {ReturnType<typeof readRecapRoute>} route
+     * @returns {string}
+     */
+    function recapFreezeText(route) {
+        return 'Freezes ' + (route.at ? 'the ' + route.period + ' that holds ' + route.at : 'the last closed ' + route.period)
+            + (route.environment || route.service || route.grouping ? ', with the filters above' : '') + '.';
+    }
+
+    /**
+     * Why the recap did not load. Management gets no permission name and no daemon.
+     * @param {number} status
+     * @param {string} view
+     * @returns {string}
+     */
+    function recapErrorText(status, view) {
+        const management = view === 'pilotage';
+        if (status === 403) {
+            return management
+                ? 'The Hub did not let you read the recap: your access does not include it.'
+                : 'The Hub did not let you read the recap: your access holds no findings.read.';
+        }
+        if (status === 400) return 'The Hub could not read a recap for this period or these filters.';
+        return management
+            ? 'The Hub did not return the recap.'
+            : 'The Hub did not return the recap. This is the Hub itself, not any daemon.';
+    }
+
+    /**
+     * The note under a ranking the Hub cut at 5,000, as RecapText.Truncated.
+     * @param {string} view
+     * @returns {string}
+     */
+    function recapTruncatedText(view) {
+        return 'The Hub read the first 5,000 ' + (view === 'pilotage' ? 'problems' : 'findings')
+            + ' and stopped there. Narrow the filters to see the others.';
+    }
+
+    /**
+     * The sources that sent no detection volume, as RecapText.SourcesWithoutVolume.
+     * @param {string[]} sources
+     * @param {string} view
+     * @returns {string}
+     */
+    function recapSourcesNote(sources, view) {
+        return (view === 'pilotage' ? 'No figures came from: ' : 'Sources without a detection volume: ')
+            + sources.join(', ') + '.';
+    }
+
+    /**
+     * Why a report went nowhere, or an empty string when it went somewhere.
+     * @param {{subscription: string | null, nothing_moved: boolean, deliveries: unknown[]}} report
+     * @returns {string}
+     */
+    function recapReportStatus(report) {
+        if (!report.subscription) return 'On demand, not sent';
+        if (report.nothing_moved) return 'Archived, not sent: nothing moved';
+        return report.deliveries.length === 0 ? 'Archived, no destination' : '';
+    }
+
+    /**
+     * One delivery of a report: the channel and where it went, the state, the last answer the
+     * destination gave and how many tries it took.
+     * @param {{channel: string, target: string, state: string, attempts?: number,
+     *   last_status?: number | null}} delivery
+     * @returns {string}
+     */
+    function recapDeliveryText(delivery) {
+        const attempts = delivery.attempts || 0;
+        return delivery.channel + ' ' + delivery.target + ': ' + delivery.state
+            + (delivery.last_status === null || delivery.last_status === undefined ? '' : ' (' + delivery.last_status + ')')
+            + (attempts > 0 ? ', ' + attempts + (attempts === 1 ? ' try' : ' tries') : '');
+    }
+
+    /**
+     * The body of a generate request: the screen's period and filters, and the date only when
+     * the route names one (the Hub then takes the last closed period).
+     * @param {ReturnType<typeof readRecapRoute>} route
+     * @returns {{period: string, at?: string, environment: string | null, service: string | null,
+     *   grouping: string | null}}
+     */
+    function recapOnDemandBody(route) {
+        return {
+            period: route.period,
+            ...(route.at ? {at: route.at} : {}),
+            environment: route.environment,
+            service: route.service,
+            grouping: route.grouping
+        };
+    }
+
+    /**
+     * The carbon tile in three pieces, so a phone-wide tile can set the figure large and the
+     * rest small. The grams arrive rounded to one significant figure, the server's rule.
+     * @param {number | null} grams
+     * @param {number} sourcesWithoutCoefficient
+     * @param {string | null | undefined} missingReason `no_coefficient` or `no_avoidable_io`
+     * @param {string} [view] `pilotage` says only that there is no figure
+     * @returns {{lead: string, figure: string, unit: string}}
+     */
+    function co2Parts(grams, sourcesWithoutCoefficient, missingReason, view) {
+        if (grams === null || grams === undefined) {
+            if (view === 'pilotage') return {lead: '', figure: '—', unit: 'not available'};
+            return {
+                lead: '', figure: '—',
+                unit: missingReason === 'no_avoidable_io' ? 'no avoidable I/O' : 'no coefficient from the engine'
+            };
+        }
+        // A nonzero estimate never rounds to zero; "at least" would contradict "< 1 g".
+        if (grams > 0 && grams < 1) return {lead: '', figure: '< 1 g', unit: 'CO2e'};
+        const kilos = grams >= 1000;
+        const value = kilos ? Number((grams / 1000).toPrecision(3)) : Math.round(grams);
+        return {
+            lead: sourcesWithoutCoefficient > 0 ? 'at least' : '',
+            figure: '~' + value.toLocaleString('en-US') + (kilos ? ' kg' : ' g'),
+            unit: 'CO2e'
+        };
+    }
+
+    /**
+     * The carbon estimate as one sentence: an estimate always, a partial minimum when some
+     * sources send no coefficient, a dash and the reason when there is no figure.
+     * @param {number | null} grams
+     * @param {number} sourcesWithoutCoefficient
+     * @param {string | null | undefined} missingReason
+     * @param {string} [view]
+     * @returns {string}
+     */
+    function co2Text(grams, sourcesWithoutCoefficient, missingReason, view) {
+        const parts = co2Parts(grams, sourcesWithoutCoefficient, missingReason, view);
+        if (grams === null || grams === undefined) return parts.figure + ' ' + parts.unit;
+        return (parts.lead ? parts.lead + ' ' : '') + parts.figure + ' ' + parts.unit + ', estimate'
+            + co2Tail(sourcesWithoutCoefficient, view);
+    }
+
+    /**
+     * What a partial carbon figure leaves out, after a comma, or nothing when it is whole.
+     * @param {number} sourcesWithoutCoefficient
+     * @param {string} [view]
+     * @returns {string}
+     */
+    function co2Tail(sourcesWithoutCoefficient, view) {
+        if (!(sourcesWithoutCoefficient > 0)) return '';
+        return view === 'pilotage'
+            ? ', part of the activity has no CO2 estimate'
+            : ', ' + sourcesWithoutCoefficient + (sourcesWithoutCoefficient === 1 ? ' source' : ' sources')
+            + ' without a coefficient';
+    }
+
+    /**
+     * Whether a ranked item carries a volume to read. The Hub ranks on a volume above zero, so a
+     * zero is as much "nothing to count" as null and must never show as a figure.
+     * @param {{avoidable_io_ops?: number | null}} item
+     * @returns {boolean}
+     */
+    function hasAvoidableVolume(item) {
+        return item.avoidable_io_ops != null && item.avoidable_io_ops > 0;
+    }
+
+    /**
+     * Whether the "Below, ..." divider goes before a ranked row: the first row without a volume
+     * after one with, so a list with no volume at all has none.
+     * @param {Array<{avoidable_io_ops?: number | null}>} items the ranking, volumes first
+     * @param {number} index
+     * @returns {boolean}
+     */
+    function dividesBefore(items, index) {
+        return index > 0 && !hasAvoidableVolume(items[index]) && hasAvoidableVolume(items[index - 1]);
+    }
+
+    /**
+     * A row's trend as a person reads it: a word, or the relative change as a signed percentage.
+     * @param {string} trend `new`, `up`, `down`, `flat`, `gone` or `unknown`
+     * @param {number | null | undefined} change
+     * @returns {string}
+     */
+    function trendText(trend, change) {
+        if (trend === 'new') return 'new';
+        if (trend === 'gone') return 'gone';
+        if (trend === 'flat') return 'stable';
+        if (trend !== 'up' && trend !== 'down') return '';
+        if (change === null || change === undefined) return trend;
+        return (change > 0 ? '+' : '') + Math.round(change * 100) + '%';
+    }
+
+    /**
+     * What the engine's check of a `done` action says, in words. A state a newer Hub adds is
+     * left out rather than guessed at.
+     * @param {string | null | undefined} state
+     * @param {string} [view] `pilotage` for the Management words
+     * @returns {string}
+     */
+    function confirmationLabel(state, view) {
+        const management = view === 'pilotage';
+        switch (state) {
+            case 'confirmed':
+                return management ? 'Confirmed by the measurements' : 'Confirmed by the engine';
+            case 'contradicted':
+                return 'Still detected';
+            case 'came_back':
+                return 'Came back';
+            case 'awaiting':
+                return management ? 'Waiting for a full day of measurements' : 'Waiting for a sealed day';
+            default:
+                return '';
+        }
+    }
+
+    /**
+     * The days of a period, UTC as the server counts them, and whether it is still running.
+     * @param {{kind: string, from: string, to: string, in_progress?: boolean}} period
+     * @returns {string}
+     */
+    function periodText(period) {
+        const days = period.kind === 'day' ? period.from : period.from + ' to ' + period.to;
+        return days + (period.in_progress ? ', in progress' : '');
+    }
+
+    /**
+     * @param {string[] | null | undefined} reasons
+     * @param {string} [view]
+     * @returns {string}
+     */
+    function incompleteText(reasons, view) {
+        return reasons && reasons.length ? 'Incomplete: ' + reasons.map(function (reason) {
+            return gapLabel(reason, view);
+        }).join(', ') : '';
+    }
+
+    /**
+     * @param {string[] | null | undefined} notes
+     * @param {number | null | undefined} samplingRate
+     * @param {string} [view]
+     * @returns {string}
+     */
+    function notesText(notes, samplingRate, view) {
+        if (!notes || !notes.length) return '';
+        const hasRate = samplingRate !== null && samplingRate !== undefined;
+        return 'Note: ' + notes.map(function (note) {
+            return gapLabel(note, view) + (note === 'sampling' && hasRate ? ' (rate ' + samplingRate + ')' : '');
+        }).join(', ');
+    }
+
+    /**
+     * The address when it is an http or https one, else null. A `reference_url` comes from a daemon,
+     * so a `javascript:` address must never reach an href.
+     * @param {string | null | undefined} value
+     * @returns {string | null}
+     */
+    function httpUrl(value) {
+        try {
+            const url = new URL(String(value));
+            return url.protocol === 'http:' || url.protocol === 'https:' ? String(value) : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    /**
+     * A timestamp in the reader's own time and zone, always `YYYY-MM-DD HH:mm <zone>`: the locale
+     * only supplies the zone name (en-GB writes CET where en-US writes GMT+1), the order is fixed.
+     * @param {number} ms
+     * @returns {string}
+     */
+    function localTime(ms) {
+        const parts = {};
+        new Intl.DateTimeFormat('en-GB', {
+            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+            hour12: false, timeZoneName: 'short'
+        }).formatToParts(ms).forEach(function (part) {
+            parts[part.type] = part.value;
+        });
+        // Some engines write midnight as 24.
+        const hour = parts.hour === '24' ? '00' : parts.hour;
+        return parts.year + '-' + parts.month + '-' + parts.day + ' ' + hour + ':' + parts.minute + ' '
+            + parts.timeZoneName;
+    }
+
     global.PSL = {
         setVersions,
         get ENGINE() {
@@ -2331,6 +2808,36 @@
         deviceIntro,
         deviceRequestLine,
         deviceNetworkAlert,
-        deviceApproveStep
+        deviceApproveStep,
+        ownerLabel,
+        RECAP_LABELS,
+        RECAP_HELP,
+        serviceParts,
+        namesService,
+        readRecapRoute,
+        recapHash,
+        recapPath,
+        recapReportLabel,
+        RECAP_REPORTS_COPY,
+        recapFreezeText,
+        recapErrorText,
+        recapTruncatedText,
+        recapSourcesNote,
+        recapReportStatus,
+        recapDeliveryText,
+        recapOnDemandBody,
+        co2Parts,
+        co2Text,
+        co2Tail,
+        trendText,
+        hasAvoidableVolume,
+        dividesBefore,
+        confirmationLabel,
+        periodText,
+        incompleteText,
+        notesText,
+        httpUrl,
+        localTime,
+        isoUtc
     };
 })(globalThis);

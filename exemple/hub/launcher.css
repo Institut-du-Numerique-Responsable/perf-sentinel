@@ -191,6 +191,7 @@ button {
         justify-content: flex-end;
         min-width: 0;
     }
+
     /* On a phone a long chip breaks rather than pushing the page sideways. */
     .shell-main .code-inline {
         white-space: normal;
@@ -4807,5 +4808,768 @@ a.chip {
 
     .disc-open {
         margin-left: 0;
+    }
+}
+
+/* ------------------------------------------------------------ screen: recap */
+
+/* Fixes the two-line label ("in progress" chip and "?" beside it) and the figure that wraps
+   on a phone, for the recap's tiles only. */
+.recap-tiles .disc-figure-label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.recap-tiles .disc-figure-value {
+    flex-wrap: wrap;
+}
+
+.recap-tiles .disc-figure-value small {
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-2);
+}
+
+.recap-tiles .disc-figure-sub {
+    line-height: 1.45;
+}
+
+.chip[data-tone="progress"] {
+    background: var(--info-bg);
+    color: var(--info-fg);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: .04em;
+}
+
+.title-row:has(> .recap-h2) {
+    margin: 6px 0 14px;
+}
+
+.recap-h2 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -.2px;
+}
+
+.recap-h2 span {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+    letter-spacing: 0;
+}
+
+.recap-period {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    margin: 18px 0 2px;
+}
+
+.recap-period > .help-dot {
+    align-self: center;
+}
+
+.recap-period-main {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.recap-period-tz {
+    margin-left: -8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+.recap-period-prev {
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.recap-notes {
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-3);
+}
+
+.recap-period-block {
+    margin-bottom: 14px;
+}
+
+.recap-period-block .banner {
+    margin-top: 12px;
+}
+
+.recap-input {
+    height: 24px;
+    width: 132px;
+    padding: 0 8px;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.recap-input::placeholder {
+    color: var(--text-3);
+}
+
+.recap-input:hover {
+    border-color: var(--brand);
+}
+
+.recap-filter .segmented {
+    margin-left: auto;
+}
+
+.recap-section {
+    margin-top: 30px;
+}
+
+.recap-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.recap-row {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr) minmax(128px, auto);
+    gap: 4px 14px;
+    padding: 14px 16px;
+}
+
+.recap-rank {
+    padding-top: 1px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3);
+}
+
+.recap-what {
+    min-width: 0;
+}
+
+.recap-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+}
+
+.recap-service {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+}
+
+/* The technical name beside a named service, at the size of the endpoint after it. */
+.recap-service .code-inline {
+    font-size: 12px;
+}
+
+.recap-endpoint {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-2);
+    overflow-wrap: anywhere;
+}
+
+.recap-label {
+    margin: 0 0 2px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.recap-plain {
+    max-width: 68ch;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.5;
+    color: var(--text);
+}
+
+.recap-label + .recap-plain {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-2);
+}
+
+/* The endpoint stays whole on a phone and breaks inside itself only when it must. */
+.recap-where .code-inline,
+.recap-move li .code-inline {
+    display: inline-block;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.recap-where {
+    margin-top: 3px;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.recap-suggest {
+    max-width: 78ch;
+    margin: 8px 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+.recap-figure {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    text-align: right;
+}
+
+.recap-figure-n {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+.recap-figure-u {
+    font-size: 11px;
+    white-space: nowrap;
+    color: var(--text-3);
+}
+
+/* One series, its value printed beside it: the bar only lets the eye compare rows. */
+.recap-bar {
+    width: 128px;
+    height: 4px;
+    border-radius: 4px;
+    background: var(--surface-3);
+    overflow: hidden;
+}
+
+.recap-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--brand-text);
+}
+
+.recap-trend {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--surface-3);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--text-2);
+}
+
+.recap-trend[data-trend="up"] {
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+}
+
+.recap-trend[data-trend="down"],
+.recap-trend[data-trend="gone"] {
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+}
+
+.recap-trend[data-trend="new"] {
+    background: var(--info-bg);
+    color: var(--info-fg);
+}
+
+.recap-foot {
+    grid-column: 2 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.recap-foot .facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+}
+
+.recap-foot .facts b {
+    font-weight: 600;
+    color: var(--text-2);
+}
+
+.recap-action {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.recap-owner {
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.recap-when {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+/* The name of an endpoint, and Cancel: a word that acts, not a second button beside Take. */
+.recap-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--brand-text);
+    font: 500 12px var(--font-ui);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.recap-name {
+    grid-column: 2 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.recap-name .recap-input {
+    width: min(100%, 280px);
+}
+
+.recap-alert {
+    grid-column: 2 / -1;
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+/* A report: its name and its two downloads on one line, then when it was written and where it went. */
+.recap-report {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 6px 16px;
+    padding: 12px 16px;
+}
+
+.recap-report .recap-label {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.recap-report-links {
+    display: flex;
+    gap: 14px;
+}
+
+.recap-report-foot {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+/* A delivery is a sentence with an address in it: sentence case, not the run pill's capitals. */
+.recap-report .status-pill {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    text-transform: none;
+    overflow-wrap: anywhere;
+}
+
+.recap-generate {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    margin-bottom: 12px;
+}
+
+.recap-generate .recap-more {
+    margin: 0;
+}
+
+.recap-alert-wide {
+    margin: 0 0 12px;
+}
+
+.recap-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.recap-state svg {
+    width: 12px;
+    height: 12px;
+}
+
+.recap-state[data-state="confirmed"] {
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+}
+
+.recap-state[data-state="contradicted"] {
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+}
+
+.recap-state[data-state="came_back"] {
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+}
+
+.recap-state[data-state="awaiting"],
+.recap-state[data-state="none"] {
+    background: var(--surface-3);
+    color: var(--text-2);
+}
+
+.recap-state[data-state="in_progress"] {
+    background: var(--info-bg);
+    color: var(--info-fg);
+}
+
+.recap-detail {
+    grid-column: 2 / -1;
+    margin-top: 8px;
+}
+
+.recap-detail summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    list-style: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--btn-fg);
+    cursor: pointer;
+}
+
+.recap-detail summary::-webkit-details-marker {
+    display: none;
+}
+
+.recap-detail summary svg {
+    transition: transform .18s cubic-bezier(.2, .8, .2, 1);
+}
+
+.recap-detail[open] summary svg {
+    transform: rotate(90deg);
+}
+
+.recap-detail-body {
+    display: grid;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.recap-code {
+    margin: 0;
+    padding: 9px 12px;
+    border: 1px solid var(--inset-bd);
+    border-radius: var(--r-sm);
+    background: var(--inset-bg);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text);
+}
+
+.recap-kv {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px 14px;
+    margin: 0;
+    font-size: 12px;
+}
+
+.recap-kv dt {
+    color: var(--text-3);
+}
+
+.recap-kv dd {
+    margin: 0;
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+    color: var(--text-2);
+}
+
+.recap-fix {
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    background: var(--fix-bg);
+    color: var(--fix-fg);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.recap-fix-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.recap-fix-ref {
+    margin-top: 4px;
+    font-size: 12px;
+}
+
+.recap-fix a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.recap-fix .chip {
+    background: color-mix(in srgb, var(--fix-fg) 14%, transparent);
+    color: inherit;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.recap-events {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.recap-events time {
+    margin-right: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+.recap-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.recap-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+.recap-more {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--text-2);
+}
+
+.recap-showall {
+    margin-top: 12px;
+}
+
+.recap-moves {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 10px;
+}
+
+.recap-move {
+    padding: 13px 16px;
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.recap-move h3 {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.recap-move h3 .n {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.recap-move h3 .sub {
+    margin-left: auto;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--ok-fg);
+}
+
+.recap-move ul {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.recap-move li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+    align-items: start;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--text-2);
+}
+
+.recap-move li .who {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    min-width: 0;
+}
+
+.recap-move li .who > .plain,
+.recap-move li .who > .recap-where {
+    flex: 1 1 100%;
+}
+
+.recap-move li .recap-where {
+    margin-top: 0;
+}
+
+.recap-move li .plain {
+    color: var(--text);
+}
+
+.recap-move[data-tone="crit"] h3 {
+    color: var(--crit-fg);
+}
+
+.recap-move[data-tone="warn"] h3 {
+    color: var(--warn-fg);
+}
+
+@media (max-width: 560px) {
+    .recap-row {
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: 4px 10px;
+        padding: 13px 14px;
+    }
+
+    .recap-figure {
+        grid-column: 2;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 6px 10px;
+        margin-top: 8px;
+        text-align: left;
+    }
+
+    .recap-bar {
+        order: 9;
+        width: 100%;
+    }
+
+    .recap-action {
+        margin-left: 0;
+    }
+
+    .recap-moves {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    /* The two downloads drop under the name, which gets the whole line. */
+    .recap-report {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .recap-report-links {
+        order: 1;
+    }
+
+    .recap-input {
+        width: calc(50% - 5px);
+    }
+}
+
+@media (max-width: 760px) {
+    .recap-filter .segmented {
+        margin-left: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .recap-detail summary svg {
+        transition: none;
     }
 }

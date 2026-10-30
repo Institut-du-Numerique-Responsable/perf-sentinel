@@ -50,6 +50,13 @@ if (!existsSync(FIXTURES)) {
 }
 
 const fixtures = JSON.parse(readFileSync(FIXTURES, 'utf8'));
+// A frozen recap report's two pages are links, not reads, so they ship as files
+// beside the launcher rather than inside the patch.
+const pages = fixtures.pages || {};
+delete fixtures.pages;
+for (const path of Object.keys(pages)) {
+  if (!/^\/recaps\/[0-9a-f]{32}\/(tech|pilotage)\.html$/.test(path)) die(`fixtures carry an unexpected page ${path}`);
+}
 // Guard the fixture shape rather than discovering a missing route as an empty
 // screen in the browser. /api/status is the hard gate: without it the launcher
 // renders one red banner and nothing else.
@@ -367,6 +374,12 @@ const PATCH = `<script>
           var src = frames[k].getAttribute('src') || '';
           if (src.indexOf('/reports/') === 0) frames[k].setAttribute('src', '/exemple/dashboard');
         }
+        // A frozen recap report is a link to a page the site serves beside this one.
+        var links = node.tagName === 'A' ? [node] : node.querySelectorAll('a[href^="/recaps/"]');
+        for (var l = 0; l < links.length; l++) {
+          var href = links[l].getAttribute('href') || '';
+          if (href.indexOf('/recaps/') === 0) links[l].setAttribute('href', href.slice(1));
+        }
       }
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
@@ -416,6 +429,10 @@ mkdirSync(OUT_DIR, { recursive: true });
 cpSync(WWWROOT, OUT_DIR, { recursive: true });
 mkdirSync(join(OUT_DIR, 'files'), { recursive: true });
 for (const id of pdfIds) cpSync(join(pdfDir, `${id}.pdf`), join(OUT_DIR, 'files', `${id}.pdf`));
+for (const [path, html] of Object.entries(pages)) {
+  mkdirSync(dirname(join(OUT_DIR, path)), { recursive: true });
+  writeFileSync(join(OUT_DIR, path), html);
+}
 rmSync(pdfDir, { recursive: true, force: true });
 
 const patched = `${source.slice(0, headEnd)}${PATCH}\n${source.slice(headEnd)}`;
@@ -423,3 +440,4 @@ writeFileSync(join(OUT_DIR, 'index.html'), patched);
 console.log(`[embed-hub] wrote exemple/hub/ from ${WWWROOT}`);
 console.log(`[embed-hub] ${Object.keys(fixtures.routes).length} routes replayed, patch injected before </head>`);
 console.log(`[embed-hub] ${pdfIds.length} disclosure PDF(s) rendered by ${ENGINE}`);
+console.log(`[embed-hub] ${Object.keys(pages).length} frozen recap page(s) written`);
