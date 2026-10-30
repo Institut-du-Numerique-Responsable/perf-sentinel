@@ -211,3 +211,42 @@ export async function readPdfCard(bytes) {
   const attachment = await readPdfAttachment(bytes, `${KEYWORD}.json`);
   return attachment && utf8(attachment);
 }
+
+// ---- the bytes `content_sig` signs ----
+
+const SLOT_MARKER = [...'{"content_sig":"'].map((c) => c.charCodeAt(0));
+const SLOT_END = [...'","payload":"'].map((c) => c.charCodeAt(0));
+const SIG_LENGTH = 86;
+
+/** Offset of the value after the only `{"content_sig":"` in a PDF, when it holds `sigText`. */
+function pdfSlot(bytes, sigText) {
+  if (sigText.length !== SIG_LENGTH) return null;
+  let at = -1;
+  for (let i = 0; i + SLOT_MARKER.length <= bytes.length; i++) {
+    if (bytes[i] !== SLOT_MARKER[0] || !startsWith(bytes, SLOT_MARKER, i)) continue;
+    if (at >= 0) return null;
+    at = i + SLOT_MARKER.length;
+  }
+  if (at < 0 || !startsWith(bytes, [...sigText].map((c) => c.charCodeAt(0)), at)) return null;
+  return startsWith(bytes, SLOT_END, at + SIG_LENGTH) ? at : null;
+}
+
+/** The file minus its envelope carrier, or the PDF with its slot reset to `A`s: the engine's `card_content`. */
+export function cardContent(format, bytes, contentSigText) {
+  if (format === 'pdf') {
+    const at = pdfSlot(bytes, contentSigText);
+    if (at === null) return null;
+    const content = bytes.slice();
+    content.fill(0x41, at, at + SIG_LENGTH);
+    return content;
+  }
+  let range;
+  if (format === 'png') range = pngEnvelopeRange(bytes)?.chunk;
+  else if (format === 'svg') range = svgEnvelopeRange(bytes)?.element;
+  else if (format === 'jxl') range = jxlEnvelopeRange(bytes)?.box;
+  if (!range) return null;
+  const content = new Uint8Array(bytes.length - (range[1] - range[0]));
+  content.set(bytes.subarray(0, range[0]));
+  content.set(bytes.subarray(range[1]), range[0]);
+  return content;
+}

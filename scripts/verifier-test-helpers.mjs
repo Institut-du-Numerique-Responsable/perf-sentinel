@@ -1,4 +1,5 @@
 // Shared by the verifier test suites, never served.
+import { crc32 } from 'node:zlib';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
@@ -40,6 +41,35 @@ export function pngChunks(bytes) {
   }
   return chunks;
 }
+
+/** One PNG chunk, length field through a valid CRC. */
+export const pngChunk = (type, data) => concat(u32(data.length), ascii(type), data, u32(crc32(concat(ascii(type), data))));
+
+/** The PNG with its first chunk of `type` replaced by `chunk`, a whole chunk. */
+export function replaceChunk(bytes, type, chunk) {
+  const c = pngChunks(bytes).find((x) => x.type === type);
+  return concat(bytes.subarray(0, c.start), chunk, bytes.subarray(c.end));
+}
+
+/** The PNG with its first chunk of `type` moved right after the first `after` chunk, or first when `after` is null. */
+export function moveChunk(bytes, type, after) {
+  const chunks = pngChunks(bytes);
+  const moved = chunks.find((c) => c.type === type);
+  const rest = chunks.filter((c) => c !== moved);
+  rest.splice(after === null ? 0 : rest.findIndex((c) => c.type === after) + 1, 0, moved);
+  return concat(bytes.subarray(0, 8), ...rest.map((c) => bytes.subarray(c.start, c.end)));
+}
+
+/** The card's `iTXt` chunk around `text`, its header bytes overridable to break one rule at a time. */
+export const cardChunk = (text, { flag = 0, method = 0, lang = '', translated = '' } = {}) => pngChunk('iTXt', concat(
+  ascii('perf-sentinel-card\0'), Uint8Array.of(flag, method), ascii(`${lang}\0${translated}\0`), ascii(text)));
+
+/** An envelope text with its keys in another order, or with a space after the first `:`. */
+export function reorderEnvelope(text) {
+  const o = JSON.parse(text);
+  return `{"payload":"${o.payload}","content_sig":"${o.content_sig}","signature":"${o.signature}"}`;
+}
+export const spaceEnvelope = (text) => text.replace(':', ': ');
 
 /** The PNG without its chunks of `type`. */
 export function stripChunk(bytes, type) {

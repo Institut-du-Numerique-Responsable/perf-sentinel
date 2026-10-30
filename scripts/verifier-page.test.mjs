@@ -9,7 +9,10 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COPY } from '../assets/verifier/copy.js';
-import { tokenOf, flip, concat, stripChunk, jxlParts } from './verifier-test-helpers.mjs';
+import { readPngCard } from '../assets/verifier/files.js';
+import {
+  tokenOf, flip, concat, stripChunk, jxlParts, jxlBox, pngChunks, replaceChunk, cardChunk, reorderEnvelope, spaceEnvelope,
+} from './verifier-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 let chromium;
@@ -307,7 +310,8 @@ test('a dropped SVG is never rendered', async () => {
     .replace('</svg>', '<script>window.__pwned=1</script><image href="https://evil.example/x.png"/></svg>');
   assert.ok(svg.includes('onload=') && svg.includes('evil.example'));
   let { page, external, close } = await openFile('card.svg', enc(svg), { init: COUNT_BLOBS });
-  await waitState(page, 'level1');
+  // The envelope still reads, the added script makes the file content modified.
+  await waitState(page, 'modified');
   await page.waitForTimeout(200);
   assert.equal(await page.evaluate(() => window.__pwned), 0);
   const html = await page.evaluate(() => document.documentElement.outerHTML);
@@ -424,4 +428,121 @@ test('a modified vendored file stops the check', async () => {
   await waitState(page, 'cannot-verify');
   assert.equal(await text(page, '#verifier-headline'), COPY.en.cannotVerify);
   await close();
+});
+
+// ---- the file content check and the signed figures (Task 5b) ----
+
+const FORMATS = ['png', 'svg', 'jxl', 'pdf'];
+const precedes = (page, a, b) => page.evaluate(([x, y]) => Boolean(document.querySelector(x)
+  .compareDocumentPosition(document.querySelector(y)) & Node.DOCUMENT_POSITION_FOLLOWING), [a, b]);
+const figure = (page, name) => text(page, `[data-figure="${name}"]`);
+
+test('the signed figures come first, with the compare line', async () => {
+  let { page, close } = await open(link('story'));
+  await waitState(page, 'level1');
+  assert.equal(await precedes(page, '#verifier-headline', '#verifier-figures'), true);
+  assert.equal(await precedes(page, '#verifier-figures', '#verifier-details'), true);
+  assert.equal(await text(page, '#verifier-figures h2'), COPY.en.figuresTitle);
+  assert.ok((await text(page, '#verifier-figures')).includes(COPY.en.figuresCompare));
+  assert.ok((await figure(page, 'cited_ops')).includes('41'));
+  assert.ok((await figure(page, 'before_fix_ops')).includes('1.9 million'));
+  assert.ok((await figure(page, 'before_fix_period')).includes('July 2026'));
+  assert.ok((await figure(page, 'period')).includes('September 2026'));
+  const names = await page.$$eval('#verifier-figures [data-figure]', (els) => els.map((e) => e.dataset.figure));
+  assert.deepEqual(names, ['period', 'before_fix_period', 'cited_ops', 'before_fix_ops']);
+  assert.equal(await page.locator('#verifier-content').count(), 0);
+  await assertNoAccent(page);
+  await close();
+
+  ({ page, close } = await open('/fr' + link('story'), { locale: 'fr-FR' }));
+  await waitState(page, 'level1');
+  assert.ok((await figure(page, 'before_fix_ops')).includes('1,9 million'));
+  assert.ok((await figure(page, 'before_fix_period')).includes('juillet 2026'));
+  assert.ok((await text(page, '#verifier-figures')).includes(COPY.fr.figuresCompare));
+  await close();
+
+  ({ page, close } = await open(link('slow')));
+  await waitState(page, 'level1');
+  assert.ok((await figure(page, 'cited_ms')).includes('2.3 s or more'));
+  await close();
+});
+
+test('an original file says intact', async () => {
+  for (const format of FORMATS) {
+    const { page, close } = await openFile(`story.${format}`, fixture(fx.cards.story[format]));
+    await waitState(page, 'level1');
+    assert.equal(await page.getAttribute('#verifier-content', 'data-content'), 'intact', format);
+    assert.equal(await text(page, '#verifier-content'), COPY.en.contentIntact, format);
+    assert.equal(await visible(page, '#verifier-figures'), true, format);
+    assert.equal(await precedes(page, '#verifier-content', '#verifier-figures'), true, format);
+    if (format === 'png') await assertNoAccent(page);
+    await close();
+  }
+});
+
+test('a copied envelope reads modified', async () => {
+  for (const format of FORMATS) {
+    const { page, external, close } = await openFile(`card.${format}`, fixture(fx.swapped[format]));
+    await waitState(page, 'modified');
+    assert.equal(await text(page, '#verifier-headline'), COPY.en.modified, format);
+    assert.equal(await visible(page, '#verifier-next'), true, format);
+    assert.equal(await text(page, '#verifier-next'), COPY.en.modifiedNext, format);
+    assert.ok(await page.locator('#verifier-result [data-open-limits]').count() > 0, format);
+    assert.equal(await page.locator('#verifier-result [data-ico="shield-alert"]').count(), 1, format);
+    for (const sel of ['[data-field]', '#verifier-figures', '#verifier-content', '#verifier-dns']) {
+      assert.equal(await page.locator(sel).count(), 0, `${format} ${sel}`);
+    }
+    assert.deepEqual(external, [], format);
+    await assertNoAccent(page);
+    await close();
+  }
+});
+
+test('the limits explain a reposted card', async () => {
+  for (const [path, lang] of [['/verifier', 'en'], ['/fr/verifier', 'fr']]) {
+    const { page, close } = await open(path);
+    assert.ok((await text(page, 'details#verifier-limits')).includes(COPY[lang].limitRepost), lang);
+    await close();
+  }
+});
+
+test('a broken carrier reads no card data, a changed image modified', async () => {
+  const png = fixture('story.png');
+  const svg = dec(fixture('story.svg'));
+  const element = /<metadata id="perf-sentinel-card">[\s\S]*?<\/metadata>/.exec(svg)[0];
+  const env = /<metadata id="perf-sentinel-card">([\s\S]*?)<\/metadata>/.exec(svg)[1];
+  const pngText = readPngCard(png);
+  const parts = jxlParts(fixture('story.jxl'));
+  const jxlEnv = dec(parts.pscd.subarray(8));
+  const wide = new Uint8Array(16);
+  new DataView(wide.buffer).setUint32(0, 1);
+  wide.set(enc('pscd'), 4);
+  new DataView(wide.buffer).setUint32(12, 8 + parts.pscd.length);
+  const crc = png.slice();
+  crc[pngChunks(png).find((c) => c.type === 'iTXt').end - 1] ^= 1;
+  const unread = {
+    'bad envelope CRC.png': crc,
+    'no IEND.png': stripChunk(png, 'IEND'),
+    'png reordered.png': replaceChunk(png, 'iTXt', cardChunk(reorderEnvelope(pngText))),
+    'png space.png': replaceChunk(png, 'iTXt', cardChunk(spaceEnvelope(pngText))),
+    'in title.svg': enc(svg.replace(element + '\n', '').replace('</title>', element + '</title>')),
+    'svg reordered.svg': enc(svg.replace(env, reorderEnvelope(env))),
+    'pscd after jxlc.jxl': concat(parts['JXL '], parts.ftyp, parts.jxlc, parts.pscd),
+    '64-bit pscd.jxl': concat(parts['JXL '], parts.ftyp, wide, parts.pscd.subarray(8), parts.jxlc),
+    'jxl space.jxl': concat(parts['JXL '], parts.ftyp, jxlBox('pscd', enc(spaceEnvelope(jxlEnv))), parts.jxlc),
+  };
+  for (const [name, bytes] of Object.entries(unread)) {
+    const { page, close } = await openFile(name, bytes);
+    await waitState(page, 'no-card-data');
+    assert.equal(await page.locator('#verifier-content').count(), 0, name);
+    await close();
+  }
+  for (const [name, bytes] of Object.entries({
+    'after IEND.png': concat(png, enc('retouched')),
+    'bom.svg': concat(Uint8Array.of(0xef, 0xbb, 0xbf), enc('\n'), fixture('story.svg')),
+  })) {
+    const { page, close } = await openFile(name, bytes);
+    await waitState(page, 'modified');
+    await close();
+  }
 });

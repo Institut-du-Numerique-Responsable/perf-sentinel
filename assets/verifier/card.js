@@ -1,6 +1,7 @@
 // Share card tokens: strict base64url, Ed25519 signatures, compact payloads and
 // the values the page prints. Mirrors the engine's report/card (C3 frozen).
 import { COPY } from './copy.js';
+import { cardContent } from './files.js';
 
 export const NOBLE_URL = '/assets/vendor/noble-ed25519-3.2.0.js';
 export const NOBLE_SHA384 = 'sha384-Mn3Pw6kF6BnK6mrt9jgociul6uWPooS/UN1RxwkhSN6lFlyQF33h3c9Dx+TKoIG3';
@@ -181,7 +182,16 @@ function readableFull(card) {
     && Number.isSafeInteger(at) && at >= 0 && at <= 8.64e15;
 }
 
-export async function openCard(pair, kind, loadNoble = defaultLoadNoble) {
+const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+const sha256Hex = async (bytes) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
+
+/** What `content_sig` signs: context, format, SHA-256 of the payload, SHA-256 of the content. */
+export async function contentMessage(format, payload, content) {
+  return new TextEncoder().encode(`perf-sentinel-card-content-v1\n${format}\n${await sha256Hex(payload)}\n${await sha256Hex(content)}`);
+}
+
+/** `file` is `{format, bytes}` for a dropped file: its content is checked against `contentSig`. */
+export async function openCard(pair, kind, loadNoble = defaultLoadNoble, file = undefined) {
   let parsed;
   try {
     parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(pair.payload));
@@ -201,10 +211,44 @@ export async function openCard(pair, kind, loadNoble = defaultLoadNoble) {
   const fp = await fingerprint(pub);
   if (kind === 'compact') {
     const card = expandCompact(parsed);
-    return card ? { state: 'ok', card, fingerprint: fp, date: card.generated_on } : { state: 'unsupported' };
+    return card ? { state: 'ok', card, fingerprint: fp, date: card.generated_on, content: 'not_checked' } : { state: 'unsupported' };
   }
-  if (parsed.key !== fp || !readableFull(parsed)) return { state: 'unsupported' };
-  return { state: 'ok', card: parsed, fingerprint: fp, date: new Date(parsed.generated_at_ms).toISOString().slice(0, 10) };
+  if (parsed.key !== fp) return { state: 'unsupported' };
+  if (file) {
+    const content = cardContent(file.format, file.bytes, b64urlEncode(pair.contentSig));
+    try {
+      if (!content || !(await verifyEd25519(pub, pair.contentSig, await contentMessage(file.format, pair.payload, content), loadNoble))) {
+        return { state: 'modified' };
+      }
+    } catch (e) {
+      if (e instanceof EngineUnavailable) return { state: 'cannot-verify' };
+      throw e;
+    }
+  }
+  if (!readableFull(parsed)) return { state: 'unsupported' };
+  return {
+    state: 'ok', card: parsed, fingerprint: fp, date: new Date(parsed.generated_at_ms).toISOString().slice(0, 10),
+    content: file ? 'intact' : 'not_checked',
+  };
+}
+
+// The figures the QR code signs, per angle, in the order the page shows them (the engine's `compact_figures`).
+const BIG_FIGURES = {
+  story: ['cited_ops', 'cited_ms', 'before_fix_ops', 'threshold_ops', 'threshold_ms'],
+  curve: ['last_waste_permille', 'previous_waste_permille'],
+  collective: ['confirmed_fixes_count', 'services_count'],
+};
+
+/** The signed figures to compare with the image, the same object for a file and its link. */
+export function bigFigures(card) {
+  const figures = isObject(card.figures) ? card.figures : {};
+  const waste = Array.isArray(figures.waste_permille) ? figures.waste_permille : [];
+  const all = { last_waste_permille: waste.at(-1), previous_waste_permille: waste.at(-2), ...figures };
+  const names = Object.hasOwn(BIG_FIGURES, card.angle) ? BIG_FIGURES[card.angle] : [];
+  const out = { period: card.period };
+  if (isObject(card.before_fix_period)) out.before_fix_period = card.before_fix_period;
+  out.values = names.filter((n) => Number.isSafeInteger(all[n]) && all[n] >= 0).map((n) => [n, all[n]]);
+  return out;
 }
 
 // ---- values, as the card prints them ----

@@ -169,7 +169,7 @@ function verifierMain(lang) {
     `<div class="vf-res" id="verifier-result" data-state="empty" aria-live="polite"></div>` +
     `<label class="vf-drop" id="verifier-drop"><input type="file" id="verifier-file" accept=".png,.svg,.jxl,.pdf,.jpg,.jpeg,.webp,image/png,image/svg+xml,image/jxl,application/pdf,image/jpeg,image/webp">${vIco('upload')}<span><strong>${lead}<u>${action}</u></strong><small>${t.dropSub}</small></span></label>` +
     `<p class="vf-phone" id="verifier-phone">${t.phone}</p>` +
-    `<details class="vf-lim" id="verifier-limits"><summary>${vIco('chevron-right')}${t.limitsLink}</summary><p>${t.limitLevel1}</p><p>${t.limitStolenKey}</p><p>${t.limitLinkedIn}</p><a class="vf-meth" href="${t.methodHref}">${t.method}</a></details>` +
+    `<details class="vf-lim" id="verifier-limits"><summary>${vIco('chevron-right')}${t.limitsLink}</summary><p>${t.limitLevel1}</p><p>${t.limitStolenKey}</p><p>${t.limitLinkedIn}</p><p>${t.limitRepost}</p><a class="vf-meth" href="${t.methodHref}">${t.method}</a></details>` +
     `<script type="module" src="/assets/verifier/page.js"></script>`;
 }
 // The approved mockup (card-site Task 1), inside the .legal-main frame. Level 1 never uses the accent.
@@ -191,9 +191,9 @@ const verifierCss = `<style>${['shield-check', 'shield-alert', 'link-2-off', 'ci
   `.vf-res[data-state="level2"]{border-color:color-mix(in srgb,var(--accent) 60%,var(--border))}` +
   `.vf-res[data-state="level2"] .vf-hd{background:var(--accent-soft);color:var(--accent-strong)}` +
   `.vf-res[data-state="level2"] .vf-hl{color:var(--accent-strong)}` +
-  `.vf-res[data-state="tampered"]{border-color:var(--coral)}` +
-  `.vf-res[data-state="tampered"] .vf-hd{background:color-mix(in srgb,var(--coral) 9%,var(--surface));color:var(--coral)}` +
-  `.vf-res:not([data-state^="level"]):not([data-state="tampered"]) .vf-hl{font-size:17px;font-weight:500}` +
+  `.vf-res:is([data-state="tampered"],[data-state="modified"]){border-color:var(--coral)}` +
+  `.vf-res:is([data-state="tampered"],[data-state="modified"]) .vf-hd{background:color-mix(in srgb,var(--coral) 9%,var(--surface));color:var(--coral)}` +
+  `.vf-res:not([data-state^="level"]):not([data-state="tampered"]):not([data-state="modified"]) .vf-hl{font-size:17px;font-weight:500}` +
   `.vf-dns{padding:0 24px 20px}` +
   `.vf-btn{display:inline-flex;align-items:center;gap:9px;min-height:44px;padding:10px 16px;border-radius:9px;border:1px solid color-mix(in srgb,var(--text-2) 45%,var(--border));background:var(--surface);color:var(--text);font:600 15px/1.35 'DM Sans',system-ui,sans-serif;text-align:left;cursor:pointer;transition:border-color .16s ease,background-color .16s ease}` +
   `.vf-btn::before{content:"";flex:none;width:17px;height:17px;background:var(--text-2);-webkit-mask:url(/assets/icons/globe.svg) center/contain no-repeat;mask:url(/assets/icons/globe.svg) center/contain no-repeat}` +
@@ -201,6 +201,8 @@ const verifierCss = `<style>${['shield-check', 'shield-alert', 'link-2-off', 'ci
   `[data-ps-root] .vf-btn:focus-visible,[data-ps-root] .vf-res :is(a,button):focus-visible{outline:2px solid var(--text);outline-offset:2px}` +
   `.vf-btn span{overflow-wrap:anywhere}` +
   `.vf-btn[disabled]{cursor:progress;color:var(--text-2);background:var(--surface-2)}` +
+  `.vf-fig{padding:0 24px 18px}` +
+  `.legal-main .vf-fig .vf-gh{margin-top:2px}` +
   `.vf-det{border-top:1px solid var(--border);padding:4px 24px 18px}` +
   `.legal-main .vf-gh{margin:22px 0 4px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}` +
   `.legal-main .vf-gnote{margin:0 0 6px;font-size:13.5px;line-height:1.5}` +

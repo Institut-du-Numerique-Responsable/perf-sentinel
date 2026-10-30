@@ -1,7 +1,7 @@
 // The /verifier page: reads the card from the URL fragment or a dropped original file,
 // then shows one state in #verifier-result. Every payload string goes through text nodes.
 import { COPY } from './copy.js';
-import { parseFragment, parseEnvelope, openCard, formatValue, leafPaths, periodName, equivalenceCount } from './card.js';
+import { parseFragment, parseEnvelope, openCard, formatValue, leafPaths, periodName, equivalenceCount, bigFigures } from './card.js';
 import { readPngCard, readPdfCard, readSvgCard, readJxlCard } from './files.js';
 import { isValidDomain } from './dns.js';
 
@@ -49,6 +49,7 @@ const headline = (...text) => el('p', { class: 'vf-hl', id: 'verifier-headline' 
 const REFUSALS = {
   'invalid-link': ['invalidLink', 'link-2-off', true],
   tampered: ['tampered', 'shield-alert', true, () => el('p', { class: 'vf-next', id: 'verifier-next' }, T.tamperedNext)],
+  modified: ['modified', 'shield-alert', true, () => el('p', { class: 'vf-next', id: 'verifier-next' }, T.modifiedNext)],
   unsupported: ['unsupported', 'circle-alert'],
   'cannot-verify': ['cannotVerify', 'circle-alert'],
   'no-card-data': ['noCardData', 'image-off', true, () => el('p', { class: 'vf-phone' }, T.phone)],
@@ -197,6 +198,18 @@ function details(card, compact) {
   ].filter(Boolean).flat());
 }
 
+/** The figures the QR code signs, first, so a reader compares them with the image they saw. */
+function figures(card) {
+  const { values, ...periods } = bigFigures(card);
+  const rows = [
+    ...Object.entries(periods).map(([name, v]) => [name, name, formatValue(name, v, lang)]),
+    ...values.map(([name, v]) => [name, `figures.${name}`, formatValue(`figures.${name}`, v, lang)]),
+  ].map(([name, path, shown]) => el('div', { 'data-figure': name },
+    el('dt', null, labelOf(path, card, true)), el('dd', { class: path.startsWith('figures.') ? 'vf-n vf-big' : undefined }, shown)));
+  return el('section', { class: 'vf-fig', id: 'verifier-figures' },
+    el('h2', { class: 'vf-gh' }, T.figuresTitle), el('p', { class: 'vf-gnote' }, T.figuresCompare), el('dl', { class: 'vf-dl' }, ...rows));
+}
+
 function orgLine(org) {
   const vars = { org: org.name, domain: org.domain };
   if (filled(org.name) && filled(org.domain)) return fill(T.level1Org, vars);
@@ -205,14 +218,17 @@ function orgLine(org) {
   return null;
 }
 
-function level1(card, compact) {
+function level1(card, compact, content) {
   const org = isObject(card.org) ? card.org : {};
   const line = orgLine(org);
   const [first, second] = T.level1.split(/(?<=\.) /);
   const dns = typeof org.domain === 'string' && isValidDomain(org.domain)
     && el('div', { class: 'vf-dns' }, el('button', { class: 'vf-btn', id: 'verifier-dns', type: 'button' }, el('span', null, fill(T.dnsButton, { domain: org.domain }))));
   show('level1',
-    head(headline(el('span', null, first), ' ', el('span', null, second)), null, line && el('p', { class: 'vf-org', id: 'verifier-org' }, line)),
+    head(headline(el('span', null, first), ' ', el('span', null, second)), null,
+      line && el('p', { class: 'vf-org', id: 'verifier-org' }, line),
+      content === 'intact' && el('p', { class: 'vf-org', id: 'verifier-content', 'data-content': 'intact' }, T.contentIntact)),
+    figures(card),
     dns,
     details(card, compact),
     el('div', { class: 'vf-ft' }, el('a', { href: T.methodHref, 'data-plain': true }, T.method), limitsButton()));
@@ -222,15 +238,15 @@ function level1(card, compact) {
 
 let latest = 0;
 
-async function check(pair, kind, n) {
+async function check(pair, kind, n, file) {
   let r;
   try {
-    r = await openCard(pair, kind);
+    r = await openCard(pair, kind, undefined, file);
   } catch {
     r = { state: 'cannot-verify' };
   }
   if (n !== latest) return;
-  if (r.state === 'ok') level1(r.card, kind === 'compact');
+  if (r.state === 'ok') level1(r.card, kind === 'compact', r.content);
   else refuse(r.state);
 }
 
@@ -274,7 +290,7 @@ async function fromFile(file) {
     }
   }
   if (n !== latest) return;
-  return pair ? check(pair, 'full', n) : refuse('no-card-data');
+  return pair ? check(pair, 'full', n, { format, bytes }) : refuse('no-card-data');
 }
 
 input.addEventListener('change', () => {

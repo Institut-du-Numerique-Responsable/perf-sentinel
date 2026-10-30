@@ -5,15 +5,18 @@ import { crc32 } from 'node:zlib';
 import {
   b64urlDecode, b64urlEncode, parseToken, parseEnvelope, parseFragment, fingerprint,
   verifyEd25519, defaultLoadNoble, EngineUnavailable, openCard, expandCompact,
-  formatValue, periodName, printedCo2Ug, equivalenceCount, leafPaths,
+  formatValue, periodName, printedCo2Ug, equivalenceCount, leafPaths, contentMessage, bigFigures,
 } from '../assets/verifier/card.js';
 import {
   inflateCapped, pngEnvelopeRange, readPngCard, jxlBoxes, jxlEnvelopeRange, svgEnvelopeRange,
-  readPdfAttachment, readPdfCard, readJxlCard, readSvgCard,
+  readPdfAttachment, readPdfCard, readJxlCard, readSvgCard, cardContent,
 } from '../assets/verifier/files.js';
 import { COPY } from '../assets/verifier/copy.js';
 import { DOH, isValidDomain, lookupTxt, parseTxtRecord, bindingState } from '../assets/verifier/dns.js';
-import { tokenOf, flip, concat, stripChunk, jxlBox, jxlParts } from './verifier-test-helpers.mjs';
+import {
+  tokenOf, flip, concat, stripChunk, jxlBox, jxlParts, pngChunks, moveChunk, replaceChunk, cardChunk,
+  reorderEnvelope, spaceEnvelope,
+} from './verifier-test-helpers.mjs';
 
 const here = (p) => new URL(p, import.meta.url);
 const bytesOf = (p) => new Uint8Array(readFileSync(here(p)));
@@ -569,5 +572,196 @@ test('every signed key has a label in both languages', async () => {
         }
       }
     }
+  }
+});
+
+// ---- the file content check and the signed figures (Task 5b) ----
+
+const READ = { png: readPngCard, svg: readSvgCard, jxl: readJxlCard, pdf: readPdfCard };
+const FORMATS = ['png', 'svg', 'jxl', 'pdf'];
+const openFileCard = async (format, bytes) => openCard(parseEnvelope(await READ[format](bytes)), 'full', undefined, { format, bytes });
+const storyFile = (format) => fixture(fx.cards.story[format]);
+const envelopeOf = async (format, bytes) => parseEnvelope(await READ[format](bytes));
+/** Byte offset of `needle` in `bytes`, by a plain byte search. */
+const find = (bytes, needle, from = 0) => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).indexOf(Buffer.from(needle), from);
+const withByte = (bytes, at, xor = 1) => {
+  const out = bytes.slice();
+  out[at] ^= xor;
+  return out;
+};
+const CRC_OF = (bytes, type) => pngChunks(bytes).find((c) => c.type === type).end - 1;
+
+test('the content message matches the engine', async () => {
+  assert.equal(dec(await contentMessage('png', enc('{}'), enc('abc'))),
+    'perf-sentinel-card-content-v1\npng\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\n'
+    + 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+});
+
+test('each original file reads intact', async () => {
+  for (const format of FORMATS) {
+    const r = await openFileCard(format, storyFile(format));
+    assert.equal(r.state, 'ok', format);
+    assert.equal(r.content, 'intact', format);
+  }
+  const link = await openCard(storyPair(), 'compact');
+  assert.equal(link.state, 'ok');
+  assert.equal(link.content, 'not_checked');
+});
+
+test('a copied envelope reads modified', async () => {
+  for (const format of FORMATS) {
+    assert.deepEqual(await openFileCard(format, fixture(fx.swapped[format])), { state: 'modified' }, format);
+  }
+});
+
+test('the content ignores only the envelope', async () => {
+  const sigText = async (format, bytes) => b64urlEncode((await envelopeOf(format, bytes)).contentSig);
+  const png = storyFile('png');
+  assert.deepEqual(cardContent('png', png, await sigText('png', png)), stripChunk(png, 'iTXt'));
+
+  const svg = storyFile('svg');
+  const open = find(svg, '<metadata id="perf-sentinel-card">');
+  const close = find(svg, '</metadata>', open) + '</metadata>'.length;
+  assert.deepEqual(cardContent('svg', svg, await sigText('svg', svg)), concat(svg.subarray(0, open), svg.subarray(close)));
+
+  const jxl = storyFile('jxl');
+  const parts = jxlParts(jxl);
+  assert.deepEqual(cardContent('jxl', jxl, await sigText('jxl', jxl)), concat(parts['JXL '], parts.ftyp, parts.jxlc));
+
+  const pdf = storyFile('pdf');
+  const content = cardContent('pdf', pdf, await sigText('pdf', pdf));
+  assert.equal(content.length, pdf.length);
+  const changed = [...pdf.keys()].filter((i) => pdf[i] !== content[i]);
+  assert.ok(changed.length > 0 && changed.length <= 86);
+  const slot = find(pdf, '{"content_sig":"') + 16;
+  assert.ok(changed.every((i) => i >= slot && i < slot + 86));
+  assert.deepEqual([...content.subarray(slot, slot + 86)], Array(86).fill(0x41));
+  assert.equal(cardContent('pdf', pdf, 'A'.repeat(86)), null);
+
+  const appended = {
+    png: concat(png, Uint8Array.of(0)),
+    svg: concat(svg, enc(' ')),
+    jxl: concat(jxl, jxlBox('free', new Uint8Array(0))),
+    pdf: concat(pdf, enc('\n')),
+  };
+  for (const format of FORMATS) assert.deepEqual(await openFileCard(format, appended[format]), { state: 'modified' }, format);
+});
+
+test('PNG envelope chunks are read once and before the image data', () => {
+  const png = storyFile('png');
+  const card = pngChunks(png).find((c) => c.type === 'iTXt');
+  const iend = pngChunks(png).find((c) => c.type === 'IEND');
+  const twice = concat(png.subarray(0, iend.start), png.subarray(card.start, card.end), png.subarray(iend.start));
+  assert.equal(readPngCard(twice), null);
+  assert.equal(readPngCard(moveChunk(png, 'iTXt', 'IDAT')), null);
+  const long = png.slice();
+  new DataView(long.buffer).setUint32(card.start, 0x7ffffff0);
+  assert.equal(readPngCard(long), null);
+});
+
+/** The story PNG cases of plan 2 Task 15 `the_png_walk_follows_the_shared_byte_rules`. */
+async function pngWalkCases() {
+  const png = storyFile('png');
+  const text = readPngCard(png);
+  const last = pngChunks(png).filter((c) => c.type === 'IDAT').at(-1);
+  return {
+    unread: {
+      'first byte': withByte(png, 0),
+      'envelope before IHDR': moveChunk(png, 'iTXt', null),
+      'no IEND': stripChunk(png, 'IEND'),
+      'cut after the last IDAT': png.subarray(0, last.end),
+      'envelope CRC': withByte(png, CRC_OF(png, 'iTXt')),
+      'compression flag 1': replaceChunk(png, 'iTXt', cardChunk(text, { flag: 1 })),
+      'compression method 1': replaceChunk(png, 'iTXt', cardChunk(text, { method: 1 })),
+      'language tag': replaceChunk(png, 'iTXt', cardChunk(text, { lang: 'en' })),
+      'translated keyword': replaceChunk(png, 'iTXt', cardChunk(text, { translated: 'x' })),
+      '1 KiB language tag': replaceChunk(png, 'iTXt', cardChunk(text, { lang: 'a'.repeat(1024) })),
+    },
+    modified: {
+      'bytes after IEND': concat(png, enc('retouched')),
+      'IDAT CRC': withByte(png, CRC_OF(png, 'IDAT')),
+    },
+  };
+}
+
+test('the PNG walk follows the engine\'s byte rules', async () => {
+  const { unread, modified } = await pngWalkCases();
+  for (const [name, bytes] of Object.entries(unread)) assert.equal(readPngCard(bytes), null, name);
+  for (const [name, bytes] of Object.entries(modified)) {
+    assert.equal(typeof readPngCard(bytes), 'string', name);
+    assert.deepEqual(await openFileCard('png', bytes), { state: 'modified' }, name);
+  }
+});
+
+test('a moved carrier is refused', () => {
+  const svg = dec(storyFile('svg'));
+  const element = /<metadata id="perf-sentinel-card">[\s\S]*?<\/metadata>/.exec(svg)[0];
+  const inTitle = enc(svg.replace(element + '\n', '').replace('</title>', element + '</title>'));
+  assert.equal(readSvgCard(inTitle), null);
+  assert.equal(svgEnvelopeRange(inTitle), null);
+
+  const parts = jxlParts(storyFile('jxl'));
+  const payload = parts.pscd.subarray(8);
+  const wide = new Uint8Array(16);
+  new DataView(wide.buffer).setUint32(0, 1);
+  wide.set(enc('pscd'), 4);
+  new DataView(wide.buffer).setUint32(12, 16 + payload.length);
+  for (const [name, bytes] of Object.entries({
+    'pscd after jxlc': concat(parts['JXL '], parts.ftyp, parts.jxlc, parts.pscd),
+    '64-bit pscd size': concat(parts['JXL '], parts.ftyp, wide, payload, parts.jxlc),
+  })) {
+    assert.ok(jxlBoxes(bytes), name);
+    assert.equal(readJxlCard(bytes), null, name);
+    assert.equal(jxlEnvelopeRange(bytes), null, name);
+  }
+});
+
+test('a non-canonical envelope never reads intact', async () => {
+  const png = storyFile('png');
+  const svg = dec(storyFile('svg'));
+  const env = readSvgCard(storyFile('svg'));
+  const parts = jxlParts(storyFile('jxl'));
+  const jxlEnv = readJxlCard(storyFile('jxl'));
+  const cases = {
+    'png reordered': ['png', replaceChunk(png, 'iTXt', cardChunk(reorderEnvelope(readPngCard(png))))],
+    'png space': ['png', replaceChunk(png, 'iTXt', cardChunk(spaceEnvelope(readPngCard(png))))],
+    'svg reordered': ['svg', enc(svg.replace(env, reorderEnvelope(env)))],
+    'jxl space': ['jxl', concat(parts['JXL '], parts.ftyp, jxlBox('pscd', enc(spaceEnvelope(jxlEnv))), parts.jxlc)],
+  };
+  for (const [name, [format, bytes]] of Object.entries(cases)) {
+    assert.notEqual(await READ[format](bytes), null, name);
+    assert.equal(parseEnvelope(await READ[format](bytes)), null, name);
+  }
+});
+
+test('a prepended BOM is content', async () => {
+  const bytes = concat(Uint8Array.of(0xef, 0xbb, 0xbf), enc('\n'), storyFile('svg'));
+  assert.equal(typeof readSvgCard(bytes), 'string');
+  assert.deepEqual(await openFileCard('svg', bytes), { state: 'modified' });
+});
+
+test('a PDF with a second slot reads modified', async () => {
+  const bytes = concat(storyFile('pdf'), enc('{"content_sig":"' + 'A'.repeat(86)));
+  assert.deepEqual(await openFileCard('pdf', bytes), { state: 'modified' });
+});
+
+test('big figures are the ones the QR signs', async () => {
+  const ORDER = ['cited_ops', 'cited_ms', 'before_fix_ops', 'threshold_ops', 'threshold_ms', 'last_waste_permille',
+    'previous_waste_permille', 'confirmed_fixes_count', 'services_count'];
+  const expected = {
+    story: [['cited_ops', 41], ['before_fix_ops', 1937000]],
+    slow: [['cited_ms', 2349], ['threshold_ms', 500]],
+    curve: [['last_waste_permille', 31], ['previous_waste_permille', 48]],
+    collective: [['confirmed_fixes_count', 7], ['services_count', 3]],
+  };
+  for (const angle of ANGLES) {
+    const full = await openCard(parseEnvelope(readPngCard(fixture(fx.cards[angle].png))), 'full');
+    const compact = await openCard(parseFragment('#c=' + tokenOf(fx.cards[angle].compact_url)), 'compact');
+    // verify-card prints `angle` and the figures flat: read them as bigFigures does.
+    const { angle: _, period, before_fix_period: before, ...flat } = fx.cards[angle].figures;
+    const engine = { period, ...(before && { before_fix_period: before }), values: ORDER.filter((k) => k in flat).map((k) => [k, flat[k]]) };
+    assert.deepEqual(bigFigures(full.card), bigFigures(compact.card), angle);
+    assert.deepEqual(bigFigures(full.card), engine, angle);
+    assert.deepEqual(bigFigures(full.card).values, expected[angle], angle);
   }
 });
