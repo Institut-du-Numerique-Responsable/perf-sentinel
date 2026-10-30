@@ -1,0 +1,103 @@
+{
+  "fingerprint": "ps1:GexfogO8I7_wzx9qdST-ng",
+  "public_key": "aAY0FrJzn7jv9P3-2XF5HFHpHuJHJQqg7BPoTiYivc0",
+  "date": "2026-10-15",
+  "domain": "cards.example.org",
+  "cards": {
+    "story": {
+      "png": "story.png",
+      "pdf": "story.pdf",
+      "svg": "story.svg",
+      "jxl": "story.jxl",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsiYiI6MTkzNzAwMCwibyI6NDF9LCJnIjoyMDc0MSwiayI6ImFBWTBGckp6bjdqdjlQMy0yWEY1SEZIcEh1SkhKUXFnN0JQb1RpWWl2YzAiLCJwIjpbIm0iLDIwNjk3LDIwNzI2XSwiciI6WzIwNjM1LDIwNjY1XSwidiI6MX0.Ot0k3h21uk5tn7Ti6lTlPzIRj0fmPz-cyDJ-7FWeUgPCGYJ8lqzh8WAvTXA_8eUlwUiQESqaYDrNRqb8ca3IBw",
+      "figures": {
+        "angle": "story",
+        "period": {
+          "kind": "month",
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "before_fix_period": {
+          "from": "2026-07-01",
+          "to": "2026-07-31"
+        },
+        "before_fix_ops": 1937000,
+        "cited_ops": 41
+      }
+    },
+    "slow": {
+      "png": "slow.png",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsibSI6MjM0OSwidSI6NTAwfSwiZyI6MjA3NDEsImsiOiJhQVkwRnJKem43anY5UDMtMlhGNUhGSHBIdUpISlFxZzdCUG9UaVlpdmMwIiwicCI6WyJtIiwyMDY5NywyMDcyNl0sInIiOlsyMDY2NiwyMDY5Nl0sInYiOjF9.Oe7kcFmFCIf7xjZKVMD2rKDt8bxDF5iZCr67sNDUaaOxG8SYaJdNZGjfqedsddL-N7w58R8wSu2oQ8Wept_3Cw",
+      "figures": {
+        "angle": "story",
+        "period": {
+          "kind": "month",
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "before_fix_period": {
+          "from": "2026-08-01",
+          "to": "2026-08-31"
+        },
+        "cited_ms": 2349,
+        "threshold_ms": 500
+      }
+    },
+    "curve": {
+      "png": "curve.png",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoiYyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsidyI6MzEsIngiOjQ4fSwiZyI6MjA3NDEsImsiOiJhQVkwRnJKem43anY5UDMtMlhGNUhGSHBIdUpISlFxZzdCUG9UaVlpdmMwIiwicCI6WyJtIiwyMDY5NywyMDcyNl0sInYiOjF9.8C--zANUBYGEsCfW1CPFTJSqlPVKJWzCr444gZtTCGZVXdDKXOSPg7AXveTmKKFKBbw-ouv9INBMlrkgpCVdAw",
+      "figures": {
+        "angle": "curve",
+        "period": {
+          "kind": "month",
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "last_waste_permille": 31,
+        "previous_waste_permille": 48
+      }
+    },
+    "collective": {
+      "png": "collective.png",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoiayIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsiZSI6MywibiI6N30sImciOjIwNzQxLCJrIjoiYUFZMEZySnpuN2p2OVAzLTJYRjVIRkhwSHVKSEpRcWc3QlBvVGlZaXZjMCIsInAiOlsibSIsMjA2OTcsMjA3MjZdLCJyIjpbMjA2NjYsMjA2OTZdLCJ2IjoxfQ.Ni8Fc0zIyG-j4wqH50WXMNf8ziOl6han15gbJ0rG7hfTTC0tWWGqU2hip8Usn4tBlpnDVhsnbZxMfhGrRn5mCQ",
+      "figures": {
+        "angle": "collective",
+        "period": {
+          "kind": "month",
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "before_fix_period": {
+          "from": "2026-08-01",
+          "to": "2026-08-31"
+        },
+        "confirmed_fixes_count": 7,
+        "services_count": 3
+      }
+    },
+    "nodomain": {
+      "png": "nodomain.png",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImYiOnsiYiI6MTkzNzAwMCwibyI6NDF9LCJnIjoyMDc0MSwiayI6ImFBWTBGckp6bjdqdjlQMy0yWEY1SEZIcEh1SkhKUXFnN0JQb1RpWWl2YzAiLCJwIjpbIm0iLDIwNjk3LDIwNzI2XSwiciI6WzIwNjM1LDIwNjY1XSwidiI6MX0.6AK6-xuBqXdU8bkv3xZW0rPTG8d7_WcNiDyCUtm23QCQYSwHaCgVMqVC68S2hdNc998oJxYc8jvdU-4ZutTGCQ",
+      "figures": {
+        "angle": "story",
+        "period": {
+          "kind": "month",
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "before_fix_period": {
+          "from": "2026-07-01",
+          "to": "2026-07-31"
+        },
+        "before_fix_ops": 1937000,
+        "cited_ops": 41
+      }
+    }
+  },
+  "swapped": {
+    "png": "swapped.png",
+    "svg": "swapped.svg",
+    "jxl": "swapped.jxl",
+    "pdf": "swapped.pdf"
+  }
+}

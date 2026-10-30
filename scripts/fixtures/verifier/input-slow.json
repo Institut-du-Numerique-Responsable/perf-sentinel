@@ -1,0 +1,39 @@
+{
+  "angle": "story",
+  "lang": "en",
+  "period": {
+    "kind": "month",
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+  },
+  "scope": {
+    "environment": "production",
+    "sources": [
+      "prod-eu"
+    ],
+    "covered_days": 30,
+    "restart_days": 2,
+    "sampled_permille": 250
+  },
+  "figures": {
+    "cited_ms": 2349,
+    "threshold_ms": 500
+  },
+  "story": {
+    "finding_type": "slow_sql",
+    "service": "shop",
+    "endpoint": "GET /cart/{id}",
+    "observed_at": "2026-08-20",
+    "done_at": "2026-08-28"
+  },
+  "before_fix_period": {
+    "from": "2026-08-01",
+    "to": "2026-08-31"
+  },
+  "free": {},
+  "org": {
+    "name": "Example Org",
+    "domain": "cards.example.org"
+  },
+  "generated_at_ms": 1792054800000
+}
