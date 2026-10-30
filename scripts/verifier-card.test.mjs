@@ -12,6 +12,7 @@ import {
   readPdfAttachment, readPdfCard, readJxlCard, readSvgCard,
 } from '../assets/verifier/files.js';
 import { COPY } from '../assets/verifier/copy.js';
+import { DOH, isValidDomain, lookupTxt, parseTxtRecord, bindingState } from '../assets/verifier/dns.js';
 import { tokenOf, flip, concat, stripChunk, jxlBox, jxlParts } from './verifier-test-helpers.mjs';
 
 const here = (p) => new URL(p, import.meta.url);
@@ -387,4 +388,158 @@ test('the equivalence count uses the printed CO2', () => {
   assert.equal(equivalenceCount(15_800_000_000, 2_040_000_000), 7);
   assert.equal(equivalenceCount(19_800_000_000, 2_040_000_000), 9);
   assert.equal(printedCo2Ug(999_999), 990_000);
+});
+
+// ---- DNS-over-HTTPS and the binding rule ----
+
+const fp = 'ps1:' + 'A'.repeat(22);
+const rec = (extra) => 'v=ps1; k=' + fp + '; from=2026-01-01' + extra;
+const DNS_NAME = '_perf-sentinel.cards.example.org';
+const QUERY = `name=${DNS_NAME}&type=TXT`;
+
+/**
+ * A fetch answering `replies` in order: an Error is thrown, a number is that HTTP
+ * status, a string a 200 non-JSON body, an object a 200 JSON body whose `Answer`
+ * items get the query name (Google adds the trailing dot) unless they set `name`.
+ */
+function fakeDoh(...replies) {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    const reply = replies[calls.length - 1];
+    if (reply instanceof Error) throw reply;
+    if (typeof reply === 'number') return new Response('', { status: reply });
+    if (typeof reply === 'string') return new Response(reply, { status: 200 });
+    const name = DNS_NAME + (url.startsWith(DOH.google) ? '.' : '');
+    const Answer = reply.Answer?.map((a) => ('name' in a ? a : { ...a, name }));
+    return new Response(JSON.stringify({ ...reply, Answer }), { status: 200 });
+  };
+  return { fetchImpl, calls };
+}
+
+test('TXT records parse in both resolver shapes', () => {
+  const want = { k: fp, from: '2026-01-01' };
+  assert.deepEqual(parseTxtRecord('"' + rec('') + '"'), want);
+  assert.deepEqual(parseTxtRecord(rec('')), want);
+  assert.equal(parseTxtRecord('"v=ps1; k=' + fp.slice(0, 10) + '" "' + fp.slice(10) + '; from=2026-01-01"').k, fp);
+  assert.deepEqual(parseTxtRecord(rec('; to=2026-12-31; revoked=2026-12-01')), { ...want, to: '2026-12-31', revoked: '2026-12-01' });
+  for (const bad of ['v=ps2; k=' + fp + '; from=2026-01-01', 'v=ps1; from=2026-01-01', 'v=ps1; k=' + fp, 'v=ps1; k=' + fp + '; from=2026-1-1', rec('; from=2026-02-01')]) {
+    assert.equal(parseTxtRecord(bad), null, bad);
+  }
+});
+
+test('binding follows the key dates', () => {
+  const state = (records) => bindingState(records, fp, '2026-10-15').state;
+  const other = 'v=ps1; k=ps1:' + 'B'.repeat(22) + '; from=2026-01-01';
+  const cases = [
+    [[rec('')], 'bound'],
+    [[rec('; revoked=2026-10-01')], 'revoked'],
+    [[rec('; revoked=2026-10-15')], 'revoked'],
+    [[rec('; revoked=2026-12-01')], 'revoked'],
+    [[rec('; to=2026-12-31; revoked=2026-12-01')], 'revoked'],
+    [[rec(''), rec('; revoked=2026-12-01')], 'revoked'],
+    [[rec('; to=2026-06-30')], 'out-of-validity'],
+    [[rec('; to=2026-10-15')], 'bound'],
+    [[other], 'not-published'],
+    [[], 'not-published'],
+    [['garbage', rec('')], 'bound'],
+    [[rec(''), rec('; to=2026-06-30')], 'out-of-validity'],
+    [[rec('; to=2026-06-30'), rec('')], 'out-of-validity'],
+    [['v=ps1; k=' + fp + '; from=2026-11-01', rec('')], 'out-of-validity'],
+    [[rec('; to=2026-06-30'), rec('; to=2026-12-31')], 'out-of-validity'],
+  ];
+  for (const [records, want] of cases) assert.equal(state(records), want, JSON.stringify(records));
+  const revoked = bindingState([rec('; revoked=2026-12-01'), rec('; revoked=2026-11-01')], fp, '2026-10-15');
+  assert.equal(revoked.record.revoked, '2026-11-01');
+});
+
+test('domains are checked before any lookup', () => {
+  for (const d of ['cards.example.org', 'example.co.uk', 'example.xn--p1ai']) assert.equal(isValidDomain(d), true, d);
+  const long = Array.from({ length: 4 }, () => 'a'.repeat(63)).join('.');
+  assert.equal(long.length, 255);
+  for (const d of ['', 'localhost', '10.0.0.1', 'Example.org', '-a.org', 'a..org', 'a.org/x', 'a.org.', 'exa mple.org', long.slice(1)]) {
+    assert.equal(isValidDomain(d), false, d);
+  }
+});
+
+test('lookup asks Cloudflare first with the JSON accept header', async () => {
+  const { fetchImpl, calls } = fakeDoh({ Status: 0, Answer: [{ type: 16, data: '"x"' }, { type: 5, data: 'y' }] });
+  assert.deepEqual(await lookupTxt('cards.example.org', fetchImpl), { resolver: 'cloudflare', records: ['"x"'] });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://cloudflare-dns.com/dns-query?' + QUERY);
+  assert.equal(calls[0].init.headers.accept, 'application/dns-json');
+  assert.ok(calls[0].init.signal instanceof AbortSignal);
+});
+
+test('NXDOMAIN is an answer, not a failure', async () => {
+  const { fetchImpl, calls } = fakeDoh({ Status: 3 });
+  assert.deepEqual(await lookupTxt('cards.example.org', fetchImpl), { resolver: 'cloudflare', records: [] });
+  assert.equal(calls.length, 1);
+});
+
+test('lookup refuses a bad domain and an answer for another name', async () => {
+  for (const d of ['cards.example.org&name=_perf-sentinel.evil.com', 'Cards.example.org', 'localhost']) {
+    const { fetchImpl, calls } = fakeDoh();
+    assert.deepEqual(await lookupTxt(d, fetchImpl), { resolver: null }, d);
+    assert.equal(calls.length, 0, d);
+  }
+  const evil = { Status: 0, Question: [{ name: '_perf-sentinel.evil.com', type: 16 }], Answer: [{ name: '_perf-sentinel.evil.com', type: 16, data: rec('') }] };
+  const lookup = async (...replies) => {
+    const doh = fakeDoh(...replies);
+    const result = await lookupTxt('cards.example.org', doh.fetchImpl);
+    for (const { url } of doh.calls) assert.ok(url.endsWith('?' + QUERY), url);
+    return { result, calls: doh.calls.length };
+  };
+  assert.deepEqual(await lookup(evil, evil), { result: { resolver: null }, calls: 2 });
+  assert.deepEqual(
+    await lookup(
+      { Status: 3, Question: [{ name: '_perf-sentinel.evil.com.', type: 16 }] },
+      { Status: 0, Answer: [{ name: '_PERF-SENTINEL.Cards.Example.Org.', type: 16, data: 'x' }] },
+    ),
+    { result: { resolver: 'google', records: ['x'] }, calls: 2 },
+  );
+  const google = { Status: 0, Answer: [{ type: 16, data: 'g' }] };
+  const fellBack = { result: { resolver: 'google', records: ['g'] }, calls: 2 };
+  assert.deepEqual(await lookup({ Status: 0, Answer: [{ type: 16, data: 'x', name: undefined }] }, google), fellBack);
+  assert.deepEqual(
+    await lookup({ Status: 0, Answer: [{ name: DNS_NAME, type: 5, data: 'target.example.net.' }, { name: 'target.example.net', type: 16, data: rec('') }] }),
+    { result: { resolver: 'cloudflare', records: [rec('')] }, calls: 1 },
+  );
+  const chain = (hops) => {
+    const names = [DNS_NAME, ...Array.from({ length: hops }, (_, i) => `h${i + 1}.example.net`)];
+    const cnames = names.slice(1).map((target, i) => ({ name: names[i], type: 5, data: target + '.' }));
+    return { Status: 0, Answer: [...cnames, { name: names[hops], type: 16, data: 'deep' }] };
+  };
+  assert.deepEqual(await lookup(chain(8)), { result: { resolver: 'cloudflare', records: ['deep'] }, calls: 1 });
+  assert.deepEqual(await lookup(chain(9), google), fellBack);
+  const stray = { Status: 0, Answer: [{ name: DNS_NAME, type: 5, data: 'target.example.net' }, { name: 'other.example.net', type: 16, data: rec('') }] };
+  assert.deepEqual(await lookup(stray, google), fellBack);
+  const strayCname = { Status: 0, Answer: [{ type: 16, data: rec('') }, { name: 'other.example.net', type: 5, data: 'x.example.net' }] };
+  assert.deepEqual(await lookup(strayCname, google), fellBack);
+});
+
+test('a failing Cloudflare falls back to Google once', async () => {
+  for (const failure of [503, new TypeError('network'), { Status: 2 }]) {
+    const { fetchImpl, calls } = fakeDoh(failure, { Status: 0, Answer: [{ type: 16, data: 'x' }] });
+    assert.deepEqual(await lookupTxt('cards.example.org', fetchImpl), { resolver: 'google', records: ['x'] });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].url, 'https://dns.google/resolve?' + QUERY);
+    assert.equal(calls[1].init.headers, undefined);
+    assert.ok(calls[1].init.signal instanceof AbortSignal);
+  }
+});
+
+test('both resolvers failing reads as unavailable', async () => {
+  for (const replies of [[new TypeError('a'), new TypeError('b')], ['not json', '<html>']]) {
+    const { fetchImpl } = fakeDoh(...replies);
+    assert.deepEqual(await lookupTxt('cards.example.org', fetchImpl), { resolver: null });
+  }
+});
+
+test('a single DNS source has no partial state', async () => {
+  const { fetchImpl } = fakeDoh(503, { Status: 0, Answer: [{ type: 16, data: rec('; revoked=2026-12-01') }, { type: 16, data: rec('') }] });
+  const found = await lookupTxt('cards.example.org', fetchImpl);
+  assert.deepEqual(found, { resolver: 'google', records: [rec('; revoked=2026-12-01'), rec('')] });
+  assert.equal(bindingState(found.records, fp, '2026-10-15').state, 'revoked');
+  assert.deepEqual(await lookupTxt('cards.example.org', fakeDoh(503, 503).fetchImpl), { resolver: null });
 });
