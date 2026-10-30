@@ -1,9 +1,9 @@
 // The /verifier page: reads the card from the URL fragment or a dropped original file,
 // then shows one state in #verifier-result. Every payload string goes through text nodes.
 import { COPY } from './copy.js';
-import { parseFragment, parseEnvelope, openCard, formatValue, leafPaths, periodName, equivalenceCount, bigFigures } from './card.js';
+import { parseFragment, parseEnvelope, openCard, formatValue, formatDay, leafPaths, periodName, equivalenceCount, bigFigures } from './card.js';
 import { readPngCard, readPdfCard, readSvgCard, readJxlCard } from './files.js';
-import { isValidDomain } from './dns.js';
+import { isValidDomain, lookupTxt, bindingState } from './dns.js';
 
 const lang = document.documentElement.lang === 'fr' ? 'fr' : 'en';
 const T = COPY[lang];
@@ -171,7 +171,7 @@ function classOf(path, v) {
   return undefined;
 }
 
-function row(path, card, compact) {
+function row(path, card, compact, verified) {
   const v = get(card, path);
   let shown;
   try {
@@ -179,14 +179,14 @@ function row(path, card, compact) {
   } catch {
     shown = String(v); // a self-signed card can hold values no formatter expects
   }
-  return el('div', { 'data-field': path }, el('dt', null, labelOf(path, card, compact)), el('dd', { class: classOf(path, v) }, shown));
+  return el('div', { 'data-field': path }, el('dt', null, verified && path === 'org.domain' ? T.domainVerified : labelOf(path, card, compact)), el('dd', { class: classOf(path, v) }, shown));
 }
 
-function details(card, compact) {
+function details(card, compact, verified) {
   const paths = [...new Set(leafPaths(card).map((p) => WHOLE.find((w) => p.startsWith(w + '.')) ?? p))];
   paths.sort((a, b) => rank(a) - rank(b));
   const groups = { card: [], free: [], cover: [], fix: [], co2: [], sig: [] };
-  for (const p of paths) groups[groupOf(p)].push(row(p, card, compact));
+  for (const p of paths) groups[groupOf(p)].push(row(p, card, compact, verified));
   const section = (name, note) => groups[name].length > 0 && [
     el('h2', { class: 'vf-gh' }, T.groups[name]), note, el('dl', { class: 'vf-dl' }, ...groups[name]),
   ];
@@ -218,19 +218,79 @@ function orgLine(org) {
   return null;
 }
 
-function level1(card, compact, content) {
+// ---- level 2: the domain over DNS-over-HTTPS, only when the reader asks ----
+
+const RESOLVERS = { cloudflare: 'Cloudflare DNS', google: 'Google Public DNS' };
+
+function dnsButton(domain, label) {
+  return el('button', { class: 'vf-btn', id: 'verifier-dns', type: 'button' }, el('span', null, fill(label, { domain })));
+}
+
+function dnsNote(domain) {
+  const [before, after] = T.dnsNote.split('_perf-sentinel.{domain}');
+  return el('p', { class: 'vf-note', id: 'verifier-dns-note' }, before, el('code', null, `_perf-sentinel.${domain}`), after);
+}
+
+const bindingLine = (state, ...children) =>
+  el('p', { class: 'vf-bind', id: 'verifier-binding', 'data-binding': state, tabindex: '-1' }, ...children);
+
+/** A coral box: the first sentence in bold, then what it means for the reader. */
+function bindingAlert(state, text) {
+  const cut = text.indexOf('. ') + 1;
+  return el('div', { class: 'vf-bind vf-alert', id: 'verifier-binding', 'data-binding': state, tabindex: '-1' }, icon('shield-alert'),
+    el('p', null, el('strong', null, text.slice(0, cut)), ' ', text.slice(cut + 1)));
+}
+
+/** What a DNS answer that does not verify the domain says, inside the level 1 state. */
+function unbound(state, domain, record) {
+  if (state === 'revoked') return [bindingAlert(state, fill(T.revoked, { domain, date: formatDay(record.revoked, lang) }))];
+  if (state === 'out-of-validity') return [bindingAlert(state, fill(T.outOfValidity, { domain }))];
+  if (state === 'not-published') return [bindingLine(state, fill(T.notPublished, { domain }))];
+  return [dnsButton(domain, T.dnsRetry), dnsNote(domain), bindingLine('unavailable', T.unavailable)];
+}
+
+async function checkDomain(r, compact, n, block, domain) {
+  const button = block.querySelector('#verifier-dns');
+  button.disabled = true;
+  button.firstChild.textContent = T.dnsBusy;
+  const found = await lookupTxt(domain);
+  if (n !== latest) return;
+  const state = found.resolver ? bindingState(found.records, r.fingerprint, r.date) : { state: 'unavailable' };
+  if (state.state === 'bound') {
+    verdict(r, compact, n, found.resolver);
+  } else {
+    block.replaceChildren(...unbound(state.state, domain, state.record));
+  }
+  // The pressed button is gone or was disabled: keep the reader where the answer is.
+  $('#verifier-binding').focus({ preventScroll: true });
+}
+
+/** The verified card: level 1, or level 2 once `resolver` found its key under the declared domain. */
+function verdict(r, compact, n, resolver) {
+  const { card, content } = r;
   const org = isObject(card.org) ? card.org : {};
-  const line = orgLine(org);
-  const [first, second] = T.level1.split(/(?<=\.) /);
-  const dns = typeof org.domain === 'string' && isValidDomain(org.domain)
-    && el('div', { class: 'vf-dns' }, el('button', { class: 'vf-btn', id: 'verifier-dns', type: 'button' }, el('span', null, fill(T.dnsButton, { domain: org.domain }))));
-  show('level1',
-    head(headline(el('span', null, first), ' ', el('span', null, second)), null,
-      line && el('p', { class: 'vf-org', id: 'verifier-org' }, line),
-      content === 'intact' && el('p', { class: 'vf-org', id: 'verifier-content', 'data-content': 'intact' }, T.contentIntact)),
-    figures(card),
-    dns,
-    details(card, compact),
+  const domain = typeof org.domain === 'string' && isValidDomain(org.domain) ? org.domain : null;
+  const contentLine = content === 'intact' && el('p', { class: 'vf-org', id: 'verifier-content', 'data-content': 'intact' }, T.contentIntact);
+  let top;
+  let dns = null;
+  if (resolver) {
+    // DNS vouches for the domain, never for the name.
+    const line = filled(org.name) && el('p', { class: 'vf-org', id: 'verifier-org' }, fill(T.level2Org, { domain, org: org.name }));
+    top = head(headline(fill(T.level2, { domain })), 'shield-check', line, contentLine);
+    dns = el('div', { class: 'vf-dns' }, bindingLine('bound', fill(T.boundVia, { resolver: RESOLVERS[resolver] })));
+  } else {
+    const line = orgLine(org);
+    const [first, second] = T.level1.split(/(?<=\.) /);
+    top = head(headline(el('span', null, first), ' ', el('span', null, second)), null,
+      line && el('p', { class: 'vf-org', id: 'verifier-org' }, line), contentLine);
+    if (domain) {
+      dns = el('div', { class: 'vf-dns' }, dnsButton(domain, T.dnsButton), dnsNote(domain));
+      dns.addEventListener('click', (e) => {
+        if (e.target.closest('#verifier-dns')) checkDomain(r, compact, n, dns, domain);
+      });
+    }
+  }
+  show(resolver ? 'level2' : 'level1', top, figures(card), dns, details(card, compact, Boolean(resolver)),
     el('div', { class: 'vf-ft' }, el('a', { href: T.methodHref, 'data-plain': true }, T.method), limitsButton()));
 }
 
@@ -246,7 +306,7 @@ async function check(pair, kind, n, file) {
     r = { state: 'cannot-verify' };
   }
   if (n !== latest) return;
-  if (r.state === 'ok') level1(r.card, kind === 'compact', r.content);
+  if (r.state === 'ok') verdict(r, kind === 'compact', n);
   else refuse(r.state);
 }
 

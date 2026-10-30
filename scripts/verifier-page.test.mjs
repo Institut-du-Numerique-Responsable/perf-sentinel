@@ -546,3 +546,157 @@ test('a broken carrier reads no card data, a changed image modified', async () =
     await close();
   }
 });
+
+// ---- the domain check over DNS-over-HTTPS (Task 6) ----
+
+const DNS_NAME = '_perf-sentinel.cards.example.org';
+const txt = (extra) => 'v=ps1; k=' + fx.fingerprint + '; from=2026-01-01' + extra;
+const quoted = (extra) => '"' + txt(extra) + '"';
+const cloudflareTxt = (extra) => ({ cloudflare: { json: { Status: 0, Answer: [{ type: 16, data: quoted(extra) }] } } });
+
+/** Fake Cloudflare and Google resolvers: each handler `{status, json}` or 'abort' (the default). */
+async function fakeDns(page, handlers) {
+  const requests = [];
+  for (const [resolver, pattern] of [['cloudflare', 'https://cloudflare-dns.com/**'], ['google', 'https://dns.google/**']]) {
+    await page.route(pattern, (route) => {
+      const req = route.request();
+      requests.push({ url: req.url(), accept: req.headers().accept });
+      const h = handlers[resolver] ?? 'abort';
+      if (h === 'abort') return route.abort();
+      const json = structuredClone(h.json);
+      // lookupTxt reads only answers for the queried name; Google writes it with a trailing dot.
+      for (const a of json.Answer ?? []) a.name ??= DNS_NAME + (resolver === 'google' ? '.' : '');
+      return route.fulfill({
+        status: h.status ?? 200, contentType: 'application/dns-json',
+        headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(json),
+      });
+    });
+  }
+  return requests;
+}
+
+/** Opens `path`, waits for level 1, clicks the DNS button and waits for the binding line. */
+async function checkDomain(path, handlers, opts) {
+  const opened = path.startsWith('/') ? await open(path, opts) : await openFile(path, fixture(path), opts);
+  await waitState(opened.page, 'level1');
+  const requests = await fakeDns(opened.page, handlers);
+  await opened.page.click('#verifier-dns');
+  await opened.page.locator('#verifier-binding').waitFor();
+  return { ...opened, requests };
+}
+const binding = (page) => page.getAttribute('#verifier-binding', 'data-binding');
+
+test('nothing leaves the page before the button', async () => {
+  const { page, external, close } = await open(link('story'));
+  await waitState(page, 'level1');
+  const requests = await fakeDns(page, cloudflareTxt(''));
+  await page.waitForTimeout(200);
+  assert.deepEqual(requests, []);
+  assert.deepEqual(external, []);
+  assert.equal(await text(page, '#verifier-dns'), COPY.en.dnsButton.replace('{domain}', 'cards.example.org'));
+  const note = await text(page, '#verifier-dns-note');
+  assert.ok(note.includes('Cloudflare') && note.includes('Google'), note);
+  assert.ok(note.includes(DNS_NAME), note);
+  await close();
+});
+
+test('a published key gives the verified state', async () => {
+  let { page, requests, close } = await checkDomain(link('story'), cloudflareTxt(''));
+  await waitState(page, 'level2');
+  assert.equal(await text(page, '#verifier-headline'), 'Signed by cards.example.org');
+  assert.equal(await binding(page), 'bound');
+  assert.ok((await text(page, '#verifier-binding')).includes('Cloudflare DNS'));
+  const domainLine = COPY.en.level1Domain.replace('{domain}', 'cards.example.org');
+  assert.equal((await pageText(page)).includes(domainLine), false);
+  assert.equal(await page.locator('#verifier-result [data-ico="shield-check"]').count(), 1);
+  assert.equal(await visible(page, '#verifier-figures'), true);
+  assert.equal(await label(page, 'org.domain'), COPY.en.domainVerified);
+  assert.equal(await page.locator('#verifier-dns').count(), 0);
+  assert.deepEqual(requests, [{ url: DOH_URL.cloudflare, accept: 'application/dns-json' }]);
+  await close();
+
+  ({ page, requests, close } = await checkDomain('story.png', cloudflareTxt('')));
+  await waitState(page, 'level2');
+  assert.equal(await text(page, '#verifier-org'), COPY.en.level2Org.replace('{domain}', 'cards.example.org').replace('{org}', 'Example Org'));
+  const orgLine = COPY.en.level1Org.replace('{org}', 'Example Org').replace('{domain}', 'cards.example.org');
+  assert.equal((await pageText(page)).includes(orgLine), false);
+  assert.equal(await page.getAttribute('#verifier-content', 'data-content'), 'intact');
+  assert.equal(await visible(page, '#verifier-figures'), true);
+  assert.equal(requests.length, 1);
+  assert.ok(requests[0].url.endsWith('?name=_perf-sentinel.cards.example.org&type=TXT'));
+  await close();
+});
+
+const DOH_URL = { cloudflare: 'https://cloudflare-dns.com/dns-query?name=_perf-sentinel.cards.example.org&type=TXT' };
+
+test('a key exposed before the card is not verified', async () => {
+  for (const [path, lang, day] of [[link('story'), 'en', 'exposed since 1 October 2026'], ['/fr' + link('story'), 'fr', '1er octobre 2026']]) {
+    const { page, close } = await checkDomain(path, cloudflareTxt('; revoked=2026-10-01'), { locale: lang });
+    await waitState(page, 'level1');
+    assert.equal(await binding(page), 'revoked', lang);
+    const said = await text(page, '#verifier-binding');
+    assert.ok(said.includes(day), said);
+    assert.equal(/withdrew the key .* on /.test(said), false, said);
+    if (lang === 'en') assert.ok(said.includes('stolen key'), said);
+    assert.equal(await page.locator('#verifier-binding [data-ico="shield-alert"]').count(), 1, lang);
+    assert.ok((await text(page, '#verifier-binding strong')).includes(day), lang);
+    await close();
+  }
+});
+
+test('a revoked key never verifies, whatever the card\'s date', async () => {
+  const { page, close } = await checkDomain(link('story'), cloudflareTxt('; revoked=2026-12-01'));
+  await waitState(page, 'level1');
+  assert.equal(await binding(page), 'revoked');
+  const said = await text(page, '#verifier-binding');
+  assert.ok(said.includes('1 December 2026') && said.includes('whatever date it shows'), said);
+  await assertNoAccent(page);
+  await close();
+});
+
+test('a key outside its dates is not verified', async () => {
+  const { page, close } = await checkDomain(link('story'), cloudflareTxt('; to=2026-06-30'));
+  await waitState(page, 'level1');
+  assert.equal(await binding(page), 'out-of-validity');
+  assert.equal(await text(page, '#verifier-binding'), COPY.en.outOfValidity.replaceAll('{domain}', 'cards.example.org'));
+  await assertNoAccent(page);
+  await close();
+});
+
+test('no matching key reads as not published', async () => {
+  let { page, close } = await checkDomain(link('story'), { cloudflare: { json: { Status: 3 } } });
+  await waitState(page, 'level1');
+  assert.equal(await binding(page), 'not-published');
+  assert.equal(await text(page, '#verifier-binding'), COPY.en.notPublished.replace('{domain}', 'cards.example.org'));
+  await close();
+
+  const other = { cloudflare: { json: { Status: 0, Answer: [{ type: 16, data: '"v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-01-01"' }] } } };
+  ({ page, close } = await checkDomain(link('story'), other));
+  await waitState(page, 'level1');
+  assert.equal(await binding(page), 'not-published');
+  await assertNoAccent(page);
+  await close();
+});
+
+test('Cloudflare down falls back to Google and says so', async () => {
+  const { page, requests, close } = await checkDomain(link('story'), {
+    cloudflare: 'abort', google: { json: { Status: 0, Answer: [{ type: 16, data: txt('') }] } },
+  });
+  await waitState(page, 'level2');
+  assert.equal(await binding(page), 'bound');
+  assert.ok((await text(page, '#verifier-binding')).includes('Google Public DNS'));
+  assert.equal(requests.length, 2);
+  await close();
+});
+
+test('both resolvers down reads as could not check', async () => {
+  const { page, close } = await checkDomain(link('story'), { cloudflare: 'abort', google: 'abort' });
+  await waitState(page, 'level1');
+  assert.equal(await binding(page), 'unavailable');
+  assert.equal(await text(page, '#verifier-binding'), COPY.en.unavailable);
+  assert.equal(await page.isEnabled('#verifier-dns'), true);
+  assert.equal(await text(page, '#verifier-dns'), 'Try cards.example.org again');
+  assert.equal(await visible(page, '#verifier-dns-note'), true);
+  await assertNoAccent(page);
+  await close();
+});
