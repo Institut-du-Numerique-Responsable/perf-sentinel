@@ -55,6 +55,8 @@ const IMAGE_HEROES: &[f32] = &[170.0, 150.0, 130.0, 112.0, 96.0];
 const IMAGE_SENTENCES: &[f32] = &[42.0, 38.0, 34.0];
 const PAGE_HEROES: &[f32] = &[340.0, 300.0, 260.0, 220.0, 180.0, 150.0];
 const PAGE_SENTENCES: &[f32] = &[56.0, 48.0, 42.0];
+/// The curve's share, which can read "moins de 0,1 %": it steps down further.
+const PAGE_CURVE_HEROES: &[f32] = &[300.0, 260.0, 220.0, 180.0, 150.0, 120.0, 96.0];
 
 /// Build the QR code of the compact URL, at error correction L.
 ///
@@ -334,9 +336,17 @@ impl Block {
 /// Lines of `(x, face, colour, text)` segments.
 type Row = Vec<(f32, Face, Rgb, String)>;
 
+/// A word: the styled pieces between two spaces.
+type Word<'a> = Vec<Run<'a>>;
+
 fn wrap_runs(runs: &[Run<'_>], size: f32, width: f32) -> Vec<Row> {
-    // A word is the pieces between two spaces, possibly from several runs.
-    let mut words: Vec<Vec<(Face, Rgb, &str)>> = Vec::new();
+    place_words(&glue_words(runs), size, width)
+}
+
+/// Splits the runs on spaces; pieces not separated by a space, even across
+/// two runs, stay in one word.
+fn glue_words<'a>(runs: &[Run<'a>]) -> Vec<Word<'a>> {
+    let mut words: Vec<Word<'a>> = Vec::new();
     let mut open = false;
     for &(face, color, text) in runs {
         for (i, part) in text.split(' ').enumerate() {
@@ -353,44 +363,48 @@ fn wrap_runs(runs: &[Run<'_>], size: f32, width: f32) -> Vec<Row> {
             open = true;
         }
     }
+    words
+}
+
+/// Fills rows greedily with `words`.
+fn place_words(words: &[Word<'_>], size: f32, width: f32) -> Vec<Row> {
     let space = text_width(Face::Regular, size, " ");
-    let word_width = |word: &[(Face, Rgb, &str)]| -> f32 {
-        word.iter()
-            .map(|(face, _, text)| text_width(*face, size, text))
-            .sum()
-    };
     let mut rows: Vec<Row> = Vec::new();
     let mut row: Row = Vec::new();
     let mut x = 0.0;
-    for word in &words {
-        let w = word_width(word);
+    for word in words {
+        let w: f32 = word
+            .iter()
+            .map(|&(face, _, text)| text_width(face, size, text))
+            .sum();
         if !row.is_empty() && x + space + w > width {
             rows.push(std::mem::take(&mut row));
             x = 0.0;
         }
-        let mut first = true;
-        for &(face, color, text) in word {
-            let lead = if first && !row.is_empty() { " " } else { "" };
-            first = false;
-            match row.last_mut() {
-                Some((_, last_face, last_color, last))
-                    if *last_face == face && *last_color == color =>
-                {
-                    last.push_str(lead);
-                    last.push_str(text);
-                }
-                _ => {
-                    let at = if lead.is_empty() { x } else { x + space };
-                    row.push((at, face, color, text.to_owned()));
-                }
-            }
-            x += if lead.is_empty() { 0.0 } else { space } + text_width(face, size, text);
+        for (i, &piece) in word.iter().enumerate() {
+            let gap = (i == 0 && !row.is_empty()).then_some(space);
+            push_piece(&mut row, x, gap, piece);
+            x += gap.unwrap_or(0.0) + text_width(piece.0, size, piece.2);
         }
     }
     if !row.is_empty() {
         rows.push(row);
     }
     rows
+}
+
+/// Appends `piece` to the row, merged into the last segment when both share
+/// their style; `space` is the gap before it, if any.
+fn push_piece(row: &mut Row, x: f32, space: Option<f32>, (face, color, text): Run<'_>) {
+    match row.last_mut() {
+        Some((_, last_face, last_color, last)) if *last_face == face && *last_color == color => {
+            if space.is_some() {
+                last.push(' ');
+            }
+            last.push_str(text);
+        }
+        _ => row.push((x + space.unwrap_or(0.0), face, color, text.to_owned())),
+    }
 }
 
 fn shifted(ops: Vec<Op>, dy: f32) -> impl Iterator<Item = Op> {
@@ -489,6 +503,16 @@ fn hero(b: &mut Block, figure: &str, size: f32) {
             .push(text_op(x, y, Face::Bold, unit_size, BRAND_DEEP, unit));
     }
     b.y += HERO_LINE * size;
+}
+
+/// `wanted`, stepped down through `sizes` until the hero and its unit fit
+/// the width.
+fn fitted_hero(figure: &str, sizes: &[f32], wanted: f32) -> f32 {
+    hero_sizes(figure, sizes)
+        .first()
+        .copied()
+        .unwrap_or(wanted)
+        .min(wanted)
 }
 
 /// The largest of `sizes` at which the hero and its unit fit the width.
@@ -620,6 +644,53 @@ struct ChartSizes {
     label: f32,
 }
 
+/// Where one bar stands: its left edge, top, size and the shared base.
+struct Bar {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    base: f32,
+}
+
+/// Left of a label `width` wide: centred on the bar, or on the outer edges
+/// when only the ends are named (`Some(true)` for the last bar).
+fn bar_anchor(bar: &Bar, width: f32, ends: Option<bool>) -> f32 {
+    match ends {
+        None => bar.x + (bar.w - width) / 2.0,
+        Some(false) => bar.x,
+        Some(true) => bar.x + bar.w - width,
+    }
+}
+
+/// Rounded top, square base: a square box covers the bottom corners.
+fn draw_bar(b: &mut Block, bar: &Bar, color: Rgb) {
+    if bar.h <= 0.0 {
+        return;
+    }
+    let radius = 8.0_f32.min(bar.h / 2.0);
+    b.ops
+        .push(filled(bar.x, bar.y, bar.w, bar.h, radius, color));
+    b.ops
+        .push(filled(bar.x, bar.base - radius, bar.w, radius, 0.0, color));
+}
+
+fn bar_value(b: &mut Block, bar: &Bar, text: &str, size: f32, ends: Option<bool>) {
+    let width = text_width(Face::Bold, size, text);
+    let x = bar_anchor(bar, width, ends);
+    b.ops
+        .push(text_op(x, bar.y - 0.4 * size, Face::Bold, size, TEXT, text));
+}
+
+fn bar_label(b: &mut Block, bar: &Bar, label: &str, size: f32, room: f32, ends: Option<bool>) {
+    let steps = [size, size * 0.85, size * 0.7];
+    let fitted = step_size(label, Face::Regular, &steps, room, 1);
+    let x = bar_anchor(bar, text_width(Face::Regular, fitted, label), ends);
+    let y = baseline(bar.base + 14.0, size * 1.3, size);
+    b.ops
+        .push(text_op(x, y, Face::Regular, fitted, TEXT_2, label));
+}
+
 /// One bar per period, the card's in deep green; values on the two
 /// compared bars only.
 fn chart(b: &mut Block, payload: &FullPayload, sizes: &ChartSizes) {
@@ -639,51 +710,26 @@ fn chart(b: &mut Block, payload: &FullPayload, sizes: &ChartSizes) {
     let top = b.y + sizes.value * 1.6;
     let plot = sizes.height - sizes.value * 1.6 - sizes.label * 1.8;
     let base = top + plot;
-    for (i, &v) in values.iter().enumerate() {
+    let label_room = if many { b.width / 2.0 } else { bar_w + gap };
+    for (i, (&v, label)) in values.iter().zip(&labels).enumerate() {
         #[allow(clippy::cast_precision_loss)]
-        let (x, bar_h) = (x0 + i as f32 * (bar_w + gap), plot * v as f32 / max as f32);
-        let y = base - bar_h;
-        let last = i + 1 == n;
-        let color = if last { BRAND_DEEP } else { BRAND };
-        if bar_h > 0.0 {
-            // Rounded top, square base: a square box covers the bottom corners.
-            let radius = 8.0_f32.min(bar_h / 2.0);
-            b.ops.push(filled(x, y, bar_w, bar_h, radius, color));
-            b.ops
-                .push(filled(x, base - radius, bar_w, radius, 0.0, color));
-        }
-        // Outer labels align on the outer edges when only the ends are named.
-        let anchor = |width: f32| match (many, i) {
-            (false, _) => x + (bar_w - width) / 2.0,
-            (true, 0) => x,
-            (true, _) => x + bar_w - width,
+        let (x, h) = (x0 + i as f32 * (bar_w + gap), plot * v as f32 / max as f32);
+        let bar = Bar {
+            x,
+            y: base - h,
+            w: bar_w,
+            h,
+            base,
         };
+        let color = if i + 1 == n { BRAND_DEEP } else { BRAND };
+        draw_bar(b, &bar, color);
+        let ends = many.then_some(i > 0);
         if i + 2 >= n {
             let text = format_permille(v, payload.lang);
-            let width = text_width(Face::Bold, sizes.value, &text);
-            b.ops.push(text_op(
-                anchor(width),
-                y - 0.4 * sizes.value,
-                Face::Bold,
-                sizes.value,
-                TEXT,
-                &text,
-            ));
+            bar_value(b, &bar, &text, sizes.value, ends);
         }
-        let label = &labels[i];
         if !label.is_empty() {
-            let room = if many { b.width / 2.0 } else { bar_w + gap };
-            let steps = [sizes.label, sizes.label * 0.85, sizes.label * 0.7];
-            let size = step_size(label, Face::Regular, &steps, room, 1);
-            let width = text_width(Face::Regular, size, label);
-            b.ops.push(text_op(
-                anchor(width),
-                baseline(base + 14.0, sizes.label * 1.3, sizes.label),
-                Face::Regular,
-                size,
-                TEXT_2,
-                label,
-            ));
+            bar_label(b, &bar, label, sizes.label, label_room, ends);
         }
     }
     b.ops.push(filled(b.x, base, b.width, 2.0, 0.0, BORDER_2));
@@ -797,12 +843,11 @@ fn story_image(payload: &FullPayload, hero_size: f32, sentence: f32) -> Block {
         b.gap(10.0);
     }
     let figure = super::copy::cited_figure(payload);
-    let size = hero_sizes(&figure, IMAGE_HEROES)
-        .first()
-        .copied()
-        .unwrap_or(hero_size)
-        .min(hero_size);
-    hero(&mut b, &figure, size);
+    hero(
+        &mut b,
+        &figure,
+        fitted_hero(&figure, IMAGE_HEROES, hero_size),
+    );
     b.gap(18.0);
     b.para(
         Face::Regular,
@@ -841,7 +886,7 @@ fn curve_image(payload: &FullPayload, hero_size: f32) -> Block {
     let share = curve_share(payload);
     b.para(Face::Bold, 36.0, 44.0, TEXT, w.curve_what);
     b.gap(8.0);
-    hero(&mut b, &share, hero_size);
+    hero(&mut b, &share, fitted_hero(&share, IMAGE_HEROES, hero_size));
     b.gap(10.0);
     b.runs(
         &[
@@ -1034,12 +1079,11 @@ fn hook_page(payload: &FullPayload, room: f32) -> Block {
                 b.gap(24.0);
             }
             let figure = super::copy::cited_figure(payload);
-            let size = hero_sizes(&figure, PAGE_HEROES)
-                .first()
-                .copied()
-                .unwrap_or(hero_size)
-                .min(hero_size);
-            hero(&mut b, &figure, size);
+            hero(
+                &mut b,
+                &figure,
+                fitted_hero(&figure, PAGE_HEROES, hero_size),
+            );
             b.gap(30.0);
             b.para(
                 Face::Regular,
@@ -1058,7 +1102,9 @@ fn hook_page(payload: &FullPayload, room: f32) -> Block {
             let mut b = Block::new(MARGIN, CONTENT);
             b.para(Face::Bold, 52.0, 62.0, TEXT, w.curve_what);
             b.gap(16.0);
-            hero(&mut b, &curve_share(payload), hero_size.min(300.0));
+            let share = curve_share(payload);
+            let size = fitted_hero(&share, PAGE_CURVE_HEROES, hero_size.min(300.0));
+            hero(&mut b, &share, size);
             b.gap(30.0);
             let previous = previous.trim_start_matches([',', ' ']);
             let current = if previous.is_empty() {
@@ -1814,6 +1860,30 @@ mod tests {
                 assert!(figures.contains(&co2_line(&payload).expect("a CO2 line")));
                 let (count, factor) = equivalence_lines(&payload).expect("an equivalence");
                 assert!(figures.contains(&count) && figures.contains(&factor));
+            }
+        }
+    }
+
+    #[test]
+    fn a_curve_ending_under_one_permille_keeps_its_hero_on_the_page() {
+        for lang in LANGS {
+            let mut input = in_lang(curve_input(), lang);
+            input["figures"]["waste_permille"] = json!([62, 48, 0]);
+            let share = match lang {
+                Lang::En => "under 0.1%",
+                Lang::Fr => "moins de 0,1\u{a0}%",
+            };
+            let mut pages = carousel(&input);
+            pages.push(image(&input));
+            for page in &pages {
+                assert_inside_page(page);
+            }
+            // The hook page and the image both print the share as their hero.
+            for page in [&pages[0], &pages[4]] {
+                assert!(
+                    heroes(page).iter().any(|t| t.content == share),
+                    "{lang:?} lacks {share:?}"
+                );
             }
         }
     }
