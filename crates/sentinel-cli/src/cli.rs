@@ -1104,7 +1104,8 @@ pub(crate) enum Commands {
     ///
     /// Reads a `card.png`, a `card.pdf` or the verify URL its QR code
     /// holds, offline by default. Prints one JSON line on stdout, the
-    /// contract; stderr carries the detail.
+    /// contract; stderr carries the detail. The verdict covers the signed
+    /// payload, not the pixels: compare its figures with the image.
     #[cfg(feature = "card")]
     #[command(after_help = help_examples::VERIFY_CARD)]
     VerifyCard {

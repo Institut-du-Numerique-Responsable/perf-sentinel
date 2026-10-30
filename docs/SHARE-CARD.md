@@ -1,6 +1,6 @@
 # Share cards
 
-A share card prints the CO2 a team avoided, as measured by Perf Sentinel, next to an everyday equivalent such as meals or kilometres by train. It is signed, so anyone can check that the figures are the ones the signer's Perf Sentinel Hub measured, and that nobody edited them afterwards.
+A share card prints what Perf Sentinel measured about a waste pattern, such as its volume before a fix and the CO2 priced on that volume, next to an everyday equivalent such as meals or kilometres by train. It is signed, so anyone can check that a key signed these figures and that nobody changed them afterwards. Level 2 of the check ties that key to the signer's domain.
 
 PerfSentinelHub builds the card's figures from its own records and calls the engine to draw and sign it. The engine never reads the Hub's database: it receives a `card.json`, applies every rule on this page, and refuses a card whose figures would claim more than they show. This page is the contract between the two (C2 for the commands, C3 for the payloads), and the reference the verify page at `perf-sentinel.dev/verifier` is built on.
 
@@ -74,6 +74,8 @@ Reads a card file (16 MiB at most, a PNG or a PDF by its first bytes) or a verif
 | `reason` | Why, from the closed list below. |
 
 The signature is checked first, over the exact bytes the card carries. Only an intact payload is then read against the rules: a bad signature is `tampered` whatever the bytes say, and a valid signature over a payload that breaks a rule is `malformed_input`.
+
+The verdict covers the signed payload, not the pixels. Someone can copy a genuine card's `iTXt` chunk, PDF attachment or QR code onto an edited image, and `verify-card` still prints `"integrity":"ok"`. Compare the payload's figures with the image: the verify page shows them.
 
 ### Exit codes and reasons
 

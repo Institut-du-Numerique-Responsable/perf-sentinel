@@ -1,6 +1,6 @@
 # Cartes à partager
 
-Une carte à partager imprime le CO2 qu'une équipe a évité, mesuré par Perf Sentinel, à côté d'un équivalent du quotidien comme des repas ou des kilomètres en train. Elle est signée : chacun peut vérifier que les chiffres sont ceux qu'a mesurés le Perf Sentinel Hub du signataire, et que personne ne les a modifiés ensuite.
+Une carte à partager imprime ce que Perf Sentinel a mesuré d'un motif de gaspillage, comme son volume avant une correction et le CO2 chiffré sur ce volume, à côté d'un équivalent du quotidien comme des repas ou des kilomètres en train. Elle est signée : chacun peut vérifier qu'une clé a signé ces chiffres et que personne ne les a modifiés ensuite. Le niveau 2 de la vérification relie cette clé au domaine du signataire.
 
 PerfSentinelHub construit les chiffres de la carte à partir de ses propres données et appelle le moteur pour la dessiner et la signer. Le moteur ne lit jamais la base du Hub : il reçoit un `card.json`, applique toutes les règles de cette page et refuse une carte dont les chiffres annonceraient plus que ce qu'ils montrent. Cette page est le contrat entre les deux (C2 pour les commandes, C3 pour les charges utiles) et la référence sur laquelle repose la page de vérification `perf-sentinel.dev/verifier`.
 
@@ -74,6 +74,8 @@ Lit un fichier de carte (16 Mio au plus, un PNG ou un PDF d'après ses premiers 
 | `reason` | Pourquoi, tiré de la liste fermée ci-dessous. |
 
 La signature est vérifiée d'abord, sur les octets exacts que porte la carte. Seule une charge utile intacte est ensuite confrontée aux règles : une mauvaise signature donne `tampered` quoi que disent les octets, et une signature valide sur une charge utile qui enfreint une règle donne `malformed_input`.
+
+Le verdict porte sur la charge utile signée, pas sur les pixels. Quelqu'un peut copier le chunk `iTXt`, la pièce jointe PDF ou le QR code d'une vraie carte sur une image retouchée, et `verify-card` imprime toujours `"integrity":"ok"`. Comparez les chiffres de la charge utile avec l'image : la page de vérification les affiche.
 
 ### Codes de sortie et raisons
 
