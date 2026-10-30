@@ -14,12 +14,13 @@ A card has one of three angles:
 | Curve | `curve` | The share of the work that was avoidable, period by period, 2 to 12 bars. |
 | Collective | `collective` | How many fixes were confirmed by measurement over a period, on how many services, by family. |
 
-Each card renders in English or French (`lang`) and in one of two formats:
+Each card renders in English or French (`lang`) and in one of three formats:
 
 - `card.png`, a single 1080 x 1350 image, the format to post.
+- `card.svg`, the same image as an SVG, its text drawn as outlines (see [The SVG](#the-svg)).
 - `card.pdf`, a four-page carousel (the hook, why it matters, the figures with their equivalence, the proof with the method), PDF/A-3b.
 
-Both carry the full signed payload. The QR code on the image and on the carousel's last page holds the verify URL with the compact payload.
+All three carry the full signed payload. The QR code on the image and on the carousel's last page holds the verify URL with the compact payload.
 
 ## Commands (C2)
 
@@ -42,10 +43,10 @@ Generates an Ed25519 key, writes it to `<DIR>/<fingerprint>.pk8` (PKCS#8 v2, mod
 ### `card render`
 
 ```bash
-perf-sentinel card render --input card.json --signing-key <fingerprint>.pk8 --out-dir <DIR> --format png|pdf
+perf-sentinel card render --input card.json --signing-key <fingerprint>.pk8 --out-dir <DIR> --format png|pdf|svg
 ```
 
-Reads `card.json` (64 KiB at most) and the key (1 KiB at most, a regular file, never a symlink, and on Unix readable by its owner only), signs the full and compact payloads, and writes `<DIR>/card.png` or `<DIR>/card.pdf`. Nothing is written unless the card renders. The same input and key give the same bytes. It prints:
+Reads `card.json` (64 KiB at most) and the key (1 KiB at most, a regular file, never a symlink, and on Unix readable by its owner only), signs the full and compact payloads, and writes `<DIR>/card.png`, `<DIR>/card.pdf` or `<DIR>/card.svg`. Nothing is written unless the card renders. The same input and key give the same bytes. It prints:
 
 ```json
 {"result":"rendered","files":["card.png"],"fingerprint":"ps1:...","compact_url":"https://perf-sentinel.dev/verifier#c=..."}
@@ -56,10 +57,10 @@ The private key never travels as a command-line argument: the Hub passes the pat
 ### `verify-card`
 
 ```bash
-perf-sentinel verify-card <card.png|card.pdf|URL> [--keys <published.json>] [--online [--doh <URL>]]
+perf-sentinel verify-card <card.png|card.pdf|card.svg|URL> [--keys <published.json>] [--online [--doh <URL>]]
 ```
 
-Reads a card file (16 MiB at most, a PNG or a PDF by its first bytes) or a verify URL (any target starting with `https://` or `http://`), checks the signature, then the key's binding to the card's domain. It works offline by default. `--keys` reads a local copy of the domain's `/.well-known/perf-sentinel-key` (64 KiB at most). `--online` reads the published keys over the network, see [`--online`](#--online). `--keys` and `--online` exclude each other, and `--doh` needs `--online`. It prints:
+Reads a card file (16 MiB at most, a PNG, a PDF or an SVG by its first bytes, an SVG starting with `<?xml` or `<svg` after an optional UTF-8 BOM and whitespace) or a verify URL (any target starting with `https://` or `http://`), checks the signature, then the key's binding to the card's domain. It works offline by default. `--keys` reads a local copy of the domain's `/.well-known/perf-sentinel-key` (64 KiB at most). `--online` reads the published keys over the network, see [`--online`](#--online). `--keys` and `--online` exclude each other, and `--doh` needs `--online`. It prints:
 
 ```json
 {"integrity":"ok","level":2,"domain":"acme.fr","key":"current","reason":"key_published"}
@@ -75,7 +76,7 @@ Reads a card file (16 MiB at most, a PNG or a PDF by its first bytes) or a verif
 
 The signature is checked first, over the exact bytes the card carries. Only an intact payload is then read against the rules: a bad signature is `tampered` whatever the bytes say, and a valid signature over a payload that breaks a rule is `malformed_input`.
 
-The verdict covers the signed payload, not the pixels. Someone can copy a genuine card's `iTXt` chunk, PDF attachment or QR code onto an edited image, and `verify-card` still prints `"integrity":"ok"`. Compare the payload's figures with the image: the verify page shows them.
+The verdict covers the signed payload, not the pixels. Someone can copy a genuine card's `iTXt` chunk, PDF attachment, SVG `<metadata>` element or QR code onto an edited image, and `verify-card` still prints `"integrity":"ok"`. Compare the payload's figures with the image: the verify page shows them.
 
 ### Exit codes and reasons
 
@@ -86,7 +87,7 @@ An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `
 | 0 | | Done. |
 | 1 | `refused` | `period_not_calendar`, `period_not_closed`, `incomplete_period`, `volume_not_avoidable`, `threshold_not_applicable`, `unknown_equivalence`, `equivalence_out_of_scale`, `unsupported_language`. The card would claim what its figures do not show. |
 | 3 | `input_error` | `missing_file`, `file_too_large`, `malformed_input`, `signing_key_permissions`, `signing_key_unreadable`, `key_exists`, `output_unwritable`. |
-| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`. |
+| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`. |
 
 | Exit | `verify-card` line and reasons |
 |---|---|
@@ -208,7 +209,7 @@ The story fixture's compact payload:
 
 ### Envelopes
 
-- **File envelope**: `{"payload":"<base64url of the canonical full payload>","signature":"<base64url of the 64-byte Ed25519 signature>"}`, no other key. The PNG carries it in an `iTXt` chunk with the keyword `perf-sentinel-card`, ahead of the image data. The PDF carries it as the attachment `perf-sentinel-card.json`. The envelope takes at most 64 KiB. A second `perf-sentinel-card` chunk ahead of the image data, or a second attachment of that name, is `duplicate_card_payload`.
+- **File envelope**: `{"payload":"<base64url of the canonical full payload>","signature":"<base64url of the 64-byte Ed25519 signature>"}`, no other key. The PNG carries it in an `iTXt` chunk with the keyword `perf-sentinel-card`, ahead of the image data. The PDF carries it as the attachment `perf-sentinel-card.json`. The SVG carries it as the text of `<metadata id="perf-sentinel-card">`, written as is. The envelope takes at most 64 KiB. A second `perf-sentinel-card` chunk ahead of the image data, a second attachment of that name, or a second such element, is `duplicate_card_payload`.
 - **Compact URL**: `https://perf-sentinel.dev/verifier#c=<base64url of the canonical compact payload>.<base64url of its signature>`. The token travels in the fragment, which a browser never sends to the server. A reader takes what follows the first `#c=` and splits it on its last `.`.
 
 ### Encoding rules
@@ -363,9 +364,53 @@ The other lines:
 | Carousel, page 2 | `Every unnecessary operation costs server time, energy and sometimes waiting.` and `Measuring them shows where the application can do the same work with less.` |
 | Carousel, page 4 | `Check these figures` and `Method:` followed by the link to this page |
 
+In the `Measured with` line, the two names Perf Sentinel and Institut du Numérique Responsable print in bold, underlined, in the brand green `#107a56`, and each stays whole on one line. The words are the same as in the table.
+
 Every figure is rounded down: counts are exact below 10 000, then two significant figures ("1.9 million"), durations in whole milliseconds below 100 ms, then seconds with one decimal, and a share under 0.1 % reads "under 0.1%". The units an equivalence counts are `average meal(s)`, `km by high-speed train`, `km driven by an average car` and `smartphone(s)`.
 
 A story CO2 line covers the before-fix period only, a curve's covers the card's period, and a collective's covers the before-fix period of its N+1 and redundant fixes only. A curve's scope line counts the days of every period it shows, from the first bar to the last.
+
+## The SVG
+
+`card.svg` draws the same operations as `card.png`. Its text is the glyph outlines of the bundled DM Sans fonts, one `<path>` per piece of text, not a `<text>` element with an embedded font:
+
+1. The SVG draws exactly what the layout measured. A viewer's own text engine applies kerning and its own metrics, so a line measured to fit could overflow, or wrap where the PNG does not.
+2. The viewer needs no font. Several editors ignore an embedded `@font-face` and substitute a system font, which the layout never checked its glyphs against.
+3. The bytes depend only on the card and the bundled fonts, never on a font the viewer has.
+4. Embedding the two DM Sans files would add about 143 KiB before a single glyph, and subsetting them needs a crate the engine does not have.
+
+The cost: the text cannot be selected or searched, and a screen reader reads the `<title>` as the image's name. The title is the card's `free.title`, else `Perf Sentinel card` (`Carte Perf Sentinel` in French), the same as the PDF metadata. DM Sans is under the SIL Open Font License, which allows both forms.
+
+The file starts with a fixed header:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350" xml:lang="en" role="img">
+<title>{title, XML-escaped}</title>
+<metadata id="perf-sentinel-card">{envelope}</metadata>
+```
+
+One line per drawing operation follows, in the PNG's order, then `</svg>`. The only elements are `svg`, `title`, `metadata`, `defs`, `linearGradient`, `stop`, `path`, `rect` and `circle`: no script, no style, no link, no image, no `<text>`. Numbers are fixed point with at most two decimals, so the same card gives the same bytes on one build target.
+
+The envelope only holds JSON punctuation (`{`, `}`, `"`, `:`, `,`) and base64url characters, so it needs no XML escaping. `card render` checks every byte before writing and stops with `svg_encode_failed` otherwise, which the canonical envelope never triggers. `verify-card` reads the envelope without an XML parser: the engine writes the element in one form only, and a parser would be a new dependency and more code exposed to a file a stranger sends. It looks for the exact string `<metadata id="perf-sentinel-card">` and takes its text up to the next `</metadata>`:
+
+| The file | Reason |
+|---|---|
+| Over 16 MiB | `file_too_large` |
+| Not UTF-8, or not starting with `<?xml` or `<svg` after an optional UTF-8 BOM and whitespace | `malformed_input` |
+| No such element | `no_card_payload` |
+| The element twice | `duplicate_card_payload` |
+| No `</metadata>`, more than 64 KiB, or a byte outside the set above | `malformed_input` |
+
+Like the PNG chunk, the envelope proves the payload, not the drawing around it.
+
+Sizes measured on the test fixtures, envelope included:
+
+| Fixture | English | French |
+|---|---|---|
+| Story | 319 KiB | 324 KiB |
+| Curve | 297 KiB | 293 KiB |
+| Collective | 325 KiB | 338 KiB |
 
 ## QR code
 

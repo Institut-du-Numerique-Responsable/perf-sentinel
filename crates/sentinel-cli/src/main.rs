@@ -633,6 +633,7 @@ async fn dispatch_command(command: Commands) {
                 let format = match format {
                     cli::CardFormatArg::Png => sentinel_core::report::card::CardFormat::Png,
                     cli::CardFormatArg::Pdf => sentinel_core::report::card::CardFormat::Pdf,
+                    cli::CardFormatArg::Svg => sentinel_core::report::card::CardFormat::Svg,
                 };
                 std::process::exit(card::cmd_card_render(&card::RenderArgs {
                     input: &input,

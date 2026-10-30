@@ -10,6 +10,7 @@ pub mod online;
 pub mod payload;
 pub mod pdf;
 pub mod raster;
+pub mod svg;
 #[cfg(test)]
 mod test_fixtures;
 pub mod verify;
@@ -73,13 +74,15 @@ pub enum CardFormat {
     Png,
     /// The four-page carousel.
     Pdf,
+    /// The single image as an SVG, its text drawn as outlines.
+    Svg,
 }
 
 /// A signed card, ready to write.
 #[derive(Debug)]
 pub struct RenderedCard {
     pub bytes: Vec<u8>,
-    /// `card.png` or `card.pdf`.
+    /// `card.png`, `card.pdf` or `card.svg`.
     pub file_name: &'static str,
     pub fingerprint: String,
     pub compact_url: String,
@@ -114,6 +117,14 @@ pub fn render_card(
             (
                 pdf::render_carousel_pdf(&pages, &envelope, &full)?,
                 "card.pdf",
+            )
+        }
+        CardFormat::Svg => {
+            let ops = layout::layout_image(&full, &compact_url)?;
+            let title = pdf::card_title(&full);
+            (
+                svg::render_svg(&ops, &envelope, title, full.lang)?,
+                "card.svg",
             )
         }
     };
@@ -155,6 +166,27 @@ mod tests {
         assert!(verify_signature(&public_key, &compact, &compact_signature));
 
         let again = render_card(&input, &key.pkcs8, CardFormat::Png).expect("renders");
+        assert_eq!(again.bytes, card.bytes);
+    }
+
+    #[test]
+    fn render_card_signs_what_it_draws_as_svg() {
+        let key = generate_key().expect("key");
+        let input = serde_json::to_vec(&story_input(FindingType::NPlusOneSql)).expect("json");
+        let card = render_card(&input, &key.pkcs8, CardFormat::Svg).expect("renders");
+        assert_eq!(card.file_name, "card.svg");
+
+        let envelope = svg::read_svg_envelope(&card.bytes).expect("envelope");
+        let (payload, signature) = parse_file_envelope(&envelope).expect("file envelope");
+        let full = parse_full_payload(&payload).expect("full payload");
+        let public_key = b64url_decode(&full.public_key).expect("public key");
+        assert!(verify_signature(&public_key, &payload, &signature));
+
+        let png = render_card(&input, &key.pkcs8, CardFormat::Png).expect("renders");
+        assert_eq!(card.compact_url, png.compact_url);
+        assert_eq!(card.fingerprint, png.fingerprint);
+
+        let again = render_card(&input, &key.pkcs8, CardFormat::Svg).expect("renders");
         assert_eq!(again.bytes, card.bytes);
     }
 }

@@ -8,6 +8,7 @@ use sentinel_core::report::card::binding::{
     Binding, DEFAULT_DOH_URL, KeyStatus, PublishedKey, judge, parse_key_list,
 };
 use sentinel_core::report::card::raster::MAX_CARD_PNG_BYTES;
+use sentinel_core::report::card::svg::looks_like_svg;
 use sentinel_core::report::card::verify::{CardSource, Integrity, check_integrity};
 use serde::Serialize;
 
@@ -27,7 +28,7 @@ struct VerifyLine<'a> {
     reason: &'static str,
 }
 
-/// Verify the card at `target` (a PNG, a PDF or its verify URL), then
+/// Verify the card at `target` (a PNG, a PDF, an SVG or its verify URL), then
 /// bind its key through `--keys`, or through `--online` the key list its
 /// domain publishes.
 pub async fn cmd_verify_card(
@@ -155,7 +156,7 @@ fn read_key_list(path: &Path) -> Result<Vec<PublishedKey>, CardError> {
 }
 
 /// A target starting with `https://` or `http://` is a verify URL; any
-/// other is a file, a PNG or a PDF by its first bytes.
+/// other is a file, a PNG, a PDF or an SVG by its first bytes.
 fn integrity_of(target: &str) -> Result<Integrity, CardError> {
     if target.starts_with("https://") || target.starts_with("http://") {
         return check_integrity(CardSource::Url(target));
@@ -165,10 +166,12 @@ fn integrity_of(target: &str) -> Result<Integrity, CardError> {
         CardSource::Png(&bytes)
     } else if bytes.starts_with(PDF_MAGIC) {
         CardSource::Pdf(&bytes)
+    } else if looks_like_svg(&bytes) {
+        CardSource::Svg(&bytes)
     } else {
         return Err(input_error(
             "malformed_input",
-            format!("{target} is not a PNG, a PDF or a verify URL"),
+            format!("{target} is not a PNG, a PDF, an SVG or a verify URL"),
         ));
     };
     check_integrity(source)

@@ -1102,14 +1102,14 @@ pub(crate) enum Commands {
     /// Verify a share card: its signature, then its key's binding to the
     /// card's domain.
     ///
-    /// Reads a `card.png`, a `card.pdf` or the verify URL its QR code
-    /// holds, offline by default. Prints one JSON line on stdout, the
+    /// Reads a `card.png`, a `card.pdf`, a `card.svg` or the verify URL its
+    /// QR code holds, offline by default. Prints one JSON line on stdout, the
     /// contract; stderr carries the detail. The verdict covers the signed
     /// payload, not the pixels: compare its figures with the image.
     #[cfg(feature = "card")]
     #[command(after_help = help_examples::VERIFY_CARD)]
     VerifyCard {
-        /// The card file (PNG or PDF) or its verify URL.
+        /// The card file (PNG, PDF or SVG) or its verify URL.
         target: String,
         /// The key list the card's domain publishes, the JSON of
         /// `/.well-known/perf-sentinel-key`, read from a local file.
@@ -1178,8 +1178,9 @@ pub(crate) enum CardAction {
     },
     /// Render and sign a share card from the Hub's `card.json`.
     ///
-    /// Writes `<DIR>/card.png` (the image) or `<DIR>/card.pdf` (the
-    /// four-page carousel), each carrying its signed payload, and prints
+    /// Writes `<DIR>/card.png` (the image), `<DIR>/card.pdf` (the
+    /// four-page carousel) or `<DIR>/card.svg` (the image as an SVG), each
+    /// carrying its signed payload, and prints
     /// the key fingerprint and the verify URL its QR code holds. Nothing
     /// is written unless the card renders.
     Render {
@@ -1206,6 +1207,8 @@ pub(crate) enum CardFormatArg {
     Png,
     /// The four-page carousel, `card.pdf`.
     Pdf,
+    /// The single image as an SVG, its text drawn as outlines, `card.svg`.
+    Svg,
 }
 
 /// Sub-actions for the `query` subcommand.
@@ -1493,13 +1496,17 @@ Exit codes, with one JSON line on stdout:
   perf-sentinel card render --input card.json \\
     --signing-key ~/.config/perf-sentinel/keys/<fingerprint>.pk8 --out-dir . --format png
 
+  # The same image as an SVG, its signed payload in a <metadata> element
+  perf-sentinel card render --input card.json \\
+    --signing-key ~/.config/perf-sentinel/keys/<fingerprint>.pk8 --out-dir . --format svg
+
 Exit codes, with one JSON line on stdout:
   0  done: {\"fingerprint\",\"public_key\"} for keygen,
      {\"result\":\"rendered\",\"files\",\"fingerprint\",\"compact_url\"} for render
   1  refused, the card would claim what its figures do not show (volume_not_avoidable, ...)
   3  input error (missing_file, file_too_large, malformed_input, signing_key_permissions,
      signing_key_unreadable, key_exists, output_unwritable)
-  5  cannot render (compact_too_large, unsupported_characters with \"field\", ...)";
+  5  cannot render (compact_too_large, unsupported_characters with \"field\", svg_encode_failed, ...)";
 
     #[cfg(feature = "card")]
     pub const VERIFY_CARD: &str = "Examples:
@@ -1508,6 +1515,9 @@ Exit codes, with one JSON line on stdout:
 
   # Check it against the key list its organization publishes
   perf-sentinel verify-card card.pdf --keys perf-sentinel-key.json
+
+  # Check an SVG card the same way
+  perf-sentinel verify-card card.svg
 
   # Check the verify URL a card's QR code holds
   perf-sentinel verify-card 'https://perf-sentinel.dev/verifier#c=...'

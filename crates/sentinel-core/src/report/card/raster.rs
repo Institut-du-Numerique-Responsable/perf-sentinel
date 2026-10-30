@@ -5,7 +5,7 @@
 use std::io::Cursor;
 
 use skrifa::instance::{LocationRef, Size};
-use skrifa::outline::{DrawSettings, OutlinePen};
+use skrifa::outline::{DrawSettings, OutlineGlyph, OutlinePen};
 use skrifa::{FontRef, MetadataProvider};
 use tiny_skia::{
     Color, FillRule, GradientStop, LinearGradient, Paint, Path, PathBuilder, Pixmap, Point, Rect,
@@ -214,27 +214,46 @@ impl OutlinePen for Pen {
     }
 }
 
-/// Glyph by glyph from the face's charmap, each advance the one the line
-/// breaking measured (no kerning).
-fn draw_text(pixmap: &mut Pixmap, (x, y): (f32, f32), face: Face, size: f32, rgb: Rgb, text: &str) {
+/// Each glyph of `text` from the face's charmap with its pen x, starting
+/// at `x`, each advance the one the line breaking measured (no kerning).
+pub(crate) fn for_each_glyph(
+    face: Face,
+    size: f32,
+    text: &str,
+    x: f32,
+    mut each: impl FnMut(&OutlineGlyph<'_>, f32),
+) {
     let font = FontRef::new(face.bytes()).expect("bundled font parses");
     let charmap = font.charmap();
     let outlines = font.outline_glyphs();
+    let mut pen_x = x;
+    let mut utf8 = [0u8; 4];
+    for c in text.chars() {
+        if let Some(glyph) = charmap.map(c).and_then(|id| outlines.get(id)) {
+            each(&glyph, pen_x);
+        }
+        pen_x += text_width(face, size, c.encode_utf8(&mut utf8));
+    }
+}
+
+/// `glyph` drawn unhinted at `size` into `pen`. The layout checked every
+/// glyph exists; a bundled outline that fails to draw leaves a gap rather
+/// than a broken card.
+pub(crate) fn draw_glyph(glyph: &OutlineGlyph<'_>, size: f32, pen: &mut impl OutlinePen) {
+    let settings = DrawSettings::unhinted(Size::new(size), LocationRef::default());
+    let _ = glyph.draw(settings, pen);
+}
+
+fn draw_text(pixmap: &mut Pixmap, (x, y): (f32, f32), face: Face, size: f32, rgb: Rgb, text: &str) {
     let mut pen = Pen {
         builder: PathBuilder::new(),
         x,
         baseline: y,
     };
-    let mut utf8 = [0u8; 4];
-    for c in text.chars() {
-        if let Some(glyph) = charmap.map(c).and_then(|id| outlines.get(id)) {
-            let settings = DrawSettings::unhinted(Size::new(size), LocationRef::default());
-            // The layout checked every glyph exists; a bundled outline that
-            // fails to draw leaves a gap rather than a broken card.
-            let _ = glyph.draw(settings, &mut pen);
-        }
-        pen.x += text_width(face, size, c.encode_utf8(&mut utf8));
-    }
+    for_each_glyph(face, size, text, x, |glyph, pen_x| {
+        pen.x = pen_x;
+        draw_glyph(glyph, size, &mut pen);
+    });
     if let Some(path) = pen.builder.finish() {
         fill_path(pixmap, &path, &solid(rgb), Transform::identity());
     }

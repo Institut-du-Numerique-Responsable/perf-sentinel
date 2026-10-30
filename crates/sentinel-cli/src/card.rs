@@ -115,8 +115,8 @@ struct Rendered<'a> {
     compact_url: &'a str,
 }
 
-/// Render and sign the card of `--input` into `<out_dir>/card.png` or
-/// `card.pdf`. Nothing is written unless the card renders.
+/// Render and sign the card of `--input` into `<out_dir>/card.png`,
+/// `card.pdf` or `card.svg`. Nothing is written unless the card renders.
 pub fn cmd_card_render(args: &RenderArgs<'_>) -> i32 {
     let card = match render(args) {
         Ok(card) => card,

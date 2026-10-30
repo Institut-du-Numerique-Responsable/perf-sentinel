@@ -166,6 +166,30 @@ fn card_render_writes_the_pdf_carousel() {
 }
 
 #[test]
+fn card_render_writes_the_svg() {
+    let (out, dir, _) = render_json(&story_input(), "svg");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(stdout_json(&out)["files"], serde_json::json!(["card.svg"]));
+    let svg = fs::read_to_string(dir.path().join("out/card.svg")).expect("card.svg exists");
+    assert!(svg.starts_with("<?xml"));
+    assert_eq!(
+        svg.matches("<metadata id=\"perf-sentinel-card\">").count(),
+        1
+    );
+    assert!(!svg.contains("<text") && !svg.contains("<script"));
+}
+
+#[test]
+fn card_render_refuses_an_unknown_format() {
+    let (out, _dir, _) = render_json(&story_input(), "jpg");
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    for format in ["png", "pdf", "svg"] {
+        assert!(stderr.contains(format), "{stderr}");
+    }
+}
+
+#[test]
 fn card_render_refuses_a_qr_too_dense() {
     let mut input = story_input();
     input["org"]["domain"] =
@@ -331,6 +355,63 @@ fn verify_card_with_the_published_key_is_level_2() {
         let out = verify(&[path_str(&png), "--keys", path_str(&keys)]);
         assert_line(&out, code, &expected);
     }
+}
+
+/// A story card SVG of the story fixture under a fresh key: the
+/// directory holding it, its path and the key's fingerprint.
+fn rendered_svg() -> (tempfile::TempDir, std::path::PathBuf, String) {
+    let (out, dir, fingerprint) = render_json(&story_input(), "svg");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let svg = dir.path().join("out/card.svg");
+    (dir, svg, fingerprint)
+}
+
+#[test]
+fn verify_card_on_its_own_svg_is_ok_level_1() {
+    let (dir, svg, fingerprint) = rendered_svg();
+    assert_line(
+        &verify(&[path_str(&svg)]),
+        0,
+        &verified(1, Some("acme.fr"), "unknown", "no_key_list"),
+    );
+    let keys = key_list(
+        dir.path(),
+        &serde_json::json!([{"fingerprint": fingerprint, "from": "2026-01-01"}]),
+    );
+    assert_line(
+        &verify(&[path_str(&svg), "--keys", path_str(&keys)]),
+        0,
+        &verified(2, Some("acme.fr"), "current", "key_published"),
+    );
+}
+
+#[test]
+fn verify_card_on_an_svg_without_its_metadata_says_no_card_payload() {
+    let (dir, svg, _) = rendered_svg();
+    let text = fs::read_to_string(&svg).expect("card.svg");
+    let start = text.find("<metadata").expect("the metadata");
+    let end = text.find("</metadata>").expect("its end") + "</metadata>".len();
+    let stripped = dir.path().join("stripped.svg");
+    fs::write(&stripped, format!("{}{}", &text[..start], &text[end..])).expect("write");
+    assert_line(
+        &verify(&[path_str(&stripped)]),
+        3,
+        &serde_json::json!({"result": "input_error", "reason": "no_card_payload"}),
+    );
+}
+
+#[test]
+fn verify_card_refuses_an_html_file() {
+    let (dir, svg, _) = rendered_svg();
+    let text = fs::read_to_string(&svg).expect("card.svg");
+    let svg_start = text.find("<svg").expect("the svg element");
+    let html = dir.path().join("card.html");
+    fs::write(&html, format!("<html>{}</html>", &text[svg_start..])).expect("write");
+    assert_line(
+        &verify(&[path_str(&html)]),
+        3,
+        &serde_json::json!({"result": "input_error", "reason": "malformed_input"}),
+    );
 }
 
 #[test]

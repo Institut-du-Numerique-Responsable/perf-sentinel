@@ -27,6 +27,16 @@ fn export_failed(detail: impl Into<String>) -> CardError {
     CardError::new(CardResult::Unrenderable, "pdf_export_failed", detail)
 }
 
+/// The card's free title, else "Perf Sentinel card" in its language: the
+/// PDF metadata title and the SVG `<title>`.
+pub(crate) fn card_title(payload: &FullPayload) -> &str {
+    payload
+        .free
+        .title
+        .as_deref()
+        .unwrap_or(words(payload.lang).pdf_title)
+}
+
 /// The carousel pages as a PDF/A-3b, 1080 x 1350 pt each, the envelope
 /// attached as [`CARD_ATTACHMENT_NAME`]. The date and document id come
 /// from the payload, never the clock, so a render is reproducible.
@@ -48,15 +58,10 @@ pub(crate) fn render_carousel_pdf(
         Lang::En => "en",
         Lang::Fr => "fr",
     };
-    let title = payload
-        .free
-        .title
-        .clone()
-        .unwrap_or_else(|| words(payload.lang).pdf_title.to_owned());
     let mut document = archival_document();
     document.set_metadata(
         Metadata::new()
-            .title(title)
+            .title(card_title(payload).to_owned())
             .language(language.to_owned())
             .creator(format!("perf-sentinel {}", env!("CARGO_PKG_VERSION")))
             .creation_date(date)

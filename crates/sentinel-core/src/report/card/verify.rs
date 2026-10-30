@@ -10,6 +10,7 @@ use super::keys::{
 use super::payload::{MS_PER_DAY, parse_compact_payload, parse_full_payload};
 use super::pdf::read_pdf_envelope;
 use super::raster::read_png_envelope;
+use super::svg::read_svg_envelope;
 use super::{CardError, CardResult};
 
 /// What `verify-card` reads: a card file, or the verify URL of its QR code.
@@ -17,6 +18,7 @@ use super::{CardError, CardResult};
 pub enum CardSource<'a> {
     Png(&'a [u8]),
     Pdf(&'a [u8]),
+    Svg(&'a [u8]),
     Url(&'a str),
 }
 
@@ -35,7 +37,7 @@ pub struct Integrity {
     pub reason: &'static str,
 }
 
-/// Check a card: the full payload of a PNG or PDF, the compact payload of
+/// Check a card: the full payload of a PNG, PDF or SVG, the compact payload of
 /// a verify URL.
 ///
 /// # Errors
@@ -49,6 +51,7 @@ pub fn check_integrity(source: CardSource<'_>) -> Result<Integrity, CardError> {
     match source {
         CardSource::Png(png) => check_full(&read_png_envelope(png)?),
         CardSource::Pdf(pdf) => check_full(&read_pdf_envelope(pdf)?),
+        CardSource::Svg(svg) => check_full(&read_svg_envelope(svg)?),
         CardSource::Url(url) => check_compact(url),
     }
 }
@@ -169,9 +172,11 @@ mod tests {
     use crate::report::card::keys::{
         CardSigner, b64url_encode, compact_url, file_envelope, generate_key,
     };
+    use crate::report::card::layout::layout_image;
     use crate::report::card::payload::{build_payloads, canonical_bytes, parse_card_input};
     use crate::report::card::raster::encode_png;
-    use crate::report::card::test_fixtures::story_input;
+    use crate::report::card::svg::render_svg;
+    use crate::report::card::test_fixtures::{compact_url_of, full_payload, story_input};
     use crate::report::card::{CardFormat, render_card};
     use serde_json::json;
 
@@ -402,5 +407,34 @@ mod tests {
                 Err(error) => panic!("flip {at} read as {}", error.reason),
             }
         }
+    }
+
+    #[test]
+    fn a_rendered_svg_verifies() {
+        let key = generate_key().expect("key");
+        let card = render_card(&story_bytes(), &key.pkcs8, CardFormat::Svg).expect("renders");
+        assert_ok(
+            &check_integrity(CardSource::Svg(&card.bytes)).expect("checks"),
+            &key.fingerprint,
+        );
+    }
+
+    #[test]
+    fn one_changed_payload_byte_in_the_svg_is_tampered() {
+        let signer = signer();
+        let input = story_input(FindingType::NPlusOneSql);
+        let (full, _) = canonical(&input, &signer, &signer.fingerprint());
+        let changed = String::from_utf8(full.clone()).expect("utf-8").replacen(
+            "\"cited_ops\":41",
+            "\"cited_ops\":42",
+            1,
+        );
+        assert_ne!(changed.as_bytes(), full.as_slice());
+        let payload = full_payload(&input);
+        let ops = layout_image(&payload, &compact_url_of(&input)).expect("lays out");
+        let envelope = file_envelope(changed.as_bytes(), &signer.sign_b64(&full));
+        let svg = render_svg(&ops, &envelope, "Perf Sentinel card", payload.lang).expect("svg");
+        let integrity = check_integrity(CardSource::Svg(&svg)).expect("checks");
+        assert_eq!(integrity, tampered("signature_invalid"));
     }
 }

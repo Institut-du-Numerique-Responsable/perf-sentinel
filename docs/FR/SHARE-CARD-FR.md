@@ -14,12 +14,13 @@ Une carte a l'un de ces trois angles :
 | Courbe | `curve` | La part du travail évitable, période par période, de 2 à 12 barres. |
 | Collectif | `collective` | Combien de corrections la mesure a confirmées sur une période, sur combien de services, par famille. |
 
-Chaque carte se rend en anglais ou en français (`lang`) et dans l'un de ces deux formats :
+Chaque carte se rend en anglais ou en français (`lang`) et dans l'un de ces trois formats :
 
 - `card.png`, une image unique de 1080 x 1350, le format à publier.
+- `card.svg`, la même image en SVG, son texte dessiné en contours (voir [Le SVG](#le-svg)).
 - `card.pdf`, un carrousel de quatre pages (l'accroche, pourquoi c'est important, les chiffres avec leur équivalence, la preuve avec la méthode), en PDF/A-3b.
 
-Les deux portent la charge utile complète signée. Le QR code de l'image et de la dernière page du carrousel contient l'URL de vérification avec la charge utile compacte.
+Les trois portent la charge utile complète signée. Le QR code de l'image et de la dernière page du carrousel contient l'URL de vérification avec la charge utile compacte.
 
 ## Commandes (C2)
 
@@ -42,10 +43,10 @@ Génère une clé Ed25519, l'écrit dans `<DIR>/<empreinte>.pk8` (PKCS#8 v2, mod
 ### `card render`
 
 ```bash
-perf-sentinel card render --input card.json --signing-key <empreinte>.pk8 --out-dir <DIR> --format png|pdf
+perf-sentinel card render --input card.json --signing-key <empreinte>.pk8 --out-dir <DIR> --format png|pdf|svg
 ```
 
-Lit `card.json` (64 Kio au plus) et la clé (1 Kio au plus, un fichier régulier, jamais un lien symbolique, et sous Unix lisible par son seul propriétaire), signe les charges utiles complète et compacte, et écrit `<DIR>/card.png` ou `<DIR>/card.pdf`. Rien n'est écrit si la carte ne se rend pas. La même entrée et la même clé donnent les mêmes octets. La commande affiche :
+Lit `card.json` (64 Kio au plus) et la clé (1 Kio au plus, un fichier régulier, jamais un lien symbolique, et sous Unix lisible par son seul propriétaire), signe les charges utiles complète et compacte, et écrit `<DIR>/card.png`, `<DIR>/card.pdf` ou `<DIR>/card.svg`. Rien n'est écrit si la carte ne se rend pas. La même entrée et la même clé donnent les mêmes octets. La commande affiche :
 
 ```json
 {"result":"rendered","files":["card.png"],"fingerprint":"ps1:...","compact_url":"https://perf-sentinel.dev/verifier#c=..."}
@@ -56,10 +57,10 @@ La clé privée ne passe jamais en argument de ligne de commande : le Hub passe 
 ### `verify-card`
 
 ```bash
-perf-sentinel verify-card <card.png|card.pdf|URL> [--keys <published.json>] [--online [--doh <URL>]]
+perf-sentinel verify-card <card.png|card.pdf|card.svg|URL> [--keys <published.json>] [--online [--doh <URL>]]
 ```
 
-Lit un fichier de carte (16 Mio au plus, un PNG ou un PDF d'après ses premiers octets) ou une URL de vérification (toute cible qui commence par `https://` ou `http://`), vérifie la signature, puis le lien de la clé avec le domaine de la carte. Elle fonctionne hors ligne par défaut. `--keys` lit une copie locale du `/.well-known/perf-sentinel-key` du domaine (64 Kio au plus). `--online` lit les clés publiées par le réseau, voir [`--online`](#--online). `--keys` et `--online` s'excluent, et `--doh` demande `--online`. La commande affiche :
+Lit un fichier de carte (16 Mio au plus, un PNG, un PDF ou un SVG d'après ses premiers octets, un SVG commençant par `<?xml` ou `<svg` après un BOM UTF-8 facultatif et des blancs) ou une URL de vérification (toute cible qui commence par `https://` ou `http://`), vérifie la signature, puis le lien de la clé avec le domaine de la carte. Elle fonctionne hors ligne par défaut. `--keys` lit une copie locale du `/.well-known/perf-sentinel-key` du domaine (64 Kio au plus). `--online` lit les clés publiées par le réseau, voir [`--online`](#--online). `--keys` et `--online` s'excluent, et `--doh` demande `--online`. La commande affiche :
 
 ```json
 {"integrity":"ok","level":2,"domain":"acme.fr","key":"current","reason":"key_published"}
@@ -75,7 +76,7 @@ Lit un fichier de carte (16 Mio au plus, un PNG ou un PDF d'après ses premiers 
 
 La signature est vérifiée d'abord, sur les octets exacts que porte la carte. Seule une charge utile intacte est ensuite confrontée aux règles : une mauvaise signature donne `tampered` quoi que disent les octets, et une signature valide sur une charge utile qui enfreint une règle donne `malformed_input`.
 
-Le verdict porte sur la charge utile signée, pas sur les pixels. Quelqu'un peut copier le chunk `iTXt`, la pièce jointe PDF ou le QR code d'une vraie carte sur une image retouchée, et `verify-card` imprime toujours `"integrity":"ok"`. Comparez les chiffres de la charge utile avec l'image : la page de vérification les affiche.
+Le verdict porte sur la charge utile signée, pas sur les pixels. Quelqu'un peut copier le chunk `iTXt`, la pièce jointe PDF, l'élément `<metadata>` du SVG ou le QR code d'une vraie carte sur une image retouchée, et `verify-card` imprime toujours `"integrity":"ok"`. Comparez les chiffres de la charge utile avec l'image : la page de vérification les affiche.
 
 ### Codes de sortie et raisons
 
@@ -86,7 +87,7 @@ Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` 
 | 0 | | Fait. |
 | 1 | `refused` | `period_not_calendar`, `period_not_closed`, `incomplete_period`, `volume_not_avoidable`, `threshold_not_applicable`, `unknown_equivalence`, `equivalence_out_of_scale`, `unsupported_language`. La carte annoncerait ce que ses chiffres ne montrent pas. |
 | 3 | `input_error` | `missing_file`, `file_too_large`, `malformed_input`, `signing_key_permissions`, `signing_key_unreadable`, `key_exists`, `output_unwritable`. |
-| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`. |
+| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`. |
 
 | Sortie | Ligne et raisons de `verify-card` |
 |---|---|
@@ -208,7 +209,7 @@ La charge utile compacte de la fixture d'histoire :
 
 ### Enveloppes
 
-- **Enveloppe de fichier** : `{"payload":"<base64url de la charge utile complète canonique>","signature":"<base64url de la signature Ed25519 de 64 octets>"}`, sans autre clé. Le PNG la porte dans un chunk `iTXt` au mot-clé `perf-sentinel-card`, avant les données d'image. Le PDF la porte en pièce jointe `perf-sentinel-card.json`. L'enveloppe tient en 64 Kio. Un second chunk `perf-sentinel-card` avant les données d'image, ou une seconde pièce jointe de ce nom, donne `duplicate_card_payload`.
+- **Enveloppe de fichier** : `{"payload":"<base64url de la charge utile complète canonique>","signature":"<base64url de la signature Ed25519 de 64 octets>"}`, sans autre clé. Le PNG la porte dans un chunk `iTXt` au mot-clé `perf-sentinel-card`, avant les données d'image. Le PDF la porte en pièce jointe `perf-sentinel-card.json`. Le SVG la porte comme texte de `<metadata id="perf-sentinel-card">`, écrite telle quelle. L'enveloppe tient en 64 Kio. Un second chunk `perf-sentinel-card` avant les données d'image, une seconde pièce jointe de ce nom, ou un second élément de ce type, donne `duplicate_card_payload`.
 - **URL compacte** : `https://perf-sentinel.dev/verifier#c=<base64url de la charge utile compacte canonique>.<base64url de sa signature>`. Le jeton voyage dans le fragment, qu'un navigateur n'envoie jamais au serveur. Un lecteur prend ce qui suit le premier `#c=` et le coupe sur son dernier `.`.
 
 ### Règles d'encodage
@@ -363,9 +364,53 @@ Les autres lignes :
 | Carrousel, page 2 | `Chaque opération inutile coûte du temps de serveur, de l'énergie et parfois de l'attente.` et `Les mesurer montre où l'application peut faire le même travail avec moins.` |
 | Carrousel, page 4 | `Vérifiez ces chiffres` et `Méthode :` suivi du lien vers cette page |
 
+Dans la ligne `Mesuré avec`, les deux noms Perf Sentinel et Institut du Numérique Responsable s'impriment en gras, soulignés, dans le vert de la marque `#107a56`, et chacun reste entier sur une ligne. Les mots sont ceux du tableau.
+
 En français, une espace insécable sépare un chiffre de son unité, les groupes de milliers, et précède `:` et `%`. Chaque chiffre est arrondi vers le bas : les nombres sont exacts sous 10 000, puis gardent deux chiffres significatifs (« 1,9 million »), les durées sont en millisecondes entières sous 100 ms, puis en secondes avec une décimale, et une part sous 0,1 % se lit « moins de 0,1 % ». Les unités que compte une équivalence sont `repas moyen(s)`, `km en TGV`, `km parcourus par une voiture moyenne` et `smartphone(s)`.
 
 La ligne CO2 d'une histoire couvre la seule période d'avant la correction, celle d'une courbe la période de la carte, et celle d'un collectif la période d'avant la correction de ses seules corrections N+1 et redondantes. La ligne de périmètre d'une courbe compte les jours de toutes les périodes qu'elle montre, de la première barre à la dernière.
+
+## Le SVG
+
+`card.svg` dessine les mêmes opérations que `card.png`. Son texte est fait des contours des glyphes des polices DM Sans embarquées, un `<path>` par morceau de texte, et non d'un élément `<text>` avec une police intégrée :
+
+1. Le SVG dessine exactement ce que la mise en page a mesuré. Le moteur de texte d'une visionneuse applique le crénage et ses propres métriques, si bien qu'une ligne mesurée pour tenir pourrait déborder, ou passer à la ligne là où le PNG ne le fait pas.
+2. La visionneuse n'a besoin d'aucune police. Plusieurs éditeurs ignorent un `@font-face` intégré et le remplacent par une police système, dont la mise en page n'a jamais vérifié les glyphes.
+3. Les octets ne dépendent que de la carte et des polices embarquées, jamais d'une police installée chez le lecteur.
+4. Intégrer les deux fichiers DM Sans ajouterait environ 143 Kio avant le moindre glyphe, et les réduire aux glyphes utiles demande une crate que le moteur n'a pas.
+
+Le prix : le texte ne se sélectionne pas et ne se recherche pas, et un lecteur d'écran lit le `<title>` comme nom de l'image. Ce titre est le `free.title` de la carte, sinon `Carte Perf Sentinel` (`Perf Sentinel card` en anglais), comme dans les métadonnées du PDF. DM Sans est sous licence SIL Open Font License, qui autorise les deux formes.
+
+Le fichier commence par un en-tête fixe :
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350" xml:lang="fr" role="img">
+<title>{titre, échappé en XML}</title>
+<metadata id="perf-sentinel-card">{enveloppe}</metadata>
+```
+
+Suivent une ligne par opération de dessin, dans l'ordre du PNG, puis `</svg>`. Les seuls éléments sont `svg`, `title`, `metadata`, `defs`, `linearGradient`, `stop`, `path`, `rect` et `circle` : ni script, ni style, ni lien, ni image, ni `<text>`. Les nombres sont en virgule fixe avec deux décimales au plus, si bien que la même carte donne les mêmes octets sur une même cible de compilation.
+
+L'enveloppe ne contient que de la ponctuation JSON (`{`, `}`, `"`, `:`, `,`) et des caractères base64url, elle n'a donc besoin d'aucun échappement XML. `card render` vérifie chaque octet avant d'écrire et s'arrête sinon sur `svg_encode_failed`, ce que l'enveloppe canonique ne déclenche jamais. `verify-card` lit l'enveloppe sans analyseur XML : le moteur écrit l'élément sous une seule forme, et un analyseur serait une dépendance de plus et davantage de code exposé à un fichier envoyé par un inconnu. Il cherche la chaîne exacte `<metadata id="perf-sentinel-card">` et prend son texte jusqu'au `</metadata>` suivant :
+
+| Le fichier | Raison |
+|---|---|
+| Plus de 16 Mio | `file_too_large` |
+| Pas en UTF-8, ou ne commence pas par `<?xml` ou `<svg` après un BOM UTF-8 facultatif et des blancs | `malformed_input` |
+| Aucun élément de ce type | `no_card_payload` |
+| L'élément deux fois | `duplicate_card_payload` |
+| Pas de `</metadata>`, plus de 64 Kio, ou un octet hors de l'ensemble ci-dessus | `malformed_input` |
+
+Comme le chunk du PNG, l'enveloppe prouve la charge utile, pas le dessin qui l'entoure.
+
+Tailles mesurées sur les fixtures de test, enveloppe comprise :
+
+| Fixture | Anglais | Français |
+|---|---|---|
+| Histoire | 319 Kio | 324 Kio |
+| Courbe | 297 Kio | 293 Kio |
+| Collectif | 325 Kio | 338 Kio |
 
 ## QR code
 
