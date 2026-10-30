@@ -316,7 +316,8 @@ impl Block {
                 self.ops.push(text_op(x, y, face, size, color, &text));
                 if name {
                     let w = text_width(face, size, &text);
-                    let top = y + UNDERLINE_OFFSET_EM * size;
+                    // On a whole pixel, so the 2 px rule fills two PNG rows.
+                    let top = (y + UNDERLINE_OFFSET_EM * size).round();
                     self.ops.push(filled(x, top, w, UNDERLINE_PX, 0.0, color));
                 }
             }
@@ -2036,7 +2037,8 @@ mod tests {
                         (w - text_width(Face::Bold, size, text)).abs() < 0.01,
                         "{text}"
                     );
-                    assert!(same(*by, y + UNDERLINE_OFFSET_EM * size), "{text}");
+                    // On a whole pixel, so the 2 px rule fills two PNG rows.
+                    assert_eq!(*by, (y + UNDERLINE_OFFSET_EM * size).round(), "{text}");
                     assert!(same(*h, UNDERLINE_PX) && same(*radius, 0.0), "{text}");
                     assert_eq!(*fill, Some(BRAND_TEXT));
                     assert!(outline.is_none());

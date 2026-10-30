@@ -828,8 +828,10 @@ mod tests {
             a.0.abs_diff(b.0) <= 8 && a.1.abs_diff(b.1) <= 8 && a.2.abs_diff(b.2) <= 8
         };
         for (x, y, w, h) in underlines {
-            let middle = pixel(&pixmap, x + w / 2.0, y + h / 2.0);
-            assert!(near(middle, BRAND_TEXT), "{middle:?} at the underline");
+            for row in [y, y + h - 1.0] {
+                let inside = pixel(&pixmap, x + w / 2.0, row);
+                assert!(near(inside, BRAND_TEXT), "{inside:?} at the underline");
+            }
             let below = pixel(&pixmap, x + w / 2.0, y + h + 6.0);
             assert!(near(below, SURFACE), "{below:?} under the underline");
         }
