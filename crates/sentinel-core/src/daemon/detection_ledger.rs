@@ -5,7 +5,7 @@
 //! retention. A restart starts a new ledger (`ledger_id`), so the first day
 //! is always a gap. The lock is never held across an `.await`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -13,7 +13,8 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::config::DaemonDetectionsConfig;
-use crate::detect::Finding;
+use crate::detect::below_threshold::WatchIndex;
+use crate::detect::{DetectConfig, Finding};
 use crate::report::metrics::MetricsState;
 
 pub(crate) const DAY_MS: u64 = 86_400_000;
@@ -22,7 +23,8 @@ pub(crate) const MAX_TRACKED_SIGNATURE_BYTES: usize = 1024;
 /// Estimated JSON bytes one page may carry.
 pub(crate) const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 /// Estimated JSON bytes of a `CountRow` beside its signature.
-const ROW_OVERHEAD_BYTES: usize = 96;
+/// Room for `below_threshold_passes`.
+const ROW_OVERHEAD_BYTES: usize = 128;
 
 /// The JSON length of a tracked signature. Control characters never reach a
 /// key (they go to the overflow), so `"` and `\` are the only escapes.
@@ -34,6 +36,7 @@ fn json_string_len(s: &str) -> usize {
 pub(crate) struct Tally {
     pub(crate) detections: u64,
     pub(crate) extra_io_ops: u64,
+    pub(crate) below_threshold_passes: u64,
     /// The day's `rev` at this row's last change.
     pub(crate) rev: u64,
 }
@@ -58,6 +61,9 @@ pub(crate) struct DayCarbon {
 #[derive(Debug)]
 pub(crate) struct DayBucket {
     pub(crate) counts: BTreeMap<Arc<str>, Tally>,
+    /// Rows opened by below-passes alone (`detections == 0`), capped apart
+    /// so they never take a detection slot.
+    pub(crate) watch_rows: usize,
     pub(crate) overflow: Tally,
     pub(crate) gap: bool,
     pub(crate) sealed: bool,
@@ -76,6 +82,7 @@ impl DayBucket {
     fn new(sampling_rate: f64) -> Self {
         Self {
             counts: BTreeMap::new(),
+            watch_rows: 0,
             overflow: Tally::default(),
             gap: false,
             sealed: false,
@@ -96,6 +103,8 @@ pub(crate) struct LedgerState {
     last_shed: u64,
     last_rejected: u64,
     last_tick_day: u32,
+    /// The signatures the Hub asked to watch, replaced on each reply.
+    watch: Arc<WatchIndex>,
 }
 
 impl LedgerState {
@@ -177,6 +186,8 @@ pub(crate) struct CountRow {
     pub(crate) detections: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) extra_io_ops: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) below_threshold_passes: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -190,6 +201,7 @@ pub(crate) struct DayRow {
     pub(crate) shed_traces: u64,
     pub(crate) ingest_rejected: u64,
     pub(crate) sampling_rate: f64,
+    pub(crate) thresholds: DayThresholds,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) avoidable_gco2: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -198,6 +210,38 @@ pub(crate) struct DayRow {
     pub(crate) avoidable_io_ops: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) total_io_ops: Option<u64>,
+}
+
+/// The detection thresholds the daemon applies, sent with every day so the
+/// Hub reads a pass against the threshold it was measured under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) struct DayThresholds {
+    pub(crate) slow_query_threshold_ms: u64,
+    pub(crate) slow_http_threshold_ms: u64,
+    pub(crate) max_fanout: u32,
+    pub(crate) chatty_threshold: u32,
+    pub(crate) pool_saturation_threshold: u32,
+    pub(crate) serialized_min_calls: u32,
+}
+
+impl From<&DetectConfig> for DayThresholds {
+    fn from(cfg: &DetectConfig) -> Self {
+        Self {
+            // The engine has one slow knob, both slow keys carry it.
+            slow_query_threshold_ms: cfg.slow_threshold_ms,
+            slow_http_threshold_ms: cfg.slow_threshold_ms,
+            max_fanout: cfg.max_fanout,
+            chatty_threshold: cfg.chatty_service_min_calls,
+            pool_saturation_threshold: cfg.pool_saturation_concurrent_threshold,
+            serialized_min_calls: cfg.serialized_min_sequential,
+        }
+    }
+}
+
+impl Default for DayThresholds {
+    fn default() -> Self {
+        Self::from(&DetectConfig::default())
+    }
 }
 
 /// One day as the Hub push sends it, copied under the lock.
@@ -217,6 +261,7 @@ pub(crate) struct DetectionLedger {
     max_signatures_per_day: usize,
     io_tracked: bool,
     sampling_rate: f64,
+    thresholds: DayThresholds,
     state: Mutex<LedgerState>,
 }
 
@@ -233,6 +278,7 @@ impl DetectionLedger {
         cfg: &DaemonDetectionsConfig,
         io_tracked: bool,
         sampling_rate: f64,
+        thresholds: DayThresholds,
         now_ms: u64,
     ) -> Self {
         let today = day_of(now_ms);
@@ -246,11 +292,13 @@ impl DetectionLedger {
             max_signatures_per_day: cfg.max_signatures_per_day,
             io_tracked,
             sampling_rate,
+            thresholds,
             state: Mutex::new(LedgerState {
                 days: BTreeMap::from([(today, first)]),
                 last_shed: 0,
                 last_rejected: 0,
                 last_tick_day: today,
+                watch: Arc::default(),
             }),
         }
     }
@@ -286,6 +334,58 @@ impl DetectionLedger {
         overflowed
     }
 
+    /// Replaces the watch list, keeping the trackable thresholded
+    /// signatures up to `max_signatures_per_day`.
+    pub(crate) fn set_watch(&self, signatures: &[String]) {
+        let watch = WatchIndex::from_signatures(
+            signatures
+                .iter()
+                .map(String::as_str)
+                .filter(|s| is_trackable(s)),
+            self.max_signatures_per_day,
+        );
+        self.lock().watch = Arc::new(watch);
+    }
+
+    pub(crate) fn watch(&self) -> Arc<WatchIndex> {
+        Arc::clone(&self.lock().watch)
+    }
+
+    /// Adds one batch's below-threshold passes to their day. A signature
+    /// without a row gets one only while the day has watch-row room, else
+    /// its passes are dropped, never sent to overflow.
+    pub(crate) fn record_below(&self, passes: &HashMap<Arc<str>, u64>, now_ms: u64) {
+        // Sorted so the rows kept at the cap do not depend on hash order.
+        let mut passes: Vec<_> = passes.iter().filter(|(_, n)| **n > 0).collect();
+        passes.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let cap = self.max_signatures_per_day;
+        let mut state = self.lock();
+        let day = state.effective_day(now_ms);
+        let bucket = state.bucket(day, self.sampling_rate);
+        let rev = bucket.rev + 1;
+        let mut changed = false;
+        for (signature, &n) in passes {
+            if let Some(tally) = bucket.counts.get_mut(&**signature) {
+                tally.below_threshold_passes += n;
+                tally.rev = rev;
+            } else if bucket.watch_rows < cap && bucket.counts.len() < cap.saturating_mul(2) {
+                let tally = Tally {
+                    below_threshold_passes: n,
+                    rev,
+                    ..Tally::default()
+                };
+                bucket.counts.insert(Arc::clone(signature), tally);
+                bucket.watch_rows += 1;
+            } else {
+                continue;
+            }
+            changed = true;
+        }
+        if changed {
+            bucket.rev = rev;
+        }
+    }
+
     /// Adds one scored batch's avoidable carbon to its day, which the push
     /// then resends.
     pub(crate) fn record_avoidable(&self, batch: DayCarbon, now_ms: u64) {
@@ -313,10 +413,16 @@ impl DetectionLedger {
     fn count(&self, state: &mut LedgerState, day: u32, signature: &str, io: u64, rev: u64) -> bool {
         let bucket = state.bucket(day, self.sampling_rate);
         if let Some(tally) = bucket.counts.get_mut(signature) {
+            if tally.detections == 0 {
+                bucket.watch_rows -= 1;
+            }
             tally.add(io, rev);
             return true;
         }
-        if bucket.counts.len() >= self.max_signatures_per_day || !is_trackable(signature) {
+        // Watch rows never take a detection slot.
+        if bucket.counts.len() - bucket.watch_rows >= self.max_signatures_per_day
+            || !is_trackable(signature)
+        {
             bucket.overflow.add(io, rev);
             return false;
         }
@@ -479,6 +585,8 @@ impl DetectionLedger {
             signature: signature.to_string(),
             detections: tally.detections,
             extra_io_ops: self.io_tracked.then_some(tally.extra_io_ops),
+            below_threshold_passes: (tally.below_threshold_passes > 0)
+                .then_some(tally.below_threshold_passes),
         }
     }
 
@@ -492,6 +600,7 @@ impl DetectionLedger {
             shed_traces: bucket.shed_traces,
             ingest_rejected: bucket.ingest_rejected,
             sampling_rate: bucket.sampling_rate,
+            thresholds: self.thresholds,
             avoidable_gco2: bucket.avoidable.map(|c| c.gco2_mid),
             avoidable_gco2_low: bucket.avoidable.map(|c| c.gco2_low),
             avoidable_io_ops: bucket.avoidable.map(|c| c.avoidable_io_ops),

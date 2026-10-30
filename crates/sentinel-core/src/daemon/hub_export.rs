@@ -697,6 +697,19 @@ pub(super) async fn post_batch(
     api_key: &str,
     body: Vec<u8>,
 ) -> Result<hyper::StatusCode, String> {
+    post_batch_with_reply(client, uri, api_key, body)
+        .await
+        .map(|(status, _)| status)
+        .map_err(|error| error.to_string())
+}
+
+/// [`post_batch`] with the reply body, for a route whose reply carries data.
+pub(super) async fn post_batch_with_reply(
+    client: &HubClient,
+    uri: &http_client::Uri,
+    api_key: &str,
+    body: Vec<u8>,
+) -> Result<(hyper::StatusCode, Bytes), http_client::FetchError> {
     http_client::fetch_with_body(
         &client.http,
         hyper::Method::POST,
@@ -707,8 +720,6 @@ pub(super) async fn post_batch(
         Bytes::from(body),
     )
     .await
-    .map(|(status, _)| status)
-    .map_err(|error| error.to_string())
 }
 
 pub(super) fn classify(status: hyper::StatusCode) -> ExportOutcome {

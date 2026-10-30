@@ -238,6 +238,7 @@ fn build_detection_ledger(config: &Config) -> Option<Arc<detection_ledger::Detec
             cfg,
             config.green.enabled,
             config.daemon.sampling_rate,
+            detection_ledger::DayThresholds::from(&DetectConfig::from(config)),
             event_loop::current_time_ms(),
         ))
     })

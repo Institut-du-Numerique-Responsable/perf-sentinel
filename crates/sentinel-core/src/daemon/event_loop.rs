@@ -1780,7 +1780,9 @@ async fn process_traces(
         .map(|(trace_id, spans)| Trace { trace_id, spans })
         .collect();
 
-    let mut findings = detect::run_full_detection(&trace_structs, ctx.detect_config);
+    let watch = ctx.detection_ledger.map(DetectionLedger::watch);
+    let (mut findings, passes) =
+        detect::run_full_detection_with_below(&trace_structs, ctx.detect_config, watch.as_deref());
     let now_ms = current_time_ms();
     observe_slow_window(&trace_structs, &mut findings, now_ms, &mut ctx);
 
@@ -1816,6 +1818,7 @@ async fn process_traces(
     // Every scored batch, findings or not, so `total_io_ops` counts the clean ones.
     if let Some(ledger) = ctx.detection_ledger {
         record_carbon_in_ledger(ledger, &green_summary, now_ms);
+        record_below_in_ledger(ledger, &passes, now_ms);
     }
 
     if !findings.is_empty() {
@@ -1926,6 +1929,14 @@ fn record_carbon_in_ledger(ledger: &DetectionLedger, green_summary: &GreenSummar
             total_io_ops: green_summary.total_io_ops as u64,
         };
         ledger.record_avoidable(batch, now_ms);
+    }
+}
+
+/// Adds a batch's below-threshold passes of the watched signatures to the
+/// ledger's day. A no-op until the Hub sends a watch list.
+fn record_below_in_ledger(ledger: &DetectionLedger, passes: &HashMap<Arc<str>, u64>, now_ms: u64) {
+    if !passes.is_empty() {
+        ledger.record_below(passes, now_ms);
     }
 }
 
