@@ -169,10 +169,13 @@ export function expandCompact(c) {
 }
 
 // The keys the page reads, checked after the signature: anyone can sign any JSON with their own key.
+const isIsoDay = (s) => isString(s) && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
 function readableFull(card) {
-  const { period, org, generated_at_ms: at } = card;
+  const { period, org, generated_at_ms: at, before_fix_period: before } = card;
   return isString(card.angle)
-    && isObject(period) && [period.kind, period.from, period.to].every(isString)
+    && isObject(period) && isString(period.kind) && isIsoDay(period.from) && isIsoDay(period.to)
+    && (before === undefined || (isObject(before) && isIsoDay(before.from) && isIsoDay(before.to)))
     && isObject(org) && isString(org.name) && org.name !== ''
     && (org.domain === undefined || isString(org.domain))
     && Number.isSafeInteger(at) && at >= 0 && at <= 8.64e15;

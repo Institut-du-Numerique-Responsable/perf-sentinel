@@ -128,6 +128,15 @@ test('a self-signed payload missing what the page reads is unsupported', async (
   const ok = await open({ ...base, org: { name: 'X' } });
   assert.equal(ok.state, 'ok');
   assert.equal(ok.date, '2026-10-15');
+  const withOrg = { ...base, org: { name: 'X' } };
+  for (const bad of [null, 5, 'x', { from: 5, to: 6 }, { from: 'x', to: '2026-08-31' }, { from: '2026-08-01' }]) {
+    assert.equal((await open({ ...withOrg, before_fix_period: bad })).state, 'unsupported', JSON.stringify(bad));
+  }
+  for (const period of [{ kind: 'month', from: 'x', to: '2026-09-30' }, { kind: 'month', from: '2026-09-01', to: '2026-9-30' }]) {
+    assert.equal((await open({ ...withOrg, period })).state, 'unsupported', JSON.stringify(period));
+  }
+  const good = await open({ ...withOrg, before_fix_period: { from: '2026-08-01', to: '2026-08-31' } });
+  assert.equal(good.state, 'ok');
 });
 
 test('one changed character reads as tampered', async () => {
