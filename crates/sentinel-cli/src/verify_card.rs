@@ -174,8 +174,8 @@ fn integrity_of(target: &str) -> Result<Integrity, CardError> {
     check_integrity(source)
 }
 
-/// The domain's `/.well-known/perf-sentinel-key`, refused unless its
-/// authority is exactly the domain: no userinfo, no port.
+/// The domain's `/.well-known/perf-sentinel-key`, refused unless the domain
+/// is a public host name and the URL's authority is exactly that domain.
 #[cfg(any(feature = "daemon", feature = "tempo", feature = "jaeger-query"))]
 fn well_known_url(domain: &str) -> Result<sentinel_core::http_client::Uri, CardError> {
     let refused = || {
@@ -184,6 +184,9 @@ fn well_known_url(domain: &str) -> Result<sentinel_core::http_client::Uri, CardE
             format!("{domain:?} does not make a well-known URL on that host alone"),
         )
     };
+    if !sentinel_core::report::card::payload::is_public_host_name(domain) {
+        return Err(refused());
+    }
     let uri: sentinel_core::http_client::Uri =
         format!("https://{domain}/.well-known/perf-sentinel-key")
             .parse()
@@ -216,6 +219,10 @@ mod tests {
             "acme.fr:8443",
             "acme.fr/x",
             "acme.fr?x",
+            "acme.fr&x",
+            "Acme.fr",
+            "localhost",
+            "10.0.0.1",
         ] {
             let error = well_known_url(bad).expect_err(bad);
             assert_eq!(error.reason, "malformed_input", "{bad}");

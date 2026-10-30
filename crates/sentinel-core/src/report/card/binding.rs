@@ -186,15 +186,22 @@ pub fn parse_txt_record(data: &str) -> Option<PublishedKey> {
     })
 }
 
+const TXT: u16 = 16;
+const CNAME: u16 = 5;
+/// The longest CNAME chain followed inside one answer.
+const MAX_CNAME_HOPS: usize = 8;
+
 /// Read a DNS-over-HTTPS JSON answer (`application/dns-json`) for the TXT
-/// records of `_perf-sentinel.<domain>`: NXDOMAIN or no `v=ps1` record is
-/// `Absent`, any other failure `Failed`.
+/// records of `name`, the full `_perf-sentinel.<domain>`: NXDOMAIN or no
+/// `v=ps1` record is `Absent`, any other failure `Failed`. An answer that
+/// names another question, or a TXT or CNAME record not linked to `name`
+/// through the answer's own CNAME chain, is `Failed`.
 #[must_use]
-pub fn parse_doh_answer(json: &[u8]) -> Lookup {
+pub fn parse_doh_answer(json: &[u8], name: &str) -> Lookup {
     const NOERROR: u32 = 0;
     const NXDOMAIN: u32 = 3;
-    const TXT: u16 = 16;
     match serde_json::from_slice::<DohAnswer>(json) {
+        Ok(answer) if !answers_for(&answer, name) => Lookup::Failed,
         Ok(answer) if answer.status == NXDOMAIN => Lookup::Absent,
         Ok(answer) if answer.status == NOERROR => {
             let keys: Vec<PublishedKey> = answer
@@ -213,18 +220,62 @@ pub fn parse_doh_answer(json: &[u8]) -> Lookup {
     }
 }
 
+/// Whether every question names `name` and every TXT or CNAME record
+/// names `name` or a CNAME target reached from it.
+fn answers_for(answer: &DohAnswer, name: &str) -> bool {
+    let linked = cname_chain(&answer.answer, name);
+    answer.question.iter().all(|q| names_match(&q.name, name))
+        && answer
+            .answer
+            .iter()
+            .filter(|record| record.kind == TXT || record.kind == CNAME)
+            .all(|record| linked.iter().any(|want| names_match(&record.name, want)))
+}
+
+/// `name`, then each CNAME target the records lead to from it.
+fn cname_chain<'a>(records: &'a [DohRecord], name: &'a str) -> Vec<&'a str> {
+    let mut chain = vec![name];
+    for _ in 0..MAX_CNAME_HOPS {
+        let last = chain[chain.len() - 1];
+        let Some(next) = records
+            .iter()
+            .find(|r| r.kind == CNAME && names_match(&r.name, last))
+        else {
+            break;
+        };
+        chain.push(next.data.strip_suffix('.').unwrap_or(&next.data));
+    }
+    chain
+}
+
+/// Resolvers differ on case and on the trailing dot (Google writes it,
+/// Cloudflare does not).
+fn names_match(got: &str, want: &str) -> bool {
+    got.strip_suffix('.')
+        .unwrap_or(got)
+        .eq_ignore_ascii_case(want)
+}
+
 /// The fields of a DNS-over-HTTPS JSON answer this reads; resolvers add
 /// others.
 #[derive(Deserialize)]
 struct DohAnswer {
     #[serde(rename = "Status")]
     status: u32,
+    #[serde(rename = "Question", default)]
+    question: Vec<DohName>,
     #[serde(rename = "Answer", default)]
     answer: Vec<DohRecord>,
 }
 
 #[derive(Deserialize)]
+struct DohName {
+    name: String,
+}
+
+#[derive(Deserialize)]
 struct DohRecord {
+    name: String,
     #[serde(rename = "type")]
     kind: u16,
     data: String,
@@ -298,6 +349,7 @@ mod tests {
     use super::*;
 
     const FP: &str = "ps1:AAAAAAAAAAAAAAAAAAAAAA";
+    const ACME: &str = "_perf-sentinel.acme.fr";
     const PK: &str = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
     /// 2026-10-01, the day the fixtures are generated.
     const SIGNED: u32 = 20727;
@@ -516,11 +568,12 @@ mod tests {
 
     #[test]
     fn doh_answers_tell_absent_from_found() {
-        assert_eq!(parse_doh_answer(br#"{"Status":3}"#), Lookup::Absent);
-        assert_eq!(parse_doh_answer(br#"{"Status":0}"#), Lookup::Absent);
+        assert_eq!(parse_doh_answer(br#"{"Status":3}"#, ACME), Lookup::Absent);
+        assert_eq!(parse_doh_answer(br#"{"Status":0}"#, ACME), Lookup::Absent);
         assert_eq!(
             parse_doh_answer(
-                br#"{"Status":0,"Answer":[{"name":"_perf-sentinel.acme.fr","type":16,"TTL":300,"data":"\"v=spf1 -all\""}]}"#
+                br#"{"Status":0,"Answer":[{"name":"_perf-sentinel.acme.fr","type":16,"TTL":300,"data":"\"v=spf1 -all\""}]}"#,
+                ACME
             ),
             Lookup::Absent
         );
@@ -530,6 +583,7 @@ mod tests {
                 {"name":"_perf-sentinel.acme.fr","type":16,"TTL":300,"data":"\"v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-30\""},
                 {"name":"_perf-sentinel.acme.fr","type":16,"TTL":300,"data":"\"v=spf1 -all\""}
             ]}"#,
+            ACME,
         );
         assert_eq!(found, Lookup::Found(vec![key("2026-10-30", None, None)]));
         for failed in [
@@ -539,12 +593,73 @@ mod tests {
             br#"{"Status":0,"Answer":{}}"#,
         ] {
             assert_eq!(
-                parse_doh_answer(failed),
+                parse_doh_answer(failed, ACME),
                 Lookup::Failed,
                 "{}",
                 String::from_utf8_lossy(failed)
             );
         }
+    }
+
+    #[test]
+    fn doh_answer_names_ignore_case_and_one_trailing_dot() {
+        let answer = |question: &str, records: &str| {
+            let json = format!(
+                r#"{{"Status":0,"Question":[{{"name":"{question}","type":16}}],"Answer":[{records}]}}"#
+            );
+            parse_doh_answer(json.as_bytes(), ACME)
+        };
+        let txt = |name: &str| {
+            format!(
+                r#"{{"name":"{name}","type":16,"TTL":300,"data":"\"v=ps1; k={FP}; from=2026-10-30\""}}"#
+            )
+        };
+        let cname = |name: &str, target: &str| {
+            format!(r#"{{"name":"{name}","type":5,"TTL":300,"data":"{target}"}}"#)
+        };
+        let found = Lookup::Found(vec![key("2026-10-30", None, None)]);
+        let upper = "_PERF-Sentinel.Acme.FR.";
+        assert_eq!(answer(upper, &txt(upper)), found);
+        for name in ["_perf-sentinel.acme.fr..", "x_perf-sentinel.acme.fr"] {
+            assert_eq!(answer(ACME, &txt(name)), Lookup::Failed, "{name}");
+        }
+        let nameless =
+            format!(r#"{{"type":16,"TTL":300,"data":"v=ps1; k={FP}; from=2026-10-30"}}"#);
+        assert_eq!(answer(ACME, &nameless), Lookup::Failed);
+
+        // A TXT reached through CNAME records of the same answer is linked
+        // to the query name, up to 8 hops.
+        let chained = format!(
+            "{},{},{}",
+            cname(ACME, "target.example.net."),
+            cname("Target.Example.Net.", "keys.example.org"),
+            txt("keys.example.org.")
+        );
+        assert_eq!(answer(ACME, &chained), found);
+        let unlinked = format!(
+            "{},{}",
+            cname(ACME, "target.example.net."),
+            txt("other.example.net.")
+        );
+        assert_eq!(answer(ACME, &unlinked), Lookup::Failed);
+        let stray = format!("{},{}", txt(ACME), cname("evil.example.", ACME));
+        assert_eq!(answer(ACME, &stray), Lookup::Failed);
+        let hops = |n: usize| {
+            let mut records: Vec<String> = (0..n)
+                .map(|i| {
+                    let from = if i == 0 {
+                        ACME.to_owned()
+                    } else {
+                        format!("h{i}.example.net")
+                    };
+                    cname(&from, &format!("h{}.example.net.", i + 1))
+                })
+                .collect();
+            records.push(txt(&format!("h{n}.example.net.")));
+            records.join(",")
+        };
+        assert_eq!(answer(ACME, &hops(8)), found);
+        assert_eq!(answer(ACME, &hops(9)), Lookup::Failed);
     }
 
     #[test]

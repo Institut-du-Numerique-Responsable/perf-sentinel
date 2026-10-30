@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use super::binding::{Lookup, parse_doh_answer, parse_key_list};
+use super::payload::is_public_host_name;
 use crate::http_client::{FetchError, HttpClient, Uri, fetch_get_with_headers};
 use crate::ingest::auth_header::AuthHeader;
 
@@ -15,10 +16,15 @@ const MAX_ANSWER_BYTES: usize = 64 * 1024;
 const USER_AGENT: &str = concat!("perf-sentinel/", env!("CARGO_PKG_VERSION"));
 
 /// The TXT records of `_perf-sentinel.<domain>`, asked of the
-/// DNS-over-HTTPS JSON service at `doh`.
+/// DNS-over-HTTPS JSON service at `doh`. A domain that is not a public host
+/// name is `Failed` before any request.
 pub async fn lookup_txt(client: &HttpClient, doh: &Uri, domain: &str) -> Lookup {
+    if !is_public_host_name(domain) {
+        return Lookup::Failed;
+    }
+    let name = format!("_perf-sentinel.{domain}");
     let separator = if doh.query().is_some() { '&' } else { '?' };
-    let query = format!("{doh}{separator}name=_perf-sentinel.{domain}&type=TXT");
+    let query = format!("{doh}{separator}name={name}&type=TXT");
     let (Ok(uri), Ok(accept)) = (
         query.parse::<Uri>(),
         AuthHeader::parse("Accept: application/dns-json"),
@@ -35,7 +41,7 @@ pub async fn lookup_txt(client: &HttpClient, doh: &Uri, domain: &str) -> Lookup 
     )
     .await
     {
-        Ok(body) => parse_doh_answer(&body),
+        Ok(body) => parse_doh_answer(&body, &name),
         Err(_) => Lookup::Failed,
     }
 }
@@ -118,6 +124,57 @@ mod tests {
             head.contains("\r\naccept: application/dns-json\r\n"),
             "{head}"
         );
+    }
+
+    #[tokio::test]
+    async fn lookup_txt_refuses_a_domain_that_is_not_a_host_name() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let doh: Uri = format!("http://{}/dns-query", listener.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        for bad in [
+            "acme.fr&name=_perf-sentinel.evil.com",
+            "acme.fr/x",
+            "Acme.fr",
+            "localhost",
+        ] {
+            assert_eq!(
+                lookup_txt(&build_client(), &doh, bad).await,
+                Lookup::Failed,
+                "{bad}"
+            );
+        }
+        // A connection made and closed would still wait in the backlog.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn doh_answer_for_another_name_is_a_failure() {
+        let key = r#""data":"\"v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-30\"""#;
+        for body in [
+            format!(
+                r#"{{"Status":0,"Question":[{{"name":"_perf-sentinel.evil.com","type":16}}],"Answer":[{{"name":"_perf-sentinel.evil.com","type":16,"TTL":300,{key}}}]}}"#
+            ),
+            format!(
+                r#"{{"Status":0,"Question":[{{"name":"_perf-sentinel.acme.fr","type":16}}],"Answer":[{{"name":"_perf-sentinel.evil.com","type":16,"TTL":300,{key}}}]}}"#
+            ),
+            String::from(
+                r#"{"Status":3,"Question":[{"name":"_perf-sentinel.evil.com.","type":16}]}"#,
+            ),
+        ] {
+            let (base, server) = serve_once(response("200 OK", "", body.as_bytes())).await;
+            let doh: Uri = format!("{base}/dns-query").parse().unwrap();
+            assert_eq!(
+                lookup_txt(&build_client(), &doh, "acme.fr").await,
+                Lookup::Failed,
+                "{body}"
+            );
+            server.await.unwrap();
+        }
     }
 
     #[tokio::test]

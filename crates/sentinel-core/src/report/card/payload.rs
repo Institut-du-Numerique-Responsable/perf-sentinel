@@ -838,7 +838,8 @@ fn check_texts(card: &Card<'_>) -> Result<(), CardError> {
 /// A public DNS name: lowercase ASCII, at most 253, at least two labels of 1
 /// to 63 `[a-z0-9-]` with no edge hyphen, the last one not all digits (no IP
 /// literal, no `localhost`, no user, path, query or port).
-fn check_domain(domain: &str) -> Result<(), CardError> {
+#[must_use]
+pub fn is_public_host_name(domain: &str) -> bool {
     let labels: Vec<&str> = domain.split('.').collect();
     let label_ok = |label: &&str| {
         (1..=63).contains(&label.len())
@@ -851,7 +852,11 @@ fn check_domain(domain: &str) -> Result<(), CardError> {
     let numeric_tld = labels
         .last()
         .is_some_and(|tld| tld.bytes().all(|b| b.is_ascii_digit()));
-    if domain.len() <= 253 && labels.len() >= 2 && labels.iter().all(label_ok) && !numeric_tld {
+    domain.len() <= 253 && labels.len() >= 2 && labels.iter().all(label_ok) && !numeric_tld
+}
+
+fn check_domain(domain: &str) -> Result<(), CardError> {
+    if is_public_host_name(domain) {
         Ok(())
     } else {
         Err(malformed(format!("{domain:?} is not a public host name")))
@@ -1387,14 +1392,17 @@ mod tests {
             "-acme.fr",
             "acme.fr@evil.example",
             "evil.example/x?",
+            "acme.fr&name=_perf-sentinel.evil.com",
         ] {
             assert_eq!(
                 reason(&with(story(), "/org/domain", json!(domain))),
                 "malformed_input",
                 "{domain}"
             );
+            assert!(!is_public_host_name(domain), "{domain}");
         }
         accepted(&with(story(), "/org/domain", json!("cards.acme.fr")));
+        assert!(is_public_host_name("cards.acme.fr"));
     }
 
     #[test]
