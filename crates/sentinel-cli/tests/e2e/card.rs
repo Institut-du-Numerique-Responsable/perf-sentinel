@@ -395,6 +395,34 @@ fn verify_card_on_the_compact_url_is_ok() {
     );
 }
 
+#[test]
+fn verify_card_on_a_url_with_one_payload_character_flipped_is_tampered() {
+    let (_dir, _, _, url) = rendered_png(&story_input());
+    let (prefix, fragment) = url.split_once("#c=").expect("fragment");
+    let (compact, signature) = fragment.rsplit_once('.').expect("signature");
+    // The raw edit, no decode and re-encode: an unreadable payload is a
+    // tamper, not an input error.
+    for at in [2, 5, 9, 20, 40] {
+        let mut bytes = compact.as_bytes().to_vec();
+        bytes[at] = if bytes[at] == b'A' { b'B' } else { b'A' };
+        let flipped = format!(
+            "{prefix}#c={}.{signature}",
+            String::from_utf8(bytes).expect("ascii")
+        );
+        assert_line(
+            &verify(&[&flipped]),
+            1,
+            &serde_json::json!({
+                "integrity": "tampered",
+                "level": 1,
+                "domain": null,
+                "key": "unknown",
+                "reason": "signature_invalid",
+            }),
+        );
+    }
+}
+
 /// `png` without its text chunks, every other chunk kept as it was.
 fn without_text_chunks(png: &[u8]) -> Vec<u8> {
     let mut out = png[..8].to_vec();
