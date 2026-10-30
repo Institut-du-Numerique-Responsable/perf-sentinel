@@ -5,13 +5,16 @@
 //! `cargo bench -p perf-sentinel-core -- --save-baseline main` before a
 //! change and `-- --baseline main` after.
 
+use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+use sentinel_core::acknowledgments;
 use sentinel_core::config::Config;
 use sentinel_core::correlate::{self, Trace};
-use sentinel_core::detect::{self, DetectConfig};
+use sentinel_core::detect::below_threshold::WatchIndex;
+use sentinel_core::detect::{self, DetectConfig, FindingType};
 use sentinel_core::event::SpanEvent;
 use sentinel_core::normalize;
 use sentinel_core::pipeline;
@@ -139,6 +142,117 @@ fn bench_detectors(c: &mut Criterion) {
         group.throughput(Throughput::Elements(spans as u64));
         group.bench_function(format!("{pattern}_1k_traces"), |b| {
             b.iter(|| black_box(detect::run_full_detection(black_box(&traces), &config)));
+        });
+    }
+    group.finish();
+}
+
+/// Every thresholded signature the corpus can produce, grouped by kind.
+/// Thresholds at their floor make each detector fire on its first case,
+/// so the harvest holds signatures that the default config passes below.
+fn harvest_signatures(traces: &[Trace]) -> BTreeMap<FindingType, Vec<String>> {
+    let config = DetectConfig {
+        slow_threshold_ms: 1,
+        slow_min_occurrences: 1,
+        max_fanout: 1,
+        chatty_service_min_calls: 1,
+        pool_saturation_concurrent_threshold: 2,
+        serialized_min_sequential: 2,
+        ..DetectConfig::from(&Config::default())
+    };
+    let mut findings = detect::run_full_detection(traces, &config);
+    acknowledgments::enrich_with_signatures(&mut findings);
+    let mut signatures: Vec<(FindingType, String)> = findings
+        .into_iter()
+        .filter(|f| f.finding_type.is_thresholded())
+        .map(|f| (f.finding_type, f.signature))
+        .collect();
+    signatures.sort();
+    signatures.dedup();
+    let mut by_kind: BTreeMap<FindingType, Vec<String>> = BTreeMap::new();
+    for (kind, signature) in signatures {
+        by_kind.entry(kind).or_default().push(signature);
+    }
+    by_kind
+}
+
+/// Up to `n` signatures taken one kind at a time, so a small list still
+/// spans several kinds instead of the first kind in sorted order.
+fn round_robin<'a>(groups: impl IntoIterator<Item = &'a Vec<String>>, n: usize) -> Vec<&'a str> {
+    let groups: Vec<&Vec<String>> = groups.into_iter().collect();
+    let mut picked = Vec::with_capacity(n);
+    for i in 0.. {
+        let before = picked.len();
+        for group in &groups {
+            if picked.len() == n {
+                return picked;
+            }
+            if let Some(signature) = group.get(i) {
+                picked.push(signature.as_str());
+            }
+        }
+        if picked.len() == before {
+            break;
+        }
+    }
+    picked
+}
+
+/// Detection with a watch list next to detection without, on the same
+/// 10k-event corpus: each `watch_*` run is detection plus the daemon's
+/// below-threshold counting. The budget is `watch_10` and `watch_slow_only`
+/// at no more than 5 % over `detect_baseline`, and `watch_0` within noise
+/// of it.
+///
+/// Run with `cargo bench -p perf-sentinel-core --bench pipeline --
+/// below_threshold`. The detectors' own regression check is
+/// `-- '^detect/' --save-baseline main` before a change and
+/// `-- '^detect/' --baseline main` after (`^detect/` keeps
+/// `below_threshold/detect_baseline`, which has no `main` baseline, out of
+/// the filter).
+fn bench_below_threshold(c: &mut Criterion) {
+    let traces = traces_for(10_000);
+    let config = DetectConfig::from(&Config::default());
+    let harvested = harvest_signatures(&traces);
+    let watch_10 = WatchIndex::from_signatures(round_robin(harvested.values(), 10), 10);
+    assert!(
+        watch_10.watches(&FindingType::SlowSql),
+        "watch_10 lacks slow_sql"
+    );
+    let kinds = harvested
+        .keys()
+        .filter(|kind| watch_10.watches(kind))
+        .count();
+    assert!(
+        kinds >= 2,
+        "watch_10 spans {kinds} kind(s), expected at least 2"
+    );
+    let slow = [FindingType::SlowSql, FindingType::SlowHttp];
+    let watch_slow_only = WatchIndex::from_signatures(
+        round_robin(slow.iter().filter_map(|k| harvested.get(k)), 10),
+        10,
+    );
+    let watch_all =
+        WatchIndex::from_signatures(harvested.values().flatten().map(String::as_str), 10_000);
+
+    let mut group = c.benchmark_group("below_threshold");
+    group.bench_function("detect_baseline", |b| {
+        b.iter(|| black_box(detect::run_full_detection(black_box(&traces), &config)));
+    });
+    for (name, watch) in [
+        ("watch_0", &WatchIndex::default()),
+        ("watch_10", &watch_10),
+        ("watch_slow_only", &watch_slow_only),
+        ("watch_all", &watch_all),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(detect::run_full_detection_with_below(
+                    black_box(&traces),
+                    &config,
+                    Some(watch),
+                ))
+            });
         });
     }
     group.finish();
@@ -288,6 +402,7 @@ criterion_group!(
     bench_normalize_all,
     bench_correlate,
     bench_detectors,
+    bench_below_threshold,
     bench_score_green,
     bench_score_green_findings,
     bench_score_green_findings_mixed,

@@ -357,6 +357,8 @@ Since 0.37.0 the daemon counts how many times it detected each finding signature
 
 **What `below_threshold_passes` covers.** It counts the runs of a watched signature that stayed under its threshold, and it can miss some. A fanout signature built on the dominant child template matches only part of its parents. A serialized parent outside the trace is skipped. The watch list is lost on a daemon restart until the next push reply, and a daemon the Hub only polls gets no list. A cross-trace slow finding takes its service and endpoint from its worst span, so the same template under another endpoint is not counted. All of these give missed passes, never false ones.
 
+**What counting passes costs.** The daemon counts passes only while the Hub's watch list holds signatures, that is while a thresholded fix awaits confirmation. An empty list costs nothing. On the 10k-event synthetic bench corpus, detection takes 5.9 to 6.6 % longer with ten watched signatures across kinds, 5.4 to 6.3 % with ten slow ones, and about 35 % longer with every thresholded signature of the corpus watched. Most of it is the check of each trace's service and endpoint against the list, which every trace pays.
+
 ## Field length limits at ingestion
 
 All ingestion boundaries (OTLP, JSON, Jaeger, Zipkin) truncate string fields to prevent unbounded memory growth from oversized attributes. Limits: `service` 256 bytes, `operation` 256 bytes, `target` 64 KB, `source.endpoint` 512 bytes, `source.method` 512 bytes, `timestamp` 64 bytes, `trace_id`/`span_id` 128 bytes. Truncation preserves UTF-8 char boundaries. Fields within the limit are untouched (zero-copy fast path).
