@@ -1,7 +1,11 @@
 //! Share cards: the signed payloads a card carries, its keys, and their
 //! rendering. Contract C2/C3 in `docs/SHARE-CARD.md`.
 
+#[cfg_attr(not(test), expect(dead_code, reason = "called by render_card, Task 8"))]
+mod copy;
 pub mod keys;
+#[cfg_attr(not(test), expect(dead_code, reason = "called by render_card, Task 8"))]
+mod layout;
 pub mod payload;
 #[cfg(test)]
 mod test_fixtures;

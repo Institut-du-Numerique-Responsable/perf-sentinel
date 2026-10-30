@@ -1,6 +1,10 @@
 //! The three `card.json` fixtures every card test starts from, shaped per
 //! finding type.
 
+use super::keys::{b64url_encode, compact_url};
+use super::payload::{
+    CompactPayload, FullPayload, build_payloads, canonical_bytes, parse_card_input,
+};
 use crate::detect::FindingType;
 use serde_json::{Value, json};
 
@@ -68,4 +72,29 @@ pub(crate) fn collective_input() -> Value {
     fixture(include_str!(
         "../../../../../tests/fixtures/card/collective.json"
     ))
+}
+
+/// The full payload `build_payloads` makes of `input`, under a dummy key.
+pub(crate) fn full_payload(input: &Value) -> FullPayload {
+    payloads(input).0
+}
+
+/// The verify URL of `input`'s compact payload, with a dummy signature of
+/// the real length.
+pub(crate) fn compact_url_of(input: &Value) -> String {
+    compact_url(
+        &canonical_bytes(&payloads(input).1),
+        &b64url_encode(&[9u8; 64]),
+    )
+}
+
+fn payloads(input: &Value) -> (FullPayload, CompactPayload) {
+    let bytes = serde_json::to_vec(input).expect("fixture serializes");
+    let input = parse_card_input(&bytes).expect("fixture is accepted");
+    build_payloads(
+        &input,
+        &b64url_encode(&[7u8; 32]),
+        "ps1:AAAAAAAAAAAAAAAAAAAAAA",
+    )
+    .expect("fixture builds")
 }
