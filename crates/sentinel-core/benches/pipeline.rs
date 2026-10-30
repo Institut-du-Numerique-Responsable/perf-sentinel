@@ -200,9 +200,9 @@ fn round_robin<'a>(groups: impl IntoIterator<Item = &'a Vec<String>>, n: usize) 
 
 /// Detection with a watch list next to detection without, on the same
 /// 10k-event corpus: each `watch_*` run is detection plus the daemon's
-/// below-threshold counting. The budget is `watch_10` and `watch_slow_only`
-/// at no more than 5 % over `detect_baseline`, and `watch_0` within noise
-/// of it.
+/// below-threshold counting. `watch_0` stays within noise of
+/// `detect_baseline`. `watch_10` and `watch_slow_only` measured about 6 %
+/// over it, the overhead `docs/LIMITATIONS.md` records as accepted.
 ///
 /// Run with `cargo bench -p perf-sentinel-core --bench pipeline --
 /// below_threshold`. The detectors' own regression check is
