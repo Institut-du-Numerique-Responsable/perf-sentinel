@@ -248,7 +248,7 @@ The story fixture's compact payload:
 
 - **Canonical bytes.** A payload is signed as JSON with its keys sorted at every depth, no whitespace, strings in UTF-8 as written (only `"`, `\` and control characters are escaped, and texts hold no control character). A verifier checks the signature over the bytes the card carries and never re-serializes them.
 - **Strict base64url.** The alphabet `A-Z a-z 0-9 - _`, no padding, a length that is not 1 modulo 4, and trailing bits at zero, so one changed character never decodes to the same bytes.
-- **Fingerprint.** `ps1:` then the base64url of the first 16 bytes of the SHA-256 of the raw 32-byte public key: 26 characters.
+- **Fingerprint.** `ps1:` then the base64url of the first 16 bytes of the SHA-256 of the raw 32-byte public key: 22 characters after `ps1:`, 26 in all.
 - **Integers only.** Every number is an integer from 0 to 2^53 − 1, the unit in the key's name (`_ug`, `_ops`, `_ms`, `_permille`, `_count`, `_days`). A float, a negative number or a larger integer is `malformed_input`.
 - **Signature.** Ed25519 (RFC 8032) over the canonical bytes. It is deterministic: one payload and one key give one signature.
 

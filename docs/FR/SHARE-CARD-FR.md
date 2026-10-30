@@ -248,7 +248,7 @@ La charge utile compacte de la fixture d'histoire :
 
 - **Octets canoniques.** Une charge utile se signe en JSON, clés triées à chaque niveau, sans espaces, chaînes en UTF-8 telles qu'écrites (seuls `"`, `\` et les caractères de contrôle sont échappés, et les textes n'en contiennent aucun). Un vérificateur vérifie la signature sur les octets que porte la carte et ne les resérialise jamais.
 - **base64url strict.** L'alphabet `A-Z a-z 0-9 - _`, sans remplissage, une longueur qui ne vaut pas 1 modulo 4, et des bits de fin à zéro, pour qu'un seul caractère modifié ne décode jamais vers les mêmes octets.
-- **Empreinte.** `ps1:` puis le base64url des 16 premiers octets du SHA-256 de la clé publique brute de 32 octets : 26 caractères.
+- **Empreinte.** `ps1:` puis le base64url des 16 premiers octets du SHA-256 de la clé publique brute de 32 octets : 22 caractères après `ps1:`, 26 en tout.
 - **Entiers seulement.** Chaque nombre est un entier de 0 à 2^53 − 1, l'unité dans le nom de la clé (`_ug`, `_ops`, `_ms`, `_permille`, `_count`, `_days`). Un flottant, un nombre négatif ou un entier plus grand donne `malformed_input`.
 - **Signature.** Ed25519 (RFC 8032) sur les octets canoniques. Elle est déterministe : une charge utile et une clé donnent une seule signature.
 
