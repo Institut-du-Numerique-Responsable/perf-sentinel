@@ -5,7 +5,7 @@
 use fast_qr::{ECL, QRBuilder};
 
 use super::copy::{
-    RENDERED_LANGS, co2_parts, collective_captions, collective_lines, confirmation,
+    RENDERED_LANGS, brand_split, co2_parts, collective_captions, collective_lines, confirmation,
     curve_bar_labels, curve_comparison, curve_lines, equivalence_lines, family_label,
     format_permille, generated_line, header_period, org_line, scope_line, story_fact,
     story_sentence, why_it_matters, words,
@@ -29,6 +29,11 @@ pub(crate) const QR_PAGE_MODULE_PX: f32 = 8.0;
 /// The deep green of DESIGN.md, for the hero figures.
 pub(crate) const BRAND_DEEP: Rgb = (0x0b, 0x52, 0x3a);
 pub(crate) const PROOF_BAND_PX: f32 = 312.0;
+/// Top of a brand name's underline below the baseline, as a share of the
+/// size: DM Sans `post.underlinePosition`, -100 of 1000 units.
+pub(crate) const UNDERLINE_OFFSET_EM: f32 = 0.1;
+/// Thicker than the font's 50 units, so the line survives a phone feed.
+pub(crate) const UNDERLINE_PX: f32 = 2.0;
 
 const WHITE: Rgb = (0xff, 0xff, 0xff);
 const MARGIN: f32 = 80.0;
@@ -279,8 +284,9 @@ fn filled(x: f32, y: f32, w: f32, h: f32, radius: f32, color: Rgb) -> Op {
     }
 }
 
-/// One run of a paragraph: its face, colour and words.
-type Run<'a> = (Face, Rgb, &'a str);
+/// One run of a paragraph: its face, colour and words, and whether it is a
+/// brand name, kept on one line and underlined.
+type Run<'a> = (Face, Rgb, &'a str, bool);
 
 impl Block {
     fn new(x: f32, width: f32) -> Self {
@@ -297,7 +303,7 @@ impl Block {
     }
 
     fn para(&mut self, face: Face, size: f32, line: f32, color: Rgb, text: &str) {
-        self.runs(&[(face, color, text)], size, line);
+        self.runs(&[(face, color, text, false)], size, line);
     }
 
     /// A paragraph of runs wrapped greedily on spaces; runs not separated
@@ -305,9 +311,14 @@ impl Block {
     fn runs(&mut self, runs: &[Run<'_>], size: f32, line: f32) {
         for row in wrap_runs(runs, size, self.width) {
             let y = baseline(self.y, line, size);
-            for (x, face, color, text) in row {
-                self.ops
-                    .push(text_op(self.x + x, y, face, size, color, &text));
+            for (x, face, color, text, name) in row {
+                let x = self.x + x;
+                self.ops.push(text_op(x, y, face, size, color, &text));
+                if name {
+                    let w = text_width(face, size, &text);
+                    let top = y + UNDERLINE_OFFSET_EM * size;
+                    self.ops.push(filled(x, top, w, UNDERLINE_PX, 0.0, color));
+                }
             }
             self.y += line;
         }
@@ -333,8 +344,8 @@ impl Block {
     }
 }
 
-/// Lines of `(x, face, colour, text)` segments.
-type Row = Vec<(f32, Face, Rgb, String)>;
+/// Lines of `(x, face, colour, text, brand name)` segments.
+type Row = Vec<(f32, Face, Rgb, String, bool)>;
 
 /// A word: the styled pieces between two spaces.
 type Word<'a> = Vec<Run<'a>>;
@@ -343,13 +354,13 @@ fn wrap_runs(runs: &[Run<'_>], size: f32, width: f32) -> Vec<Row> {
     place_words(&glue_words(runs), size, width)
 }
 
-/// Splits the runs on spaces; pieces not separated by a space, even across
-/// two runs, stay in one word.
+/// Splits the runs on spaces, a brand name staying whole; pieces not
+/// separated by a space, even across two runs, stay in one word.
 fn glue_words<'a>(runs: &[Run<'a>]) -> Vec<Word<'a>> {
     let mut words: Vec<Word<'a>> = Vec::new();
     let mut open = false;
-    for &(face, color, text) in runs {
-        for (i, part) in text.split(' ').enumerate() {
+    for &(face, color, text, name) in runs {
+        for (i, part) in text.split(|c| c == ' ' && !name).enumerate() {
             if i > 0 {
                 open = false;
             }
@@ -357,8 +368,8 @@ fn glue_words<'a>(runs: &[Run<'a>]) -> Vec<Word<'a>> {
                 continue;
             }
             match words.last_mut() {
-                Some(word) if open => word.push((face, color, part)),
-                _ => words.push(vec![(face, color, part)]),
+                Some(word) if open => word.push((face, color, part, name)),
+                _ => words.push(vec![(face, color, part, name)]),
             }
             open = true;
         }
@@ -375,7 +386,7 @@ fn place_words(words: &[Word<'_>], size: f32, width: f32) -> Vec<Row> {
     for word in words {
         let w: f32 = word
             .iter()
-            .map(|&(face, _, text)| text_width(face, size, text))
+            .map(|&(face, _, text, _)| text_width(face, size, text))
             .sum();
         if !row.is_empty() && x + space + w > width {
             rows.push(std::mem::take(&mut row));
@@ -394,16 +405,19 @@ fn place_words(words: &[Word<'_>], size: f32, width: f32) -> Vec<Row> {
 }
 
 /// Appends `piece` to the row, merged into the last segment when both share
-/// their style; `space` is the gap before it, if any.
-fn push_piece(row: &mut Row, x: f32, space: Option<f32>, (face, color, text): Run<'_>) {
+/// their style and neither is a brand name; `space` is the gap before it,
+/// if any.
+fn push_piece(row: &mut Row, x: f32, space: Option<f32>, (face, color, text, name): Run<'_>) {
     match row.last_mut() {
-        Some((_, last_face, last_color, last)) if *last_face == face && *last_color == color => {
+        Some((_, last_face, last_color, last, false))
+            if !name && *last_face == face && *last_color == color =>
+        {
             if space.is_some() {
                 last.push(' ');
             }
             last.push_str(text);
         }
-        _ => row.push((x + space.unwrap_or(0.0), face, color, text.to_owned())),
+        _ => row.push((x + space.unwrap_or(0.0), face, color, text.to_owned(), name)),
     }
 }
 
@@ -581,9 +595,9 @@ fn co2_block(b: &mut Block, payload: &FullPayload, s: &Co2Sizes) {
     let rest = format!(" {rest}");
     b.runs(
         &[
-            (Face::Regular, TEXT, &lead),
-            (Face::Bold, TEXT, &figure),
-            (Face::Regular, TEXT, &rest),
+            (Face::Regular, TEXT, &lead, false),
+            (Face::Bold, TEXT, &figure, false),
+            (Face::Regular, TEXT, &rest, false),
         ],
         s.text,
         s.line,
@@ -905,8 +919,8 @@ fn curve_image(payload: &FullPayload, hero_size: f32) -> Block {
     b.gap(10.0);
     b.runs(
         &[
-            (Face::Bold, TEXT, &current),
-            (Face::Regular, TEXT_2, &previous),
+            (Face::Bold, TEXT, &current, false),
+            (Face::Regular, TEXT_2, &previous, false),
         ],
         34.0,
         44.0,
@@ -963,8 +977,8 @@ fn collective_sentence(b: &mut Block, payload: &FullPayload, size: f32, line: f3
             let against = format!(" {against}");
             b.runs(
                 &[
-                    (Face::Regular, TEXT, sentence),
-                    (Face::Regular, TEXT_2, &against),
+                    (Face::Regular, TEXT, sentence, false),
+                    (Face::Regular, TEXT_2, &against, false),
                 ],
                 size,
                 line,
@@ -998,11 +1012,27 @@ fn proof_band(ops: &mut Vec<Op>, payload: &FullPayload, modules: &[Vec<bool>]) {
     let mut b = Block::new(MARGIN, HEADER_WIDTH.min(tile_x - 24.0 - MARGIN));
     b.para(Face::Bold, 21.0, 29.0, TEXT, &org_line(payload));
     b.para(Face::Regular, 21.0, 29.0, TEXT_2, &generated_line(payload));
-    b.para(Face::Regular, 21.0, 29.0, TEXT_2, w.measured_with);
+    mention(&mut b, payload.lang, 21.0, 29.0);
     b.gap(18.0);
     b.para(Face::Regular, 24.0, 32.0, TEXT, w.verify);
     b.para(Face::Bold, 32.0, 40.0, BRAND_TEXT, w.verify_url);
     place(ops, b, (band_top, band_top + PROOF_BAND_PX));
+}
+
+/// "Measured with Perf Sentinel, …": the two brand names in bold,
+/// underlined, in the brand green, the rest in the grey of the band.
+fn mention(b: &mut Block, lang: Lang, size: f32, line: f32) {
+    let runs: Vec<Run<'_>> = brand_split(words(lang).measured_with)
+        .into_iter()
+        .map(|(name, text)| {
+            if name {
+                (Face::Bold, BRAND_TEXT, text, true)
+            } else {
+                (Face::Regular, TEXT_2, text, false)
+            }
+        })
+        .collect();
+    b.runs(&runs, size, line);
 }
 
 /// Side of a QR tile: the code and its quiet zone.
@@ -1264,7 +1294,7 @@ fn proof_page_with(payload: &FullPayload, modules: &[Vec<bool>], spacing: f32) -
     b.para(Face::Regular, 24.0, 32.0, TEXT, &org_line(payload));
     b.gap(10.0 * spacing);
     b.para(Face::Regular, 24.0, 33.0, TEXT_2, &generated_line(payload));
-    b.para(Face::Regular, 24.0, 33.0, TEXT_2, w.measured_with);
+    mention(&mut b, payload.lang, 24.0, 33.0);
     b.gap(14.0 * spacing);
     method_link(&mut b, payload);
     ops.extend(shifted(b.ops, top));
@@ -1343,8 +1373,8 @@ mod tests {
     use super::*;
     use crate::detect::FindingType;
     use crate::report::card::copy::{
-        RENDERED_LANGS, co2_line, collective_lines, equivalence_lines, org_line, scope_line,
-        story_fact, why_it_matters,
+        BRAND_NAMES, RENDERED_LANGS, co2_line, collective_lines, equivalence_lines, org_line,
+        scope_line, story_fact, why_it_matters,
     };
     use crate::report::card::test_fixtures::{
         collective_input, compact_url_of, curve_input, full_payload, story_input,
@@ -1930,5 +1960,150 @@ mod tests {
                 format!("{:?}", image(&input))
             );
         }
+    }
+
+    /// The mention's size on the image's proof band and on carousel page 4,
+    /// with the page.
+    fn mention_pages(input: &Value) -> [(Vec<Op>, f32); 2] {
+        [(image(input), 21.0), (carousel(input).swap_remove(3), 24.0)]
+    }
+
+    /// The mention's ops in drawing order, from its first word to the
+    /// underline of its last name, if any.
+    fn mention_ops(page: &[Op], lang: Lang, size: f32) -> &[Op] {
+        let first = match lang {
+            Lang::En => "Measured",
+            Lang::Fr => "Mesuré",
+        };
+        let in_mention = |op: &Op, wanted: &dyn Fn(&str) -> bool| matches!(op, Op::Text { size: s, text, .. } if same(*s, size) && wanted(text));
+        let start = page
+            .iter()
+            .position(|op| in_mention(op, &|text| text.starts_with(first)))
+            .expect("the mention is drawn");
+        let last = page
+            .iter()
+            .rposition(|op| in_mention(op, &|text| text.contains("Responsable")))
+            .expect("the institute is drawn");
+        let end = match page.get(last + 1) {
+            Some(Op::Box { .. }) => last + 2,
+            _ => last + 1,
+        };
+        &page[start..end]
+    }
+
+    fn is_underline(op: &Op) -> bool {
+        matches!(op, Op::Box { fill: Some(c), h, .. } if *c == BRAND_TEXT && same(*h, UNDERLINE_PX))
+    }
+
+    #[test]
+    fn the_mention_sets_the_two_names_bold_underlined_in_brand_green() {
+        for lang in LANGS {
+            for (page, size) in mention_pages(&in_lang(story(), lang)) {
+                let ops = mention_ops(&page, lang, size);
+                let mut names = Vec::new();
+                for (i, op) in ops.iter().enumerate() {
+                    let Op::Text {
+                        x,
+                        y,
+                        face,
+                        size: s,
+                        color,
+                        text,
+                    } = op
+                    else {
+                        continue;
+                    };
+                    assert!(same(*s, size), "{text}");
+                    if !BRAND_NAMES.contains(&text.as_str()) {
+                        assert_eq!((*face, *color), (Face::Regular, TEXT_2), "{text}");
+                        continue;
+                    }
+                    assert_eq!((*face, *color), (Face::Bold, BRAND_TEXT), "{text}");
+                    let Some(Op::Box {
+                        x: bx,
+                        y: by,
+                        w,
+                        h,
+                        radius,
+                        fill,
+                        outline,
+                    }) = ops.get(i + 1)
+                    else {
+                        panic!("{text} is not underlined");
+                    };
+                    assert!(same(*bx, *x), "{text}");
+                    assert!(
+                        (w - text_width(Face::Bold, size, text)).abs() < 0.01,
+                        "{text}"
+                    );
+                    assert!(same(*by, y + UNDERLINE_OFFSET_EM * size), "{text}");
+                    assert!(same(*h, UNDERLINE_PX) && same(*radius, 0.0), "{text}");
+                    assert_eq!(*fill, Some(BRAND_TEXT));
+                    assert!(outline.is_none());
+                    assert!(!ops.get(i + 2).is_some_and(is_underline), "{text}");
+                    names.push(text.as_str());
+                }
+                assert_eq!(names, BRAND_NAMES, "{lang:?} at {size}");
+                assert_eq!(page.iter().filter(|op| is_underline(op)).count(), 2);
+            }
+        }
+    }
+
+    #[test]
+    fn a_brand_name_never_breaks_across_lines() {
+        for lang in LANGS {
+            for (page, size) in mention_pages(&in_lang(story(), lang)) {
+                let ops = mention_ops(&page, lang, size);
+                for name in BRAND_NAMES {
+                    let whole = texts(ops).iter().filter(|t| t.content == name).count();
+                    assert_eq!(whole, 1, "{lang:?} at {size}: {name}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_mention_keeps_its_two_lines() {
+        for lang in LANGS {
+            for (page, size) in mention_pages(&in_lang(story(), lang)) {
+                let mut baselines: Vec<f32> = texts(mention_ops(&page, lang, size))
+                    .iter()
+                    .map(|t| t.y)
+                    .collect();
+                baselines.dedup_by(|a, b| same(*a, *b));
+                assert_eq!(baselines.len(), 2, "{lang:?} at {size}");
+            }
+        }
+    }
+
+    /// WCAG 2 contrast ratio of two sRGB colours.
+    fn contrast(a: Rgb, b: Rgb) -> f32 {
+        let luminance = |(r, g, b): Rgb| {
+            let channel = |c: u8| {
+                let c = f32::from(c) / 255.0;
+                if c <= 0.039_28 {
+                    c / 12.92
+                } else {
+                    ((c + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+        };
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    #[test]
+    fn the_brand_green_reads_on_both_backgrounds() {
+        assert!(
+            contrast(BRAND_TEXT, SURFACE) >= 4.5,
+            "{}",
+            contrast(BRAND_TEXT, SURFACE)
+        );
+        assert!(
+            contrast(BRAND_TEXT, WHITE) >= 4.5,
+            "{}",
+            contrast(BRAND_TEXT, WHITE)
+        );
     }
 }

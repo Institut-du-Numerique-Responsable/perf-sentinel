@@ -384,10 +384,10 @@ mod tests {
     use crate::detect::FindingType;
     use crate::report::card::copy::story_sentence;
     use crate::report::card::keys::{b64url_encode, file_envelope};
-    use crate::report::card::layout::layout_image;
+    use crate::report::card::layout::{UNDERLINE_PX, layout_image};
     use crate::report::card::payload::canonical_bytes;
     use crate::report::card::test_fixtures::{compact_url_of, full_payload, story_input};
-    use crate::report::periodic::pdf::pages::Op;
+    use crate::report::periodic::pdf::pages::{BRAND_TEXT, Op, SURFACE};
     use serde_json::Value;
 
     fn story() -> Value {
@@ -572,5 +572,37 @@ mod tests {
         let huge = "x".repeat(64 * 1024 + 1);
         let error = read_png_envelope(&reencode(&png, &[&huge])).expect_err("text too large");
         assert_eq!(error.reason, "malformed_input");
+    }
+
+    #[test]
+    fn the_names_are_underlined_in_the_png() {
+        let ops = ops(&story());
+        let pixmap = rasterize(&ops).expect("the image rasterizes");
+        let underlines: Vec<(f32, f32, f32, f32)> = ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Box {
+                    x,
+                    y,
+                    w,
+                    h,
+                    fill: Some(fill),
+                    ..
+                } if *fill == BRAND_TEXT && (h - UNDERLINE_PX).abs() < 1e-3 => {
+                    Some((*x, *y, *w, *h))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(underlines.len(), 2, "one underline per brand name");
+        let near = |a: (u8, u8, u8), b: Rgb| {
+            a.0.abs_diff(b.0) <= 8 && a.1.abs_diff(b.1) <= 8 && a.2.abs_diff(b.2) <= 8
+        };
+        for (x, y, w, h) in underlines {
+            let middle = pixel(&pixmap, x + w / 2.0, y + h / 2.0);
+            assert!(near(middle, BRAND_TEXT), "{middle:?} at the underline");
+            let below = pixel(&pixmap, x + w / 2.0, y + h + 6.0);
+            assert!(near(below, SURFACE), "{below:?} under the underline");
+        }
     }
 }

@@ -1016,6 +1016,31 @@ pub(crate) fn confirmation(payload: &FullPayload) -> Option<&'static str> {
     }
 }
 
+/// The two proper names the mention sets apart, the same in both languages.
+pub(crate) const BRAND_NAMES: [&str; 2] = ["Perf Sentinel", "Institut du Numérique Responsable"];
+
+/// `text` cut at each brand name, `true` marking a name; the parts joined
+/// give `text` back.
+pub(crate) fn brand_split(text: &str) -> Vec<(bool, &str)> {
+    let mut parts = Vec::new();
+    let mut rest = text;
+    while let Some((at, name)) = BRAND_NAMES
+        .iter()
+        .filter_map(|name| rest.find(name).map(|at| (at, *name)))
+        .min()
+    {
+        if at > 0 {
+            parts.push((false, &rest[..at]));
+        }
+        parts.push((true, name));
+        rest = &rest[at + name.len()..];
+    }
+    if !rest.is_empty() {
+        parts.push((false, rest));
+    }
+    parts
+}
+
 /// The unit an equivalence counts, agreed with `count`. The table's
 /// `label` stays the English docs label.
 pub(crate) fn equivalence_unit(id: &str, count: u64, lang: Lang) -> &'static str {
@@ -1537,5 +1562,48 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn brand_split_marks_the_two_names() {
+        for lang in LANGS {
+            let sentence = words(lang).measured_with;
+            let parts = brand_split(sentence);
+            assert_eq!(
+                parts.iter().map(|(_, part)| *part).collect::<String>(),
+                sentence
+            );
+            let names: Vec<&str> = parts
+                .iter()
+                .filter(|(name, _)| *name)
+                .map(|(_, part)| *part)
+                .collect();
+            assert_eq!(names, BRAND_NAMES, "{lang:?}");
+        }
+        let french = brand_split(words(Lang::Fr).measured_with);
+        let institute = french
+            .iter()
+            .position(|&part| part == (true, BRAND_NAMES[1]))
+            .expect("the institute is marked");
+        assert!(
+            !french[institute - 1].0 && french[institute - 1].1.ends_with("l'"),
+            "{french:?}"
+        );
+        assert_eq!(
+            brand_split("Seen on 20 August 2026."),
+            vec![(false, "Seen on 20 August 2026.")]
+        );
+    }
+
+    #[test]
+    fn the_mention_copy_did_not_change() {
+        assert_eq!(
+            words(Lang::En).measured_with,
+            "Measured with Perf Sentinel, free software carried by the Institut du Numérique Responsable"
+        );
+        assert_eq!(
+            words(Lang::Fr).measured_with,
+            "Mesuré avec Perf Sentinel, logiciel libre porté par l'Institut du Numérique Responsable"
+        );
     }
 }
