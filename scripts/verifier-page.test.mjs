@@ -700,3 +700,52 @@ test('both resolvers down reads as could not check', async () => {
   await assertNoAccent(page);
   await close();
 });
+
+test('a French reader of the QR link lands on the French page with the card', async () => {
+  const { page, close } = await open(link('story'), { locale: 'fr-FR' });
+  await page.waitForURL('**/fr/verifier#c=*');
+  assert.ok(page.url().endsWith('/fr/verifier#c=' + token('story')));
+  await waitState(page, 'level1');
+  assert.equal(await page.getAttribute('html', 'lang'), 'fr');
+  assert.equal(await text(page, '#verifier-headline'), COPY.fr.level1);
+  await close();
+});
+
+test('a stored English choice keeps the English page', async () => {
+  const { page, close } = await open(link('story'), { locale: 'fr-FR', init: `localStorage.setItem('ps-lang', 'en')` });
+  await waitState(page, 'level1');
+  assert.ok(page.url().endsWith('/verifier#c=' + token('story')));
+  assert.ok(!page.url().includes('/fr/'));
+  assert.equal(await text(page, '#verifier-headline'), COPY.en.level1);
+  await close();
+});
+
+test('the French URL never redirects', async () => {
+  const { page, close } = await open('/fr/verifier#c=' + token('story'), { locale: 'en-US' });
+  await waitState(page, 'level1');
+  assert.ok(page.url().endsWith('/fr/verifier#c=' + token('story')));
+  assert.equal(await text(page, '#verifier-headline'), COPY.fr.level1);
+  await close();
+});
+
+test('the language toggle keeps the card', async () => {
+  let { page, close } = await open(link('story'));
+  await waitState(page, 'level1');
+  assert.ok((await page.getAttribute('[data-lang-switch]', 'href')).endsWith('/fr/verifier#c=' + token('story')));
+  await close();
+  ({ page, close } = await open('/fr/verifier#c=' + token('story')));
+  await waitState(page, 'level1');
+  const href = await page.getAttribute('[data-lang-switch]', 'href');
+  assert.ok(href.endsWith('/verifier#c=' + token('story')) && !href.includes('/fr/'));
+  await close();
+});
+
+test('the privacy policy names both resolvers', async () => {
+  for (const path of ['/privacy-policy', '/confidentialite']) {
+    const { page, close } = await open(path);
+    const body = await pageText(page);
+    assert.ok(body.includes('Cloudflare'), path);
+    assert.ok(body.includes('Google Public DNS'), path);
+    await close();
+  }
+});
