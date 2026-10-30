@@ -355,6 +355,8 @@ Since 0.37.0 the daemon counts how many times it detected each finding signature
 
 **Several pods behind one Service.** Each daemon keeps its own ledger. A Hub that polls a Service reaches one pod per request, so it never reads every pod's ledger, and it flags the counts it builds from them as incomplete (`multi_instance`). Two setups give complete counts: one Hub source per pod, each polling that pod's own address, or `[daemon.hub_export]` on every pod, so each pod pushes its own ledger and the Hub adds them up. See [HELM-DEPLOYMENT.md](./HELM-DEPLOYMENT.md#detection-counts-with-several-pods).
 
+**What `below_threshold_passes` covers.** It counts the runs of a watched signature that stayed under its threshold, and it can miss some. A fanout signature built on the dominant child template matches only part of its parents. A serialized parent outside the trace is skipped. The watch list is lost on a daemon restart until the next push reply, and a daemon the Hub only polls gets no list. A cross-trace slow finding takes its service and endpoint from its worst span, so the same template under another endpoint is not counted. All of these give missed passes, never false ones.
+
 ## Field length limits at ingestion
 
 All ingestion boundaries (OTLP, JSON, Jaeger, Zipkin) truncate string fields to prevent unbounded memory growth from oversized attributes. Limits: `service` 256 bytes, `operation` 256 bytes, `target` 64 KB, `source.endpoint` 512 bytes, `source.method` 512 bytes, `timestamp` 64 bytes, `trace_id`/`span_id` 128 bytes. Truncation preserves UTF-8 char boundaries. Fields within the limit are untouched (zero-copy fast path).

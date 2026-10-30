@@ -1020,6 +1020,13 @@ counted in `perf_sentinel_hub_export_dropped_total`, and its day set to `gap = t
 ledger. A Hub that answers 404 or 405 on that route predates it: the daemon logs one warning
 and stops pushing detection counts until it restarts, while the other exports keep flowing.
 
+The Hub's reply to a detection page can carry `watch`, the signatures of threshold-type
+findings it wants confirmed: a fix marked done with no confirming day yet. The daemon keeps
+that list in memory, replaces it with each accepted reply, truncates it to
+`max_signatures_per_day` and counts `below_threshold_passes` for those signatures only. The
+list is lost on restart and comes back with the next push. A daemon the Hub only polls gets
+no list, so its rows never carry `below_threshold_passes`.
+
 On a graceful shutdown (SIGTERM, `helm upgrade`, a rolling restart) the
 exporter flushes what it still holds before the process exits, for up to
 10 seconds. The budget keeps an unreachable Hub from holding the daemon past

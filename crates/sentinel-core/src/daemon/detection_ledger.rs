@@ -104,10 +104,6 @@ pub(crate) struct LedgerState {
     last_rejected: u64,
     last_tick_day: u32,
     /// The signatures the Hub asked to watch, replaced on each reply.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Hub export and the event loop wire it next")
-    )]
     watch: Arc<WatchIndex>,
 }
 
@@ -340,10 +336,6 @@ impl DetectionLedger {
 
     /// Replaces the watch list, keeping the trackable thresholded
     /// signatures up to `max_signatures_per_day`.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Hub export and the event loop wire it next")
-    )]
     pub(crate) fn set_watch(&self, signatures: &[String]) {
         let watch = WatchIndex::from_signatures(
             signatures
