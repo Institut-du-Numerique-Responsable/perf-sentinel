@@ -5,7 +5,7 @@ import { crc32 } from 'node:zlib';
 import {
   b64urlDecode, b64urlEncode, parseToken, parseEnvelope, parseFragment, fingerprint,
   verifyEd25519, defaultLoadNoble, EngineUnavailable, openCard, expandCompact,
-  formatValue, periodName, printedCo2Ug, equivalenceCount,
+  formatValue, periodName, printedCo2Ug, equivalenceCount, leafPaths,
 } from '../assets/verifier/card.js';
 import {
   inflateCapped, pngEnvelopeRange, readPngCard, jxlBoxes, jxlEnvelopeRange, svgEnvelopeRange,
@@ -542,4 +542,32 @@ test('a single DNS source has no partial state', async () => {
   assert.deepEqual(found, { resolver: 'google', records: [rec('; revoked=2026-12-01'), rec('')] });
   assert.equal(bindingState(found.records, fp, '2026-10-15').state, 'revoked');
   assert.deepEqual(await lookupTxt('cards.example.org', fakeDoh(503, 503).fetchImpl), { resolver: null });
+});
+
+test('every signed key has a label in both languages', async () => {
+  const cards = [];
+  for (const name of [...ANGLES, 'nodomain']) {
+    const full = await openCard(parseEnvelope(readPngCard(fixture(fx.cards[name].png))), 'full');
+    const compact = await openCard(parseFragment('#c=' + tokenOf(fx.cards[name].compact_url)), 'compact');
+    assert.equal(full.state, 'ok', name);
+    assert.equal(compact.state, 'ok', name);
+    cards.push(full.card, compact.card);
+  }
+  const listed = ['angle', 'lang', 'period', 'kind', 'from', 'to', 'scope', 'figures', 'story', 'before_fix_period',
+    'equivalence', 'id', 'per_unit_ug', 'unit', 'source', 'vintage', 'free', 'title', 'team', 'label', 'org', 'name',
+    'domain', 'key', 'public_key', 'generated_at_ms', 'generated_on', 'last_waste_permille', 'previous_waste_permille'];
+  const enums = { angle: 'angles', lang: 'langs', 'period.kind': 'kinds', 'story.finding_type': 'findingTypes', 'equivalence.unit': 'units' };
+  for (const lang of ['en', 'fr']) {
+    const { fields } = COPY[lang];
+    for (const key of listed) assert.equal(typeof fields[key], 'string', `${lang} ${key}`);
+    for (const card of cards) {
+      for (const path of leafPaths(card)) {
+        assert.equal(typeof fields[path.split('.').at(-1)], 'string', `${lang} ${path}`);
+        if (Object.hasOwn(enums, path)) {
+          const value = path.split('.').reduce((o, k) => o[k], card);
+          assert.ok(Object.hasOwn(COPY[lang][enums[path]], value), `${lang} ${path}=${value}`);
+        }
+      }
+    }
+  }
 });

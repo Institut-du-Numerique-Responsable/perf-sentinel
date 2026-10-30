@@ -1,12 +1,13 @@
-// Generates the standalone legal pages plus the 404, FR + EN:
-//   FR: mentions-legales.html, confidentialite.html, fr/404.html
-//   EN: legal-notice.html, privacy-policy.html, 404.html
+// Generates the standalone legal pages, the 404 and the share card verifier, FR + EN:
+//   FR: mentions-legales.html, confidentialite.html, fr/404.html, fr/verifier.html
+//   EN: legal-notice.html, privacy-policy.html, 404.html, verifier.html
 // Lifts the vitrine <style> verbatim so the chrome (theme vars, fonts, footer,
 // hovers) stays identical without duplicating CSS. Each page has a language
 // toggle linking to its counterpart and persisting ps-lang.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { COPY } from '../assets/verifier/copy.js';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STYLE = readFileSync(join(SITE, 'index.html'), 'utf8').match(/<style>[\s\S]*?<\/style>/)[0];
@@ -159,10 +160,100 @@ const nfCss = `<style>.legal-main{display:flex;align-items:center;justify-conten
 // A missing /fr/ or /docs/fr/ URL keeps its language, other missing URLs follow the stored choice.
 const frRedirect = `<script>(function(){var p=location.pathname,l=p.indexOf('/fr/')===0||p.indexOf('/docs/fr/')===0?'fr':null;if(!l)try{l=localStorage.getItem('ps-lang')}catch(e){}if(l!=='fr'&&l!=='en')l=(navigator.language||'').toLowerCase().indexOf('fr')===0?'fr':'en';if(l==='fr')location.replace('/fr/404');})();</script>`;
 
+// Share card verifier: static frame here, every state drawn by assets/verifier/page.js.
+const vIco = (n) => `<span data-ico="${n}" aria-hidden="true"></span>`;
+function verifierMain(lang) {
+  const t = COPY[lang];
+  const [lead, action] = t.drop.split(/(?<=, (?:or|ou) )/);
+  return `<h1>${t.title}</h1><p class="vf-intro">${t.intro}</p>` +
+    `<div class="vf-res" id="verifier-result" data-state="empty" aria-live="polite"></div>` +
+    `<label class="vf-drop" id="verifier-drop"><input type="file" id="verifier-file" accept=".png,.svg,.jxl,.pdf,.jpg,.jpeg,.webp,image/png,image/svg+xml,image/jxl,application/pdf,image/jpeg,image/webp">${vIco('upload')}<span><strong>${lead}<u>${action}</u></strong><small>${t.dropSub}</small></span></label>` +
+    `<p class="vf-phone" id="verifier-phone">${t.phone}</p>` +
+    `<details class="vf-lim" id="verifier-limits"><summary>${vIco('chevron-right')}${t.limitsLink}</summary><p>${t.limitLevel1}</p><p>${t.limitStolenKey}</p><p>${t.limitLinkedIn}</p><a class="vf-meth" href="${t.methodHref}">${t.method}</a></details>` +
+    `<script type="module" src="/assets/verifier/page.js"></script>`;
+}
+// The approved mockup (card-site Task 1), inside the .legal-main frame. Level 1 never uses the accent.
+const verifierCss = `<style>${['shield-check', 'shield-alert', 'link-2-off', 'circle-alert', 'image-off', 'file-x', 'upload', 'chevron-right'].map((n) => `[data-ico="${n}"]{--ico:url(/assets/icons/${n}.svg)}`).join('')}` +
+  `.legal-main .vf-intro{margin:14px 0 0;max-width:66ch;font-size:15.5px;line-height:1.65}` +
+  `.legal-main .vf-phone{margin:12px 0 0;max-width:66ch;font-size:14.5px;line-height:1.6;color:var(--text-2)}` +
+  `.vf-res{margin-top:30px;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}` +
+  `.vf-res[data-state="empty"]{display:none}` +
+  `.vf-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:22px 24px 20px;color:var(--text-2)}` +
+  `.vf-hd [data-ico]{flex:none;width:26px;height:26px;margin-top:2px}` +
+  `.legal-main .vf-hl{margin:0;font-size:18px;line-height:1.4;font-weight:600;color:var(--text);text-wrap:pretty}` +
+  `.vf-hl>span{display:block}` +
+  `.legal-main .vf-org{margin:10px 0 0;font-size:14.5px;line-height:1.5;color:var(--text-2);overflow-wrap:anywhere}` +
+  `.legal-main .vf-next{margin:8px 0 0;font-size:15px;line-height:1.5;color:var(--text)}` +
+  `.legal-main .vf-res a,.vf-lnk{color:var(--text);text-decoration:underline;text-underline-offset:2px;text-decoration-color:color-mix(in srgb,var(--text-2) 60%,transparent)}` +
+  `.legal-main .vf-res a:hover{background:none}` +
+  `.vf-lnk{font:inherit;background:none;border:0;padding:0;cursor:pointer}` +
+  `.vf-hd .vf-lnk{display:inline-block;margin-top:10px;font-size:14.5px}` +
+  `.vf-res[data-state="level2"]{border-color:color-mix(in srgb,var(--accent) 60%,var(--border))}` +
+  `.vf-res[data-state="level2"] .vf-hd{background:var(--accent-soft);color:var(--accent-strong)}` +
+  `.vf-res[data-state="level2"] .vf-hl{color:var(--accent-strong)}` +
+  `.vf-res[data-state="tampered"]{border-color:var(--coral)}` +
+  `.vf-res[data-state="tampered"] .vf-hd{background:color-mix(in srgb,var(--coral) 9%,var(--surface));color:var(--coral)}` +
+  `.vf-res:not([data-state^="level"]):not([data-state="tampered"]) .vf-hl{font-size:17px;font-weight:500}` +
+  `.vf-dns{padding:0 24px 20px}` +
+  `.vf-btn{display:inline-flex;align-items:center;gap:9px;min-height:44px;padding:10px 16px;border-radius:9px;border:1px solid color-mix(in srgb,var(--text-2) 45%,var(--border));background:var(--surface);color:var(--text);font:600 15px/1.35 'DM Sans',system-ui,sans-serif;text-align:left;cursor:pointer;transition:border-color .16s ease,background-color .16s ease}` +
+  `.vf-btn::before{content:"";flex:none;width:17px;height:17px;background:var(--text-2);-webkit-mask:url(/assets/icons/globe.svg) center/contain no-repeat;mask:url(/assets/icons/globe.svg) center/contain no-repeat}` +
+  `.vf-btn:hover{border-color:var(--text-2);background:var(--surface-2)}` +
+  `[data-ps-root] .vf-btn:focus-visible,[data-ps-root] .vf-res :is(a,button):focus-visible{outline:2px solid var(--text);outline-offset:2px}` +
+  `.vf-btn span{overflow-wrap:anywhere}` +
+  `.vf-btn[disabled]{cursor:progress;color:var(--text-2);background:var(--surface-2)}` +
+  `.vf-det{border-top:1px solid var(--border);padding:4px 24px 18px}` +
+  `.legal-main .vf-gh{margin:22px 0 4px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}` +
+  `.legal-main .vf-gnote{margin:0 0 6px;font-size:13.5px;line-height:1.5}` +
+  `.vf-dl{display:grid;grid-template-columns:minmax(0,16rem) minmax(0,1fr);column-gap:20px;margin:0}` +
+  `.vf-dl>div{display:contents}` +
+  `.vf-dl>div>dt,.vf-dl>div>dd{padding:9px 0;border-top:1px solid color-mix(in srgb,var(--border) 75%,transparent)}` +
+  `.vf-dl>div:first-child>*{border-top:0}` +
+  `.vf-dl dt{font-size:14px;line-height:1.45;color:var(--text-2)}` +
+  `.vf-dl dd{margin:0;font-size:15px;line-height:1.45;color:var(--text);overflow-wrap:anywhere}` +
+  `.vf-n{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}` +
+  `.vf-dl dd.vf-big{font-size:21px;font-weight:600;letter-spacing:-.01em;line-height:1.3}` +
+  `.vf-m{font-family:'JetBrains Mono',monospace;font-size:12.5px}` +
+  `.vf-free{font-style:italic}` +
+  `.vf-dl dd.vf-big-list{font-size:16px}` +
+  `.vf-rates{display:grid;grid-template-columns:max-content max-content;gap:4px 18px;margin:0;padding:0;list-style:none}` +
+  `.vf-rates li{display:contents}` +
+  `.vf-rates span,.vf-rates b{color:var(--text)}` +
+  `.vf-rates b{font-family:'JetBrains Mono',monospace;font-weight:500;font-variant-numeric:tabular-nums;text-align:right}` +
+  `.vf-rates:not([data-plain]) li:last-child>*{font-weight:600}` +
+  `.legal-main .vf-cnote{margin:6px 0 4px;padding:11px 14px;border-radius:10px;background:var(--surface-2);font-size:14px;line-height:1.55;color:var(--text-2)}` +
+  `.vf-ft{display:flex;flex-wrap:wrap;gap:8px 26px;padding:14px 24px;border-top:1px solid var(--border);font-size:14px}` +
+  `.vf-drop{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:30px;padding:34px 24px;text-align:center;border:1.5px dashed color-mix(in srgb,var(--text-2) 45%,var(--border));border-radius:14px;background:var(--surface);cursor:pointer;transition:border-color .16s ease,background-color .16s ease}` +
+  `.vf-drop:hover,.vf-drop[data-over]{border-color:var(--accent);background:color-mix(in srgb,var(--accent-soft) 45%,var(--surface))}` +
+  `.vf-drop[data-over]{border-style:solid}` +
+  `.vf-drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}` +
+  `.vf-drop input{position:absolute;width:1px;height:1px;opacity:0}` +
+  `.vf-drop [data-ico]{width:26px;height:26px;color:var(--text-2)}` +
+  `.vf-drop[data-over] [data-ico]{color:var(--accent-strong)}` +
+  `.vf-drop strong{font-size:15.5px;font-weight:600;color:var(--text)}` +
+  `.vf-drop strong u{text-underline-offset:2px}` +
+  `.vf-drop small{display:block;margin-top:8px;font-size:13.5px;color:var(--text-2)}` +
+  `.vf-drop[data-compact]{flex-direction:row;align-items:center;gap:14px;margin-top:20px;padding:14px 18px;text-align:left}` +
+  `.vf-drop[data-compact] [data-ico]{flex:none;width:20px;height:20px}` +
+  `.vf-drop[data-compact] strong{font-size:14.5px;font-weight:500}` +
+  `.vf-drop[data-compact] small{display:none}` +
+  `.vf-lim{margin-top:30px;border-top:1px solid var(--border);padding-top:16px;scroll-margin-top:84px}` +
+  `.vf-lim>summary{display:inline-flex;align-items:center;gap:6px;min-height:32px;list-style:none;cursor:pointer;font-size:15px;font-weight:600;color:var(--text)}` +
+  `.vf-lim>summary::-webkit-details-marker{display:none}` +
+  `.vf-lim>summary [data-ico]{width:16px;height:16px;color:var(--text-2);transition:transform .2s ease}` +
+  `.vf-lim[open]>summary [data-ico]{transform:rotate(90deg)}` +
+  `.legal-main .vf-lim p{margin:10px 0 0}` +
+  `.vf-lim .vf-meth{display:inline-block;margin-top:12px;font-size:14.5px}` +
+  `@media(prefers-reduced-motion:reduce){.vf-btn,.vf-drop,.vf-lim>summary [data-ico]{transition:none}}` +
+  `@media(max-width:560px){.legal-main{padding:36px 16px 64px}.vf-hd{padding:18px 18px 16px;gap:12px}.vf-dns,.vf-det{padding-left:18px;padding-right:18px}` +
+  `.vf-btn{display:flex;width:100%;align-items:flex-start}.vf-btn::before{margin-top:2px}.vf-ft{padding:14px 18px}` +
+  `.vf-dl{grid-template-columns:minmax(0,1fr)}.vf-dl>div>dt{padding-bottom:0}.vf-dl>div>dd{padding-top:2px;border-top:0}}</style>`;
+
 writeFileSync(join(SITE, '404.html'), page('en', '/fr/404', NF.en.title, NF.en.desc, notFound('en'), { robots: 'noindex,follow', head: nfCss + frRedirect }));
 writeFileSync(join(SITE, 'fr', '404.html'), page('fr', '/404', NF.fr.title, NF.fr.desc, notFound('fr'), { robots: 'noindex,follow', head: nfCss }));
 writeFileSync(join(SITE, 'mentions-legales.html'), page('fr', '/legal-notice', 'Mentions légales', 'Mentions légales du site Perf Sentinel : éditeur, directeur de la publication et hébergeur.', mentionsFR));
 writeFileSync(join(SITE, 'legal-notice.html'), page('en', '/mentions-legales', 'Legal notice', 'Legal notice for the Perf Sentinel site: publisher, publication director and host.', mentionsEN));
 writeFileSync(join(SITE, 'confidentialite.html'), page('fr', '/privacy-policy', 'Politique de confidentialité', 'Politique de confidentialité du site Perf Sentinel : aucun cookie, aucun traceur, aucune collecte de données.', confidFR));
 writeFileSync(join(SITE, 'privacy-policy.html'), page('en', '/confidentialite', 'Privacy policy', 'Privacy policy for the Perf Sentinel site: no cookies, no trackers, no data collection.', confidEN));
-console.log('wrote mentions-legales + legal-notice + confidentialite + privacy-policy + 404 (en, fr)');
+writeFileSync(join(SITE, 'verifier.html'), page('en', '/fr/verifier', COPY.en.title, COPY.en.desc, verifierMain('en'), { head: verifierCss }));
+writeFileSync(join(SITE, 'fr', 'verifier.html'), page('fr', '/verifier', COPY.fr.title, COPY.fr.desc, verifierMain('fr'), { head: verifierCss }));
+console.log('wrote mentions-legales + legal-notice + confidentialite + privacy-policy + 404 + verifier (en, fr)');
