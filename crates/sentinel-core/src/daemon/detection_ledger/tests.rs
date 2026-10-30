@@ -11,7 +11,13 @@ fn cfg(retained_days: u32, max_signatures_per_day: usize) -> DaemonDetectionsCon
 }
 
 fn ledger_at(day: u64, io_tracked: bool) -> DetectionLedger {
-    DetectionLedger::new(&cfg(8, 10_000), io_tracked, 1.0, day * DAY_MS)
+    DetectionLedger::new(
+        &cfg(8, 10_000),
+        io_tracked,
+        1.0,
+        DayThresholds::default(),
+        day * DAY_MS,
+    )
 }
 
 fn finding(signature: &str, io: usize) -> Finding {
@@ -27,7 +33,13 @@ fn bucket<R>(ledger: &DetectionLedger, day: u32, read: impl FnOnce(&DayBucket) -
 
 #[test]
 fn first_day_of_a_ledger_is_a_gap() {
-    let ledger = DetectionLedger::new(&cfg(8, 10_000), true, 1.0, 3 * DAY_MS + 5);
+    let ledger = DetectionLedger::new(
+        &cfg(8, 10_000),
+        true,
+        1.0,
+        DayThresholds::default(),
+        3 * DAY_MS + 5,
+    );
     assert_eq!(ledger.status().current_day, 3);
     assert!(bucket(&ledger, 3, |b| b.gap));
 }
@@ -61,7 +73,7 @@ fn empty_signatures_are_skipped() {
 
 #[test]
 fn overflow_takes_new_signatures_past_the_cap() {
-    let ledger = DetectionLedger::new(&cfg(8, 2), true, 1.0, 3 * DAY_MS);
+    let ledger = DetectionLedger::new(&cfg(8, 2), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
     assert_eq!(
         ledger.record(&[finding("a", 1), finding("b", 1)], 3 * DAY_MS),
         0
@@ -122,7 +134,7 @@ fn tick_flags_shed_and_rejects_on_both_days_across_midnight() {
 
 #[test]
 fn tick_drops_days_past_retention() {
-    let ledger = DetectionLedger::new(&cfg(2, 10_000), true, 1.0, DAY_MS);
+    let ledger = DetectionLedger::new(&cfg(2, 10_000), true, 1.0, DayThresholds::default(), DAY_MS);
     for day in 2..=4 {
         ledger.record(&[finding("a", 1)], day * DAY_MS);
     }
@@ -396,4 +408,163 @@ fn avoidable_carbon_makes_an_acked_day_dirty() {
     assert_eq!(dirty[0].day, 3);
     assert!(dirty[0].rows.is_empty());
     assert_eq!(dirty[0].meta.avoidable_gco2, Some(0.5));
+}
+
+const SLOW: &str = "slow_sql:svc:GET__a:0123456789abcdef0123456789abcdef";
+const CHATTY: &str = "chatty_service:svc:GET__b:0123456789abcdef0123456789abcdef";
+
+fn passes(entries: &[(&str, u64)]) -> HashMap<Arc<str>, u64> {
+    entries.iter().map(|&(s, n)| (Arc::from(s), n)).collect()
+}
+
+fn row(ledger: &DetectionLedger, day: u32, signature: &str) -> Option<CountRow> {
+    ledger
+        .page(None, None, 5000)
+        .counts
+        .into_iter()
+        .find(|r| r.day == day && r.signature == signature)
+}
+
+#[test]
+fn set_watch_keeps_trackable_thresholded_signatures_up_to_the_cap() {
+    let ledger = DetectionLedger::new(&cfg(8, 2), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
+    let hex = "0123456789abcdef0123456789abcdef";
+    let head = "slow_sql:svc:";
+    let long = format!(
+        "{head}{}:{hex}",
+        "e".repeat(MAX_TRACKED_SIGNATURE_BYTES + 1 - head.len() - 1 - hex.len())
+    );
+    assert_eq!(long.len(), MAX_TRACKED_SIGNATURE_BYTES + 1);
+    let control = format!("slow_sql:s\nvc:GET__a:{hex}");
+    let serialized = format!("serialized_calls:svc:GET__c:{hex}");
+    ledger.set_watch(&[
+        long,
+        control,
+        SLOW.to_string(),
+        CHATTY.to_string(),
+        serialized,
+    ]);
+    let watch = ledger.watch();
+    assert_eq!(watch.len(), 2);
+    assert!(watch.watches(&FindingType::SlowSql));
+    assert!(watch.watches(&FindingType::ChattyService));
+    assert!(!watch.watches(&FindingType::SerializedCalls));
+    ledger.set_watch(&[]);
+    assert!(ledger.watch().is_empty());
+}
+
+#[test]
+fn below_passes_open_a_row_without_detections() {
+    let ledger = ledger_at(3, true);
+    ledger.record_below(&passes(&[(SLOW, 3)]), 3 * DAY_MS);
+    let row = row(&ledger, 3, SLOW).expect("row");
+    assert_eq!(row.detections, 0);
+    assert_eq!(row.below_threshold_passes, Some(3));
+    let json = serde_json::to_value(&row).expect("serialize");
+    assert_eq!(json["below_threshold_passes"], 3);
+}
+
+#[test]
+fn below_passes_add_to_a_detected_row() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[finding(SLOW, 0)], 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 2)]), 3 * DAY_MS);
+    let row = row(&ledger, 3, SLOW).expect("row");
+    assert_eq!(row.detections, 1);
+    assert_eq!(row.below_threshold_passes, Some(2));
+}
+
+#[test]
+fn a_row_without_passes_has_no_below_key() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[finding("a", 1)], 3 * DAY_MS);
+    let json = serde_json::to_value(row(&ledger, 3, "a").expect("row")).expect("serialize");
+    assert!(json.get("below_threshold_passes").is_none());
+}
+
+#[test]
+fn below_passes_never_land_on_a_sealed_day() {
+    let ledger = ledger_at(3, true);
+    ledger.tick(4 * DAY_MS, 0, 0);
+    ledger.record_below(&passes(&[(SLOW, 1)]), 3 * DAY_MS + 5);
+    assert!(row(&ledger, 3, SLOW).is_none());
+    assert_eq!(
+        row(&ledger, 4, SLOW).expect("row").below_threshold_passes,
+        Some(1)
+    );
+}
+
+#[test]
+fn below_passes_respect_the_watch_row_cap() {
+    let ledger = DetectionLedger::new(&cfg(8, 1), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 4)]), 3 * DAY_MS);
+    ledger.record_below(&passes(&[(CHATTY, 2)]), 3 * DAY_MS);
+    assert!(row(&ledger, 3, SLOW).is_some());
+    assert!(row(&ledger, 3, CHATTY).is_none());
+    assert_eq!(ledger.overflow(3), 0);
+}
+
+#[test]
+fn a_watch_row_never_pushes_a_detection_into_overflow() {
+    let ledger = DetectionLedger::new(&cfg(8, 1), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 4)]), 3 * DAY_MS);
+    ledger.record(&[finding("a", 1)], 3 * DAY_MS);
+    assert_eq!(row(&ledger, 3, "a").expect("row").detections, 1);
+    assert_eq!(ledger.overflow(3), 0);
+    assert_eq!(
+        row(&ledger, 3, SLOW).expect("row").below_threshold_passes,
+        Some(4)
+    );
+    ledger.record(&[finding("b", 1)], 3 * DAY_MS);
+    assert_eq!(ledger.overflow(3), 1, "the detection cap still holds");
+}
+
+#[test]
+fn a_detection_on_a_watch_row_frees_its_watch_slot() {
+    let ledger = DetectionLedger::new(&cfg(8, 1), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 1)]), 3 * DAY_MS);
+    ledger.record(&[finding(SLOW, 0)], 3 * DAY_MS);
+    ledger.record_below(&passes(&[(CHATTY, 1)]), 3 * DAY_MS);
+    assert!(row(&ledger, 3, CHATTY).is_some());
+}
+
+#[test]
+fn a_day_never_holds_more_than_twice_the_cap() {
+    let ledger = DetectionLedger::new(&cfg(8, 1), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
+    ledger.record(&[finding("a", 1)], 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 1)]), 3 * DAY_MS);
+    ledger.record(&[finding(SLOW, 0)], 3 * DAY_MS);
+    ledger.record_below(&passes(&[(CHATTY, 1)]), 3 * DAY_MS);
+    assert!(row(&ledger, 3, CHATTY).is_none());
+    assert_eq!(ledger.overflow(3), 0);
+}
+
+#[test]
+fn below_passes_make_an_acked_day_dirty() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[finding("a", 1)], 3 * DAY_MS);
+    ledger.ack_day(3, ledger.dirty_days()[0].rev);
+    ledger.record_below(&passes(&[(SLOW, 1)]), 3 * DAY_MS);
+    let dirty = ledger.dirty_days();
+    assert_eq!(dirty.len(), 1);
+    assert_eq!(dirty[0].day, 3);
+    let rows: Vec<&str> = dirty[0].rows.iter().map(|r| r.signature.as_str()).collect();
+    assert_eq!(rows, [SLOW]);
+}
+
+#[test]
+fn every_day_row_carries_the_ledger_thresholds() {
+    let ledger = ledger_at(3, true);
+    let json = serde_json::to_value(day_row(&ledger, 3)).expect("serialize");
+    assert_eq!(
+        json["thresholds"],
+        serde_json::json!({
+            "slow_query_threshold_ms": 500,
+            "slow_http_threshold_ms": 500,
+            "max_fanout": 20,
+            "chatty_threshold": 15,
+            "pool_saturation_threshold": 10,
+            "serialized_min_calls": 3
+        })
+    );
 }

@@ -1387,4 +1387,25 @@ mod extraction {
             Err(ExtractError::NotAPdf)
         ));
     }
+
+    #[test]
+    fn extract_named_reads_one_attachment_by_name() {
+        let (pdf, report, ..) = rendered();
+        assert_eq!(
+            Some(report),
+            extract_named(&pdf, "report.json", 1 << 20).expect("reads report.json")
+        );
+        assert_eq!(
+            None,
+            extract_named(&pdf, "perf-sentinel-card.json", 1 << 20).expect("reads the PDF")
+        );
+        assert!(matches!(
+            extract_named(b"hello", "report.json", 1 << 20),
+            Err(ExtractError::NotAPdf)
+        ));
+        assert!(matches!(
+            extract_named(&pdf, "report.json", 16),
+            Err(ExtractError::TooLarge("report.json"))
+        ));
+    }
 }

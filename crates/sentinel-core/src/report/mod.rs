@@ -24,6 +24,8 @@
 //! Production pipelines that care should validate baseline shapes
 //! upstream.
 
+#[cfg(feature = "card")]
+pub mod card;
 pub mod embedded;
 pub mod html;
 pub mod interpret;

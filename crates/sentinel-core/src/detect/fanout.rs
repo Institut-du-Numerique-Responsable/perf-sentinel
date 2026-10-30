@@ -1,7 +1,9 @@
 //! Fanout detection: identifies parent spans generating excessive child spans.
 
 use crate::correlate::Trace;
+use crate::detect::below_threshold::BelowPass;
 use crate::detect::{Confidence, Finding, FindingType, Pattern, Severity, TraceIndices};
+use crate::normalize::NormalizedEvent;
 
 /// Detect excessive fanout within a trace.
 ///
@@ -13,7 +15,18 @@ use crate::detect::{Confidence, Finding, FindingType, Pattern, Severity, TraceIn
 /// HashMap-build cost for traces that trigger both.
 #[must_use]
 pub fn detect_fanout(trace: &Trace, indices: &TraceIndices<'_>, max_fanout: u32) -> Vec<Finding> {
-    fanout_impl(trace, indices, max_fanout, false)
+    detect_fanout_with_below(trace, indices, max_fanout, None)
+}
+
+/// Same detection, also counting each parent with at most `max_fanout`
+/// children in `below`.
+pub(crate) fn detect_fanout_with_below<'t>(
+    trace: &'t Trace,
+    indices: &TraceIndices<'_>,
+    max_fanout: u32,
+    below: Option<&mut BelowPass<'_, 't>>,
+) -> Vec<Finding> {
+    fanout_impl(trace, indices, max_fanout, false, below)
         .into_iter()
         .map(|(finding, _)| finding)
         .collect()
@@ -29,105 +42,127 @@ pub(crate) fn detect_fanout_with_spans<'a>(
     indices: &TraceIndices<'_>,
     max_fanout: u32,
 ) -> Vec<(Finding, Vec<&'a str>)> {
-    fanout_impl(trace, indices, max_fanout, true)
+    fanout_impl(trace, indices, max_fanout, true, None)
 }
 
 /// `collect_spans` stays off on the detection path: a fanout finding
 /// exists because the child count is large, so building that id list per
 /// finding only to drop it would allocate most on the widest traces.
+/// With `below` set every parent is walked, else only those over `max_fanout`.
 fn fanout_impl<'a>(
     trace: &'a Trace,
     indices: &TraceIndices<'_>,
     max_fanout: u32,
     collect_spans: bool,
+    mut below: Option<&mut BelowPass<'_, 'a>>,
 ) -> Vec<(Finding, Vec<&'a str>)> {
-    let span_index = &indices.span_index;
-
+    let max = max_fanout as usize;
+    let min_children = if below.is_some() { 1 } else { max + 1 };
     let mut findings = Vec::new();
-
-    for (parent_id, child_indices) in indices.parents_with_children(max_fanout as usize + 1) {
-        let count = child_indices.len();
-
-        let severity = if count > (max_fanout as usize) * 3 {
-            Severity::Critical
-        } else {
-            Severity::Warning
-        };
-
+    for (parent_id, child_indices) in indices.parents_with_children(min_children) {
         // Find the parent span for context (service, endpoint)
-        let parent_span = span_index.get(parent_id).map(|&i| &trace.spans[i]);
-
-        let service: String = parent_span.map_or_else(
-            || trace.spans[child_indices[0]].event.service.to_string(),
-            |s| s.event.service.to_string(),
-        );
-
-        let endpoint = parent_span.map_or_else(
-            || trace.spans[child_indices[0]].event.source.endpoint.clone(),
-            |s| s.event.source.endpoint.clone(),
-        );
-        let first_child = &trace.spans[child_indices[0]].event;
-        let namespace_event = parent_span.map_or(first_child, |span| &span.event);
-
-        // Compute window from children timestamps in one pass (no intermediate Vec)
-        let (window_ms, first_ts, last_ts) =
-            crate::detect::n_plus_one::compute_window_and_bounds_iter(
-                child_indices
-                    .iter()
-                    .map(|&i| trace.spans[i].event.timestamp.as_str()),
-            );
-        let first_ts = first_ts.to_string();
-        let last_ts = last_ts.to_string();
-
-        // Parent template, else the dominant child template: a span id would make
-        // every trace's signature unique, and a parent outside the trace is the
-        // usual case when the server span is not a captured event.
-        let template = parent_span.map_or_else(
-            || dominant_template(trace, child_indices).to_string(),
-            |s| s.template.to_string(),
-        );
-
-        let child_span_ids = crate::detect::member_span_ids(trace, child_indices, collect_spans);
-        findings.push((
-            Finding {
-                finding_type: FindingType::ExcessiveFanout,
-                severity,
-                trace_id: trace.trace_id.clone(),
-                service,
-                grouping: namespace_event.grouping.clone(),
-                source_endpoint: endpoint,
-                pattern: Pattern {
-                    template,
-                    occurrences: count,
-                    window_ms,
-                    distinct_params: count,
-                    ..Default::default()
-                },
-                suggestion: format!(
-                    "Parent span has {count} children (threshold: {max_fanout}). \
-                 Consider batching child operations to reduce fanout."
-                ),
-                first_timestamp: first_ts,
-                last_timestamp: last_ts,
-                green_impact: None,
-                confidence: Confidence::default(),
-                classification_method: None,
-                // Representative call: the first child.
-                code_location: first_child.code_location(),
-                instrumentation_scopes: first_child.scope_names(),
-                suggested_fix: None,
-                signature: String::new(),
-            },
-            child_span_ids,
+        let parent_span = indices.span_index.get(parent_id).map(|&i| &trace.spans[i]);
+        if child_indices.len() <= max {
+            if let Some(b) = below.as_deref_mut() {
+                b.fanout_parent(trace, parent_span, child_indices);
+            }
+            continue;
+        }
+        findings.push(fanout_finding(
+            trace,
+            parent_span,
+            child_indices,
+            max_fanout,
+            collect_spans,
         ));
     }
-
     findings
+}
+
+/// One fanout finding for a parent over `max_fanout`, with its children's
+/// ids when `collect_spans` is on.
+fn fanout_finding<'a>(
+    trace: &'a Trace,
+    parent_span: Option<&'a NormalizedEvent>,
+    child_indices: &[usize],
+    max_fanout: u32,
+    collect_spans: bool,
+) -> (Finding, Vec<&'a str>) {
+    let count = child_indices.len();
+
+    let severity = if count > (max_fanout as usize) * 3 {
+        Severity::Critical
+    } else {
+        Severity::Warning
+    };
+
+    let service: String = parent_span.map_or_else(
+        || trace.spans[child_indices[0]].event.service.to_string(),
+        |s| s.event.service.to_string(),
+    );
+
+    let endpoint = parent_span.map_or_else(
+        || trace.spans[child_indices[0]].event.source.endpoint.clone(),
+        |s| s.event.source.endpoint.clone(),
+    );
+    let first_child = &trace.spans[child_indices[0]].event;
+    let namespace_event = parent_span.map_or(first_child, |span| &span.event);
+
+    // Compute window from children timestamps in one pass (no intermediate Vec)
+    let (window_ms, first_ts, last_ts) = crate::detect::n_plus_one::compute_window_and_bounds_iter(
+        child_indices
+            .iter()
+            .map(|&i| trace.spans[i].event.timestamp.as_str()),
+    );
+    let first_ts = first_ts.to_string();
+    let last_ts = last_ts.to_string();
+
+    // Parent template, else the dominant child template: a span id would make
+    // every trace's signature unique, and a parent outside the trace is the
+    // usual case when the server span is not a captured event.
+    let template = parent_span.map_or_else(
+        || dominant_template(trace, child_indices).to_string(),
+        |s| s.template.to_string(),
+    );
+
+    let child_span_ids = crate::detect::member_span_ids(trace, child_indices, collect_spans);
+    (
+        Finding {
+            finding_type: FindingType::ExcessiveFanout,
+            severity,
+            trace_id: trace.trace_id.clone(),
+            service,
+            grouping: namespace_event.grouping.clone(),
+            source_endpoint: endpoint,
+            pattern: Pattern {
+                template,
+                occurrences: count,
+                window_ms,
+                distinct_params: count,
+                ..Default::default()
+            },
+            suggestion: format!(
+                "Parent span has {count} children (threshold: {max_fanout}). \
+                 Consider batching child operations to reduce fanout."
+            ),
+            first_timestamp: first_ts,
+            last_timestamp: last_ts,
+            green_impact: None,
+            confidence: Confidence::default(),
+            classification_method: None,
+            // Representative call: the first child.
+            code_location: first_child.code_location(),
+            instrumentation_scopes: first_child.scope_names(),
+            suggested_fix: None,
+            signature: String::new(),
+        },
+        child_span_ids,
+    )
 }
 
 /// The most frequent template among the children, ties going to the smallest,
 /// so the same fanout yields the same template in every trace.
-fn dominant_template<'t>(trace: &'t Trace, child_indices: &[usize]) -> &'t str {
+pub(crate) fn dominant_template<'t>(trace: &'t Trace, child_indices: &[usize]) -> &'t str {
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for &i in child_indices {
         *counts.entry(&trace.spans[i].template).or_default() += 1;

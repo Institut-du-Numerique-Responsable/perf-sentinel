@@ -395,8 +395,11 @@ prose documentation is being filled in incrementally.
 The supply-chain commands have dedicated prose documentation elsewhere:
 `disclose`, `disclose-pdf`, `verify-hash` and `hash-bake` are covered in
 [`REPORTING.md`](./REPORTING.md), with the signing and provenance
-background in [`SUPPLY-CHAIN.md`](./SUPPLY-CHAIN.md). Shell
-completions and the man page are documented below on this page.
+background in [`SUPPLY-CHAIN.md`](./SUPPLY-CHAIN.md). The share card
+commands, `card keygen`, `card render` and `verify-card`, are covered in
+[`SHARE-CARD.md`](./SHARE-CARD.md), with their JSON lines, exit codes
+and payloads. Shell completions and the man page are documented below
+on this page.
 
 ## Times on the terminal
 

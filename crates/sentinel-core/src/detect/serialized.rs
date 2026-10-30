@@ -11,6 +11,7 @@ use crate::correlate::Trace;
 use crate::event::EventType;
 use crate::normalize::sql;
 
+use super::below_threshold::BelowPass;
 use super::n_plus_one::parse_timestamp_ms;
 use super::{Confidence, Finding, FindingType, Pattern, Severity, TraceIndices};
 
@@ -47,7 +48,18 @@ pub fn detect_serialized(
     indices: &TraceIndices<'_>,
     min_sequential: u32,
 ) -> Vec<Finding> {
-    serialized_impl(trace, indices, min_sequential, false)
+    detect_serialized_with_below(trace, indices, min_sequential, None)
+}
+
+/// Same detection, also counting in `below` each parent in the trace whose
+/// longest chain stays under `min_sequential`.
+pub(crate) fn detect_serialized_with_below<'t>(
+    trace: &'t Trace,
+    indices: &TraceIndices<'_>,
+    min_sequential: u32,
+    below: Option<&mut BelowPass<'_, 't>>,
+) -> Vec<Finding> {
+    serialized_impl(trace, indices, min_sequential, false, below)
         .into_iter()
         .map(|(finding, _)| finding)
         .collect()
@@ -62,27 +74,36 @@ pub(crate) fn detect_serialized_with_spans<'a>(
     indices: &TraceIndices<'_>,
     min_sequential: u32,
 ) -> Vec<(Finding, Vec<&'a str>)> {
-    serialized_impl(trace, indices, min_sequential, true)
+    serialized_impl(trace, indices, min_sequential, true, None)
 }
 
 /// `collect_spans` stays off on the detection path, which discards the
-/// ids: only the HTML sink needs them.
+/// ids: only the HTML sink needs them. With `below` set every parent is
+/// walked, else only those with at least `min_sequential` children.
 fn serialized_impl<'a>(
     trace: &'a Trace,
     indices: &TraceIndices<'_>,
     min_sequential: u32,
     collect_spans: bool,
+    mut below: Option<&mut BelowPass<'_, 'a>>,
 ) -> Vec<(Finding, Vec<&'a str>)> {
     let min_seq = min_sequential as usize;
+    let min_children = if below.is_some() { 1 } else { min_seq };
 
     let span_index = &indices.span_index;
 
     let mut findings = Vec::new();
 
-    for (parent_id, child_indices) in indices.parents_with_children(min_seq) {
+    for (parent_id, child_indices) in indices.parents_with_children(min_children) {
+        if child_indices.len() < min_seq {
+            note_serialized_below(&mut below, trace, span_index, parent_id);
+            continue;
+        }
+
         let mut timed = timed_children(trace, child_indices);
 
         if timed.len() < min_seq {
+            note_serialized_below(&mut below, trace, span_index, parent_id);
             continue;
         }
 
@@ -96,6 +117,11 @@ fn serialized_impl<'a>(
         // pass it to evaluate_sequence for threshold / template checks.
         let best_seq = longest_non_overlapping(&timed);
 
+        if best_seq.len() < min_seq {
+            note_serialized_below(&mut below, trace, span_index, parent_id);
+            continue;
+        }
+
         if let Some(finding) =
             evaluate_sequence(&timed, &best_seq, min_seq, trace, span_index, parent_id)
         {
@@ -105,6 +131,21 @@ fn serialized_impl<'a>(
     }
 
     findings
+}
+
+/// Count a below-threshold pass for `parent_id` when `below` is set and
+/// the parent is in the trace; a parent outside it carries no identity.
+fn note_serialized_below<'t>(
+    below: &mut Option<&mut BelowPass<'_, 't>>,
+    trace: &'t Trace,
+    span_index: &HashMap<&str, usize>,
+    parent_id: &str,
+) {
+    if let Some(b) = below.as_deref_mut()
+        && let Some(&i) = span_index.get(parent_id)
+    {
+        b.serialized_parent(&trace.spans[i]);
+    }
 }
 
 /// How many distinct templates a `serialized_calls` suggestion names, and
@@ -147,6 +188,15 @@ fn timed_children<'a>(trace: &'a Trace, child_indices: &[usize]) -> Vec<TimedSpa
         }
     }
     timed
+}
+
+/// Length of the longest non-overlapping chain among the children, with
+/// the same sibling filter and end-time order as the detector.
+#[cfg(test)]
+pub(crate) fn longest_chain_len(trace: &Trace, child_indices: &[usize]) -> usize {
+    let mut timed = timed_children(trace, child_indices);
+    timed.sort_unstable_by_key(|s| (s.end_us, s.span_idx));
+    longest_non_overlapping(&timed).len()
 }
 
 /// The chain's span ids, in chronological order. Empty on the detection

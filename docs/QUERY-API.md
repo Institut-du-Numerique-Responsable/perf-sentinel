@@ -1332,13 +1332,27 @@ starts a new ledger with a new `ledger_id`, whose first day is a `gap`.
 | `current_day`    | number         | Newest day the ledger holds                                                        |
 | `oldest_day`     | number         | Oldest day the ledger holds                                                        |
 | `sealed_through` | number or null | Last sealed day when the page was read, `null` before the first one                |
-| `counts`         | array          | `{ day, signature, detections, extra_io_ops }`, in ascending (day, signature) order |
+| `counts`         | array          | `{ day, signature, detections, extra_io_ops, below_threshold_passes }`, in ascending (day, signature) order |
 | `days`           | array          | One object per day, see below                                                      |
 | `next_after`     | string or null | Cursor of the next page, `null` on the last one                                    |
 
 `extra_io_ops` sums the avoidable I/O operations of the counted
 detections. It is absent when green scoring is off, which says the I/O
 is unknown, not zero.
+
+`below_threshold_passes` counts, for a signature PerfSentinelHub asked
+the daemon to watch (see the detection push in
+[CONFIGURATION.md](CONFIGURATION.md#daemonhub_export-optional)), the
+runs seen that day at or under the threshold: a span for `slow_*`, a
+parent's children for `excessive_fanout`, a trace's outbound calls for
+`chatty_service`, a service's concurrent queries in a trace for
+`pool_saturation`, a parent's longest chain for `serialized_calls`.
+Absent when 0. A watched signature can have a row with `detections: 0`;
+such rows are capped apart, at `max_signatures_per_day` a day, and never
+take the place of a detected signature, so a day can list up to twice
+that many rows. Only threshold types are watched. Limits: a fanout or a
+serialized parent outside the trace matches less often, and a passes
+count never proves the absence of a detection on another daemon.
 
 Each `days` object:
 
@@ -1352,6 +1366,7 @@ Each `days` object:
 | `shed_traces`           | number  | Traces the analysis shed that day, never analyzed                                              |
 | `ingest_rejected`       | number  | OTLP requests refused at ingest that day, queue full or memory pressure                        |
 | `sampling_rate`         | number  | `[daemon] sampling_rate`: the counts cover that share of the traces                            |
+| `thresholds`            | object  | The thresholds the daemon applied, constant for a `ledger_id`, see below                       |
 | `avoidable_gco2`        | number  | Avoidable CO₂ of the day's analyzed batches, in gCO₂eq: the operational estimate of `green_summary.co2.avoidable.mid`. Absent when green scoring is off, no batch resolved a region or no batch brought it |
 | `avoidable_gco2_low`    | number  | The low bound of the same estimate (`green_summary.co2.avoidable.low`), for a conservative "at least" figure |
 | `avoidable_io_ops`      | number  | Avoidable I/O of the same batches, deduplicated per batch like `green_summary.avoidable_io_ops` |
@@ -1364,6 +1379,21 @@ an order of magnitude only, since `extra_io_ops` is not deduplicated
 across findings the way a batch's `avoidable_io_ops` is. Like the counts,
 the four sums cover the `sampling_rate` share of the traces: the ratios
 hold as they are, an absolute figure needs dividing by `sampling_rate`.
+
+The `thresholds` keys, their `[detection]` knob, and when a run counts
+as below:
+
+| Key                         | Knob                                   | Below                                   |
+|-----------------------------|----------------------------------------|-----------------------------------------|
+| `slow_query_threshold_ms`   | `slow_query_threshold_ms`              | At most that many ms                    |
+| `slow_http_threshold_ms`    | `slow_query_threshold_ms`              | At most that many ms                    |
+| `max_fanout`                | `max_fanout`                           | At most that many children              |
+| `chatty_threshold`          | `chatty_service_min_calls`             | At most that many calls                 |
+| `pool_saturation_threshold` | `pool_saturation_concurrent_threshold` | Fewer than that many concurrent queries |
+| `serialized_min_calls`      | `serialized_min_sequential`            | A chain shorter than that               |
+
+The engine has one slow knob, so both slow keys carry it, and
+`slow_messaging` compares against `slow_query_threshold_ms`.
 
 A detection goes to its day's overflow when its signature is new past
 `[daemon.detections] max_signatures_per_day`, longer than 1024 bytes, or
@@ -1427,6 +1457,7 @@ curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode limit=2 \
       "shed_traces": 0,
       "ingest_rejected": 0,
       "sampling_rate": 1.0,
+      "thresholds": {"slow_query_threshold_ms": 500, "slow_http_threshold_ms": 500, "max_fanout": 20, "chatty_threshold": 15, "pool_saturation_threshold": 10, "serialized_min_calls": 3},
       "avoidable_gco2": 0.0042,
       "avoidable_gco2_low": 0.0021,
       "avoidable_io_ops": 55,
@@ -1448,7 +1479,7 @@ The third page ends the walk, `next_after` is `null`:
   "sealed_through": 20753,
   "counts": [
     {"day": 20754, "signature": "redundant_sql:order-svc:_api_v1_orders:cccccccccccccccccccccccccccccccc", "detections": 1, "extra_io_ops": 2},
-    {"day": 20754, "signature": "slow_sql:billing-svc:GET__invoices:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "detections": 5, "extra_io_ops": 0}
+    {"day": 20754, "signature": "slow_sql:billing-svc:GET__invoices:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "detections": 5, "extra_io_ops": 0, "below_threshold_passes": 212}
   ],
   "days": [
     {
@@ -1460,6 +1491,7 @@ The third page ends the walk, `next_after` is `null`:
       "shed_traces": 0,
       "ingest_rejected": 0,
       "sampling_rate": 1.0,
+      "thresholds": {"slow_query_threshold_ms": 500, "slow_http_threshold_ms": 500, "max_fanout": 20, "chatty_threshold": 15, "pool_saturation_threshold": 10, "serialized_min_calls": 3},
       "avoidable_gco2": 0.0025,
       "avoidable_gco2_low": 0.0012,
       "avoidable_io_ops": 31,

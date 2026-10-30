@@ -947,3 +947,25 @@ fn signature_ignores_scopes_code_location_and_suggested_fix() {
     assert!(enriched.suggested_fix.is_some());
     assert_eq!(compute_signature(&bare), compute_signature(&enriched));
 }
+
+#[test]
+fn signature_head_and_digest_rebuild_compute_signature() {
+    let mut finding = make_finding(FindingType::SlowSql, Severity::Warning);
+    finding.service = "svc:v2\u{202E}".to_string();
+    finding.source_endpoint = "GET /a:b c".to_string();
+    finding.pattern.template = "SELECT 1".to_string();
+    let mut rebuilt = String::new();
+    push_signature_head(
+        &mut rebuilt,
+        &finding.finding_type,
+        &finding.service,
+        &finding.source_endpoint,
+    );
+    rebuilt.push(':');
+    rebuilt.extend(
+        template_digest("SELECT 1")
+            .iter()
+            .map(|byte| format!("{byte:02x}")),
+    );
+    assert_eq!(rebuilt, compute_signature(&finding));
+}

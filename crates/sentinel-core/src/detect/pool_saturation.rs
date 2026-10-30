@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use crate::correlate::Trace;
 use crate::event::EventType;
 
+use super::below_threshold::BelowPass;
 use super::n_plus_one::parse_timestamp_ms;
 use super::{Confidence, Finding, FindingType, Pattern, Severity};
 
@@ -22,7 +23,17 @@ type PoolKey<'a> = (&'a str, Option<(&'a str, &'a str)>);
 /// every replica of the service.
 #[must_use]
 pub fn detect_pool_saturation(trace: &Trace, threshold: u32) -> Vec<Finding> {
-    saturated_services(trace, threshold)
+    detect_pool_saturation_with_below(trace, threshold, None)
+}
+
+/// Same detection, also counting each service grouping whose peak stays
+/// under `threshold` in `below`.
+pub(crate) fn detect_pool_saturation_with_below<'t>(
+    trace: &'t Trace,
+    threshold: u32,
+    below: Option<&mut BelowPass<'_, 't>>,
+) -> Vec<Finding> {
+    saturated_services(trace, threshold, below)
         .into_iter()
         .map(|(service, indices, peak)| build_saturation_finding(trace, service, &indices, peak))
         .collect()
@@ -34,7 +45,7 @@ pub(crate) fn detect_pool_saturation_with_spans(
     trace: &Trace,
     threshold: u32,
 ) -> Vec<(Finding, Vec<&str>)> {
-    saturated_services(trace, threshold)
+    saturated_services(trace, threshold, None)
         .into_iter()
         .map(|(service, indices, peak)| {
             (
@@ -46,26 +57,35 @@ pub(crate) fn detect_pool_saturation_with_spans(
 }
 
 /// Services whose SQL spans reach `threshold` concurrent, with their span
-/// indices and the peak. One grouping pass shared by both entry points.
-fn saturated_services(trace: &Trace, threshold: u32) -> Vec<(&str, Vec<usize>, u32)> {
+/// indices and the peak. One grouping pass shared by both entry points;
+/// the groupings under `threshold` count in `below`.
+fn saturated_services<'t>(
+    trace: &'t Trace,
+    threshold: u32,
+    mut below: Option<&mut BelowPass<'_, 't>>,
+) -> Vec<(&'t str, Vec<usize>, u32)> {
     let threshold = threshold as usize;
-    group_sql_indices_by_service(trace)
-        .into_iter()
-        .filter_map(|((service, _grouping), indices)| {
-            // Fast path: can't have more concurrent than total.
-            if indices.len() < threshold {
-                return None;
-            }
+    let mut saturated = Vec::new();
+    for ((service, _grouping), indices) in group_sql_indices_by_service(trace) {
+        // Fast path: can't have more concurrent than total.
+        if indices.len() >= threshold {
             let peak = compute_peak_concurrency(trace, &indices);
-            ((peak as usize) >= threshold).then_some((service, indices, peak))
-        })
-        .collect()
+            if peak as usize >= threshold {
+                saturated.push((service, indices, peak));
+                continue;
+            }
+        }
+        if let Some(b) = below.as_deref_mut() {
+            b.pool_group(&trace.spans[indices[0]]);
+        }
+    }
+    saturated
 }
 
 /// Partition a trace's SQL span indices by service and effective grouping. HTTP
 /// and other event types are skipped. Returns borrowed service names
 /// (lifetime tied to `trace`) so grouping stays allocation-light.
-fn group_sql_indices_by_service(trace: &Trace) -> HashMap<PoolKey<'_>, Vec<usize>> {
+pub(crate) fn group_sql_indices_by_service(trace: &Trace) -> HashMap<PoolKey<'_>, Vec<usize>> {
     let mut sql_by_service: HashMap<PoolKey<'_>, Vec<usize>> =
         HashMap::with_capacity(trace.spans.len().min(16));
     for (i, span) in trace.spans.iter().enumerate() {
@@ -91,7 +111,7 @@ fn group_sql_indices_by_service(trace: &Trace) -> HashMap<PoolKey<'_>, Vec<usize
 /// ms-precision check would truncate `duration_us / 1000 = 0` and let
 /// `end_ms == start_ms` slip the `false < true` ordering, undercounting
 /// peak concurrency on hot reactive workloads.
-fn compute_peak_concurrency(trace: &Trace, indices: &[usize]) -> u32 {
+pub(crate) fn compute_peak_concurrency(trace: &Trace, indices: &[usize]) -> u32 {
     let mut sweep: Vec<(u64, bool)> = Vec::with_capacity(indices.len() * 2);
     for &idx in indices {
         let span = &trace.spans[idx];
