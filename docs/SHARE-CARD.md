@@ -113,7 +113,7 @@ The Hub writes it, the engine reads it. Unknown keys are refused, every number i
 | `period` | yes | `{"kind","from","to"}`. `kind` is `week` (Monday to Sunday), `month`, `quarter`, `semester` (January to June, July to December) or `year`. `from` and `to` bound exactly one calendar period of that kind (`period_not_calendar`), which ends before the UTC day of `generated_at_ms` (`period_not_closed`). |
 | `scope` | yes | `{"environment","sources","covered_days","restart_days","sampled_permille"}`. `environment` is optional. `sources` is not empty. `covered_days` equals the period's day count (`incomplete_period`), `restart_days` is at most `covered_days`, `sampled_permille` is 0 to 1000. `environment` and `sources`, joined with `", "`, take at most 120 characters. |
 | `figures` | yes | Integers whose name carries the unit, read by angle, see below. |
-| `story` | on a story only | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` is optional. `endpoint` takes at most 200 characters. `done_at` falls in or before the period, `observed_at` on or before `done_at`. |
+| `story` | on a story only | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` is optional. `service` and `endpoint` take at most 200 characters each. `done_at` falls in or before the period, `observed_at` on or before `done_at`. |
 | `before_fix_period` | when the card prints one | `{"from","to"}`, one calendar period of `period.kind`, see [the before-fix period](#the-before-fix-period). |
 | `equivalence` | no | An `id` of the equivalence table. Absent, the engine picks one. |
 | `free` | yes, `{}` when empty | `{"title","team","label"}`, each optional: title 48 characters, team 48, label 80 (a story only). |

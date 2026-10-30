@@ -241,6 +241,8 @@ const MAX_TEAM_CHARS: usize = 48;
 const MAX_LABEL_CHARS: usize = 80;
 const MAX_ORG_NAME_CHARS: usize = 60;
 const MAX_ENDPOINT_CHARS: usize = 200;
+/// Bounds the envelope under the readers' 64 KiB cap (`raster::MAX_ENVELOPE_BYTES`).
+const MAX_SERVICE_CHARS: usize = 200;
 /// The scope line prints at a fixed size: environment and sources, joined
 /// with ", ", fit in 120 characters.
 const MAX_SCOPE_CHARS: usize = 120;
@@ -813,7 +815,7 @@ fn check_texts(card: &Card<'_>) -> Result<(), CardError> {
         (
             "story.service",
             card.story.map(|s| s.service.as_str()),
-            NO_CAP,
+            MAX_SERVICE_CHARS,
         ),
         (
             "story.endpoint",
@@ -1365,6 +1367,8 @@ mod tests {
             ("/free/team", 48),
             ("/free/label", 80),
             ("/org/name", 60),
+            ("/story/service", 200),
+            ("/story/endpoint", 200),
         ] {
             let mut input = story();
             if pointer.starts_with("/free") {
