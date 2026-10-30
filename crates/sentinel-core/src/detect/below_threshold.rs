@@ -125,34 +125,8 @@ pub fn count_below_threshold(
         return HashMap::new();
     }
     let mut pass = Pass::new(watch);
-    let slow = [
-        FindingType::SlowSql,
-        FindingType::SlowHttp,
-        FindingType::SlowMessaging,
-    ]
-    .iter()
-    .any(|kind| watch.watches(kind));
-    let fanout = watch.watches(&FindingType::ExcessiveFanout);
-    let serialized = watch.watches(&FindingType::SerializedCalls);
     for trace in traces {
-        if slow {
-            pass.slow(trace, config.slow_threshold_ms);
-        }
-        if watch.watches(&FindingType::ChattyService) {
-            pass.chatty(trace, config.chatty_service_min_calls);
-        }
-        if watch.watches(&FindingType::PoolSaturation) {
-            pass.pool(trace, config.pool_saturation_concurrent_threshold);
-        }
-        if fanout || serialized {
-            let indices = TraceIndices::build(trace);
-            if fanout {
-                pass.fanout(trace, &indices, config.max_fanout);
-            }
-            if serialized {
-                pass.serialized(trace, &indices, config.serialized_min_sequential);
-            }
-        }
+        pass.trace(trace, config);
     }
     pass.counts
 }
@@ -217,6 +191,38 @@ impl<'w, 't> Pass<'w, 't> {
 
     fn entries_of(&mut self, kind: &FindingType, span: &'t NormalizedEvent) -> Option<&'w Entries> {
         self.entries(kind, &span.event.service, &span.event.source.endpoint)
+    }
+
+    /// Run every pass kind that has a watched signature over one trace.
+    fn trace(&mut self, trace: &'t Trace, config: &DetectConfig) {
+        let watch = self.watch;
+        let slow = [
+            FindingType::SlowSql,
+            FindingType::SlowHttp,
+            FindingType::SlowMessaging,
+        ]
+        .iter()
+        .any(|kind| watch.watches(kind));
+        if slow {
+            self.slow(trace, config.slow_threshold_ms);
+        }
+        if watch.watches(&FindingType::ChattyService) {
+            self.chatty(trace, config.chatty_service_min_calls);
+        }
+        if watch.watches(&FindingType::PoolSaturation) {
+            self.pool(trace, config.pool_saturation_concurrent_threshold);
+        }
+        let fanout = watch.watches(&FindingType::ExcessiveFanout);
+        let serialized = watch.watches(&FindingType::SerializedCalls);
+        if fanout || serialized {
+            let indices = TraceIndices::build(trace);
+            if fanout {
+                self.fanout(trace, &indices, config.max_fanout);
+            }
+            if serialized {
+                self.serialized(trace, &indices, config.serialized_min_sequential);
+            }
+        }
     }
 
     fn slow(&mut self, trace: &'t Trace, threshold_ms: u64) {
