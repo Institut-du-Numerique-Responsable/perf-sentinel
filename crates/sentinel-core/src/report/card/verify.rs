@@ -156,8 +156,8 @@ pub fn check_integrity(source: CardSource<'_>) -> Result<Integrity, CardError> {
 type SignedKey = Result<(String, Vec<u8>, String), Integrity>;
 
 /// Checks in this order, so a tampered file never reads as an input error:
-/// the envelope and its carrier, the payload
-/// signature, the fingerprint, the content signature, the payload's rules.
+/// the envelope and its carrier, the payload signature, the fingerprint,
+/// the content signature, the payload's rules.
 fn check_file(format: CardFormat, file: &[u8], text: &str) -> Result<Integrity, CardError> {
     let envelope = parse_file_envelope(text)?;
     let content = card_content(format, file, &b64url_encode(&envelope.content_sig))?;
