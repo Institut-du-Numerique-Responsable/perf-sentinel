@@ -323,7 +323,31 @@ fn verify_card_with_the_published_key_is_level_2() {
         (
             serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "revoked": "2026-09-15"}),
             1,
-            verified(1, Some("acme.fr"), "revoked", "signed_after_revocation"),
+            verified(1, Some("acme.fr"), "revoked", "key_revoked"),
+        ),
+    ];
+    for (entry, code, expected) in cases {
+        let keys = key_list(dir.path(), &serde_json::json!([entry]));
+        let out = verify(&[path_str(&png), "--keys", path_str(&keys)]);
+        assert_line(&out, code, &expected);
+    }
+}
+
+#[test]
+fn verify_card_with_a_revoked_key_is_level_1_whatever_the_day() {
+    let (dir, png, fingerprint, _) = rendered_png(&story_input());
+    let cases = [
+        // Revoked after the day the card states: still level 1.
+        (
+            serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "revoked": "2026-12-31"}),
+            1,
+            verified(1, Some("acme.fr"), "revoked", "key_revoked"),
+        ),
+        // Retired on the same day: rotation keeps old cards.
+        (
+            serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "to": "2026-12-31"}),
+            0,
+            verified(2, Some("acme.fr"), "retired", "key_published"),
         ),
     ];
     for (entry, code, expected) in cases {

@@ -32,7 +32,8 @@ pub enum KeyStatus {
 }
 
 /// Level 1: the signature holds, nothing ties the key to the domain.
-/// Level 2: the domain publishes the key for the day the card was signed.
+/// Level 2: the domain publishes the key, not revoked, valid on the day the
+/// card states it was signed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Binding {
     pub level: u8,
@@ -111,8 +112,10 @@ pub fn judge(
     {
         return binding(1, KeyStatus::Unknown, "public_key_mismatch");
     }
-    if entry.revoked.is_some_and(|day| signed_day >= day) {
-        return binding(1, KeyStatus::Revoked, "signed_after_revocation");
+    // The signing day is the signer's own claim: a stolen key could date a
+    // card before any revocation day, so a revoked key vouches for nothing.
+    if entry.revoked.is_some() {
+        return binding(1, KeyStatus::Revoked, "key_revoked");
     }
     let status = if entry.to.is_some() {
         KeyStatus::Retired
@@ -121,9 +124,6 @@ pub fn judge(
     };
     if signed_day < entry.from || entry.to.is_some_and(|day| signed_day > day) {
         return binding(1, status, "signed_outside_validity");
-    }
-    if entry.revoked.is_some() {
-        return binding(2, KeyStatus::Revoked, "signed_before_revocation");
     }
     binding(2, status, "key_published")
 }
@@ -354,17 +354,33 @@ mod tests {
         for revoked in ["2026-09-15", "2026-10-01"] {
             assert_eq!(
                 judged(&[key("2026-01-01", None, Some(revoked))]),
-                (1, KeyStatus::Revoked, "signed_after_revocation"),
+                (1, KeyStatus::Revoked, "key_revoked"),
                 "{revoked}"
             );
         }
     }
 
     #[test]
-    fn judge_before_revocation_stays_attached() {
+    fn revoked_key_never_reaches_level_2() {
+        // The signing day is the signer's own claim: a stolen key can date a
+        // card before any revocation day, so no revocation day vouches.
+        for revoked in ["2026-10-02", "2026-12-31", "2026-10-01", "2026-09-15"] {
+            assert_eq!(
+                judged(&[key("2026-01-01", Some("2026-12-31"), Some(revoked))]),
+                (1, KeyStatus::Revoked, "key_revoked"),
+                "{revoked}"
+            );
+        }
         assert_eq!(
-            judged(&[key("2026-01-01", Some("2026-12-31"), Some("2026-10-02"))]),
-            (2, KeyStatus::Revoked, "signed_before_revocation")
+            judged(&[key("2026-10-02", None, Some("2026-10-05"))]),
+            (1, KeyStatus::Revoked, "key_revoked"),
+            "revocation is checked before the validity window"
+        );
+        let mut other = key("2026-01-01", None, Some("2026-10-02"));
+        other.public_key = Some("CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg".to_owned());
+        assert_eq!(
+            judged(&[other]),
+            (1, KeyStatus::Unknown, "public_key_mismatch")
         );
     }
 

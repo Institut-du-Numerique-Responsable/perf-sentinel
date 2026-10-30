@@ -1518,7 +1518,7 @@ Exit codes, with one JSON line on stdout:
 Exit codes, with one JSON line on stdout:
   0  integrity ok: {\"integrity\":\"ok\",\"level\",\"domain\",\"key\",\"reason\"}
   1  tampered (signature_invalid, fingerprint_mismatch), or a key the list does not
-     vouch for (signed_after_revocation, signed_outside_validity, public_key_mismatch)
+     vouch for (key_revoked, signed_outside_validity, public_key_mismatch)
   3  input error (missing_file, file_too_large, malformed_input, no_card_payload,
      duplicate_card_payload, no_domain)
   4  --online could not read the domain's key list (binding_check_failed, no_http_client)

@@ -72,7 +72,7 @@ pub async fn cmd_verify_card(
     let untrusted = !integrity.ok
         || matches!(
             binding.reason,
-            "signed_after_revocation" | "signed_outside_validity" | "public_key_mismatch"
+            "key_revoked" | "signed_outside_validity" | "public_key_mismatch"
         );
     print_line(&integrity, binding, i32::from(untrusted))
 }

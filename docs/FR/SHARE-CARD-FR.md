@@ -90,8 +90,8 @@ Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` 
 
 | Sortie | Ligne et raisons de `verify-card` |
 |---|---|
-| 0 | `integrity` `ok`. Niveau 2 : `key_published`, `signed_before_revocation`. Niveau 1 : `no_key_list`, `key_not_published`. |
-| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), ou une clé dont la liste ne se porte pas garante (`signed_after_revocation`, `signed_outside_validity`, `public_key_mismatch`), au niveau 1. |
+| 0 | `integrity` `ok`. Niveau 2 : `key_published`. Niveau 1 : `no_key_list`, `key_not_published`. |
+| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), ou une clé dont la liste ne se porte pas garante (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), au niveau 1. |
 | 3 | `{"result":"input_error"}` : `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`. |
 | 4 | `--online` n'a pas pu lire les clés du domaine : la ligne de vérification au niveau 1 avec `binding_check_failed`, ou `no_http_client` sur une compilation sans les features HTTP. |
 | 5 | `{"result":"unrenderable","reason":"unsupported_version"}` : le format de la carte est plus récent que ce moteur. |
@@ -252,21 +252,20 @@ L'enregistrement s'écrit `v=ps1; k=<empreinte>; from=YYYY-MM-DD[; to=YYYY-MM-DD
 
 `public_key`, `to` et `revoked` peuvent être absents ou `null`. Les clés inconnues et une empreinte listée deux fois sont refusées (`malformed_input`) : une liste nomme chaque clé une seule fois. `--keys` lit le même JSON depuis un fichier.
 
-**Rotation et révocation.** Une clé est valide de `from` à `to`, bornes comprises, comparées au jour UTC où la carte a été signée (`generated_at_ms`, ou `g`).
+**Rotation et révocation.** Une clé est valide de `from` à `to`, bornes comprises, comparées au jour UTC où la carte a été signée (`generated_at_ms`, ou `g`). Ce jour est une affirmation du signataire, écrite par qui détient la clé.
 
 | La liste dit | Carte signée | Résultat |
 |---|---|---|
 | Rien (aucune liste lue) | | Niveau 1, `unknown`, `no_key_list` |
 | Pas cette empreinte | | Niveau 1, `unknown`, `key_not_published` |
 | Une autre `public_key` pour cette empreinte | | Niveau 1, `unknown`, `public_key_mismatch`, sortie 1 |
-| `revoked` | ce jour-là ou après | Niveau 1, `revoked`, `signed_after_revocation`, sortie 1 |
+| `revoked` | n'importe quel jour | Niveau 1, `revoked`, `key_revoked`, sortie 1 |
 | Valide, sans `to` | avant `from` | Niveau 1, `current`, `signed_outside_validity`, sortie 1 |
 | Valide, avec `to` | hors de `from`..`to` | Niveau 1, `retired`, `signed_outside_validity`, sortie 1 |
-| `revoked` | avant ce jour, dans sa validité | Niveau 2, `revoked`, `signed_before_revocation` |
 | Valide, sans `to` | dans sa validité | Niveau 2, `current`, `key_published` |
 | Valide, avec `to` | dans sa validité | Niveau 2, `retired`, `key_published` |
 
-Pour changer de clé, publiez la nouvelle avec son `from` et posez `to` sur l'ancienne : les cartes signées avec l'ancienne restent au niveau 2, `retired`. Pour révoquer une clé qui a fuité, posez `revoked` au jour de la fuite : toute carte signée ce jour-là ou après échoue, les plus anciennes restent au niveau 2 avec `revoked`. Quand l'enregistrement DNS et le fichier well-known listent tous deux une clé, chaque limite posée par l'un ou l'autre s'applique : `revoked` l'emporte sur `to`, et `to` sur l'absence de limite.
+Pour changer de clé, publiez la nouvelle avec son `from` et posez `to` sur l'ancienne : les cartes signées avec l'ancienne restent au niveau 2, `retired`. Cette fenêtre repose sur la date du signataire : une clé volée qui est seulement retirée peut encore dater une carte à l'intérieur. Pour écarter une clé qui a pu fuiter, posez `revoked` : toute carte qu'elle a signée tombe au niveau 1, `key_revoked`, quelle que soit la date que la carte affiche, car une clé volée pourrait dater une carte d'avant n'importe quel jour de révocation. Les cartes honnêtes signées par cette clé perdent aussi le niveau 2, et aucun horodatage tiers ne les distingue. Révoquez une clé qui a pu fuiter, retirez celle qui n'a pas fui. Le jour `revoked` est le premier jour où la clé a pu fuiter, pas le jour où elle a été écartée : il ne change aucun verdict et indique seulement au lecteur depuis quand la clé a pu être exposée. Quand l'enregistrement DNS et le fichier well-known listent tous deux une clé, chaque limite posée par l'un ou l'autre s'applique : `revoked` l'emporte sur `to`, et `to` sur l'absence de limite.
 
 ## `--online`
 

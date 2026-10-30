@@ -90,8 +90,8 @@ An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `
 
 | Exit | `verify-card` line and reasons |
 |---|---|
-| 0 | `integrity` `ok`. Level 2: `key_published`, `signed_before_revocation`. Level 1: `no_key_list`, `key_not_published`. |
-| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), or a key the list does not vouch for (`signed_after_revocation`, `signed_outside_validity`, `public_key_mismatch`), level 1. |
+| 0 | `integrity` `ok`. Level 2: `key_published`. Level 1: `no_key_list`, `key_not_published`. |
+| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), or a key the list does not vouch for (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), level 1. |
 | 3 | `{"result":"input_error"}`: `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`. |
 | 4 | `--online` could not read the domain's keys: the verify line at level 1 with `binding_check_failed`, or `no_http_client` on a build without the HTTP features. |
 | 5 | `{"result":"unrenderable","reason":"unsupported_version"}`: the card's format is newer than this engine. |
@@ -252,21 +252,20 @@ The record is `v=ps1; k=<fingerprint>; from=YYYY-MM-DD[; to=YYYY-MM-DD][; revoke
 
 `public_key`, `to` and `revoked` may be absent or `null`. Unknown keys and a fingerprint listed twice are refused (`malformed_input`), so a list must name each key once. `--keys` reads the same JSON from a file.
 
-**Rotation and revocation.** A key is valid from `from` to `to`, both included, compared with the UTC day the card was signed (`generated_at_ms`, or `g`).
+**Rotation and revocation.** A key is valid from `from` to `to`, both included, compared with the UTC day the card was signed (`generated_at_ms`, or `g`). That day is the signer's own claim, written by whoever holds the key.
 
 | The list says | Card signed | Result |
 |---|---|---|
 | Nothing (no list read) | | Level 1, `unknown`, `no_key_list` |
 | Not this fingerprint | | Level 1, `unknown`, `key_not_published` |
 | Another `public_key` for this fingerprint | | Level 1, `unknown`, `public_key_mismatch`, exit 1 |
-| `revoked` | on or after that day | Level 1, `revoked`, `signed_after_revocation`, exit 1 |
+| `revoked` | any day | Level 1, `revoked`, `key_revoked`, exit 1 |
 | Valid, no `to` | before `from` | Level 1, `current`, `signed_outside_validity`, exit 1 |
 | Valid, with `to` | outside `from`..`to` | Level 1, `retired`, `signed_outside_validity`, exit 1 |
-| `revoked` | before that day, inside its validity | Level 2, `revoked`, `signed_before_revocation` |
 | Valid, no `to` | inside its validity | Level 2, `current`, `key_published` |
 | Valid, with `to` | inside its validity | Level 2, `retired`, `key_published` |
 
-To rotate, publish the new key with its `from` and set `to` on the old one: cards signed with the old key stay at level 2, `retired`. To revoke a leaked key, set `revoked` to the day of the leak: every card signed on or after that day fails, the earlier ones stay at level 2 with `revoked`. When the DNS record and the well-known file both list a key, every limit either sets applies, so `revoked` wins over `to`, and `to` over no limit.
+To rotate, publish the new key with its `from` and set `to` on the old one: cards signed with the old key stay at level 2, `retired`. That window rests on the signer's own date, so a stolen key that is only retired can still date a card inside it. To withdraw a key that may have leaked, set `revoked`: every card it signed drops to level 1, `key_revoked`, whatever date the card states, because a stolen key could date a card before any revocation day. Honest cards that key signed lose level 2 too, and no third-party timestamp tells them apart. Revoke a key that may have leaked, retire one that did not. The `revoked` day is the first day the key may have leaked, not the day it was withdrawn: it changes no verdict and only tells a reader since when the key may have been exposed. When the DNS record and the well-known file both list a key, every limit either sets applies, so `revoked` wins over `to`, and `to` over no limit.
 
 ## `--online`
 

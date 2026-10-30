@@ -985,7 +985,7 @@ The carbon estimation uses a fixed energy constant (`0.1 mWh per I/O operation`)
 
 A share card proves that a key signed these figures and that nobody changed them since, nothing more. See [`SHARE-CARD.md`](./SHARE-CARD.md) for the contract.
 
-- **No third-party timestamp.** The signed day is the signer's own claim. Someone who steals a key can sign a card dated before the leak, and revoking the key from the day of the leak does not catch it. Only cards signed after the revocation day fail.
+- **No third-party timestamp.** The signed day is the signer's own claim. A retired key still vouches for any card dated inside its window, so someone who steals a retired key can date a card there. Revoking the key closes that, at the cost of every card it signed, honest ones included.
 - **Social networks strip metadata.** LinkedIn re-encodes images, which drops the PNG `iTXt` chunk, and probably the PDF attachment of a carousel too. Dropping a file on the verify page only works with the original file, so the QR code is the main path.
 - **The QR code carries less than the file.** The compact payload holds the angle, the period, the large figures, the before-fix period, the domain, the key and the day. It carries neither the free fields, the scope, the equivalence nor the CO2 line: only the original file proves those.
 - **The signature covers the payload, not the pixels.** Someone can copy a genuine card's `iTXt` chunk, PDF attachment or QR code onto an edited image, and `verify-card` prints `"integrity":"ok"` and the same level. Its JSON line shows no figures, so compare the payload's figures with the image: the verify page shows them.
