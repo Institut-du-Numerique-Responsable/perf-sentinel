@@ -234,7 +234,7 @@ pub struct CompactPayload {
     pub g: u32,
 }
 
-const MS_PER_DAY: u64 = 86_400_000;
+pub(crate) const MS_PER_DAY: u64 = 86_400_000;
 const MAX_TITLE_CHARS: usize = 48;
 const MAX_TEAM_CHARS: usize = 48;
 /// The Hub stores endpoint labels up to 80 (`LabelWrite.MaxLabelChars`).

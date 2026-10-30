@@ -21,7 +21,7 @@ struct ErrorLine {
     field: Option<&'static str>,
 }
 
-fn input_error(reason: &'static str, detail: String) -> CardError {
+pub(crate) fn input_error(reason: &'static str, detail: String) -> CardError {
     CardError {
         result: CardResult::InputError,
         reason,
@@ -31,7 +31,7 @@ fn input_error(reason: &'static str, detail: String) -> CardError {
 }
 
 /// Print the error line and return its exit code.
-fn finish_error(error: &CardError) -> i32 {
+pub(crate) fn finish_error(error: &CardError) -> i32 {
     eprintln!("Error: {error}");
     let line = ErrorLine {
         result: error.result.as_str(),
@@ -143,18 +143,19 @@ pub fn cmd_card_render(args: &RenderArgs<'_>) -> i32 {
 }
 
 fn render(args: &RenderArgs<'_>) -> Result<RenderedCard, CardError> {
-    let input = read_input(args.input)?;
+    let input = read_file(args.input, MAX_INPUT_BYTES)?;
     let key = read_signing_key(args.signing_key)?;
     render_card(&input, &key, args.format)
 }
 
-fn read_input(path: &Path) -> Result<Vec<u8>, CardError> {
-    match read_capped(path, MAX_INPUT_BYTES) {
+/// `path` whole, `max` bytes at most.
+pub(crate) fn read_file(path: &Path, max: u64) -> Result<Vec<u8>, CardError> {
+    match read_capped(path, max) {
         Ok(CappedRead::Bytes(bytes)) => Ok(bytes),
         Ok(CappedRead::TooLarge(len)) => Err(input_error(
             "file_too_large",
             format!(
-                "{} is {len} bytes, exceeds the {MAX_INPUT_BYTES}-byte cap",
+                "{} is {len} bytes, exceeds the {max}-byte cap",
                 path.display()
             ),
         )),

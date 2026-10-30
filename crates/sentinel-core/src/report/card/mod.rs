@@ -1,6 +1,7 @@
 //! Share cards: the signed payloads a card carries, its keys, and their
 //! rendering. Contract C2/C3 in `docs/SHARE-CARD.md`.
 
+pub mod binding;
 mod copy;
 pub mod keys;
 mod layout;
@@ -9,6 +10,7 @@ pub mod pdf;
 pub mod raster;
 #[cfg(test)]
 mod test_fixtures;
+pub mod verify;
 
 /// The family a card failure belongs to, which fixes the exit code and
 /// the `result` key of the error line.

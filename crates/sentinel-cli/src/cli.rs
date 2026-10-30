@@ -1099,6 +1099,30 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         action: CardAction,
     },
+    /// Verify a share card: its signature, then its key's binding to the
+    /// card's domain.
+    ///
+    /// Reads a `card.png`, a `card.pdf` or the verify URL its QR code
+    /// holds, offline by default. Prints one JSON line on stdout, the
+    /// contract; stderr carries the detail.
+    #[cfg(feature = "card")]
+    #[command(after_help = help_examples::VERIFY_CARD)]
+    VerifyCard {
+        /// The card file (PNG or PDF) or its verify URL.
+        target: String,
+        /// The key list the card's domain publishes, the JSON of
+        /// `/.well-known/perf-sentinel-key`, read from a local file.
+        #[arg(long, value_name = "PATH", conflicts_with = "online")]
+        keys: Option<PathBuf>,
+        /// Read the domain's key list over the network: its DNS TXT
+        /// record through DNS-over-HTTPS, then its `/.well-known` file.
+        #[arg(long)]
+        online: bool,
+        /// The DNS-over-HTTPS service for `--online`, `https://` only.
+        /// Defaults to `https://cloudflare-dns.com/dns-query`.
+        #[arg(long, value_name = "URL", requires = "online")]
+        doh: Option<String>,
+    },
     /// Compute and bake the canonical `content_hash` into a periodic report.
     ///
     /// Reads `--report`, recomputes the canonical SHA-256 `content_hash`
@@ -1475,6 +1499,26 @@ Exit codes, with one JSON line on stdout:
   3  input error (missing_file, file_too_large, malformed_input, signing_key_permissions,
      signing_key_unreadable, key_exists, output_unwritable)
   5  cannot render (compact_too_large, unsupported_characters with \"field\", ...)";
+
+    #[cfg(feature = "card")]
+    pub const VERIFY_CARD: &str = "Examples:
+  # Check a card's signature, offline
+  perf-sentinel verify-card card.png
+
+  # Check it against the key list its organization publishes
+  perf-sentinel verify-card card.pdf --keys perf-sentinel-key.json
+
+  # Check the verify URL a card's QR code holds
+  perf-sentinel verify-card 'https://perf-sentinel.dev/verifier#c=...'
+
+Exit codes, with one JSON line on stdout:
+  0  integrity ok: {\"integrity\":\"ok\",\"level\",\"domain\",\"key\",\"reason\"}
+  1  tampered (signature_invalid, fingerprint_mismatch), or a key the list does not
+     vouch for (signed_after_revocation, signed_outside_validity, public_key_mismatch)
+  3  input error (missing_file, file_too_large, malformed_input, no_card_payload,
+     duplicate_card_payload)
+  4  network error on --online (no_http_client)
+  5  the card's format is newer than this engine (unsupported_version), upgrade perf-sentinel";
 
     pub const HASH_BAKE: &str = "Examples:
   # Bake the canonical content hash into a report in place

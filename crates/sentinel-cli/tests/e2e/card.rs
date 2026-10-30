@@ -241,3 +241,212 @@ fn card_render_help_exits_zero() {
     let out = run(&["render", "--help"]);
     assert_eq!(out.status.code(), Some(0), "{out:?}");
 }
+
+fn verify(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .arg("verify-card")
+        .args(args)
+        .output()
+        .expect("spawn perf-sentinel verify-card")
+}
+
+fn assert_line(out: &Output, code: i32, expected: &serde_json::Value) {
+    assert_eq!(out.status.code(), Some(code), "{out:?}");
+    assert_eq!(&stdout_json(out), expected);
+}
+
+fn verified(level: u8, domain: Option<&str>, key: &str, reason: &str) -> serde_json::Value {
+    serde_json::json!({
+        "integrity": "ok",
+        "level": level,
+        "domain": domain,
+        "key": key,
+        "reason": reason,
+    })
+}
+
+/// A story card PNG of `input` under a fresh key: the directory holding
+/// it (kept alive by the caller), its path, the key's fingerprint and the
+/// card's verify URL.
+fn rendered_png(
+    input: &serde_json::Value,
+) -> (tempfile::TempDir, std::path::PathBuf, String, String) {
+    let (out, dir, fingerprint) = render_json(input, "png");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let url = stdout_json(&out)["compact_url"]
+        .as_str()
+        .expect("compact_url")
+        .to_owned();
+    let png = dir.path().join("out/card.png");
+    (dir, png, fingerprint, url)
+}
+
+fn path_str(path: &Path) -> &str {
+    path.to_str().expect("utf-8 path")
+}
+
+/// A `--keys` file listing `keys` under `dir`.
+fn key_list(dir: &Path, keys: &serde_json::Value) -> std::path::PathBuf {
+    let path = dir.join("published.json");
+    fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({ "keys": keys })).expect("json"),
+    )
+    .expect("write key list");
+    path
+}
+
+#[test]
+fn verify_card_on_its_own_png_is_ok_level_1() {
+    let (_dir, png, _, _) = rendered_png(&story_input());
+    assert_line(
+        &verify(&[path_str(&png)]),
+        0,
+        &verified(1, Some("acme.fr"), "unknown", "no_key_list"),
+    );
+}
+
+#[test]
+fn verify_card_with_the_published_key_is_level_2() {
+    let (dir, png, fingerprint, _) = rendered_png(&story_input());
+    let cases = [
+        (
+            serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01"}),
+            0,
+            verified(2, Some("acme.fr"), "current", "key_published"),
+        ),
+        (
+            serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "to": "2026-12-31"}),
+            0,
+            verified(2, Some("acme.fr"), "retired", "key_published"),
+        ),
+        (
+            serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "revoked": "2026-09-15"}),
+            1,
+            verified(1, Some("acme.fr"), "revoked", "signed_after_revocation"),
+        ),
+    ];
+    for (entry, code, expected) in cases {
+        let keys = key_list(dir.path(), &serde_json::json!([entry]));
+        let out = verify(&[path_str(&png), "--keys", path_str(&keys)]);
+        assert_line(&out, code, &expected);
+    }
+}
+
+#[test]
+fn verify_card_after_a_rotation_keeps_old_cards() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (key_a, fingerprint_a) = key_in(dir.path());
+    let (_, fingerprint_b) = key_in(dir.path());
+    let input = serde_json::to_vec(&story_input()).expect("input serializes");
+    let (out, out_dir) = render(dir.path(), &input, &key_a, "png");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let keys = key_list(
+        dir.path(),
+        &serde_json::json!([
+            {"fingerprint": fingerprint_a, "from": "2026-01-01", "to": "2026-10-15"},
+            {"fingerprint": fingerprint_b, "from": "2026-10-15"},
+        ]),
+    );
+    let out = verify(&[
+        path_str(&out_dir.join("card.png")),
+        "--keys",
+        path_str(&keys),
+    ]);
+    assert_line(
+        &out,
+        0,
+        &verified(2, Some("acme.fr"), "retired", "key_published"),
+    );
+}
+
+#[test]
+fn verify_card_on_the_compact_url_is_ok() {
+    use sentinel_core::report::card::keys::{b64url_decode, b64url_encode};
+
+    let (_dir, _, _, url) = rendered_png(&story_input());
+    assert_line(
+        &verify(&[&url]),
+        0,
+        &verified(1, Some("acme.fr"), "unknown", "no_key_list"),
+    );
+
+    // One payload character changed, the signature kept: the day it was
+    // generated, 2026-10-01, moved to the next.
+    let (prefix, fragment) = url.split_once("#c=").expect("fragment");
+    let (compact, signature) = fragment.rsplit_once('.').expect("signature");
+    let compact = String::from_utf8(b64url_decode(compact).expect("base64url")).expect("utf-8");
+    let changed = compact.replacen("\"g\":20727", "\"g\":20728", 1);
+    assert_ne!(changed, compact);
+    let tampered = format!(
+        "{prefix}#c={}.{signature}",
+        b64url_encode(changed.as_bytes())
+    );
+    assert_line(
+        &verify(&[&tampered]),
+        1,
+        &serde_json::json!({
+            "integrity": "tampered",
+            "level": 1,
+            "domain": null,
+            "key": "unknown",
+            "reason": "signature_invalid",
+        }),
+    );
+}
+
+/// `png` without its text chunks, every other chunk kept as it was.
+fn without_text_chunks(png: &[u8]) -> Vec<u8> {
+    let mut out = png[..8].to_vec();
+    let mut rest = &png[8..];
+    while rest.len() >= 12 {
+        let len = u32::from_be_bytes(rest[..4].try_into().expect("4 bytes")) as usize;
+        let (chunk, tail) = rest.split_at(12 + len);
+        if !matches!(&chunk[4..8], b"iTXt" | b"tEXt" | b"zTXt") {
+            out.extend_from_slice(chunk);
+        }
+        rest = tail;
+    }
+    out
+}
+
+#[test]
+fn verify_card_on_a_stripped_png_says_no_card_payload() {
+    let (dir, png, _, _) = rendered_png(&story_input());
+    let stripped = dir.path().join("stripped.png");
+    let bytes = without_text_chunks(&fs::read(&png).expect("card.png"));
+    assert!(bytes.len() < fs::metadata(&png).expect("card.png").len() as usize);
+    fs::write(&stripped, bytes).expect("write stripped png");
+    assert_line(
+        &verify(&[path_str(&stripped)]),
+        3,
+        &serde_json::json!({"result": "input_error", "reason": "no_card_payload"}),
+    );
+}
+
+#[test]
+fn verify_card_on_a_file_that_is_no_card_is_an_input_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let text = dir.path().join("card.txt");
+    fs::write(&text, b"not a card").expect("write");
+    assert_line(
+        &verify(&[path_str(&text)]),
+        3,
+        &serde_json::json!({"result": "input_error", "reason": "malformed_input"}),
+    );
+    assert_line(
+        &verify(&[path_str(&dir.path().join("missing.png"))]),
+        3,
+        &serde_json::json!({"result": "input_error", "reason": "missing_file"}),
+    );
+}
+
+#[test]
+fn verify_card_on_a_card_without_a_domain_prints_null() {
+    let mut input = story_input();
+    input["org"] = serde_json::json!({"name": "Acme"});
+    let (_dir, png, _, url) = rendered_png(&input);
+    let expected = verified(1, None, "unknown", "no_key_list");
+    assert_line(&verify(&[path_str(&png)]), 0, &expected);
+    assert_line(&verify(&[&url]), 0, &expected);
+}

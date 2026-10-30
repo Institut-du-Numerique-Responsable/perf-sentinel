@@ -47,6 +47,8 @@ mod tui;
 mod tui_launch;
 #[cfg(feature = "tui")]
 mod tui_resize;
+#[cfg(feature = "card")]
+mod verify_card;
 mod verify_hash;
 
 use clap::{CommandFactory, Parser};
@@ -640,6 +642,18 @@ async fn dispatch_command(command: Commands) {
                 }));
             }
         },
+        #[cfg(feature = "card")]
+        Commands::VerifyCard {
+            target,
+            keys,
+            online,
+            doh,
+        } => {
+            let code =
+                verify_card::cmd_verify_card(&target, keys.as_deref(), online, doh.as_deref())
+                    .await;
+            std::process::exit(code);
+        }
         Commands::HashBake {
             report,
             output,
