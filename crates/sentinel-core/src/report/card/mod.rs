@@ -3,6 +3,7 @@
 
 pub mod binding;
 mod copy;
+pub mod jxl;
 pub mod keys;
 mod layout;
 #[cfg(any(feature = "daemon", feature = "tempo", feature = "jaeger-query"))]
@@ -76,13 +77,15 @@ pub enum CardFormat {
     Pdf,
     /// The single image as an SVG, its text drawn as outlines.
     Svg,
+    /// The single image as a lossless JPEG XL, the PNG's pixels.
+    Jxl,
 }
 
 /// A signed card, ready to write.
 #[derive(Debug)]
 pub struct RenderedCard {
     pub bytes: Vec<u8>,
-    /// `card.png`, `card.pdf` or `card.svg`.
+    /// `card.png`, `card.pdf`, `card.svg` or `card.jxl`.
     pub file_name: &'static str,
     pub fingerprint: String,
     pub compact_url: String,
@@ -126,6 +129,10 @@ pub fn render_card(
                 svg::render_svg(&ops, &envelope, title, full.lang)?,
                 "card.svg",
             )
+        }
+        CardFormat::Jxl => {
+            let pixmap = raster::rasterize(&layout::layout_image(&full, &compact_url)?)?;
+            (jxl::encode_jxl(&pixmap, &envelope)?, "card.jxl")
         }
     };
     Ok(RenderedCard {
@@ -187,6 +194,27 @@ mod tests {
         assert_eq!(card.fingerprint, png.fingerprint);
 
         let again = render_card(&input, &key.pkcs8, CardFormat::Svg).expect("renders");
+        assert_eq!(again.bytes, card.bytes);
+    }
+
+    #[test]
+    fn render_card_signs_what_it_draws_as_jxl() {
+        let key = generate_key().expect("key");
+        let input = serde_json::to_vec(&story_input(FindingType::NPlusOneSql)).expect("json");
+        let card = render_card(&input, &key.pkcs8, CardFormat::Jxl).expect("renders");
+        assert_eq!(card.file_name, "card.jxl");
+
+        let envelope = jxl::read_jxl_envelope(&card.bytes).expect("envelope");
+        let (payload, signature) = parse_file_envelope(&envelope).expect("file envelope");
+        let full = parse_full_payload(&payload).expect("full payload");
+        let public_key = b64url_decode(&full.public_key).expect("public key");
+        assert!(verify_signature(&public_key, &payload, &signature));
+
+        let png = render_card(&input, &key.pkcs8, CardFormat::Png).expect("renders");
+        assert_eq!(card.compact_url, png.compact_url);
+        assert_eq!(card.fingerprint, png.fingerprint);
+
+        let again = render_card(&input, &key.pkcs8, CardFormat::Jxl).expect("renders");
         assert_eq!(again.bytes, card.bytes);
     }
 }

@@ -7,6 +7,7 @@ use sentinel_core::report::card::CardError;
 use sentinel_core::report::card::binding::{
     Binding, DEFAULT_DOH_URL, KeyStatus, PublishedKey, judge, parse_key_list,
 };
+use sentinel_core::report::card::jxl::JXL_SIGNATURE_BOX;
 use sentinel_core::report::card::raster::MAX_CARD_PNG_BYTES;
 use sentinel_core::report::card::svg::looks_like_svg;
 use sentinel_core::report::card::verify::{CardSource, Integrity, check_integrity};
@@ -18,6 +19,8 @@ use crate::card::{finish_error, input_error, read_file};
 const MAX_KEY_LIST_BYTES: u64 = 64 * 1024;
 const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 const PDF_MAGIC: &[u8] = b"%PDF-";
+/// A bare JPEG XL codestream, which cannot carry the card's box.
+const JXL_CODESTREAM: [u8; 2] = [0xFF, 0x0A];
 
 #[derive(Serialize)]
 struct VerifyLine<'a> {
@@ -156,7 +159,7 @@ fn read_key_list(path: &Path) -> Result<Vec<PublishedKey>, CardError> {
 }
 
 /// A target starting with `https://` or `http://` is a verify URL; any
-/// other is a file, a PNG, a PDF or an SVG by its first bytes.
+/// other is a file, a PNG, a PDF, a JPEG XL or an SVG by its first bytes.
 fn integrity_of(target: &str) -> Result<Integrity, CardError> {
     if target.starts_with("https://") || target.starts_with("http://") {
         return check_integrity(CardSource::Url(target));
@@ -166,12 +169,14 @@ fn integrity_of(target: &str) -> Result<Integrity, CardError> {
         CardSource::Png(&bytes)
     } else if bytes.starts_with(PDF_MAGIC) {
         CardSource::Pdf(&bytes)
+    } else if bytes.starts_with(&JXL_SIGNATURE_BOX) || bytes.starts_with(&JXL_CODESTREAM) {
+        CardSource::Jxl(&bytes)
     } else if looks_like_svg(&bytes) {
         CardSource::Svg(&bytes)
     } else {
         return Err(input_error(
             "malformed_input",
-            format!("{target} is not a PNG, a PDF, an SVG or a verify URL"),
+            format!("{target} is not a PNG, a PDF, an SVG, a JPEG XL or a verify URL"),
         ));
     };
     check_integrity(source)

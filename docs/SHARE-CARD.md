@@ -14,13 +14,14 @@ A card has one of three angles:
 | Curve | `curve` | The share of the work that was avoidable, period by period, 2 to 12 bars. |
 | Collective | `collective` | How many fixes were confirmed by measurement over a period, on how many services, by family. |
 
-Each card renders in English or French (`lang`) and in one of three formats:
+Each card renders in English or French (`lang`) and in one of four formats:
 
 - `card.png`, a single 1080 x 1350 image, the format to post.
 - `card.svg`, the same image as an SVG, its text drawn as outlines (see [The SVG](#the-svg)).
+- `card.jxl`, the same pixels as a lossless JPEG XL, an archival export LinkedIn does not accept (see [The JPEG XL](#the-jpeg-xl)).
 - `card.pdf`, a four-page carousel (the hook, why it matters, the figures with their equivalence, the proof with the method), PDF/A-3b.
 
-All three carry the full signed payload. The QR code on the image and on the carousel's last page holds the verify URL with the compact payload.
+All four carry the full signed payload. The QR code on the image and on the carousel's last page holds the verify URL with the compact payload.
 
 ## Commands (C2)
 
@@ -43,10 +44,10 @@ Generates an Ed25519 key, writes it to `<DIR>/<fingerprint>.pk8` (PKCS#8 v2, mod
 ### `card render`
 
 ```bash
-perf-sentinel card render --input card.json --signing-key <fingerprint>.pk8 --out-dir <DIR> --format png|pdf|svg
+perf-sentinel card render --input card.json --signing-key <fingerprint>.pk8 --out-dir <DIR> --format png|pdf|svg|jxl
 ```
 
-Reads `card.json` (64 KiB at most) and the key (1 KiB at most, a regular file, never a symlink, and on Unix readable by its owner only), signs the full and compact payloads, and writes `<DIR>/card.png`, `<DIR>/card.pdf` or `<DIR>/card.svg`. Nothing is written unless the card renders. The same input and key give the same bytes. It prints:
+Reads `card.json` (64 KiB at most) and the key (1 KiB at most, a regular file, never a symlink, and on Unix readable by its owner only), signs the full and compact payloads, and writes `<DIR>/card.png`, `<DIR>/card.pdf`, `<DIR>/card.svg` or `<DIR>/card.jxl`. Nothing is written unless the card renders. The same input and key give the same bytes. It prints:
 
 ```json
 {"result":"rendered","files":["card.png"],"fingerprint":"ps1:...","compact_url":"https://perf-sentinel.dev/verifier#c=..."}
@@ -57,10 +58,10 @@ The private key never travels as a command-line argument: the Hub passes the pat
 ### `verify-card`
 
 ```bash
-perf-sentinel verify-card <card.png|card.pdf|card.svg|URL> [--keys <published.json>] [--online [--doh <URL>]]
+perf-sentinel verify-card <card.png|card.pdf|card.svg|card.jxl|URL> [--keys <published.json>] [--online [--doh <URL>]]
 ```
 
-Reads a card file (16 MiB at most, a PNG, a PDF or an SVG by its first bytes, an SVG starting with `<?xml` or `<svg` after an optional UTF-8 BOM and whitespace) or a verify URL (any target starting with `https://` or `http://`), checks the signature, then the key's binding to the card's domain. It works offline by default. `--keys` reads a local copy of the domain's `/.well-known/perf-sentinel-key` (64 KiB at most). `--online` reads the published keys over the network, see [`--online`](#--online). `--keys` and `--online` exclude each other, and `--doh` needs `--online`. It prints:
+Reads a card file (16 MiB at most, a PNG, a PDF, a JPEG XL or an SVG by its first bytes, a JPEG XL starting with its signature box or with `FF 0A`, an SVG starting with `<?xml` or `<svg` after an optional UTF-8 BOM and whitespace) or a verify URL (any target starting with `https://` or `http://`), checks the signature, then the key's binding to the card's domain. It works offline by default. `--keys` reads a local copy of the domain's `/.well-known/perf-sentinel-key` (64 KiB at most). `--online` reads the published keys over the network, see [`--online`](#--online). `--keys` and `--online` exclude each other, and `--doh` needs `--online`. It prints:
 
 ```json
 {"integrity":"ok","level":2,"domain":"acme.fr","key":"current","reason":"key_published"}
@@ -76,7 +77,7 @@ Reads a card file (16 MiB at most, a PNG, a PDF or an SVG by its first bytes, an
 
 The signature is checked first, over the exact bytes the card carries. Only an intact payload is then read against the rules: a bad signature is `tampered` whatever the bytes say, and a valid signature over a payload that breaks a rule is `malformed_input`.
 
-The verdict covers the signed payload, not the pixels. Someone can copy a genuine card's `iTXt` chunk, PDF attachment, SVG `<metadata>` element or QR code onto an edited image, and `verify-card` still prints `"integrity":"ok"`. Compare the payload's figures with the image: the verify page shows them.
+The verdict covers the signed payload, not the pixels. Someone can copy a genuine card's `iTXt` chunk, PDF attachment, SVG `<metadata>` element, JPEG XL `pscd` box or QR code onto an edited image, and `verify-card` still prints `"integrity":"ok"`. Compare the payload's figures with the image: the verify page shows them.
 
 ### Exit codes and reasons
 
@@ -87,7 +88,7 @@ An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `
 | 0 | | Done. |
 | 1 | `refused` | `period_not_calendar`, `period_not_closed`, `incomplete_period`, `volume_not_avoidable`, `threshold_not_applicable`, `unknown_equivalence`, `equivalence_out_of_scale`, `unsupported_language`. The card would claim what its figures do not show. |
 | 3 | `input_error` | `missing_file`, `file_too_large`, `malformed_input`, `signing_key_permissions`, `signing_key_unreadable`, `key_exists`, `output_unwritable`. |
-| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`. |
+| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`, `jxl_encode_failed`. |
 
 | Exit | `verify-card` line and reasons |
 |---|---|
@@ -209,7 +210,7 @@ The story fixture's compact payload:
 
 ### Envelopes
 
-- **File envelope**: `{"payload":"<base64url of the canonical full payload>","signature":"<base64url of the 64-byte Ed25519 signature>"}`, no other key. The PNG carries it in an `iTXt` chunk with the keyword `perf-sentinel-card`, ahead of the image data. The PDF carries it as the attachment `perf-sentinel-card.json`. The SVG carries it as the text of `<metadata id="perf-sentinel-card">`, written as is. The envelope takes at most 64 KiB. A second `perf-sentinel-card` chunk ahead of the image data, a second attachment of that name, or a second such element, is `duplicate_card_payload`.
+- **File envelope**: `{"payload":"<base64url of the canonical full payload>","signature":"<base64url of the 64-byte Ed25519 signature>"}`, no other key. The PNG carries it in an `iTXt` chunk with the keyword `perf-sentinel-card`, ahead of the image data. The PDF carries it as the attachment `perf-sentinel-card.json`. The SVG carries it as the text of `<metadata id="perf-sentinel-card">`, written as is. The JPEG XL carries it as the payload of a top-level `pscd` box, ahead of the codestream. The envelope takes at most 64 KiB. A second `perf-sentinel-card` chunk ahead of the image data, a second attachment of that name, a second such element, or a second top-level `pscd` box, is `duplicate_card_payload`.
 - **Compact URL**: `https://perf-sentinel.dev/verifier#c=<base64url of the canonical compact payload>.<base64url of its signature>`. The token travels in the fragment, which a browser never sends to the server. A reader takes what follows the first `#c=` and splits it on its last `.`.
 
 ### Encoding rules
@@ -411,6 +412,47 @@ Sizes measured on the test fixtures, envelope included:
 | Story | 319 KiB | 324 KiB |
 | Curve | 297 KiB | 293 KiB |
 | Collective | 325 KiB | 338 KiB |
+
+## The JPEG XL
+
+`card.jxl` holds the pixels of `card.png`, lossless: the engine rasterizes the card once and hands the same 8-bit RGB bytes to both encoders, so a decoded `card.jxl` equals a decoded `card.png`, byte for byte. The encoder is jixel (pure Rust, no dependency, default features and SIMD off), at speed `Medium` on one thread, so the bytes do not depend on the host's core count. A test decodes the file with jxl-rs, the decoder Chrome and Firefox ship, and with jxl-oxide, a second, independent decoder, and compares both with the PNG's pixels.
+
+Sizes measured on the test fixtures (English, envelope included):
+
+| Fixture | `card.jxl` | `card.png` | Ratio |
+|---|---|---|---|
+| Story | 44,719 B | 111,986 B | 0.40 |
+| Curve | 41,383 B | 110,546 B | 0.37 |
+| Collective | 42,011 B | 116,719 B | 0.36 |
+
+JPEG XL is an archival or high-quality export. The PNG stays the format to post: LinkedIn does not accept JPEG XL ([its help page](https://www.linkedin.com/help/linkedin/answer/a564109) lists GIF, HEIF/HEIC on iOS, JPEG, PNG and WEBP for images), and browser support is recent and uneven: Chrome turns it on by default from version 155, Firefox from 158, Safari has partial support since 17, and Edge does not display it ([caniuse](https://caniuse.com/jpegxl), checked 2026-10-30).
+
+jixel writes a bare codestream (it starts `FF 0A`) and has no API for a custom box, so the engine writes the container itself. The layout is fixed:
+
+```text
+00 00 00 0C  4A 58 4C 20  0D 0A 87 0A         signature box
+00 00 00 14  ftyp  jxl   00 00 00 00  jxl     ftyp box
+size(8 + n)  pscd  <n envelope bytes>         the card's box
+size(8 + m)  jxlc  <m codestream bytes>       the codestream
+```
+
+Sizes are 32-bit big-endian and count the 8-byte header. Nothing follows `jxlc`. The `pscd` payload is the file envelope as is, the same bytes as the PNG's `iTXt` text. It comes before the codestream, so a reader finds it in the first few hundred bytes.
+
+`pscd` is a private box type. libjxl's `decode.h` lets an application add a box whose type neither starts with `jxl` or `JXL` nor reuses a defined type. jxl-rs and jxl-oxide skip it, and the test above decodes the card with its `pscd` box. An `xml ` box would force an XMP packet with XML escaping, a second canonical form that metadata tools rewrite. An `Exif` box is a TIFF structure and the box pipelines strip most often. A `jumb` box (JUMBF, the C2PA container) is far heavier than a card needs.
+
+`verify-card` reads the envelope by walking the top-level boxes, without decoding the codestream: a decoder would be a large dependency exposed to a file a stranger sends, for bytes the reader never needs. A box of size 1 has a 64-bit size after its type, a box of size 0 runs to the end of the file. Every box other than `pscd` is skipped by its length and never read, so a `pscd` box nested inside another box is not seen.
+
+| The file | Reason |
+|---|---|
+| Over 16 MiB | `file_too_large` |
+| A bare codestream (starts `FF 0A`) | `no_card_payload` |
+| Not starting with the signature box | `malformed_input` |
+| A box smaller than its header, running past the end of the file, or cut inside its header | `malformed_input` |
+| No top-level `pscd` box | `no_card_payload` |
+| Two top-level `pscd` boxes | `duplicate_card_payload` |
+| A `pscd` payload over 64 KiB or not UTF-8 | `malformed_input` |
+
+Like the PNG chunk, the envelope proves the payload, not the pixels.
 
 ## QR code
 

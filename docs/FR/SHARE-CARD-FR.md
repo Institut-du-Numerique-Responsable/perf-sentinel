@@ -14,13 +14,14 @@ Une carte a l'un de ces trois angles :
 | Courbe | `curve` | La part du travail évitable, période par période, de 2 à 12 barres. |
 | Collectif | `collective` | Combien de corrections la mesure a confirmées sur une période, sur combien de services, par famille. |
 
-Chaque carte se rend en anglais ou en français (`lang`) et dans l'un de ces trois formats :
+Chaque carte se rend en anglais ou en français (`lang`) et dans l'un de ces quatre formats :
 
 - `card.png`, une image unique de 1080 x 1350, le format à publier.
 - `card.svg`, la même image en SVG, son texte dessiné en contours (voir [Le SVG](#le-svg)).
+- `card.jxl`, les mêmes pixels en JPEG XL sans perte, un export d'archive que LinkedIn n'accepte pas (voir [Le JPEG XL](#le-jpeg-xl)).
 - `card.pdf`, un carrousel de quatre pages (l'accroche, pourquoi c'est important, les chiffres avec leur équivalence, la preuve avec la méthode), en PDF/A-3b.
 
-Les trois portent la charge utile complète signée. Le QR code de l'image et de la dernière page du carrousel contient l'URL de vérification avec la charge utile compacte.
+Les quatre portent la charge utile complète signée. Le QR code de l'image et de la dernière page du carrousel contient l'URL de vérification avec la charge utile compacte.
 
 ## Commandes (C2)
 
@@ -43,10 +44,10 @@ Génère une clé Ed25519, l'écrit dans `<DIR>/<empreinte>.pk8` (PKCS#8 v2, mod
 ### `card render`
 
 ```bash
-perf-sentinel card render --input card.json --signing-key <empreinte>.pk8 --out-dir <DIR> --format png|pdf|svg
+perf-sentinel card render --input card.json --signing-key <empreinte>.pk8 --out-dir <DIR> --format png|pdf|svg|jxl
 ```
 
-Lit `card.json` (64 Kio au plus) et la clé (1 Kio au plus, un fichier régulier, jamais un lien symbolique, et sous Unix lisible par son seul propriétaire), signe les charges utiles complète et compacte, et écrit `<DIR>/card.png`, `<DIR>/card.pdf` ou `<DIR>/card.svg`. Rien n'est écrit si la carte ne se rend pas. La même entrée et la même clé donnent les mêmes octets. La commande affiche :
+Lit `card.json` (64 Kio au plus) et la clé (1 Kio au plus, un fichier régulier, jamais un lien symbolique, et sous Unix lisible par son seul propriétaire), signe les charges utiles complète et compacte, et écrit `<DIR>/card.png`, `<DIR>/card.pdf`, `<DIR>/card.svg` ou `<DIR>/card.jxl`. Rien n'est écrit si la carte ne se rend pas. La même entrée et la même clé donnent les mêmes octets. La commande affiche :
 
 ```json
 {"result":"rendered","files":["card.png"],"fingerprint":"ps1:...","compact_url":"https://perf-sentinel.dev/verifier#c=..."}
@@ -57,10 +58,10 @@ La clé privée ne passe jamais en argument de ligne de commande : le Hub passe 
 ### `verify-card`
 
 ```bash
-perf-sentinel verify-card <card.png|card.pdf|card.svg|URL> [--keys <published.json>] [--online [--doh <URL>]]
+perf-sentinel verify-card <card.png|card.pdf|card.svg|card.jxl|URL> [--keys <published.json>] [--online [--doh <URL>]]
 ```
 
-Lit un fichier de carte (16 Mio au plus, un PNG, un PDF ou un SVG d'après ses premiers octets, un SVG commençant par `<?xml` ou `<svg` après un BOM UTF-8 facultatif et des blancs) ou une URL de vérification (toute cible qui commence par `https://` ou `http://`), vérifie la signature, puis le lien de la clé avec le domaine de la carte. Elle fonctionne hors ligne par défaut. `--keys` lit une copie locale du `/.well-known/perf-sentinel-key` du domaine (64 Kio au plus). `--online` lit les clés publiées par le réseau, voir [`--online`](#--online). `--keys` et `--online` s'excluent, et `--doh` demande `--online`. La commande affiche :
+Lit un fichier de carte (16 Mio au plus, un PNG, un PDF, un JPEG XL ou un SVG d'après ses premiers octets, un JPEG XL commençant par sa boîte de signature ou par `FF 0A`, un SVG commençant par `<?xml` ou `<svg` après un BOM UTF-8 facultatif et des blancs) ou une URL de vérification (toute cible qui commence par `https://` ou `http://`), vérifie la signature, puis le lien de la clé avec le domaine de la carte. Elle fonctionne hors ligne par défaut. `--keys` lit une copie locale du `/.well-known/perf-sentinel-key` du domaine (64 Kio au plus). `--online` lit les clés publiées par le réseau, voir [`--online`](#--online). `--keys` et `--online` s'excluent, et `--doh` demande `--online`. La commande affiche :
 
 ```json
 {"integrity":"ok","level":2,"domain":"acme.fr","key":"current","reason":"key_published"}
@@ -76,7 +77,7 @@ Lit un fichier de carte (16 Mio au plus, un PNG, un PDF ou un SVG d'après ses p
 
 La signature est vérifiée d'abord, sur les octets exacts que porte la carte. Seule une charge utile intacte est ensuite confrontée aux règles : une mauvaise signature donne `tampered` quoi que disent les octets, et une signature valide sur une charge utile qui enfreint une règle donne `malformed_input`.
 
-Le verdict porte sur la charge utile signée, pas sur les pixels. Quelqu'un peut copier le chunk `iTXt`, la pièce jointe PDF, l'élément `<metadata>` du SVG ou le QR code d'une vraie carte sur une image retouchée, et `verify-card` imprime toujours `"integrity":"ok"`. Comparez les chiffres de la charge utile avec l'image : la page de vérification les affiche.
+Le verdict porte sur la charge utile signée, pas sur les pixels. Quelqu'un peut copier le chunk `iTXt`, la pièce jointe PDF, l'élément `<metadata>` du SVG, la boîte `pscd` du JPEG XL ou le QR code d'une vraie carte sur une image retouchée, et `verify-card` imprime toujours `"integrity":"ok"`. Comparez les chiffres de la charge utile avec l'image : la page de vérification les affiche.
 
 ### Codes de sortie et raisons
 
@@ -87,7 +88,7 @@ Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` 
 | 0 | | Fait. |
 | 1 | `refused` | `period_not_calendar`, `period_not_closed`, `incomplete_period`, `volume_not_avoidable`, `threshold_not_applicable`, `unknown_equivalence`, `equivalence_out_of_scale`, `unsupported_language`. La carte annoncerait ce que ses chiffres ne montrent pas. |
 | 3 | `input_error` | `missing_file`, `file_too_large`, `malformed_input`, `signing_key_permissions`, `signing_key_unreadable`, `key_exists`, `output_unwritable`. |
-| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`. |
+| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`, `jxl_encode_failed`. |
 
 | Sortie | Ligne et raisons de `verify-card` |
 |---|---|
@@ -209,7 +210,7 @@ La charge utile compacte de la fixture d'histoire :
 
 ### Enveloppes
 
-- **Enveloppe de fichier** : `{"payload":"<base64url de la charge utile complète canonique>","signature":"<base64url de la signature Ed25519 de 64 octets>"}`, sans autre clé. Le PNG la porte dans un chunk `iTXt` au mot-clé `perf-sentinel-card`, avant les données d'image. Le PDF la porte en pièce jointe `perf-sentinel-card.json`. Le SVG la porte comme texte de `<metadata id="perf-sentinel-card">`, écrite telle quelle. L'enveloppe tient en 64 Kio. Un second chunk `perf-sentinel-card` avant les données d'image, une seconde pièce jointe de ce nom, ou un second élément de ce type, donne `duplicate_card_payload`.
+- **Enveloppe de fichier** : `{"payload":"<base64url de la charge utile complète canonique>","signature":"<base64url de la signature Ed25519 de 64 octets>"}`, sans autre clé. Le PNG la porte dans un chunk `iTXt` au mot-clé `perf-sentinel-card`, avant les données d'image. Le PDF la porte en pièce jointe `perf-sentinel-card.json`. Le SVG la porte comme texte de `<metadata id="perf-sentinel-card">`, écrite telle quelle. Le JPEG XL la porte comme charge d'une boîte `pscd` de premier niveau, avant le codestream. L'enveloppe tient en 64 Kio. Un second chunk `perf-sentinel-card` avant les données d'image, une seconde pièce jointe de ce nom, un second élément de ce type, ou une seconde boîte `pscd` de premier niveau, donne `duplicate_card_payload`.
 - **URL compacte** : `https://perf-sentinel.dev/verifier#c=<base64url de la charge utile compacte canonique>.<base64url de sa signature>`. Le jeton voyage dans le fragment, qu'un navigateur n'envoie jamais au serveur. Un lecteur prend ce qui suit le premier `#c=` et le coupe sur son dernier `.`.
 
 ### Règles d'encodage
@@ -411,6 +412,47 @@ Tailles mesurées sur les fixtures de test, enveloppe comprise :
 | Histoire | 319 Kio | 324 Kio |
 | Courbe | 297 Kio | 293 Kio |
 | Collectif | 325 Kio | 338 Kio |
+
+## Le JPEG XL
+
+`card.jxl` contient les pixels de `card.png`, sans perte : le moteur rastérise la carte une fois et passe les mêmes octets RVB 8 bits aux deux encodeurs, si bien qu'un `card.jxl` décodé égale un `card.png` décodé, octet pour octet. L'encodeur est jixel (pur Rust, sans dépendance, features par défaut et SIMD désactivées), en vitesse `Medium` sur un seul thread, pour que les octets ne dépendent pas du nombre de cœurs de la machine. Un test décode le fichier avec jxl-rs, le décodeur que livrent Chrome et Firefox, et avec jxl-oxide, un second décodeur indépendant, et compare les deux aux pixels du PNG.
+
+Tailles mesurées sur les fixtures de test (anglais, enveloppe comprise) :
+
+| Fixture | `card.jxl` | `card.png` | Rapport |
+|---|---|---|---|
+| Histoire | 44 719 o | 111 986 o | 0,40 |
+| Courbe | 41 383 o | 110 546 o | 0,37 |
+| Collectif | 42 011 o | 116 719 o | 0,36 |
+
+Le JPEG XL est un export d'archive ou de haute qualité. Le PNG reste le format à publier : LinkedIn n'accepte pas le JPEG XL ([sa page d'aide](https://www.linkedin.com/help/linkedin/answer/a564109) liste GIF, HEIF/HEIC sous iOS, JPEG, PNG et WEBP pour les images), et la prise en charge des navigateurs est récente et inégale : Chrome l'active par défaut depuis la version 155, Firefox depuis la 158, Safari la prend en charge partiellement depuis la 17, et Edge ne l'affiche pas ([caniuse](https://caniuse.com/jpegxl), vérifié le 2026-10-30).
+
+jixel écrit un codestream nu (il commence par `FF 0A`) et n'a pas d'API pour une boîte personnalisée, le moteur écrit donc le conteneur lui-même. La disposition est fixe :
+
+```text
+00 00 00 0C  4A 58 4C 20  0D 0A 87 0A         boîte de signature
+00 00 00 14  ftyp  jxl   00 00 00 00  jxl     boîte ftyp
+taille(8 + n)  pscd  <n octets d'enveloppe>   la boîte de la carte
+taille(8 + m)  jxlc  <m octets de codestream> le codestream
+```
+
+Les tailles sont sur 32 bits gros-boutiste et comptent l'en-tête de 8 octets. Rien ne suit `jxlc`. La charge de `pscd` est l'enveloppe de fichier telle quelle, les mêmes octets que le texte `iTXt` du PNG. Elle précède le codestream, un lecteur la trouve donc dans les premières centaines d'octets.
+
+`pscd` est un type de boîte privé. Le `decode.h` de libjxl permet à une application d'ajouter une boîte dont le type ne commence ni par `jxl` ni par `JXL` et ne reprend pas un type défini. jxl-rs et jxl-oxide la sautent, et le test ci-dessus décode la carte avec sa boîte `pscd`. Une boîte `xml ` imposerait un paquet XMP avec échappement XML, une seconde forme canonique que les outils de métadonnées réécrivent. Une boîte `Exif` est une structure TIFF, la boîte que les chaînes de traitement retirent le plus souvent. Une boîte `jumb` (JUMBF, le conteneur de C2PA) est bien plus lourde qu'il ne faut pour une carte.
+
+`verify-card` lit l'enveloppe en parcourant les boîtes de premier niveau, sans décoder le codestream : un décodeur serait une grosse dépendance exposée à un fichier envoyé par un inconnu, pour des octets dont le lecteur n'a jamais besoin. Une boîte de taille 1 porte une taille sur 64 bits après son type, une boîte de taille 0 court jusqu'à la fin du fichier. Toute boîte autre que `pscd` est sautée selon sa longueur et jamais lue, une boîte `pscd` imbriquée dans une autre n'est donc pas vue.
+
+| Le fichier | Raison |
+|---|---|
+| Plus de 16 Mio | `file_too_large` |
+| Un codestream nu (commence par `FF 0A`) | `no_card_payload` |
+| Ne commence pas par la boîte de signature | `malformed_input` |
+| Une boîte plus petite que son en-tête, qui dépasse la fin du fichier, ou coupée dans son en-tête | `malformed_input` |
+| Aucune boîte `pscd` de premier niveau | `no_card_payload` |
+| Deux boîtes `pscd` de premier niveau | `duplicate_card_payload` |
+| Une charge de `pscd` de plus de 64 Kio ou pas en UTF-8 | `malformed_input` |
+
+Comme le chunk du PNG, l'enveloppe prouve la charge utile, pas les pixels.
 
 ## QR code
 

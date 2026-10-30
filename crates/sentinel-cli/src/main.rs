@@ -634,6 +634,7 @@ async fn dispatch_command(command: Commands) {
                     cli::CardFormatArg::Png => sentinel_core::report::card::CardFormat::Png,
                     cli::CardFormatArg::Pdf => sentinel_core::report::card::CardFormat::Pdf,
                     cli::CardFormatArg::Svg => sentinel_core::report::card::CardFormat::Svg,
+                    cli::CardFormatArg::Jxl => sentinel_core::report::card::CardFormat::Jxl,
                 };
                 std::process::exit(card::cmd_card_render(&card::RenderArgs {
                     input: &input,

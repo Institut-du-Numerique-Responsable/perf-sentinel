@@ -49,6 +49,19 @@ pub(crate) fn rasterize(ops: &[Op]) -> Result<Pixmap, CardError> {
     Ok(pixmap)
 }
 
+/// The pixmap's pixels as 8-bit RGB rows, the bytes the PNG and the JPEG
+/// XL both encode.
+pub(crate) fn opaque_rgb(pixmap: &Pixmap) -> Vec<u8> {
+    pixmap
+        .pixels()
+        .iter()
+        .flat_map(|pixel| {
+            let color = pixel.demultiply();
+            [color.red(), color.green(), color.blue()]
+        })
+        .collect()
+}
+
 /// `pixmap` as an 8-bit RGB PNG, the envelope in an `iTXt` chunk ahead of
 /// the pixels.
 ///
@@ -56,14 +69,7 @@ pub(crate) fn rasterize(ops: &[Op]) -> Result<Pixmap, CardError> {
 ///
 /// `png_encode_failed` when the encoder refuses the chunk or the pixels.
 pub(crate) fn encode_png(pixmap: &Pixmap, envelope: &str) -> Result<Vec<u8>, CardError> {
-    let rgb: Vec<u8> = pixmap
-        .pixels()
-        .iter()
-        .flat_map(|pixel| {
-            let color = pixel.demultiply();
-            [color.red(), color.green(), color.blue()]
-        })
-        .collect();
+    let rgb = opaque_rgb(pixmap);
     let mut out = Vec::new();
     let mut encoder = png::Encoder::new(&mut out, pixmap.width(), pixmap.height());
     encoder.set_color(png::ColorType::Rgb);
@@ -474,6 +480,16 @@ mod tests {
     fn same_card_renders_the_same_png_bytes() {
         let input = story();
         assert_eq!(png_of(&input), png_of(&input));
+    }
+
+    #[test]
+    fn opaque_rgb_is_what_the_png_holds() {
+        let pixmap = rasterize(&ops(&story())).expect("the image rasterizes");
+        let (_, pixels) = decode(&encode_png(&pixmap, "{}").expect("the image encodes"));
+        assert!(
+            opaque_rgb(&pixmap) == pixels,
+            "opaque_rgb is the PNG's pixels"
+        );
     }
 
     #[test]

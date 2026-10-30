@@ -5,6 +5,8 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::process::{Command, Output};
 
+use sentinel_core::report::card::jxl::{JXL_ENVELOPE_BOX, JXL_SIGNATURE_BOX};
+
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
         .arg("card")
@@ -180,11 +182,20 @@ fn card_render_writes_the_svg() {
 }
 
 #[test]
+fn card_render_writes_the_jxl() {
+    let (out, dir, _) = render_json(&story_input(), "jxl");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(stdout_json(&out)["files"], serde_json::json!(["card.jxl"]));
+    let jxl = fs::read(dir.path().join("out/card.jxl")).expect("card.jxl exists");
+    assert!(jxl.starts_with(&JXL_SIGNATURE_BOX));
+}
+
+#[test]
 fn card_render_refuses_an_unknown_format() {
     let (out, _dir, _) = render_json(&story_input(), "jpg");
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    for format in ["png", "pdf", "svg"] {
+    for format in ["png", "pdf", "svg", "jxl"] {
         assert!(stderr.contains(format), "{stderr}");
     }
 }
@@ -395,6 +406,85 @@ fn verify_card_on_an_svg_without_its_metadata_says_no_card_payload() {
     fs::write(&stripped, format!("{}{}", &text[..start], &text[end..])).expect("write");
     assert_line(
         &verify(&[path_str(&stripped)]),
+        3,
+        &serde_json::json!({"result": "input_error", "reason": "no_card_payload"}),
+    );
+}
+
+/// A story card JPEG XL under a fresh key: the directory holding it, its
+/// bytes and the key's fingerprint.
+fn rendered_jxl() -> (tempfile::TempDir, Vec<u8>, String) {
+    let (out, dir, fingerprint) = render_json(&story_input(), "jxl");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let jxl = fs::read(dir.path().join("out/card.jxl")).expect("card.jxl");
+    (dir, jxl, fingerprint)
+}
+
+/// The top-level boxes of a card JPEG XL after its signature box, each as
+/// its type and its whole bytes (header included).
+fn jxl_boxes(jxl: &[u8]) -> Vec<([u8; 4], &[u8])> {
+    let mut rest = &jxl[JXL_SIGNATURE_BOX.len()..];
+    let mut boxes = Vec::new();
+    while !rest.is_empty() {
+        let size = u32::from_be_bytes(rest[..4].try_into().expect("size")) as usize;
+        boxes.push((rest[4..8].try_into().expect("type"), &rest[..size]));
+        rest = &rest[size..];
+    }
+    boxes
+}
+
+#[test]
+fn verify_card_on_its_own_jxl_is_ok_level_1() {
+    let (dir, jxl, fingerprint) = rendered_jxl();
+    let path = dir.path().join("out/card.jxl");
+    assert!(jxl.starts_with(&JXL_SIGNATURE_BOX));
+    assert_line(
+        &verify(&[path_str(&path)]),
+        0,
+        &verified(1, Some("acme.fr"), "unknown", "no_key_list"),
+    );
+    let keys = key_list(
+        dir.path(),
+        &serde_json::json!([{"fingerprint": fingerprint, "from": "2026-01-01"}]),
+    );
+    assert_line(
+        &verify(&[path_str(&path), "--keys", path_str(&keys)]),
+        0,
+        &verified(2, Some("acme.fr"), "current", "key_published"),
+    );
+}
+
+#[test]
+fn verify_card_on_a_jxl_without_its_box_says_no_card_payload() {
+    let (dir, jxl, _) = rendered_jxl();
+    let mut stripped = JXL_SIGNATURE_BOX.to_vec();
+    for (kind, bytes) in jxl_boxes(&jxl) {
+        if kind != JXL_ENVELOPE_BOX {
+            stripped.extend_from_slice(bytes);
+        }
+    }
+    let path = dir.path().join("stripped.jxl");
+    fs::write(&path, stripped).expect("write");
+    assert_line(
+        &verify(&[path_str(&path)]),
+        3,
+        &serde_json::json!({"result": "input_error", "reason": "no_card_payload"}),
+    );
+}
+
+#[test]
+fn verify_card_on_a_bare_jxl_codestream_says_no_card_payload() {
+    let (dir, jxl, _) = rendered_jxl();
+    let (_, jxlc) = jxl_boxes(&jxl)
+        .into_iter()
+        .find(|(kind, _)| kind == b"jxlc")
+        .expect("a jxlc box");
+    let codestream = &jxlc[8..];
+    assert!(codestream.starts_with(&[0xFF, 0x0A]));
+    let path = dir.path().join("card.jxl");
+    fs::write(&path, codestream).expect("write");
+    assert_line(
+        &verify(&[path_str(&path)]),
         3,
         &serde_json::json!({"result": "input_error", "reason": "no_card_payload"}),
     );

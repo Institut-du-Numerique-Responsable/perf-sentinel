@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 
+use super::jxl::read_jxl_envelope;
 use super::keys::{
     b64url_decode, fingerprint_of, parse_compact_url, parse_file_envelope, verify_signature,
 };
@@ -19,6 +20,7 @@ pub enum CardSource<'a> {
     Png(&'a [u8]),
     Pdf(&'a [u8]),
     Svg(&'a [u8]),
+    Jxl(&'a [u8]),
     Url(&'a str),
 }
 
@@ -37,8 +39,8 @@ pub struct Integrity {
     pub reason: &'static str,
 }
 
-/// Check a card: the full payload of a PNG, PDF or SVG, the compact payload of
-/// a verify URL.
+/// Check a card: the full payload of a PNG, PDF, SVG or JPEG XL, the compact
+/// payload of a verify URL.
 ///
 /// # Errors
 ///
@@ -52,6 +54,7 @@ pub fn check_integrity(source: CardSource<'_>) -> Result<Integrity, CardError> {
         CardSource::Png(png) => check_full(&read_png_envelope(png)?),
         CardSource::Pdf(pdf) => check_full(&read_pdf_envelope(pdf)?),
         CardSource::Svg(svg) => check_full(&read_svg_envelope(svg)?),
+        CardSource::Jxl(jxl) => check_full(&read_jxl_envelope(jxl)?),
         CardSource::Url(url) => check_compact(url),
     }
 }
@@ -435,6 +438,42 @@ mod tests {
         let envelope = file_envelope(changed.as_bytes(), &signer.sign_b64(&full));
         let svg = render_svg(&ops, &envelope, "Perf Sentinel card", payload.lang).expect("svg");
         let integrity = check_integrity(CardSource::Svg(&svg)).expect("checks");
+        assert_eq!(integrity, tampered("signature_invalid"));
+    }
+
+    #[test]
+    fn a_rendered_jxl_verifies() {
+        let key = generate_key().expect("key");
+        let card = render_card(&story_bytes(), &key.pkcs8, CardFormat::Jxl).expect("renders");
+        assert_ok(
+            &check_integrity(CardSource::Jxl(&card.bytes)).expect("checks"),
+            &key.fingerprint,
+        );
+    }
+
+    #[test]
+    fn one_changed_payload_byte_in_the_jxl_is_tampered() {
+        let key = generate_key().expect("key");
+        let card = render_card(&story_bytes(), &key.pkcs8, CardFormat::Jxl).expect("renders");
+        let envelope = read_jxl_envelope(&card.bytes).expect("envelope");
+        let (full, signature) = parse_file_envelope(&envelope).expect("file envelope");
+        let changed = String::from_utf8(full.clone()).expect("utf-8").replacen(
+            "\"cited_ops\":41",
+            "\"cited_ops\":42",
+            1,
+        );
+        assert_ne!(changed.as_bytes(), full.as_slice());
+        let forged = file_envelope(changed.as_bytes(), &b64url_encode(&signature));
+        // One digit for another: the pscd box keeps its size.
+        assert_eq!(forged.len(), envelope.len());
+        let at = card
+            .bytes
+            .windows(envelope.len())
+            .position(|w| w == envelope.as_bytes())
+            .expect("the envelope sits in the pscd box");
+        let mut jxl = card.bytes.clone();
+        jxl[at..at + envelope.len()].copy_from_slice(forged.as_bytes());
+        let integrity = check_integrity(CardSource::Jxl(&jxl)).expect("checks");
         assert_eq!(integrity, tampered("signature_invalid"));
     }
 }
