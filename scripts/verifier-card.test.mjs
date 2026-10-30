@@ -480,6 +480,13 @@ test('NXDOMAIN is an answer, not a failure', async () => {
   assert.equal(calls.length, 1);
 });
 
+test('an empty NOERROR answer is an answer, not a failure', async () => {
+  // Cloudflare and Google send this NODATA reply, with no Answer field, under a wildcard or an empty non-terminal.
+  const { fetchImpl, calls } = fakeDoh({ Status: 0, Question: [{ name: DNS_NAME, type: 16 }] });
+  assert.deepEqual(await lookupTxt('cards.example.org', fetchImpl), { resolver: 'cloudflare', records: [] });
+  assert.equal(calls.length, 1);
+});
+
 test('lookup refuses a bad domain and an answer for another name', async () => {
   for (const d of ['cards.example.org&name=_perf-sentinel.evil.com', 'Cards.example.org', 'localhost']) {
     const { fetchImpl, calls } = fakeDoh();

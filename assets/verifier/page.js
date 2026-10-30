@@ -336,7 +336,13 @@ async function fromFile(file) {
   if (!file) return;
   const n = ++latest;
   if (file.size > MAX_FILE) return refuse('file-too-large');
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bytes;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    // NotReadableError and the like: never leave the previous card's verdict on screen.
+    return n === latest ? refuse('no-card-data') : undefined;
+  }
   if (n !== latest) return;
   const format = sniff(bytes);
   if (!format) return refuse('file-type');

@@ -61,7 +61,7 @@ async function ask(url, init, name, fetchImpl) {
     const reply = await res.json();
     if (!answersFor(reply, name)) return null;
     if (reply.Status === NXDOMAIN) return [];
-    if (reply.Status === NOERROR) return reply.Answer.filter((r) => r.type === TXT).map((r) => r.data);
+    if (reply.Status === NOERROR) return (reply.Answer ?? []).filter((r) => r.type === TXT).map((r) => r.data);
   } catch {
     // A network error, a timeout or a body that is not JSON: the resolver failed.
   }

@@ -706,6 +706,19 @@ test('Cloudflare down falls back to Google and says so', async () => {
   await close();
 });
 
+test('an unreadable file never leaves the previous verdict standing', async () => {
+  const { page, close } = await checkDomain('story.png', cloudflareTxt(''));
+  await waitState(page, 'level2');
+  // NotReadableError: the file changed after it was picked, or a cloud placeholder failed to download.
+  await page.evaluate(() => {
+    File.prototype.arrayBuffer = () => Promise.reject(new DOMException('unreadable', 'NotReadableError'));
+  });
+  await choose(page, 'other.png', fixture('story.png'));
+  await waitState(page, 'no-card-data');
+  assert.equal(await page.locator('#verifier-binding').count(), 0);
+  await close();
+});
+
 test('both resolvers down reads as could not check', async () => {
   const { page, close } = await checkDomain(link('story'), { cloudflare: 'abort', google: 'abort' });
   await waitState(page, 'level1');
