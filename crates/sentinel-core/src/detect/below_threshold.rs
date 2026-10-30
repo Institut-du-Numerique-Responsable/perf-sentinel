@@ -4,7 +4,10 @@
 //! The daemon's detection ledger counts these per day, next to the
 //! detections, so "this signature ran and stayed under its threshold" can
 //! be told from "this signature did not run". A pass never creates a
-//! finding. Per kind, one pass is:
+//! finding. It is counted during detection, inside the threshold detector
+//! that measures it, when the daemon holds a watch list
+//! ([`run_full_detection_with_below`](super::run_full_detection_with_below)).
+//! Per kind, one pass is:
 //!
 //! - slow: one span with `duration_us <= slow_threshold_ms * 1000`;
 //! - chatty: one trace grouping whose outbound HTTP count is at most
@@ -21,15 +24,14 @@
 //! [`compute_signature`](crate::acknowledgments::compute_signature) builds
 //! it for the finding the detector would emit.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::acknowledgments::{push_signature_head, template_digest};
 use crate::correlate::Trace;
-use crate::event::EventType;
 use crate::normalize::NormalizedEvent;
 
-use super::{DetectConfig, FindingType, TraceIndices, fanout, pool_saturation, serialized};
+use super::{FindingType, fanout};
 
 /// One watched signature: its template digest and the full text.
 type Entry = ([u8; 16], Arc<str>);
@@ -41,8 +43,27 @@ type Entries = [Entry];
 #[derive(Debug, Default)]
 pub struct WatchIndex {
     by_head: HashMap<Box<str>, Vec<Entry>>,
-    kinds: HashSet<FindingType>,
+    /// One [`kind_bit`] per watched kind.
+    kinds: u8,
 }
+
+/// One bit per thresholded kind, 0 for the others.
+const fn kind_bit(kind: &FindingType) -> u8 {
+    match kind {
+        FindingType::SlowSql => 1,
+        FindingType::SlowHttp => 1 << 1,
+        FindingType::SlowMessaging => 1 << 2,
+        FindingType::ExcessiveFanout => 1 << 3,
+        FindingType::ChattyService => 1 << 4,
+        FindingType::PoolSaturation => 1 << 5,
+        FindingType::SerializedCalls => 1 << 6,
+        _ => 0,
+    }
+}
+
+const SLOW_BITS: u8 = kind_bit(&FindingType::SlowSql)
+    | kind_bit(&FindingType::SlowHttp)
+    | kind_bit(&FindingType::SlowMessaging);
 
 impl WatchIndex {
     /// Keep each signature whose kind is thresholded and whose last part
@@ -63,7 +84,7 @@ impl WatchIndex {
                 continue;
             }
             entries.push((digest, Arc::from(signature)));
-            index.kinds.insert(kind);
+            index.kinds |= kind_bit(&kind);
             kept += 1;
         }
         index
@@ -81,7 +102,7 @@ impl WatchIndex {
 
     #[must_use]
     pub fn watches(&self, kind: &FindingType) -> bool {
-        self.kinds.contains(kind)
+        self.kinds & kind_bit(kind) != 0
     }
 }
 
@@ -112,31 +133,14 @@ const fn nibble(byte: u8) -> Option<u8> {
     }
 }
 
-/// Count the below-threshold passes of every watched signature in the
-/// batch. Keys are the watched signatures, values their passes; a
-/// signature with no pass is absent.
-#[must_use]
-pub fn count_below_threshold(
-    traces: &[Trace],
-    config: &DetectConfig,
-    watch: &WatchIndex,
-) -> HashMap<Arc<str>, u64> {
-    if watch.is_empty() {
-        return HashMap::new();
-    }
-    let mut pass = Pass::new(watch);
-    for trace in traces {
-        pass.trace(trace, config);
-    }
-    pass.counts
-}
-
 /// The last head looked up, and what it matched.
 type LastHead<'w, 't> = (FindingType, &'t str, &'t str, Option<&'w Entries>);
 
 /// One batch's matching state: the reused head buffer, the per-batch
-/// digest memo and the counts.
-struct Pass<'w, 't> {
+/// digest memo and the counts. The threshold detectors feed it through
+/// one entry method per kind, each called on a run at or under its
+/// threshold with the span that carries the finding's identity.
+pub(crate) struct BelowPass<'w, 't> {
     watch: &'w WatchIndex,
     head: String,
     last: Option<LastHead<'w, 't>>,
@@ -144,8 +148,8 @@ struct Pass<'w, 't> {
     counts: HashMap<Arc<str>, u64>,
 }
 
-impl<'w, 't> Pass<'w, 't> {
-    fn new(watch: &'w WatchIndex) -> Self {
+impl<'w, 't> BelowPass<'w, 't> {
+    pub(crate) fn new(watch: &'w WatchIndex) -> Self {
         Self {
             watch,
             head: String::new(),
@@ -153,6 +157,20 @@ impl<'w, 't> Pass<'w, 't> {
             digests: HashMap::new(),
             counts: HashMap::new(),
         }
+    }
+
+    /// The passes per watched signature, with no zero entry.
+    pub(crate) fn into_counts(self) -> HashMap<Arc<str>, u64> {
+        self.counts
+    }
+
+    pub(crate) fn watches(&self, kind: &FindingType) -> bool {
+        self.watch.watches(kind)
+    }
+
+    /// Whether any of the three slow kinds is watched.
+    pub(crate) fn watches_slow(&self) -> bool {
+        self.watch.kinds & SLOW_BITS != 0
     }
 
     /// The watched entries under this head, the lookup cached while the
@@ -193,122 +211,61 @@ impl<'w, 't> Pass<'w, 't> {
         self.entries(kind, &span.event.service, &span.event.source.endpoint)
     }
 
-    /// Run every pass kind that has a watched signature over one trace.
-    fn trace(&mut self, trace: &'t Trace, config: &DetectConfig) {
-        let watch = self.watch;
-        let slow = [
-            FindingType::SlowSql,
-            FindingType::SlowHttp,
-            FindingType::SlowMessaging,
-        ]
-        .iter()
-        .any(|kind| watch.watches(kind));
-        if slow {
-            self.slow(trace, config.slow_threshold_ms);
+    /// One span at or under the slow threshold.
+    pub(crate) fn slow_span(&mut self, span: &'t NormalizedEvent) {
+        let kind = FindingType::from_event_type_slow(&span.event.event_type);
+        if !self.watches(&kind) {
+            return;
         }
-        if watch.watches(&FindingType::ChattyService) {
-            self.chatty(trace, config.chatty_service_min_calls);
-        }
-        if watch.watches(&FindingType::PoolSaturation) {
-            self.pool(trace, config.pool_saturation_concurrent_threshold);
-        }
-        let fanout = watch.watches(&FindingType::ExcessiveFanout);
-        let serialized = watch.watches(&FindingType::SerializedCalls);
-        if fanout || serialized {
-            let indices = TraceIndices::build(trace);
-            if fanout {
-                self.fanout(trace, &indices, config.max_fanout);
-            }
-            if serialized {
-                self.serialized(trace, &indices, config.serialized_min_sequential);
-            }
+        if let Some(entries) = self.entries_of(&kind, span) {
+            self.add(entries, &span.template, 1);
         }
     }
 
-    fn slow(&mut self, trace: &'t Trace, threshold_ms: u64) {
-        let threshold_us = threshold_ms.saturating_mul(1000);
-        for span in &trace.spans {
-            let kind = FindingType::from_event_type_slow(&span.event.event_type);
-            if span.event.duration_us > threshold_us || !self.watch.watches(&kind) {
-                continue;
-            }
-            if let Some(entries) = self.entries_of(&kind, span) {
-                self.add(entries, &span.template, 1);
-            }
+    /// One grouping's outbound calls at or under `chatty_service_min_calls`,
+    /// identified by its first call.
+    pub(crate) fn chatty_group(&mut self, first: &'t NormalizedEvent) {
+        if let Some(entries) = self.entries_of(&FindingType::ChattyService, first) {
+            self.add(entries, &first.event.source.endpoint, 1);
         }
     }
 
-    fn chatty(&mut self, trace: &'t Trace, min_calls: u32) {
-        // First span and call count per grouping, as `detect_chatty` groups.
-        let mut groups: HashMap<Option<(&str, &str)>, (&'t NormalizedEvent, usize)> =
-            HashMap::new();
-        for span in &trace.spans {
-            if span.event.event_type == EventType::HttpOut {
-                groups
-                    .entry(span.event.grouping_identity())
-                    .or_insert((span, 0))
-                    .1 += 1;
-            }
-        }
-        for (first, calls) in groups.into_values() {
-            if calls > min_calls as usize {
-                continue;
-            }
-            if let Some(entries) = self.entries_of(&FindingType::ChattyService, first) {
-                self.add(entries, &first.event.source.endpoint, 1);
-            }
+    /// One service grouping whose SQL peak stays under the threshold,
+    /// identified by its first span (the group key's service is its own).
+    pub(crate) fn pool_group(&mut self, first: &'t NormalizedEvent) {
+        if let Some(entries) = self.entries_of(&FindingType::PoolSaturation, first) {
+            self.add(entries, &first.event.service, 1);
         }
     }
 
-    fn pool(&mut self, trace: &'t Trace, threshold: u32) {
-        for ((service, _), indices) in pool_saturation::group_sql_indices_by_service(trace) {
-            let endpoint = trace.spans[indices[0]].event.source.endpoint.as_str();
-            let Some(entries) = self.entries(&FindingType::PoolSaturation, service, endpoint)
-            else {
-                continue;
-            };
-            let below = indices.len() < threshold as usize
-                || pool_saturation::compute_peak_concurrency(trace, &indices) < threshold;
-            if below {
-                self.add(entries, service, 1);
-            }
-        }
+    /// One parent with at most `max_fanout` children. Without the parent
+    /// span the first child owns it and the dominant child template names it.
+    pub(crate) fn fanout_parent(
+        &mut self,
+        trace: &'t Trace,
+        parent: Option<&'t NormalizedEvent>,
+        children: &[usize],
+    ) {
+        let owner = parent.unwrap_or(&trace.spans[children[0]]);
+        let Some(entries) = self.entries_of(&FindingType::ExcessiveFanout, owner) else {
+            return;
+        };
+        let template = parent.map_or_else(
+            || fanout::dominant_template(trace, children),
+            |span| &span.template,
+        );
+        self.add(entries, template, 1);
     }
 
-    fn fanout(&mut self, trace: &'t Trace, indices: &TraceIndices<'t>, max_fanout: u32) {
-        for (parent_id, children) in indices.parents_with_children(1) {
-            if children.len() > max_fanout as usize {
-                continue;
-            }
-            let parent = indices.span_index.get(parent_id).map(|&i| &trace.spans[i]);
-            let owner = parent.unwrap_or(&trace.spans[children[0]]);
-            let Some(entries) = self.entries_of(&FindingType::ExcessiveFanout, owner) else {
-                continue;
-            };
-            let template = parent.map_or_else(
-                || fanout::dominant_template(trace, children),
-                |span| &span.template,
-            );
-            self.add(entries, template, 1);
-        }
-    }
-
-    fn serialized(&mut self, trace: &'t Trace, indices: &TraceIndices<'t>, min_sequential: u32) {
-        let min = min_sequential as usize;
-        for (parent_id, children) in indices.parents_with_children(1) {
-            let Some(&parent) = indices.span_index.get(parent_id) else {
-                continue;
-            };
-            let parent = &trace.spans[parent];
-            let Some(entries) = self.entries_of(&FindingType::SerializedCalls, parent) else {
-                continue;
-            };
-            if children.len() < min || serialized::longest_chain_len(trace, children) < min {
-                self.add(entries, &parent.event.source.endpoint, 1);
-            }
+    /// One parent in the trace whose longest chain is under the minimum.
+    pub(crate) fn serialized_parent(&mut self, parent: &'t NormalizedEvent) {
+        if let Some(entries) = self.entries_of(&FindingType::SerializedCalls, parent) {
+            self.add(entries, &parent.event.source.endpoint, 1);
         }
     }
 }
 
+#[cfg(test)]
+mod reference;
 #[cfg(test)]
 mod tests;

@@ -1,7 +1,15 @@
+use std::collections::HashSet;
+
+use super::reference::count_below_threshold_reference;
 use super::*;
 use crate::acknowledgments::enrich_with_signatures;
-use crate::detect::run_full_detection;
+use crate::correlate;
+use crate::detect::{DetectConfig, run_full_detection, run_full_detection_with_below};
 use crate::event::SpanEvent;
+use crate::ingest::IngestSource;
+use crate::ingest::json::JsonIngest;
+use crate::normalize;
+use crate::synth::{PatternMix, generate_target_events};
 use crate::test_helpers::{
     make_http_event_with_duration, make_sql_event_with_duration, make_trace,
 };
@@ -32,7 +40,7 @@ fn signature_of(trace: &Trace, config: &DetectConfig, kind: &FindingType) -> Str
 }
 
 fn count(trace: &Trace, config: &DetectConfig, watch: &WatchIndex) -> HashMap<Arc<str>, u64> {
-    count_below_threshold(std::slice::from_ref(trace), config, watch)
+    run_full_detection_with_below(std::slice::from_ref(trace), config, Some(watch)).1
 }
 
 /// `low` detects the finding and counts no pass, `high` (threshold at the
@@ -275,6 +283,20 @@ fn serialized_counts_on_the_chain_past_the_child_count() {
 }
 
 #[test]
+fn serialized_counts_a_session_command_off_the_chain() {
+    // Three children, the COMMIT left off the timeline: two timed siblings.
+    let mut trace = serialized_trace(&[("a", 0), ("b", 100), ("c", 200)]);
+    trace.spans[3].template = "COMMIT".into();
+    assert_boundary(
+        &trace,
+        &serialized_at(2),
+        &serialized_at(3),
+        &FindingType::SerializedCalls,
+        1,
+    );
+}
+
+#[test]
 fn colons_slashes_and_bidi_in_names_still_match() {
     let trace = slow_trace("svc:v2\u{202E}", "GET /a:b c");
     assert_boundary(
@@ -329,4 +351,150 @@ fn from_signatures_keeps_valid_thresholded_entries_once_up_to_the_cap() {
     assert!(!capped.watches(&FindingType::SerializedCalls));
 
     assert_eq!(WatchIndex::from_signatures(input, 10).len(), 3);
+}
+
+/// The bench harvest config: every thresholded kind fires as early as it can.
+fn floor_config() -> DetectConfig {
+    DetectConfig {
+        slow_threshold_ms: 1,
+        slow_min_occurrences: 1,
+        max_fanout: 1,
+        chatty_service_min_calls: 1,
+        pool_saturation_concurrent_threshold: 2,
+        serialized_min_sequential: 2,
+        ..DetectConfig::default()
+    }
+}
+
+fn mid_config() -> DetectConfig {
+    DetectConfig {
+        slow_threshold_ms: 50,
+        max_fanout: 3,
+        chatty_service_min_calls: 3,
+        pool_saturation_concurrent_threshold: 3,
+        serialized_min_sequential: 3,
+        ..DetectConfig::default()
+    }
+}
+
+/// Every measured value stays under these, so every watched group passes.
+fn ceiling_config() -> DetectConfig {
+    DetectConfig {
+        slow_threshold_ms: 1_000_000,
+        max_fanout: 1_000_000,
+        chatty_service_min_calls: 1_000_000,
+        pool_saturation_concurrent_threshold: 1_000_000,
+        serialized_min_sequential: 1_000_000,
+        ..DetectConfig::default()
+    }
+}
+
+/// The thresholded signatures the traces yield under `floor_config`.
+fn harvest(traces: &[Trace]) -> Vec<String> {
+    let mut findings = run_full_detection(traces, &floor_config());
+    enrich_with_signatures(&mut findings);
+    let mut signatures: Vec<String> = findings
+        .into_iter()
+        .filter(|f| f.finding_type.is_thresholded())
+        .map(|f| f.signature)
+        .collect();
+    signatures.sort_unstable();
+    signatures.dedup();
+    signatures
+}
+
+/// The detectors' passes equal the reference walk's under four configs,
+/// and watching changes no finding. Returns the kinds that had a pass.
+fn assert_fused_equals_reference(traces: &[Trace]) -> HashSet<FindingType> {
+    let signatures = harvest(traces);
+    let watch = WatchIndex::from_signatures(signatures.iter().map(String::as_str), usize::MAX);
+    let mut kinds = HashSet::new();
+    for config in [
+        DetectConfig::default(),
+        floor_config(),
+        mid_config(),
+        ceiling_config(),
+    ] {
+        let (findings, fused) = run_full_detection_with_below(traces, &config, Some(&watch));
+        assert_eq!(
+            fused,
+            count_below_threshold_reference(traces, &config, &watch),
+            "{config:?}"
+        );
+        assert_eq!(findings, run_full_detection(traces, &config), "{config:?}");
+        kinds.extend(fused.keys().map(|signature| {
+            let (kind, _) = signature.split_once(':').unwrap();
+            FindingType::from_kind_str(kind).unwrap()
+        }));
+    }
+    kinds
+}
+
+fn fixture_traces(name: &str) -> Vec<Trace> {
+    let path = format!("{}/../../tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    let data = std::fs::read(&path).unwrap();
+    let events = JsonIngest::new(10_000_000).ingest(&data).unwrap();
+    let traces = correlate::correlate(normalize::normalize_all(events));
+    assert!(!traces.is_empty(), "{name}");
+    traces
+}
+
+/// The bench corpus `traces_for(10_000)`.
+fn synth_traces() -> Vec<Trace> {
+    let events = generate_target_events(10_000, 16, &PatternMix::default(), 42);
+    correlate::correlate(normalize::normalize_all(events))
+}
+
+#[test]
+fn fused_passes_equal_the_reference_on_the_synth_corpus() {
+    let kinds = assert_fused_equals_reference(&synth_traces());
+    for kind in [
+        FindingType::SlowSql,
+        FindingType::SlowHttp,
+        FindingType::ExcessiveFanout,
+        FindingType::ChattyService,
+        FindingType::PoolSaturation,
+    ] {
+        assert!(kinds.contains(&kind), "no {kind:?} pass");
+    }
+}
+
+#[test]
+fn fused_passes_equal_the_reference_on_the_fixtures() {
+    let mut kinds = HashSet::new();
+    for name in [
+        "demo.json",
+        "running_example.json",
+        "tied_findings.json",
+        "messaging_chain.json",
+        "fanout.json",
+        "slow_queries.json",
+        "mixed.json",
+        "otlp_php_doctrine_split.json",
+    ] {
+        kinds.extend(assert_fused_equals_reference(&fixture_traces(name)));
+    }
+    let thresholded: HashSet<FindingType> = [
+        FindingType::SlowSql,
+        FindingType::SlowHttp,
+        FindingType::SlowMessaging,
+        FindingType::ExcessiveFanout,
+        FindingType::ChattyService,
+        FindingType::PoolSaturation,
+        FindingType::SerializedCalls,
+    ]
+    .into();
+    assert_eq!(kinds, thresholded);
+}
+
+#[test]
+fn watch_none_and_watch_empty_run_plain_detection() {
+    let traces = synth_traces();
+    let plain = run_full_detection(&traces, &DetectConfig::default());
+    for watch in [None, Some(&WatchIndex::default())] {
+        let (findings, passes) =
+            run_full_detection_with_below(&traces, &DetectConfig::default(), watch);
+        assert_eq!(findings, plain);
+        assert!(passes.is_empty());
+    }
 }

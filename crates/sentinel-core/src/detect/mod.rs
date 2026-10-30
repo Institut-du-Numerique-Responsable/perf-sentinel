@@ -17,9 +17,11 @@ pub mod suggestions;
 pub use n_plus_one::DISCLOSURE_N_PLUS_ONE_THRESHOLD;
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use crate::correlate::Trace;
 use crate::event::{EventType, GroupingAttribute};
+use below_threshold::{BelowPass, WatchIndex};
 use serde::{Deserialize, Serialize};
 
 /// Precomputed per-trace indices shared by the fanout and serialized
@@ -746,6 +748,33 @@ pub fn apply_confidence(findings: &mut [Finding], confidence: Confidence) {
 #[must_use]
 pub fn run_full_detection(traces: &[Trace], config: &DetectConfig) -> Vec<Finding> {
     let mut findings = detect(traces, config);
+    append_cross_trace(traces, config, &mut findings);
+    findings
+}
+
+/// [`run_full_detection`], also counting the below-threshold passes of the
+/// watched signatures inside the threshold detectors.
+///
+/// The findings equal `run_full_detection`'s. The map is keyed by watched
+/// signature and holds no zero entry; `None` or an empty index returns an
+/// empty map. The cross-trace slow detector counts no pass.
+#[must_use]
+pub fn run_full_detection_with_below(
+    traces: &[Trace],
+    config: &DetectConfig,
+    watch: Option<&WatchIndex>,
+) -> (Vec<Finding>, HashMap<Arc<str>, u64>) {
+    let Some(watch) = watch.filter(|watch| !watch.is_empty()) else {
+        return (run_full_detection(traces, config), HashMap::new());
+    };
+    let mut pass = BelowPass::new(watch);
+    let mut findings = detect_impl(traces, config, Some(&mut pass));
+    append_cross_trace(traces, config, &mut findings);
+    (findings, pass.into_counts())
+}
+
+/// The cross-trace slow findings, merged in [`sort_findings`] order.
+fn append_cross_trace(traces: &[Trace], config: &DetectConfig, findings: &mut Vec<Finding>) {
     if traces.len() >= 2 {
         let mut cross_trace = slow::detect_slow_cross_trace(
             traces,
@@ -753,9 +782,8 @@ pub fn run_full_detection(traces: &[Trace], config: &DetectConfig) -> Vec<Findin
             config.slow_min_occurrences,
         );
         findings.append(&mut cross_trace);
-        sort_findings(&mut findings);
+        sort_findings(findings);
     }
-    findings
 }
 
 /// Run all per-trace detectors on a set of traces.
@@ -765,52 +793,83 @@ pub fn run_full_detection(traces: &[Trace], config: &DetectConfig) -> Vec<Findin
 /// in [`sort_findings`] order, which `explain` and the daemon rely on.
 #[must_use]
 pub fn detect(traces: &[Trace], config: &DetectConfig) -> Vec<Finding> {
+    detect_impl(traces, config, None)
+}
+
+fn detect_impl<'t>(
+    traces: &'t [Trace],
+    config: &DetectConfig,
+    mut below: Option<&mut BelowPass<'_, 't>>,
+) -> Vec<Finding> {
     let mut findings = Vec::new();
     for trace in traces {
-        // Span-relationship indices are built once per trace and shared
-        // by the detectors that need them (fanout, serialized).
-        let indices = TraceIndices::build(trace);
-        // append() moves the backing allocation in O(1), no iterator
-        // overhead. n_plus_one must run before redundant: redundant
-        // receives its findings to skip templates already classified
-        // as N+1 (including sanitizer-heuristic reclassifications).
-        let mut n_plus_one_findings = n_plus_one::detect_n_plus_one(
-            trace,
-            config.n_plus_one_threshold,
-            config.window_ms,
-            config.sanitizer_aware_classification,
-            config.sanitizer_aware_min_cv,
-        );
-        let mut redundant_findings = redundant::detect_redundant(trace, &n_plus_one_findings);
-        findings.append(&mut n_plus_one_findings);
-        findings.append(&mut redundant_findings);
-        findings.append(&mut slow::detect_slow(
-            trace,
-            config.slow_threshold_ms,
-            config.slow_min_occurrences,
-        ));
-        findings.append(&mut fanout::detect_fanout(
-            trace,
-            &indices,
-            config.max_fanout,
-        ));
-        findings.append(&mut chatty::detect_chatty(
-            trace,
-            config.chatty_service_min_calls,
-        ));
-        findings.append(&mut pool_saturation::detect_pool_saturation(
-            trace,
-            config.pool_saturation_concurrent_threshold,
-        ));
-        findings.append(&mut serialized::detect_serialized(
-            trace,
-            &indices,
-            config.serialized_min_sequential,
-        ));
+        detect_trace(trace, config, below.as_deref_mut(), &mut findings);
     }
     suggestions::enrich(&mut findings);
     sort_findings(&mut findings);
     findings
+}
+
+/// Every per-trace detector over one trace. A threshold detector gets
+/// `below` only when its kind is watched, so the others keep the batch
+/// iteration set.
+fn detect_trace<'t>(
+    trace: &'t Trace,
+    config: &DetectConfig,
+    mut below: Option<&mut BelowPass<'_, 't>>,
+    findings: &mut Vec<Finding>,
+) {
+    // Span-relationship indices are built once per trace and shared
+    // by the detectors that need them (fanout, serialized).
+    let indices = TraceIndices::build(trace);
+    // append() moves the backing allocation in O(1), no iterator
+    // overhead. n_plus_one must run before redundant: redundant
+    // receives its findings to skip templates already classified
+    // as N+1 (including sanitizer-heuristic reclassifications).
+    let mut n_plus_one_findings = n_plus_one::detect_n_plus_one(
+        trace,
+        config.n_plus_one_threshold,
+        config.window_ms,
+        config.sanitizer_aware_classification,
+        config.sanitizer_aware_min_cv,
+    );
+    let mut redundant_findings = redundant::detect_redundant(trace, &n_plus_one_findings);
+    findings.append(&mut n_plus_one_findings);
+    findings.append(&mut redundant_findings);
+    findings.append(&mut slow::detect_slow_with_below(
+        trace,
+        config.slow_threshold_ms,
+        config.slow_min_occurrences,
+        below.as_deref_mut().filter(|b| b.watches_slow()),
+    ));
+    findings.append(&mut fanout::detect_fanout_with_below(
+        trace,
+        &indices,
+        config.max_fanout,
+        below
+            .as_deref_mut()
+            .filter(|b| b.watches(&FindingType::ExcessiveFanout)),
+    ));
+    findings.append(&mut chatty::detect_chatty_with_below(
+        trace,
+        config.chatty_service_min_calls,
+        below
+            .as_deref_mut()
+            .filter(|b| b.watches(&FindingType::ChattyService)),
+    ));
+    findings.append(&mut pool_saturation::detect_pool_saturation_with_below(
+        trace,
+        config.pool_saturation_concurrent_threshold,
+        below
+            .as_deref_mut()
+            .filter(|b| b.watches(&FindingType::PoolSaturation)),
+    ));
+    findings.append(&mut serialized::detect_serialized_with_below(
+        trace,
+        &indices,
+        config.serialized_min_sequential,
+        below.filter(|b| b.watches(&FindingType::SerializedCalls)),
+    ));
 }
 
 /// Sort findings deterministically for stable output.
