@@ -59,6 +59,10 @@ pub(crate) fn millis_to_iso8601(ms: u64) -> String {
 /// spelling or for a date the calendar lacks (`2026-02-30`).
 #[cfg(feature = "card")]
 pub(crate) fn parse_iso_date_to_epoch_day(s: &str) -> Option<u32> {
+    // A 10-byte date with a 4-digit year keeps the arithmetic below far from overflow.
+    if s.len() != 10 || s.as_bytes()[4] != b'-' {
+        return None;
+    }
     let (year, month, day) = parse_date_ymd(s).ok()?;
     let days = u32::try_from(civil_date_to_days(year, month, day)).ok()?;
     // The round trip refuses `2026-02-30` and unpadded `2026-9-01`.
@@ -68,7 +72,7 @@ pub(crate) fn parse_iso_date_to_epoch_day(s: &str) -> Option<u32> {
 /// The `YYYY-MM-DD` spelling of a UTC epoch day.
 #[cfg(feature = "card")]
 pub(crate) fn epoch_day_to_iso_date(day: u32) -> String {
-    let mut iso = nanos_to_iso8601(u64::from(day) * 86_400_000_000_000);
+    let mut iso = nanos_to_iso8601(u64::from(day).saturating_mul(86_400_000_000_000));
     iso.truncate(10);
     iso
 }
@@ -590,5 +594,17 @@ mod tests {
         assert_eq!(epoch_day_to_iso_date(20726), "2026-09-30");
         assert_eq!(parse_iso_date_to_epoch_day("2026-02-30"), None);
         assert_eq!(parse_iso_date_to_epoch_day("2026-9-01"), None);
+    }
+
+    #[cfg(feature = "card")]
+    #[test]
+    fn far_future_dates_are_refused_without_overflow() {
+        assert_eq!(parse_iso_date_to_epoch_day("9999-12-31"), None);
+        assert_eq!(
+            parse_iso_date_to_epoch_day("99999999999999999999-01-01"),
+            None
+        );
+        // Must not panic under overflow checks.
+        let _ = epoch_day_to_iso_date(u32::MAX);
     }
 }

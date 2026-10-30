@@ -1167,6 +1167,14 @@ mod tests {
     }
 
     #[test]
+    fn a_far_future_period_date_is_malformed_not_a_panic() {
+        assert_eq!(
+            reason(&with(story(), "/period/from", json!("9999-01-01"))),
+            "malformed_input"
+        );
+    }
+
+    #[test]
     fn the_before_fix_period_is_the_one_the_figures_cover() {
         let august = json!({"from": "2026-08-01", "to": "2026-08-31"});
         let july = json!({"from": "2026-07-01", "to": "2026-07-31"});
