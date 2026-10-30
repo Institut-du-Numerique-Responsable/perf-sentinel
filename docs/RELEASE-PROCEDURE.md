@@ -56,6 +56,7 @@ This is an operator-driven audit, no script enforces it. Embedded reference data
 
 - `crates/sentinel-core/src/score/cloud_energy/table_data.rs`: `SPECPOWER_VINTAGE`, stamped with the `ccf-coefficients` snapshot date by `scripts/refresh-instance-power.py`. The manual rows (families absent from the CCF CSVs) stay in `table.rs`.
 - `crates/sentinel-core/src/score/carbon_data.rs`: `CARBON_TABLE_VINTAGE` (`ember-<latest-data-year>`), stamped by `scripts/refresh-carbon-data.py`. The subnational rows (North America, Brazil BR-CS) stay manual in `carbon.rs`.
+- `crates/sentinel-core/src/score/equivalence_data.rs`: `EQUIVALENCE_TABLE_VINTAGE` (Base Carbone version and its last update date), stamped by `scripts/refresh-equivalences.py`, which also rewrites the table in `docs/SHARE-CARD.md` and its French mirror. Check that every row is still `Valide générique` and its label still true.
 - `crates/sentinel-core/src/score/carbon_profiles.rs`: ENTSO-E / EIA / AEMO / Electricity Maps hourly grid profiles, refreshed at least annually and renormalized by hand when a scripted refresh moves an annual value beyond 5 percent. Vintage exposed as `CARBON_PROFILES_VINTAGE`.
 - `crates/sentinel-core/src/score/carbon.rs`: per-provider PUE constants (AWS, GCP, Azure, OVHcloud, Scaleway, generic), refreshed when any provider publishes a new sustainability report. OUTSCALE publishes no PUE and uses the generic value. OVHcloud and Scaleway publish on a yearly cycle, respectively as fiscal-year KPIs and as an impact report. Vintage exposed as `PUE_VINTAGE`.
 

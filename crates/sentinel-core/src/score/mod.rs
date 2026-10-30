@@ -8,6 +8,9 @@ mod carbon_data;
 pub(crate) mod carbon_profiles;
 pub mod cloud_energy;
 pub mod electricity_maps;
+pub mod equivalence;
+// Generated rows (scripts/refresh-equivalences.py), logic stays in `equivalence`.
+mod equivalence_data;
 // `energy_state` is the shared `ArcSwap`-backed storage and one-source
 // split used by the Scaphandre, cloud, Kepler, Alumet and Redfish
 // scrapers. It depends on the `arc-swap` crate which is optional (only
