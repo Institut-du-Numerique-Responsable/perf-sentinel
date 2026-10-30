@@ -22,6 +22,8 @@ mod backend_cmd;
 mod bench;
 #[cfg(feature = "daemon")]
 mod capture;
+#[cfg(feature = "card")]
+mod card;
 mod cli;
 mod config_load;
 mod demo;
@@ -614,6 +616,13 @@ async fn dispatch_command(command: Commands) {
             });
             std::process::exit(code);
         }
+        #[cfg(feature = "card")]
+        Commands::Card { action } => match action {
+            #[cfg(unix)]
+            cli::CardAction::Keygen { out_dir } => {
+                std::process::exit(card::cmd_card_keygen(&out_dir));
+            }
+        },
         Commands::HashBake {
             report,
             output,

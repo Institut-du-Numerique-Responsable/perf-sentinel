@@ -1089,6 +1089,16 @@ pub(crate) enum Commands {
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
     },
+    /// Share cards: signing keys and the signed cards they make.
+    ///
+    /// Every card subcommand prints one JSON line on stdout, which is the
+    /// contract; stderr carries the detail.
+    #[cfg(feature = "card")]
+    #[command(after_help = help_examples::CARD)]
+    Card {
+        #[command(subcommand)]
+        action: CardAction,
+    },
     /// Compute and bake the canonical `content_hash` into a periodic report.
     ///
     /// Reads `--report`, recomputes the canonical SHA-256 `content_hash`
@@ -1124,6 +1134,23 @@ pub(crate) enum QueryOutputFormat {
     Text,
     /// Structured JSON.
     Json,
+}
+
+/// Sub-actions for the `card` subcommand.
+#[cfg(feature = "card")]
+#[derive(Subcommand)]
+pub(crate) enum CardAction {
+    /// Generate an Ed25519 signing key.
+    ///
+    /// Writes the private key to `<DIR>/<fingerprint>.pk8` (PKCS#8 v2,
+    /// mode 0600), never over an existing file, and prints the
+    /// fingerprint and the public key to publish.
+    #[cfg(unix)]
+    Keygen {
+        /// The directory to write the key file into. It must exist.
+        #[arg(long, value_name = "DIR")]
+        out_dir: PathBuf,
+    },
 }
 
 /// Sub-actions for the `query` subcommand.
@@ -1401,6 +1428,15 @@ Exit codes, with one JSON line on stdout:
   1  refused, the report is not what it claims (content_hash_mismatch, binding_mismatch)
   3  input error (missing_file, file_too_large, malformed_report, output_unwritable)
   5  cannot render, though nothing says the report is wrong (unsupported_schema_version, unsupported_characters, pdf_export_failed)";
+
+    #[cfg(feature = "card")]
+    pub const CARD: &str = "Examples:
+  # Generate a signing key; keep the .pk8 file private, publish the public key
+  perf-sentinel card keygen --out-dir ~/.config/perf-sentinel/keys
+
+Exit codes, with one JSON line on stdout:
+  0  done, {\"fingerprint\":\"ps1:...\",\"public_key\":\"...\"} for keygen
+  3  input error (key_exists, output_unwritable)";
 
     pub const HASH_BAKE: &str = "Examples:
   # Bake the canonical content hash into a report in place
