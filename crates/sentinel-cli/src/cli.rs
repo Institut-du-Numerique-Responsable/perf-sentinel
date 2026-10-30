@@ -1089,6 +1089,42 @@ pub(crate) enum Commands {
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
     },
+    /// Share cards: signing keys and the signed cards they make.
+    ///
+    /// Every card subcommand prints one JSON line on stdout, which is the
+    /// contract; stderr carries the detail.
+    #[cfg(feature = "card")]
+    #[command(after_help = help_examples::CARD)]
+    Card {
+        #[command(subcommand)]
+        action: CardAction,
+    },
+    /// Verify a share card: its signature, then its key's binding to the
+    /// card's domain.
+    ///
+    /// Reads a `card.png`, a `card.pdf`, a `card.svg`, a `card.jxl` or the
+    /// verify URL its QR code holds, offline by default. Prints one JSON
+    /// line on stdout, the contract; stderr carries the detail. On a file,
+    /// `content` says whether it is the file signed; a verify URL proves
+    /// the figures it prints, not the pixels around its QR code.
+    #[cfg(feature = "card")]
+    #[command(after_help = help_examples::VERIFY_CARD)]
+    VerifyCard {
+        /// The card file (PNG, PDF, SVG or JPEG XL) or its verify URL.
+        target: String,
+        /// The key list the card's domain publishes, the JSON of
+        /// `/.well-known/perf-sentinel-key`, read from a local file.
+        #[arg(long, value_name = "PATH", conflicts_with = "online")]
+        keys: Option<PathBuf>,
+        /// Read the domain's key list over the network: its DNS TXT
+        /// record through DNS-over-HTTPS and its `/.well-known` file.
+        #[arg(long)]
+        online: bool,
+        /// The DNS-over-HTTPS service for `--online`, `https://` only.
+        /// Defaults to `https://cloudflare-dns.com/dns-query`.
+        #[arg(long, value_name = "URL", requires = "online")]
+        doh: Option<String>,
+    },
     /// Compute and bake the canonical `content_hash` into a periodic report.
     ///
     /// Reads `--report`, recomputes the canonical SHA-256 `content_hash`
@@ -1124,6 +1160,59 @@ pub(crate) enum QueryOutputFormat {
     Text,
     /// Structured JSON.
     Json,
+}
+
+/// Sub-actions for the `card` subcommand.
+#[cfg(feature = "card")]
+#[derive(Subcommand)]
+pub(crate) enum CardAction {
+    /// Generate an Ed25519 signing key.
+    ///
+    /// Writes the private key to `<DIR>/<fingerprint>.pk8` (PKCS#8 v2,
+    /// mode 0600), never over an existing file, and prints the
+    /// fingerprint and the public key to publish.
+    #[cfg(unix)]
+    Keygen {
+        /// The directory to write the key file into. It must exist.
+        #[arg(long, value_name = "DIR")]
+        out_dir: PathBuf,
+    },
+    /// Render and sign a share card from the Hub's `card.json`.
+    ///
+    /// Writes `<DIR>/card.png` (the image), `<DIR>/card.pdf` (the
+    /// four-page carousel), `<DIR>/card.svg` (the image as an SVG) or
+    /// `<DIR>/card.jxl` (the image as a lossless JPEG XL), each carrying its
+    /// signed payload, and prints
+    /// the key fingerprint and the verify URL its QR code holds. Nothing
+    /// is written unless the card renders.
+    Render {
+        /// The `card.json` to render.
+        #[arg(long, value_name = "PATH")]
+        input: PathBuf,
+        /// The `.pk8` key from `card keygen`, mode 0600.
+        #[arg(long, value_name = "PATH")]
+        signing_key: PathBuf,
+        /// The directory to write the card into. It must exist.
+        #[arg(long, value_name = "DIR")]
+        out_dir: PathBuf,
+        /// The file to render.
+        #[arg(long, value_enum)]
+        format: CardFormatArg,
+    },
+}
+
+/// What `card render` writes.
+#[cfg(feature = "card")]
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub(crate) enum CardFormatArg {
+    /// The single 1080 x 1350 image, `card.png`.
+    Png,
+    /// The four-page carousel, `card.pdf`.
+    Pdf,
+    /// The single image as an SVG, its text drawn as outlines, `card.svg`.
+    Svg,
+    /// The single image as a lossless JPEG XL, an archival export, `card.jxl`.
+    Jxl,
 }
 
 /// Sub-actions for the `query` subcommand.
@@ -1401,6 +1490,63 @@ Exit codes, with one JSON line on stdout:
   1  refused, the report is not what it claims (content_hash_mismatch, binding_mismatch)
   3  input error (missing_file, file_too_large, malformed_report, output_unwritable)
   5  cannot render, though nothing says the report is wrong (unsupported_schema_version, unsupported_characters, pdf_export_failed)";
+
+    #[cfg(feature = "card")]
+    pub const CARD: &str = "Examples:
+  # Generate a signing key; keep the .pk8 file private, publish the public key
+  perf-sentinel card keygen --out-dir ~/.config/perf-sentinel/keys
+
+  # Render and sign the image of a card.json exported by the Hub
+  perf-sentinel card render --input card.json \\
+    --signing-key ~/.config/perf-sentinel/keys/<fingerprint>.pk8 --out-dir . --format png
+
+  # The same image as an SVG, its signed payload in a <metadata> element
+  perf-sentinel card render --input card.json \\
+    --signing-key ~/.config/perf-sentinel/keys/<fingerprint>.pk8 --out-dir . --format svg
+
+  # The same image as a lossless JPEG XL, to archive; post the PNG
+  perf-sentinel card render --input card.json \\
+    --signing-key ~/.config/perf-sentinel/keys/<fingerprint>.pk8 --out-dir . --format jxl
+
+Exit codes, with one JSON line on stdout:
+  0  done: {\"fingerprint\",\"public_key\"} for keygen,
+     {\"result\":\"rendered\",\"files\",\"fingerprint\",\"compact_url\"} for render
+  1  refused, the card would claim what its figures do not show (volume_not_avoidable, ...)
+  3  input error (missing_file, file_too_large, malformed_input, signing_key_permissions,
+     signing_key_unreadable, key_exists, output_unwritable)
+  5  cannot render (compact_too_large, unsupported_characters with \"field\", svg_encode_failed, jxl_encode_failed, ...)";
+
+    #[cfg(feature = "card")]
+    pub const VERIFY_CARD: &str = "Examples:
+  # Check a card's signature, offline
+  perf-sentinel verify-card card.png
+
+  # Check it against the key list its organization publishes
+  perf-sentinel verify-card card.pdf --keys perf-sentinel-key.json
+
+  # Check an SVG card the same way
+  perf-sentinel verify-card card.svg
+
+  # And a JPEG XL card
+  perf-sentinel verify-card card.jxl
+
+  # Check the verify URL a card's QR code holds
+  perf-sentinel verify-card 'https://perf-sentinel.dev/verifier#c=...'
+
+  # Check it against the keys its domain publishes in DNS and /.well-known
+  perf-sentinel verify-card card.png --online
+
+Exit codes, with one JSON line on stdout:
+  0  integrity ok, content intact (a file) or not_checked (a URL):
+     {\"integrity\":\"ok\",\"content\",\"level\",\"domain\",\"key\",\"reason\",\"figures\"}
+  1  tampered (signature_invalid, fingerprint_mismatch), a file that is not the one
+     signed (content_modified), or a key the list does not vouch for (key_revoked,
+     signed_outside_validity, public_key_mismatch)
+  3  input error (missing_file, file_too_large, malformed_input, no_card_payload,
+     duplicate_card_payload, no_domain)
+  4  --online could not read the domain's key list (binding_check_failed, binding_partial,
+     no_http_client)
+  5  the card's format is newer than this engine (unsupported_version), upgrade perf-sentinel";
 
     pub const HASH_BAKE: &str = "Examples:
   # Bake the canonical content hash into a report in place

@@ -3,7 +3,7 @@ members = ["crates/sentinel-core", "crates/sentinel-cli"]
 resolver = "3"
 
 [workspace.package]
-version = "0.38.0"
+version = "0.39.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 rust-version = "1.99.1"
@@ -17,6 +17,11 @@ codegen-units = 1
 lto = "thin"
 strip = true
 panic = "abort"
+opt-level = 3
+
+# A debug JPEG XL encode of one card takes about 15 s, and the card
+# tests run several.
+[profile.dev.package.jixel]
 opt-level = 3
 
 # Release-grade build with symbols, for flamegraphs and samply runs.

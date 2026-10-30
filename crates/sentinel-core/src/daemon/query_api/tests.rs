@@ -3,7 +3,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-use crate::daemon::detection_ledger::{DAY_MS, DetectionLedger};
+use crate::daemon::detection_ledger::{DAY_MS, DayThresholds, DetectionLedger};
 
 /// The UTC epoch day the test ledger opens on.
 const LEDGER_DAY: u32 = 3;
@@ -51,6 +51,7 @@ fn make_state_with_correlator(
             &crate::config::DaemonDetectionsConfig::default(),
             true,
             1.0,
+            DayThresholds::default(),
             u64::from(LEDGER_DAY) * DAY_MS,
         ))),
     })

@@ -258,6 +258,7 @@ async fn ledger_counts_even_with_zero_retention() {
         &crate::config::DaemonDetectionsConfig::default(),
         false,
         1.0,
+        super::super::detection_ledger::DayThresholds::default(),
         now,
     );
     let store = findings_store::FindingsStore::new(0);
@@ -269,6 +270,64 @@ async fn ledger_counts_even_with_zero_retention() {
     let today = ledger.status().current_day;
     assert_eq!(ledger.tally(today, &signature), Some((1, None)));
     assert_eq!(store.len().await, 0);
+}
+
+/// One 100 µs span, under the 500 ms default, and the slow signature it
+/// would carry if it crossed the threshold.
+fn below_slow_batch() -> (Vec<(String, Vec<normalize::NormalizedEvent>)>, String) {
+    let span = make_normalized("t1", "SELECT * FROM users WHERE id = 1");
+    let mut finding =
+        crate::test_helpers::make_finding(detect::FindingType::SlowSql, detect::Severity::Warning);
+    finding.service = "test".to_string();
+    finding.source_endpoint = span.event.source.endpoint.clone();
+    finding.pattern.template = span.template.to_string();
+    let signature = crate::acknowledgments::compute_signature(&finding);
+    (vec![("t1".to_string(), vec![span])], signature)
+}
+
+async fn ledger_after_below_batch(watch: bool) -> (DetectionLedger, String) {
+    let (batch, signature) = below_slow_batch();
+    let metrics = MetricsState::new();
+    let ctx = empty_carbon_ctx();
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+    let store = findings_store::FindingsStore::new(100);
+    let ledger = DetectionLedger::new(
+        &crate::config::DaemonDetectionsConfig::default(),
+        false,
+        1.0,
+        super::super::detection_ledger::DayThresholds::default(),
+        current_time_ms(),
+    );
+    if watch {
+        ledger.set_watch(std::slice::from_ref(&signature));
+    }
+    let mut tctx = test_ctx(&detect_config, &ctx, &metrics, &store, true, &cell);
+    tctx.detection_ledger = Some(&ledger);
+    process_traces(batch, tctx).await;
+    (ledger, signature)
+}
+
+#[tokio::test]
+async fn watched_slow_signature_counts_below_threshold_passes() {
+    let (ledger, signature) = ledger_after_below_batch(true).await;
+    let today = ledger.status().current_day;
+    let page = ledger.page(Some(today), None, 100);
+    let row = page
+        .counts
+        .iter()
+        .find(|r| r.day == today && r.signature == signature)
+        .expect("a watch row for the slow signature");
+    assert_eq!(row.detections, 0);
+    assert_eq!(row.below_threshold_passes, Some(1));
+}
+
+#[tokio::test]
+async fn no_watch_list_adds_no_row() {
+    let (ledger, signature) = ledger_after_below_batch(false).await;
+    let today = ledger.status().current_day;
+    let page = ledger.page(Some(today), None, 100);
+    assert!(page.counts.iter().all(|r| r.signature != signature));
 }
 
 fn n_plus_one_batch() -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
@@ -312,6 +371,7 @@ async fn run_ledger_batches(
         &crate::config::DaemonDetectionsConfig::default(),
         green_enabled,
         1.0,
+        super::super::detection_ledger::DayThresholds::default(),
         current_time_ms(),
     );
     let store = findings_store::FindingsStore::new(100);

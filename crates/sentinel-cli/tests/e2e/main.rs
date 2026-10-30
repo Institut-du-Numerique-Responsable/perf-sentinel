@@ -9,6 +9,8 @@ mod ack;
 mod analyze;
 #[cfg(feature = "daemon")]
 mod capture;
+#[cfg(all(feature = "card", unix))]
+mod card;
 mod demo;
 mod diff;
 mod disclose;

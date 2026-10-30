@@ -31,9 +31,10 @@ pub(crate) fn is_bidi_or_invisible(c: char) -> bool {
 }
 
 /// Drop Unicode `BiDi`-override and invisible-format characters from a
-/// free-text string before emitting it. Reused at signature construction
-/// time (`acknowledgments::compute_signature`) so canonical signatures
-/// cannot carry trojan characters that would spoof ack matching.
+/// free-text string before emitting it. Signature construction
+/// (`acknowledgments::push_signature_head`) filters the same set char by
+/// char, so canonical signatures cannot carry trojan characters that would
+/// spoof ack matching.
 ///
 /// Probe-before-allocate: real-world inputs (service names, endpoints)
 /// are clean, so the common case returns `Cow::Borrowed` zero-copy.

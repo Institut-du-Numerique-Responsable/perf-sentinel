@@ -5,9 +5,9 @@
 
 mod annex;
 mod extract;
-mod layout;
-mod logo;
-mod pages;
+pub(crate) mod layout;
+pub(crate) mod logo;
+pub(crate) mod pages;
 
 use chrono::{Datelike, Timelike};
 use krilla::color::rgb;
@@ -24,7 +24,9 @@ use krilla::{Document, SerializeSettings};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 
-pub use extract::{ExtractError, MAX_PDF_BYTES, PdfAttachments, extract_attachments};
+pub use extract::{
+    ExtractError, MAX_PDF_BYTES, PdfAttachments, extract_attachments, extract_named,
+};
 use layout::{Face, missing_glyphs};
 pub use pages::verify_command_words;
 use pages::{Op, Outline, PageContext, Rgb, layout_pages};
@@ -141,29 +143,31 @@ pub fn render_disclosure_pdf(inputs: &PdfInputs<'_>) -> Result<Vec<u8>, RenderEr
     build_document(&report, inputs, &sheets)
 }
 
+/// The lowercase hex SHA-256 of `bytes`.
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+}
+
 fn attachment_digests(inputs: &PdfInputs<'_>) -> Vec<(&'static str, String, usize)> {
-    let digest = |bytes: &[u8]| {
-        Sha256::digest(bytes)
-            .iter()
-            .fold(String::with_capacity(64), |mut out, byte| {
-                let _ = write!(out, "{byte:02x}");
-                out
-            })
-    };
     let mut out = vec![(
         "report.json",
-        digest(inputs.report_bytes),
+        sha256_hex(inputs.report_bytes),
         inputs.report_bytes.len(),
     )];
     if let Some(attestation) = inputs.attestation {
         out.push((
             "attestation.intoto.jsonl",
-            digest(attestation),
+            sha256_hex(attestation),
             attestation.len(),
         ));
     }
     if let Some(bundle) = inputs.bundle {
-        out.push(("bundle.sig", digest(bundle), bundle.len()));
+        out.push(("bundle.sig", sha256_hex(bundle), bundle.len()));
     }
     out
 }
@@ -210,14 +214,14 @@ fn parse_statement(attestation: &[u8]) -> Result<InTotoStatement, RenderError> {
     serde_json::from_slice(line).map_err(|e| RenderError::Malformed(format!("attestation: {e}")))
 }
 
-struct Fonts {
+pub(crate) struct Fonts {
     regular: Font,
     bold: Font,
     mono: Font,
 }
 
 impl Fonts {
-    fn load() -> Self {
+    pub(crate) fn load() -> Self {
         let load = |face: Face| Font::new(face.bytes().into(), 0).expect("bundled font parses");
         Self {
             regular: load(Face::Regular),
@@ -240,16 +244,8 @@ fn build_document(
     inputs: &PdfInputs<'_>,
     sheets: &[Vec<Op>],
 ) -> Result<Vec<u8>, RenderError> {
-    let configuration = ConfigurationBuilder::new()
-        .with_archival_validator(Archival::A3_B)
-        .finish()
-        .expect("PDF/A-3b is a valid configuration");
-    let settings = SerializeSettings {
-        configuration,
-        ..SerializeSettings::default()
-    };
-    let mut document = Document::new_with(settings);
-    let date = pdf_date(report);
+    let mut document = archival_document();
+    let date = pdf_date(report.report_metadata.generated_at);
     document.set_metadata(
         Metadata::new()
             .title(format!(
@@ -269,6 +265,7 @@ fn build_document(
         inputs.report_bytes,
         date,
         "The periodic report this document presents",
+        true,
     );
     if let Some(attestation) = inputs.attestation {
         embed(
@@ -279,6 +276,7 @@ fn build_document(
             attestation,
             date,
             "The in-toto attestation naming the report's content hash",
+            true,
         );
     }
     if let Some(bundle) = inputs.bundle {
@@ -290,13 +288,33 @@ fn build_document(
             bundle,
             date,
             "The Sigstore bundle signing the attestation",
+            true,
         );
     }
+    add_pages(&mut document, sheets, PAGE_WIDTH, PAGE_HEIGHT);
+    document
+        .finish()
+        .map_err(|e| RenderError::ExportFailed(format!("{e:?}")))
+}
+
+/// An empty document that krilla validates as PDF/A-3b.
+pub(crate) fn archival_document() -> Document {
+    let configuration = ConfigurationBuilder::new()
+        .with_archival_validator(Archival::A3_B)
+        .finish()
+        .expect("PDF/A-3b is a valid configuration");
+    Document::new_with(SerializeSettings {
+        configuration,
+        ..SerializeSettings::default()
+    })
+}
+
+/// One `width` x `height` page per sheet, its operations drawn in order.
+pub(crate) fn add_pages(document: &mut Document, sheets: &[Vec<Op>], width: f32, height: f32) {
     let fonts = Fonts::load();
     for sheet in sheets {
-        let mut page = document.start_page_with(
-            PageSettings::from_wh(PAGE_WIDTH, PAGE_HEIGHT).expect("A4 is a valid page"),
-        );
+        let mut page = document
+            .start_page_with(PageSettings::from_wh(width, height).expect("a valid page size"));
         let mut surface = page.surface();
         for op in sheet {
             draw(&mut surface, &fonts, op);
@@ -304,12 +322,9 @@ fn build_document(
         surface.finish();
         page.finish();
     }
-    document
-        .finish()
-        .map_err(|e| RenderError::ExportFailed(format!("{e:?}")))
 }
 
-fn draw(surface: &mut Surface<'_>, fonts: &Fonts, op: &Op) {
+pub(crate) fn draw(surface: &mut Surface<'_>, fonts: &Fonts, op: &Op) {
     match op {
         Op::Text {
             x,
@@ -541,7 +556,8 @@ fn logo_fill(paint: logo::Paint) -> Fill {
     }
 }
 
-fn embed(
+#[allow(clippy::too_many_arguments)] // one per EmbeddedFile field the callers vary
+pub(crate) fn embed(
     document: &mut Document,
     path: &str,
     mime: &str,
@@ -549,6 +565,7 @@ fn embed(
     data: &[u8],
     date: DateTime,
     description: &str,
+    compress: bool,
 ) {
     document.embed_file(EmbeddedFile {
         path: path.to_string(),
@@ -557,14 +574,13 @@ fn embed(
         association_kind,
         data: data.to_vec().into(),
         modification_date: Some(date),
-        compress: Some(true),
+        compress: Some(compress),
         location: None,
     });
 }
 
-/// The report's own date, never the clock, so a render is reproducible.
-fn pdf_date(report: &PeriodicReport) -> DateTime {
-    let at = report.report_metadata.generated_at;
+/// A document's own date, never the clock, so a render is reproducible.
+pub(crate) fn pdf_date(at: chrono::DateTime<chrono::Utc>) -> DateTime {
     let narrow = |v: u32| u8::try_from(v).expect("calendar fields fit in u8");
     DateTime::new(u16::try_from(at.year()).unwrap_or(9999))
         .month(narrow(at.month()))

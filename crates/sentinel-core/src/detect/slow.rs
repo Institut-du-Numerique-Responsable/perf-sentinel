@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::correlate::Trace;
 use crate::event::EventType;
 
+use super::below_threshold::BelowPass;
 use super::{Confidence, Finding, FindingType, Pattern, Severity};
 
 type PerTraceSlowKey<'a> = (&'a EventType, &'a str, Option<(&'a str, &'a str)>);
@@ -19,6 +20,17 @@ type PerTraceSlowKey<'a> = (&'a EventType, &'a str, Option<(&'a str, &'a str)>);
 /// the same normalized template occurs >= `min_occurrences` times.
 #[must_use]
 pub fn detect_slow(trace: &Trace, threshold_ms: u64, min_occurrences: u32) -> Vec<Finding> {
+    detect_slow_with_below(trace, threshold_ms, min_occurrences, None)
+}
+
+/// Same detection, also counting each span at or under the threshold in
+/// `below`.
+pub(crate) fn detect_slow_with_below<'t>(
+    trace: &'t Trace,
+    threshold_ms: u64,
+    min_occurrences: u32,
+    mut below: Option<&mut BelowPass<'_, 't>>,
+) -> Vec<Finding> {
     let threshold_us = threshold_ms.saturating_mul(1000);
     let min_occ = min_occurrences as usize;
 
@@ -37,6 +49,8 @@ pub fn detect_slow(trace: &Trace, threshold_ms: u64, min_occurrences: u32) -> Ve
                 ))
                 .or_default()
                 .push(i);
+        } else if let Some(b) = below.as_deref_mut() {
+            b.slow_span(span);
         }
     }
 

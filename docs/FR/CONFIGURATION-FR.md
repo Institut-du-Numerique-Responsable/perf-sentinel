@@ -1050,6 +1050,14 @@ passé à `gap = true` dans le registre. Un Hub qui répond 404 ou 405 sur cette
 précède : le daemon journalise un avertissement et cesse de pousser les comptes de
 détections jusqu'à son redémarrage, tandis que les autres exports continuent.
 
+La réponse du Hub à une page de détections peut porter `watch`, les signatures de findings
+à seuil qu'il veut voir confirmées : un correctif marqué fait, sans jour de confirmation
+encore. Le daemon garde cette liste en mémoire, la remplace à chaque réponse acceptée, la
+tronque à `max_signatures_per_day` et compte `below_threshold_passes` pour ces signatures
+seulement. La liste se perd au redémarrage et revient avec la poussée suivante. Un daemon
+que le Hub ne fait qu'interroger ne reçoit aucune liste, ses lignes ne portent donc jamais
+`below_threshold_passes`.
+
 À l'arrêt propre (SIGTERM, `helm upgrade`, redémarrage progressif), l'exporteur
 vide ce qu'il détient encore avant que le processus ne se termine, pendant au
 plus 10 secondes. Ce budget empêche un Hub injoignable de retenir le daemon

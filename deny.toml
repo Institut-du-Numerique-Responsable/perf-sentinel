@@ -49,6 +49,17 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+# The `card` feature rasterizes the share card with tiny-skia (BSD-3-Clause,
+# pure Rust, `simd` off) and writes it with png (MIT OR Apache-2.0, pulling
+# fdeflate), no C code. png 0.18.1 brings miniz_oxide 0.8.9 next to the 0.9.1
+# that krilla's flate2 uses, the one duplicate the feature adds to
+# `cargo tree -d -e normal -p perf-sentinel-core --features card`. The other
+# pairs it lists (skrifa 0.42/0.49 with read-fonts and font-types, getrandom,
+# rand, rand_core, syn, thiserror) were there before it.
+# jixel (BSD-3-Clause OR Apache-2.0, pure Rust, default features and SIMD off)
+# writes the JPEG XL card, no dependency; it holds `unsafe` code, reviewed as a
+# supply-chain point. jxl-oxide and jxl decode it in one test only
+# (dev-dependencies).
 [bans]
 # Several crates legitimately appear in multiple versions (transitive diamond
 # dependencies), so duplicates are surfaced as warnings rather than failing the

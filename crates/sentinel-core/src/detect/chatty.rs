@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use crate::correlate::Trace;
 use crate::event::EventType;
 
+use super::below_threshold::BelowPass;
 use super::{Confidence, Finding, FindingType, Pattern, Severity};
 
 /// Detect chatty service patterns within a trace.
@@ -14,6 +15,16 @@ use super::{Confidence, Finding, FindingType, Pattern, Severity};
 /// Severity is `Warning` if > `min_calls`, `Critical` if > 3x `min_calls`.
 #[must_use]
 pub fn detect_chatty(trace: &Trace, min_calls: u32) -> Vec<Finding> {
+    detect_chatty_with_below(trace, min_calls, None)
+}
+
+/// Same detection, also counting each grouping at or under `min_calls` in
+/// `below`.
+pub(crate) fn detect_chatty_with_below<'t>(
+    trace: &'t Trace,
+    min_calls: u32,
+    mut below: Option<&mut BelowPass<'_, 't>>,
+) -> Vec<Finding> {
     // Partitioned by grouping like every other per-trace detector: counting
     // one deployment's calls into another's finding bills the wrong owner,
     // and the HTML evidence filter would light up the other's spans. Ordered,
@@ -27,10 +38,16 @@ pub fn detect_chatty(trace: &Trace, min_calls: u32) -> Vec<Finding> {
                 .push(i);
         }
     }
-    let mut findings: Vec<Finding> = by_grouping
-        .into_values()
-        .filter_map(|indices| chatty_finding(trace, &indices, min_calls))
-        .collect();
+    let mut findings = Vec::new();
+    for indices in by_grouping.into_values() {
+        if indices.len() <= min_calls as usize
+            && let Some(b) = below.as_deref_mut()
+        {
+            b.chatty_group(&trace.spans[indices[0]]);
+            continue;
+        }
+        findings.extend(chatty_finding(trace, &indices, min_calls));
+    }
     findings.sort_by(|a, b| a.pattern.template.cmp(&b.pattern.template));
     findings
 }

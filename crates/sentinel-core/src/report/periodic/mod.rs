@@ -22,7 +22,7 @@ pub mod validator;
 pub mod version;
 
 #[cfg(test)]
-mod test_fixtures;
+pub(crate) mod test_fixtures;
 
 /// `skip_serializing_if` for counters that only a declared source fills,
 /// so a report without one keeps the wire shape it had before the field

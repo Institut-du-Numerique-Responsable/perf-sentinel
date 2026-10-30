@@ -1384,13 +1384,29 @@ avec un nouveau `ledger_id`, dont le premier jour est un `gap`.
 | `current_day`    | number         | Jour le plus récent que détient le registre                                          |
 | `oldest_day`     | number         | Jour le plus ancien que détient le registre                                          |
 | `sealed_through` | number ou null | Dernier jour scellé au moment de la page, `null` avant le premier                    |
-| `counts`         | array          | `{ day, signature, detections, extra_io_ops }`, par ordre croissant (jour, signature) |
+| `counts`         | array          | `{ day, signature, detections, extra_io_ops, below_threshold_passes }`, par ordre croissant (jour, signature) |
 | `days`           | array          | Un objet par jour, voir plus bas                                                     |
 | `next_after`     | string ou null | Curseur de la page suivante, `null` sur la dernière                                  |
 
 `extra_io_ops` additionne les opérations d'I/O évitables des détections
 comptées. Il est absent quand le scoring green est coupé, ce qui dit que
 l'I/O est inconnue, pas nulle.
+
+`below_threshold_passes` compte, pour une signature que PerfSentinelHub
+a demandé au daemon de surveiller (voir le push des détections dans
+[CONFIGURATION-FR.md](CONFIGURATION-FR.md#daemonhub_export-optionnel)),
+les passages vus ce jour-là au seuil ou en dessous : un span pour
+`slow_*`, les enfants d'un parent pour `excessive_fanout`, les appels
+sortants d'une trace pour `chatty_service`, les requêtes concurrentes
+d'un service dans une trace pour `pool_saturation`, la plus longue
+chaîne d'un parent pour `serialized_calls`. Absent quand il vaut 0. Une
+signature surveillée peut avoir une ligne avec `detections: 0` ; ces
+lignes ont leur propre plafond, `max_signatures_per_day` par jour, et ne
+prennent jamais la place d'une signature détectée, si bien qu'un jour
+peut lister jusqu'à deux fois ce nombre de lignes. Seuls les types à
+seuil sont surveillés. Limites : un fanout ou un parent sérialisé hors
+de la trace correspond moins souvent, et un compte de passages ne
+prouve jamais l'absence de détection sur un autre daemon.
 
 Chaque objet de `days` :
 
@@ -1404,6 +1420,7 @@ Chaque objet de `days` :
 | `shed_traces`           | number  | Traces délestées par l'analyse ce jour-là, jamais analysées                                  |
 | `ingest_rejected`       | number  | Requêtes OTLP refusées à l'ingestion ce jour-là, file pleine ou pression mémoire             |
 | `sampling_rate`         | number  | `[daemon] sampling_rate` : les comptes couvrent cette part des traces                        |
+| `thresholds`            | object  | Les seuils appliqués par le daemon, constants pour un `ledger_id`, voir plus bas             |
 | `avoidable_gco2`        | number  | CO₂ évitable des lots analysés du jour, en gCO₂eq : l'estimation opérationnelle de `green_summary.co2.avoidable.mid`. Absent quand le scoring green est coupé, qu'aucun lot n'a résolu de région ou qu'aucun lot ne l'a apporté |
 | `avoidable_gco2_low`    | number  | La borne basse de la même estimation (`green_summary.co2.avoidable.low`), pour un chiffre prudent de type « au moins » |
 | `avoidable_io_ops`      | number  | I/O évitables des mêmes lots, dédupliquées par lot comme `green_summary.avoidable_io_ops` |
@@ -1417,6 +1434,21 @@ n'est pas dédupliqué entre findings comme le `avoidable_io_ops` d'un
 lot. Comme les compteurs, les quatre sommes couvrent la part
 `sampling_rate` des traces : les rapports valent tels quels, un chiffre
 absolu se divise par `sampling_rate`.
+
+Les clés de `thresholds`, leur réglage `[detection]` et quand un
+passage compte comme en dessous :
+
+| Clé                         | Réglage                                | En dessous                                   |
+|-----------------------------|----------------------------------------|----------------------------------------------|
+| `slow_query_threshold_ms`   | `slow_query_threshold_ms`              | Au plus ce nombre de ms                      |
+| `slow_http_threshold_ms`    | `slow_query_threshold_ms`              | Au plus ce nombre de ms                      |
+| `max_fanout`                | `max_fanout`                           | Au plus ce nombre d'enfants                  |
+| `chatty_threshold`          | `chatty_service_min_calls`             | Au plus ce nombre d'appels                   |
+| `pool_saturation_threshold` | `pool_saturation_concurrent_threshold` | Moins que ce nombre de requêtes concurrentes |
+| `serialized_min_calls`      | `serialized_min_sequential`            | Une chaîne plus courte que ce nombre         |
+
+Le moteur n'a qu'un réglage de lenteur, les deux clés lentes le portent
+donc, et `slow_messaging` se compare à `slow_query_threshold_ms`.
 
 Une détection va dans le débordement de son jour quand sa signature est
 nouvelle au-delà de `[daemon.detections] max_signatures_per_day`, dépasse
@@ -1482,6 +1514,7 @@ curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode limit=2 \
       "shed_traces": 0,
       "ingest_rejected": 0,
       "sampling_rate": 1.0,
+      "thresholds": {"slow_query_threshold_ms": 500, "slow_http_threshold_ms": 500, "max_fanout": 20, "chatty_threshold": 15, "pool_saturation_threshold": 10, "serialized_min_calls": 3},
       "avoidable_gco2": 0.0042,
       "avoidable_gco2_low": 0.0021,
       "avoidable_io_ops": 55,
@@ -1503,7 +1536,7 @@ La troisième page clôt le parcours, `next_after` vaut `null` :
   "sealed_through": 20753,
   "counts": [
     {"day": 20754, "signature": "redundant_sql:order-svc:_api_v1_orders:cccccccccccccccccccccccccccccccc", "detections": 1, "extra_io_ops": 2},
-    {"day": 20754, "signature": "slow_sql:billing-svc:GET__invoices:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "detections": 5, "extra_io_ops": 0}
+    {"day": 20754, "signature": "slow_sql:billing-svc:GET__invoices:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "detections": 5, "extra_io_ops": 0, "below_threshold_passes": 212}
   ],
   "days": [
     {
@@ -1515,6 +1548,7 @@ La troisième page clôt le parcours, `next_after` vaut `null` :
       "shed_traces": 0,
       "ingest_rejected": 0,
       "sampling_rate": 1.0,
+      "thresholds": {"slow_query_threshold_ms": 500, "slow_http_threshold_ms": 500, "max_fanout": 20, "chatty_threshold": 15, "pool_saturation_threshold": 10, "serialized_min_calls": 3},
       "avoidable_gco2": 0.0025,
       "avoidable_gco2_low": 0.0012,
       "avoidable_io_ops": 31,

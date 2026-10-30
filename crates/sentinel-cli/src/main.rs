@@ -22,6 +22,8 @@ mod backend_cmd;
 mod bench;
 #[cfg(feature = "daemon")]
 mod capture;
+#[cfg(feature = "card")]
+mod card;
 mod cli;
 mod config_load;
 mod demo;
@@ -45,6 +47,8 @@ mod tui;
 mod tui_launch;
 #[cfg(feature = "tui")]
 mod tui_resize;
+#[cfg(feature = "card")]
+mod verify_card;
 mod verify_hash;
 
 use clap::{CommandFactory, Parser};
@@ -612,6 +616,44 @@ async fn dispatch_command(command: Commands) {
                 expected_issuer: expected_issuer.as_deref(),
                 output: &output,
             });
+            std::process::exit(code);
+        }
+        #[cfg(feature = "card")]
+        Commands::Card { action } => match action {
+            #[cfg(unix)]
+            cli::CardAction::Keygen { out_dir } => {
+                std::process::exit(card::cmd_card_keygen(&out_dir));
+            }
+            cli::CardAction::Render {
+                input,
+                signing_key,
+                out_dir,
+                format,
+            } => {
+                let format = match format {
+                    cli::CardFormatArg::Png => sentinel_core::report::card::CardFormat::Png,
+                    cli::CardFormatArg::Pdf => sentinel_core::report::card::CardFormat::Pdf,
+                    cli::CardFormatArg::Svg => sentinel_core::report::card::CardFormat::Svg,
+                    cli::CardFormatArg::Jxl => sentinel_core::report::card::CardFormat::Jxl,
+                };
+                std::process::exit(card::cmd_card_render(&card::RenderArgs {
+                    input: &input,
+                    signing_key: &signing_key,
+                    out_dir: &out_dir,
+                    format,
+                }));
+            }
+        },
+        #[cfg(feature = "card")]
+        Commands::VerifyCard {
+            target,
+            keys,
+            online,
+            doh,
+        } => {
+            let code =
+                verify_card::cmd_verify_card(&target, keys.as_deref(), online, doh.as_deref())
+                    .await;
             std::process::exit(code);
         }
         Commands::HashBake {

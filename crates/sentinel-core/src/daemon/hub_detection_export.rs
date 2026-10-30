@@ -6,12 +6,14 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::detection_ledger::{
     CountRow, DayRow, DaySnapshot, DetectionLedger, DetectionLedgerStatus, MAX_PAGE_BYTES,
 };
-use super::hub_export::{ExportOutcome, HubClient, bounded_body, classify, next_delay, post_batch};
+use super::hub_export::{
+    ExportOutcome, HubClient, bounded_body, classify, next_delay, post_batch_with_reply,
+};
 use super::hub_table::{import_route, is_missing_route};
 use crate::http_client;
 use crate::report::metrics::MetricsState;
@@ -25,6 +27,21 @@ const MIN_SNAPSHOT_INTERVAL: Duration = Duration::from_mins(1);
 /// The detection import beside the configured findings import.
 pub(super) fn detections_endpoint(findings_endpoint: &str) -> String {
     import_route(findings_endpoint, "/api/import/detections")
+}
+
+/// The part of the Hub's import reply the daemon reads.
+#[derive(Deserialize)]
+struct ImportReply {
+    #[serde(default)]
+    watch: Option<Vec<String>>,
+}
+
+/// The watch list a reply carries: `None` when it does not parse, empty
+/// when it parses without `watch`.
+fn watch_of(reply: &[u8]) -> Option<Vec<String>> {
+    serde_json::from_slice::<ImportReply>(reply)
+        .ok()
+        .map(|reply| reply.watch.unwrap_or_default())
 }
 
 /// A `DetectionsPage` over borrowed rows, so paging a day copies nothing.
@@ -176,14 +193,13 @@ impl DetectionExport {
             self.due = tokio::time::Instant::now();
             return true;
         };
-        let outcome = match post_batch(client, &self.uri, api_key, body).await {
-            Ok(status) if is_missing_route(status) => {
+        let outcome = match post_batch_with_reply(client, &self.uri, api_key, body).await {
+            Ok((status, _)) if is_missing_route(status) => {
                 self.unsupported();
                 self.due = tokio::time::Instant::now() + pace;
                 return false;
             }
-            Ok(status) => classify(status),
-            Err(reason) => ExportOutcome::Retry(reason),
+            reply => self.outcome_of(reply),
         };
         let mut delay = self.apply(&outcome, rows, metrics, flush_interval);
         if self.queue.is_empty() {
@@ -191,6 +207,35 @@ impl DetectionExport {
         }
         self.due = tokio::time::Instant::now() + delay;
         true
+    }
+
+    /// The outcome of one page. An accepted reply replaces the watch list
+    /// when it parses.
+    fn outcome_of(
+        &self,
+        reply: Result<(hyper::StatusCode, bytes::Bytes), http_client::FetchError>,
+    ) -> ExportOutcome {
+        match reply {
+            Ok((status, body)) => {
+                let outcome = classify(status);
+                if matches!(outcome, ExportOutcome::Accepted)
+                    && let Some(watch) = watch_of(&body)
+                {
+                    self.ledger.set_watch(&watch);
+                }
+                outcome
+            }
+            // The Hub answers errors with short bodies, so an oversized body
+            // is an accepted page carrying a long list.
+            Err(http_client::FetchError::BodyTooLarge(_)) => {
+                tracing::warn!(
+                    endpoint = %http_client::redact_endpoint(&self.uri),
+                    "PerfSentinelHub detection reply is over the size cap; counting the page as accepted and keeping the watch list"
+                );
+                ExportOutcome::Accepted
+            }
+            Err(error) => ExportOutcome::Retry(error.to_string()),
+        }
     }
 
     /// Snapshot the dirty days once the last snapshot is sent. False when
@@ -286,7 +331,7 @@ mod tests {
 
     use super::*;
     use crate::config::DaemonDetectionsConfig;
-    use crate::daemon::detection_ledger::{DAY_MS, DayCarbon, DetectionLedger};
+    use crate::daemon::detection_ledger::{DAY_MS, DayCarbon, DayThresholds, DetectionLedger};
     use crate::daemon::hub_export::HubClient;
     use crate::daemon::hub_export::HubExportBuffer;
     use crate::daemon::hub_export::tests::{count, finding, spawn_with_detections, wait_for};
@@ -300,6 +345,7 @@ mod tests {
             &DaemonDetectionsConfig::default(),
             true,
             1.0,
+            DayThresholds::default(),
             day * DAY_MS,
         ))
     }
@@ -750,5 +796,95 @@ mod tests {
         assert_eq!(true, page["days"][0]["gap"]);
         assert_eq!("a", page["counts"][0]["signature"]);
         assert_eq!(0, ledger.dirty_days().len());
+    }
+
+    const SLOW: &str = "slow_sql:svc:GET__a:0123456789abcdef0123456789abcdef";
+
+    /// A Hub that answers every request with `status` and `reply` as body.
+    async fn fake_hub_replying(status: u16, reply: Vec<u8>) -> (String, Seen) {
+        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+        let store = seen.clone();
+        let app =
+            axum::Router::new().fallback(move |uri: axum::http::Uri, body: axum::body::Bytes| {
+                let store = store.clone();
+                let reply = reply.clone();
+                async move {
+                    store
+                        .lock()
+                        .expect("lock")
+                        .push((uri.to_string(), None, body.to_vec()));
+                    (
+                        axum::http::StatusCode::from_u16(status).expect("status"),
+                        reply,
+                    )
+                }
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        (format!("http://{address}"), seen)
+    }
+
+    /// One dirty day pushed to a Hub answering `status` with `reply`, the
+    /// watch list preset to `SLOW` when `preset`.
+    async fn push_once(status: u16, reply: Vec<u8>, preset: bool) -> (Arc<DetectionLedger>, Seen) {
+        let (base, seen) = fake_hub_replying(status, reply).await;
+        let ledger = ledger_at(DAY);
+        if preset {
+            ledger.set_watch(&[SLOW.to_string()]);
+        }
+        record(&ledger, DAY, &["a"]);
+        assert_eq!(
+            1,
+            rounds(&mut export(&base, &ledger), &MetricsState::new()).await
+        );
+        (ledger, seen)
+    }
+
+    #[tokio::test]
+    async fn an_accepted_reply_replaces_the_watch_list() {
+        let reply = format!(r#"{{"accepted":1,"rejected":0,"watch":["{SLOW}"]}}"#);
+        let (ledger, _seen) = push_once(200, reply.into_bytes(), false).await;
+        assert_eq!(1, ledger.watch().len());
+    }
+
+    #[tokio::test]
+    async fn a_reply_without_watch_clears_the_list() {
+        let (ledger, _seen) =
+            push_once(200, br#"{"accepted":1,"rejected":0}"#.to_vec(), true).await;
+        assert!(ledger.watch().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unparsable_reply_keeps_the_list_and_the_page_counts() {
+        let (ledger, seen) = push_once(200, b"not json".to_vec(), true).await;
+        assert_eq!(1, ledger.watch().len());
+        assert!(ledger.dirty_days().is_empty());
+        assert_eq!(1, seen.lock().expect("lock").len());
+    }
+
+    #[tokio::test]
+    async fn a_non_string_entry_keeps_the_list() {
+        let (ledger, _seen) = push_once(200, br#"{"watch":[1]}"#.to_vec(), true).await;
+        assert_eq!(1, ledger.watch().len());
+        assert!(ledger.dirty_days().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_page_keeps_the_list() {
+        let (ledger, _seen) = push_once(503, br#"{"watch":[]}"#.to_vec(), true).await;
+        assert_eq!(1, ledger.watch().len());
+        assert_eq!(1, ledger.dirty_days().len());
+    }
+
+    #[tokio::test]
+    async fn an_oversized_reply_counts_as_accepted() {
+        let reply = vec![b' '; http_client::MAX_BODY_BYTES + 1];
+        let (ledger, seen) = push_once(200, reply, true).await;
+        assert!(ledger.dirty_days().is_empty());
+        assert_eq!(1, seen.lock().expect("lock").len());
+        assert_eq!(1, ledger.watch().len());
     }
 }

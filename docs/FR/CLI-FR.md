@@ -421,7 +421,10 @@ Les commandes de chaîne d'approvisionnement disposent d'une documentation
 dédiée ailleurs : `disclose`, `disclose-pdf`, `verify-hash` et `hash-bake` sont
 couverts dans [`REPORTING-FR.md`](./REPORTING-FR.md), avec le
 contexte signature et provenance dans
-[`SUPPLY-CHAIN-FR.md`](./SUPPLY-CHAIN-FR.md). La complétion shell et
+[`SUPPLY-CHAIN-FR.md`](./SUPPLY-CHAIN-FR.md). Les commandes des cartes
+à partager, `card keygen`, `card render` et `verify-card`, sont couvertes
+dans [`SHARE-CARD-FR.md`](./SHARE-CARD-FR.md), avec leurs lignes JSON,
+leurs codes de sortie et leurs charges utiles. La complétion shell et
 la page de manuel sont documentées plus bas sur cette page.
 
 ## Heures au terminal
