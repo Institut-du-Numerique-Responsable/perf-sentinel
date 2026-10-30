@@ -62,25 +62,9 @@ pub fn extract_attachments(
     report_cap: u64,
     sidecar_cap: u64,
 ) -> Result<PdfAttachments, ExtractError> {
-    if !pdf.starts_with(b"%PDF-") {
-        return Err(ExtractError::NotAPdf);
-    }
-    if pdf.len() > MAX_PDF_BYTES {
-        return Err(ExtractError::TooLarge("the PDF"));
-    }
     let report_cap = usize::try_from(report_cap).unwrap_or(usize::MAX);
     let sidecar_cap = usize::try_from(sidecar_cap).unwrap_or(usize::MAX);
-    if load_streams(pdf) > MAX_LOAD_STREAMS {
-        return Err(ExtractError::Malformed(
-            "too many object streams".to_string(),
-        ));
-    }
-    let options = LoadOptions {
-        max_decompressed_size: Some(LOAD_STREAM_CAP),
-        ..LoadOptions::default()
-    };
-    let doc = Document::load_mem_with_options(pdf, options)
-        .map_err(|e| ExtractError::Malformed(e.to_string()))?;
+    let doc = load(pdf)?;
     let mut found: [Option<Vec<u8>>; 3] = [None, None, None];
     for spec in file_specs(&doc)? {
         let Some(name) = spec_name(&doc, spec) else {
@@ -105,6 +89,53 @@ pub fn extract_attachments(
         attestation,
         bundle,
     })
+}
+
+/// Read the one attachment of `pdf` named `name`, `cap` bytes at most once
+/// decoded, `None` when the PDF attaches no file of that name.
+///
+/// # Errors
+///
+/// See [`ExtractError`]: `Duplicate(name)` when two files carry the name.
+pub fn extract_named(
+    pdf: &[u8],
+    name: &'static str,
+    cap: u64,
+) -> Result<Option<Vec<u8>>, ExtractError> {
+    let cap = usize::try_from(cap).unwrap_or(usize::MAX);
+    let doc = load(pdf)?;
+    let mut found = None;
+    for spec in file_specs(&doc)? {
+        if spec_name(&doc, spec).as_deref() != Some(name) {
+            continue;
+        }
+        if found.is_some() {
+            return Err(ExtractError::Duplicate(name));
+        }
+        found = Some(embedded_bytes(&doc, spec, name, cap)?);
+    }
+    Ok(found)
+}
+
+/// `pdf` parsed under the size and stream bounds, once it looks like a PDF.
+fn load(pdf: &[u8]) -> Result<Document, ExtractError> {
+    if !pdf.starts_with(b"%PDF-") {
+        return Err(ExtractError::NotAPdf);
+    }
+    if pdf.len() > MAX_PDF_BYTES {
+        return Err(ExtractError::TooLarge("the PDF"));
+    }
+    if load_streams(pdf) > MAX_LOAD_STREAMS {
+        return Err(ExtractError::Malformed(
+            "too many object streams".to_string(),
+        ));
+    }
+    let options = LoadOptions {
+        max_decompressed_size: Some(LOAD_STREAM_CAP),
+        ..LoadOptions::default()
+    };
+    Document::load_mem_with_options(pdf, options)
+        .map_err(|e| ExtractError::Malformed(e.to_string()))
 }
 
 /// Every file specification the catalog names, through its `AF` array and

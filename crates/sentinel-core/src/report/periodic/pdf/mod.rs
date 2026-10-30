@@ -5,9 +5,9 @@
 
 mod annex;
 mod extract;
-mod layout;
-mod logo;
-mod pages;
+pub(crate) mod layout;
+pub(crate) mod logo;
+pub(crate) mod pages;
 
 use chrono::{Datelike, Timelike};
 use krilla::color::rgb;
@@ -24,7 +24,9 @@ use krilla::{Document, SerializeSettings};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 
-pub use extract::{ExtractError, MAX_PDF_BYTES, PdfAttachments, extract_attachments};
+pub use extract::{
+    ExtractError, MAX_PDF_BYTES, PdfAttachments, extract_attachments, extract_named,
+};
 use layout::{Face, missing_glyphs};
 pub use pages::verify_command_words;
 use pages::{Op, Outline, PageContext, Rgb, layout_pages};
@@ -210,14 +212,14 @@ fn parse_statement(attestation: &[u8]) -> Result<InTotoStatement, RenderError> {
     serde_json::from_slice(line).map_err(|e| RenderError::Malformed(format!("attestation: {e}")))
 }
 
-struct Fonts {
+pub(crate) struct Fonts {
     regular: Font,
     bold: Font,
     mono: Font,
 }
 
 impl Fonts {
-    fn load() -> Self {
+    pub(crate) fn load() -> Self {
         let load = |face: Face| Font::new(face.bytes().into(), 0).expect("bundled font parses");
         Self {
             regular: load(Face::Regular),
@@ -269,6 +271,7 @@ fn build_document(
         inputs.report_bytes,
         date,
         "The periodic report this document presents",
+        true,
     );
     if let Some(attestation) = inputs.attestation {
         embed(
@@ -279,6 +282,7 @@ fn build_document(
             attestation,
             date,
             "The in-toto attestation naming the report's content hash",
+            true,
         );
     }
     if let Some(bundle) = inputs.bundle {
@@ -290,6 +294,7 @@ fn build_document(
             bundle,
             date,
             "The Sigstore bundle signing the attestation",
+            true,
         );
     }
     let fonts = Fonts::load();
@@ -309,7 +314,7 @@ fn build_document(
         .map_err(|e| RenderError::ExportFailed(format!("{e:?}")))
 }
 
-fn draw(surface: &mut Surface<'_>, fonts: &Fonts, op: &Op) {
+pub(crate) fn draw(surface: &mut Surface<'_>, fonts: &Fonts, op: &Op) {
     match op {
         Op::Text {
             x,
@@ -541,7 +546,8 @@ fn logo_fill(paint: logo::Paint) -> Fill {
     }
 }
 
-fn embed(
+#[allow(clippy::too_many_arguments)] // one per EmbeddedFile field the callers vary
+pub(crate) fn embed(
     document: &mut Document,
     path: &str,
     mime: &str,
@@ -549,6 +555,7 @@ fn embed(
     data: &[u8],
     date: DateTime,
     description: &str,
+    compress: bool,
 ) {
     document.embed_file(EmbeddedFile {
         path: path.to_string(),
@@ -557,7 +564,7 @@ fn embed(
         association_kind,
         data: data.to_vec().into(),
         modification_date: Some(date),
-        compress: Some(true),
+        compress: Some(compress),
         location: None,
     });
 }
