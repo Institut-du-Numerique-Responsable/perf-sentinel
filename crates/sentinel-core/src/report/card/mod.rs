@@ -5,6 +5,8 @@ pub mod binding;
 mod copy;
 pub mod keys;
 mod layout;
+#[cfg(any(feature = "daemon", feature = "tempo", feature = "jaeger-query"))]
+pub mod online;
 pub mod payload;
 pub mod pdf;
 pub mod raster;

@@ -128,6 +128,156 @@ pub fn judge(
     binding(2, status, "key_published")
 }
 
+/// What one place a domain publishes its keys in said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lookup {
+    /// The keys it lists.
+    Found(Vec<PublishedKey>),
+    /// It answers that it publishes no key.
+    Absent,
+    /// It could not be read: no answer, an error status, a redirect, a
+    /// body that is too large or not the expected shape.
+    Failed,
+}
+
+/// Read a `_perf-sentinel` TXT record, `v=ps1; k=<fingerprint>;
+/// from=YYYY-MM-DD[; to=YYYY-MM-DD][; revoked=YYYY-MM-DD]`, as a resolver
+/// hands it over: bare, in one level of quotes, or split in quoted strings
+/// (`"a" "b"`). Unknown parameters are ignored; any other record, a bad
+/// date or a parameter given twice is `None`.
+#[must_use]
+pub fn parse_txt_record(data: &str) -> Option<PublishedKey> {
+    let data = data.trim();
+    let text: String = match data.strip_prefix('"').and_then(|d| d.strip_suffix('"')) {
+        // `a" "b` splits on its quotes into a, the gap, b: keep the strings.
+        Some(inner) => inner.split('"').step_by(2).collect(),
+        None => data.to_owned(),
+    };
+    let mut fields = text.split(';').map(str::trim).filter(|f| !f.is_empty());
+    if fields.next()? != "v=ps1" {
+        return None;
+    }
+    let (mut k, mut from, mut to, mut revoked) = (None, None, None, None);
+    for field in fields {
+        let (name, value) = field.split_once('=')?;
+        let slot = match name.trim() {
+            "k" => &mut k,
+            "from" => &mut from,
+            "to" => &mut to,
+            "revoked" => &mut revoked,
+            _ => continue,
+        };
+        if slot.replace(value.trim()).is_some() {
+            return None;
+        }
+    }
+    // Outer `None`: a bad date; inner: the parameter is absent.
+    let day = |v: Option<&str>| {
+        v.map(|t| parse_iso_date_to_epoch_day(t).ok_or(()))
+            .transpose()
+            .ok()
+    };
+    Some(PublishedKey {
+        fingerprint: k?.to_owned(),
+        public_key: None,
+        from: day(from)??,
+        to: day(to)?,
+        revoked: day(revoked)?,
+    })
+}
+
+/// Read a DNS-over-HTTPS JSON answer (`application/dns-json`) for the TXT
+/// records of `_perf-sentinel.<domain>`: NXDOMAIN or no `v=ps1` record is
+/// `Absent`, any other failure `Failed`.
+#[must_use]
+pub fn parse_doh_answer(json: &[u8]) -> Lookup {
+    const NOERROR: u32 = 0;
+    const NXDOMAIN: u32 = 3;
+    const TXT: u16 = 16;
+    match serde_json::from_slice::<DohAnswer>(json) {
+        Ok(answer) if answer.status == NXDOMAIN => Lookup::Absent,
+        Ok(answer) if answer.status == NOERROR => {
+            let keys: Vec<PublishedKey> = answer
+                .answer
+                .iter()
+                .filter(|record| record.kind == TXT)
+                .filter_map(|record| parse_txt_record(&record.data))
+                .collect();
+            if keys.is_empty() {
+                Lookup::Absent
+            } else {
+                Lookup::Found(keys)
+            }
+        }
+        _ => Lookup::Failed,
+    }
+}
+
+/// The fields of a DNS-over-HTTPS JSON answer this reads; resolvers add
+/// others.
+#[derive(Deserialize)]
+struct DohAnswer {
+    #[serde(rename = "Status")]
+    status: u32,
+    #[serde(rename = "Answer", default)]
+    answer: Vec<DohRecord>,
+}
+
+#[derive(Deserialize)]
+struct DohRecord {
+    #[serde(rename = "type")]
+    kind: u16,
+    data: String,
+}
+
+/// The key list of a domain from its DNS record and its well-known file:
+/// the union by fingerprint, an entry listed in both keeping every limit
+/// either sets (so revoked wins over retired, retired over current).
+/// Nothing published anywhere is an empty list.
+///
+/// # Errors
+///
+/// `binding_check_failed` when a lookup failed and none found a key list,
+/// since the missing one might have revoked the key.
+pub fn merge_lookups(
+    dns: Lookup,
+    well_known: Lookup,
+) -> Result<Option<Vec<PublishedKey>>, &'static str> {
+    let failed = dns == Lookup::Failed || well_known == Lookup::Failed;
+    let mut found = false;
+    let mut merged: Vec<PublishedKey> = Vec::new();
+    for lookup in [dns, well_known] {
+        let Lookup::Found(keys) = lookup else {
+            continue;
+        };
+        found = true;
+        for key in keys {
+            match merged.iter_mut().find(|m| m.fingerprint == key.fingerprint) {
+                Some(entry) => restrict(entry, key),
+                None => merged.push(key),
+            }
+        }
+    }
+    if failed && !found {
+        return Err("binding_check_failed");
+    }
+    Ok(Some(merged))
+}
+
+/// Narrow `entry` by every limit `other` sets for the same key.
+fn restrict(entry: &mut PublishedKey, other: PublishedKey) {
+    let earliest = |a: Option<u32>, b: Option<u32>| match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    entry.from = entry.from.max(other.from);
+    entry.to = earliest(entry.to, other.to);
+    entry.revoked = earliest(entry.revoked, other.revoked);
+    if entry.public_key.is_none() {
+        entry.public_key = other.public_key;
+    }
+}
+
 fn date(text: &str) -> Result<u32, CardError> {
     parse_iso_date_to_epoch_day(text)
         .ok_or_else(|| malformed(format!("key list: {text:?} is not a YYYY-MM-DD date")))
@@ -291,6 +441,166 @@ mod tests {
             let error = parse_key_list(bad.as_bytes()).expect_err("refused");
             assert_eq!(error.reason, "malformed_input", "{bad}");
             assert_eq!(error.result, CardResult::InputError, "{bad}");
+        }
+    }
+
+    #[test]
+    fn txt_records_read_in_both_resolver_styles() {
+        let published = PublishedKey {
+            fingerprint: FP.to_owned(),
+            public_key: None,
+            from: day("2026-10-30"),
+            to: None,
+            revoked: None,
+        };
+        // Cloudflare quotes the string, Google does not.
+        for data in [
+            "\"v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-30\"",
+            "v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-30",
+            "v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-30; note=ours",
+        ] {
+            assert_eq!(parse_txt_record(data), Some(published.clone()), "{data}");
+        }
+        let split = parse_txt_record(
+            "\"v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA\" \"; from=2026-10-30; revoked=2026-11-02\"",
+        );
+        assert_eq!(
+            split,
+            Some(PublishedKey {
+                revoked: Some(day("2026-11-02")),
+                ..published.clone()
+            })
+        );
+        assert_eq!(
+            parse_txt_record("v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-30; to=2026-12-31"),
+            Some(PublishedKey {
+                to: Some(day("2026-12-31")),
+                ..published
+            })
+        );
+        for other in [
+            "v=spf1 -all",
+            "",
+            "k=ps1:AAAAAAAAAAAAAAAAAAAAAA; v=ps1; from=2026-10-30",
+            "v=ps1; from=2026-10-30",
+            "v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA",
+            "v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-3",
+            "v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-30; revoked=soon",
+            "v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; k=ps1:BBBBBBBBBBBBBBBBBBBBBB; from=2026-10-30",
+        ] {
+            assert_eq!(parse_txt_record(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn doh_answers_tell_absent_from_found() {
+        assert_eq!(parse_doh_answer(br#"{"Status":3}"#), Lookup::Absent);
+        assert_eq!(parse_doh_answer(br#"{"Status":0}"#), Lookup::Absent);
+        assert_eq!(
+            parse_doh_answer(
+                br#"{"Status":0,"Answer":[{"name":"_perf-sentinel.acme.fr","type":16,"TTL":300,"data":"\"v=spf1 -all\""}]}"#
+            ),
+            Lookup::Absent
+        );
+        let found = parse_doh_answer(
+            br#"{"Status":0,"TC":false,"Question":[{"name":"_perf-sentinel.acme.fr","type":16}],"Answer":[
+                {"name":"_perf-sentinel.acme.fr","type":5,"TTL":300,"data":"v=ps1; k=ps1:CCCCCCCCCCCCCCCCCCCCCC; from=2026-01-01"},
+                {"name":"_perf-sentinel.acme.fr","type":16,"TTL":300,"data":"\"v=ps1; k=ps1:AAAAAAAAAAAAAAAAAAAAAA; from=2026-10-30\""},
+                {"name":"_perf-sentinel.acme.fr","type":16,"TTL":300,"data":"\"v=spf1 -all\""}
+            ]}"#,
+        );
+        assert_eq!(found, Lookup::Found(vec![key("2026-10-30", None, None)]));
+        for failed in [
+            &b"garbage"[..],
+            br#"{"Status":2}"#,
+            br#"{"Answer":[]}"#,
+            br#"{"Status":0,"Answer":{}}"#,
+        ] {
+            assert_eq!(
+                parse_doh_answer(failed),
+                Lookup::Failed,
+                "{}",
+                String::from_utf8_lossy(failed)
+            );
+        }
+    }
+
+    #[test]
+    fn merge_prefers_the_most_restrictive_entry() {
+        let current = key("2026-01-01", None, None);
+        let retired = key("2026-01-01", Some("2026-12-31"), None);
+        let revoked = key("2026-01-01", None, Some("2026-09-15"));
+        let mut listed = current.clone();
+        listed.public_key = Some(PK.to_owned());
+        let mut other = key("2025-01-01", None, None);
+        other.fingerprint = "ps1:BBBBBBBBBBBBBBBBBBBBBB".to_owned();
+
+        for (dns, well_known, expected) in [
+            (&revoked, &current, &revoked),
+            (&current, &revoked, &revoked),
+            (&retired, &current, &retired),
+            (&current, &retired, &retired),
+            (
+                &retired,
+                &revoked,
+                &key("2026-01-01", Some("2026-12-31"), Some("2026-09-15")),
+            ),
+        ] {
+            let merged = merge_lookups(
+                Lookup::Found(vec![dns.clone()]),
+                Lookup::Found(vec![well_known.clone()]),
+            );
+            assert_eq!(merged, Ok(Some(vec![expected.clone()])));
+            let keys = merged.expect("merged").expect("a list");
+            assert_eq!(
+                judge(FP, PK, SIGNED, Some(&keys)).key,
+                judge(FP, PK, SIGNED, Some(std::slice::from_ref(expected))).key
+            );
+        }
+
+        // The well-known public key survives a DNS entry without one, and a
+        // key listed in one place only is kept.
+        let merged = merge_lookups(
+            Lookup::Found(vec![revoked.clone(), other.clone()]),
+            Lookup::Found(vec![listed]),
+        );
+        let mut revoked_with_key = revoked;
+        revoked_with_key.public_key = Some(PK.to_owned());
+        assert_eq!(merged, Ok(Some(vec![revoked_with_key, other])));
+    }
+
+    #[test]
+    fn merge_absent_everywhere_is_not_published() {
+        assert_eq!(
+            merge_lookups(Lookup::Absent, Lookup::Absent),
+            Ok(Some(vec![]))
+        );
+        let only = key("2026-01-01", None, None);
+        for (dns, well_known) in [
+            (Lookup::Found(vec![only.clone()]), Lookup::Absent),
+            (Lookup::Absent, Lookup::Found(vec![only.clone()])),
+            (Lookup::Found(vec![only.clone()]), Lookup::Failed),
+            (Lookup::Failed, Lookup::Found(vec![only.clone()])),
+        ] {
+            assert_eq!(merge_lookups(dns, well_known), Ok(Some(vec![only.clone()])));
+        }
+        let keys = merge_lookups(Lookup::Absent, Lookup::Absent)
+            .expect("merged")
+            .expect("a list");
+        assert_eq!(
+            judge(FP, PK, SIGNED, Some(&keys)).reason,
+            "key_not_published"
+        );
+    }
+
+    #[test]
+    fn merge_with_one_failure_and_nothing_found_cannot_conclude() {
+        for (dns, well_known) in [
+            (Lookup::Failed, Lookup::Absent),
+            (Lookup::Absent, Lookup::Failed),
+            (Lookup::Failed, Lookup::Failed),
+        ] {
+            assert_eq!(merge_lookups(dns, well_known), Err("binding_check_failed"));
         }
     }
 }

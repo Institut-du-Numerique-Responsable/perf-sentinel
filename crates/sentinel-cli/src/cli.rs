@@ -1115,7 +1115,7 @@ pub(crate) enum Commands {
         #[arg(long, value_name = "PATH", conflicts_with = "online")]
         keys: Option<PathBuf>,
         /// Read the domain's key list over the network: its DNS TXT
-        /// record through DNS-over-HTTPS, then its `/.well-known` file.
+        /// record through DNS-over-HTTPS and its `/.well-known` file.
         #[arg(long)]
         online: bool,
         /// The DNS-over-HTTPS service for `--online`, `https://` only.
@@ -1511,13 +1511,16 @@ Exit codes, with one JSON line on stdout:
   # Check the verify URL a card's QR code holds
   perf-sentinel verify-card 'https://perf-sentinel.dev/verifier#c=...'
 
+  # Check it against the keys its domain publishes in DNS and /.well-known
+  perf-sentinel verify-card card.png --online
+
 Exit codes, with one JSON line on stdout:
   0  integrity ok: {\"integrity\":\"ok\",\"level\",\"domain\",\"key\",\"reason\"}
   1  tampered (signature_invalid, fingerprint_mismatch), or a key the list does not
      vouch for (signed_after_revocation, signed_outside_validity, public_key_mismatch)
   3  input error (missing_file, file_too_large, malformed_input, no_card_payload,
-     duplicate_card_payload)
-  4  network error on --online (no_http_client)
+     duplicate_card_payload, no_domain)
+  4  --online could not read the domain's key list (binding_check_failed, no_http_client)
   5  the card's format is newer than this engine (unsupported_version), upgrade perf-sentinel";
 
     pub const HASH_BAKE: &str = "Examples:

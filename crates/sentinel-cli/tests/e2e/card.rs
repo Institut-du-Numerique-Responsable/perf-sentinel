@@ -478,3 +478,68 @@ fn verify_card_on_a_card_without_a_domain_prints_null() {
     assert_line(&verify(&[path_str(&png)]), 0, &expected);
     assert_line(&verify(&[&url]), 0, &expected);
 }
+
+#[test]
+fn verify_card_online_refuses_a_plain_http_resolver() {
+    let (_dir, png, _, _) = rendered_png(&story_input());
+    assert_line(
+        &verify(&[path_str(&png), "--online", "--doh", "http://127.0.0.1:1/"]),
+        3,
+        &serde_json::json!({"result": "input_error", "reason": "malformed_input"}),
+    );
+}
+
+#[test]
+fn verify_card_online_without_a_domain_is_an_input_error() {
+    let mut input = story_input();
+    input["org"] = serde_json::json!({"name": "Acme"});
+    let (_dir, png, _, url) = rendered_png(&input);
+    let resolver = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let doh = format!(
+        "https://{}/dns-query",
+        resolver.local_addr().expect("address")
+    );
+    for target in [path_str(&png), url.as_str()] {
+        assert_line(
+            &verify(&[target, "--online", "--doh", &doh]),
+            3,
+            &serde_json::json!({"result": "input_error", "reason": "no_domain"}),
+        );
+    }
+    resolver.set_nonblocking(true).expect("nonblocking");
+    let accepted = resolver.accept().map(|_| ());
+    assert_eq!(
+        accepted.map_err(|e| e.kind()),
+        Err(std::io::ErrorKind::WouldBlock),
+        "no request may leave for a card without a domain"
+    );
+}
+
+#[cfg(any(feature = "daemon", feature = "tempo", feature = "jaeger-query"))]
+#[test]
+fn verify_card_online_that_cannot_read_the_key_list_is_level_1() {
+    // A reserved domain behind a closed proxy, a resolver on a closed
+    // port: both lookups fail and no request leaves the machine.
+    let mut input = story_input();
+    input["org"]["domain"] = serde_json::json!("acme.invalid");
+    let (_dir, png, _, _) = rendered_png(&input);
+    let out = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "verify-card",
+            path_str(&png),
+            "--online",
+            "--doh",
+            "https://127.0.0.1:1/dns-query",
+        ])
+        .env_remove("NO_PROXY")
+        .env_remove("no_proxy")
+        .env("HTTPS_PROXY", "http://127.0.0.1:1")
+        .env("https_proxy", "http://127.0.0.1:1")
+        .output()
+        .expect("spawn perf-sentinel verify-card");
+    assert_line(
+        &out,
+        4,
+        &verified(1, Some("acme.invalid"), "unknown", "binding_check_failed"),
+    );
+}

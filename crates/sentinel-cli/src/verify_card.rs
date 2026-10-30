@@ -5,7 +5,7 @@ use std::path::Path;
 
 use sentinel_core::report::card::CardError;
 use sentinel_core::report::card::binding::{
-    Binding, KeyStatus, PublishedKey, judge, parse_key_list,
+    Binding, DEFAULT_DOH_URL, KeyStatus, PublishedKey, judge, parse_key_list,
 };
 use sentinel_core::report::card::raster::MAX_CARD_PNG_BYTES;
 use sentinel_core::report::card::verify::{CardSource, Integrity, check_integrity};
@@ -28,14 +28,21 @@ struct VerifyLine<'a> {
 }
 
 /// Verify the card at `target` (a PNG, a PDF or its verify URL), then
-/// bind its key through `--keys`. `--online` has no HTTP lookup yet.
-#[expect(clippy::unused_async, reason = "the --online lookups of Task 10 await")]
+/// bind its key through `--keys`, or through `--online` the key list its
+/// domain publishes.
 pub async fn cmd_verify_card(
     target: &str,
     keys: Option<&Path>,
     online: bool,
-    _doh: Option<&str>,
+    doh: Option<&str>,
 ) -> i32 {
+    let doh = doh.unwrap_or(DEFAULT_DOH_URL);
+    if online && !doh.starts_with("https://") {
+        return finish_error(&input_error(
+            "malformed_input",
+            format!("--doh {doh} is not an https:// URL"),
+        ));
+    }
     let published = match keys.map(read_key_list).transpose() {
         Ok(published) => published,
         Err(e) => return finish_error(&e),
@@ -50,10 +57,14 @@ pub async fn cmd_verify_card(
         integrity.signed_day,
     ) {
         (Some(fingerprint), Some(public_key), Some(day)) if integrity.ok => {
-            if online {
-                eprintln!("Error: this build cannot read the domain's key list online");
-                return print_line(&integrity, unbound("no_http_client"), 4);
-            }
+            let published = if online {
+                match read_online(&integrity, doh).await {
+                    Ok(published) => published,
+                    Err(code) => return code,
+                }
+            } else {
+                published
+            };
             judge(fingerprint, public_key, day, published.as_deref())
         }
         _ => unbound(integrity.reason),
@@ -64,6 +75,56 @@ pub async fn cmd_verify_card(
             "signed_after_revocation" | "signed_outside_validity" | "public_key_mismatch"
         );
     print_line(&integrity, binding, i32::from(untrusted))
+}
+
+/// The key list the card's domain publishes, or the exit code of the line
+/// already printed: an input error, or level 1 when it cannot be read.
+async fn read_online(integrity: &Integrity, doh: &str) -> Result<Option<Vec<PublishedKey>>, i32> {
+    let Some(domain) = integrity.domain.as_deref() else {
+        return Err(finish_error(&input_error(
+            "no_domain",
+            "the card names no domain to read a key list from".to_owned(),
+        )));
+    };
+    match fetch_published(domain, doh).await {
+        Ok(Ok(published)) => Ok(published),
+        Ok(Err(reason)) => {
+            eprintln!("Error: the key list of {domain} could not be read ({reason})");
+            Err(print_line(integrity, unbound(reason), 4))
+        }
+        Err(e) => Err(finish_error(&e)),
+    }
+}
+
+/// An input error, or the merged lookups: a key list, or the reason none
+/// could be read.
+type Fetched = Result<Result<Option<Vec<PublishedKey>>, &'static str>, CardError>;
+
+/// Ask the DNS-over-HTTPS service `doh` for the domain's TXT record and
+/// fetch its well-known file, both at once.
+#[cfg(any(feature = "daemon", feature = "tempo", feature = "jaeger-query"))]
+async fn fetch_published(domain: &str, doh: &str) -> Fetched {
+    use sentinel_core::http_client::{Uri, build_client};
+    use sentinel_core::report::card::binding::merge_lookups;
+    use sentinel_core::report::card::online::{lookup_txt, lookup_well_known};
+
+    let doh: Uri = doh
+        .parse()
+        .map_err(|e| input_error("malformed_input", format!("--doh {doh}: {e}")))?;
+    let well_known = well_known_url(domain)?;
+    let client = build_client();
+    let (dns, listed) = tokio::join!(
+        lookup_txt(&client, &doh, domain),
+        lookup_well_known(&client, &well_known)
+    );
+    Ok(merge_lookups(dns, listed))
+}
+
+/// A build without the `daemon`, `tempo` or `jaeger-query` feature has no
+/// HTTP client, so `--online` cannot read anything.
+#[cfg(not(any(feature = "daemon", feature = "tempo", feature = "jaeger-query")))]
+fn fetch_published(_domain: &str, _doh: &str) -> std::future::Ready<Fetched> {
+    std::future::ready(Ok(Err("no_http_client")))
 }
 
 fn unbound(reason: &'static str) -> Binding {
@@ -111,4 +172,53 @@ fn integrity_of(target: &str) -> Result<Integrity, CardError> {
         ));
     };
     check_integrity(source)
+}
+
+/// The domain's `/.well-known/perf-sentinel-key`, refused unless its
+/// authority is exactly the domain: no userinfo, no port.
+#[cfg(any(feature = "daemon", feature = "tempo", feature = "jaeger-query"))]
+fn well_known_url(domain: &str) -> Result<sentinel_core::http_client::Uri, CardError> {
+    let refused = || {
+        input_error(
+            "malformed_input",
+            format!("{domain:?} does not make a well-known URL on that host alone"),
+        )
+    };
+    let uri: sentinel_core::http_client::Uri =
+        format!("https://{domain}/.well-known/perf-sentinel-key")
+            .parse()
+            .map_err(|_| refused())?;
+    // The host is the domain, and the authority is that host alone: no
+    // userinfo, no port.
+    if uri.host() == Some(domain) && uri.authority().is_some_and(|a| a.as_str() == domain) {
+        Ok(uri)
+    } else {
+        Err(refused())
+    }
+}
+
+#[cfg(all(
+    test,
+    any(feature = "daemon", feature = "tempo", feature = "jaeger-query")
+))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_well_known_url_is_on_the_card_domain() {
+        let uri = well_known_url("acme.fr").expect("a url");
+        assert_eq!(uri.scheme_str(), Some("https"));
+        assert_eq!(uri.host(), Some("acme.fr"));
+        assert_eq!(uri.port(), None);
+        assert_eq!(uri.path(), "/.well-known/perf-sentinel-key");
+        for bad in [
+            "evil.example@acme.fr",
+            "acme.fr:8443",
+            "acme.fr/x",
+            "acme.fr?x",
+        ] {
+            let error = well_known_url(bad).expect_err(bad);
+            assert_eq!(error.reason, "malformed_input", "{bad}");
+        }
+    }
 }
