@@ -33,7 +33,7 @@ jaeger-query = ["dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes"
 pdf = ["dep:krilla", "dep:fast_qr", "dep:lopdf", "dep:skrifa"]
 # Render, sign and verify share cards (`card keygen`, `card render`,
 # `verify-card`).
-card = ["pdf", "dep:ring", "dep:base64"]
+card = ["pdf", "dep:ring", "dep:base64", "dep:tiny-skia", "dep:png"]
 
 [dependencies]
 krilla = { version = "0.8.2", optional = true, default-features = false, features = ["simple-text"] }
@@ -45,6 +45,11 @@ lopdf = { version = "0.46.0", optional = true, default-features = false }
 ring = { version = "0.17.14", optional = true, default-features = false }
 # Base64url for card keys and payloads, already in the tree through krilla.
 base64 = { version = "0.22.1", optional = true }
+# Card raster. `simd` off so the raster takes the scalar path; `png-format`
+# off because the card writes its own PNG.
+tiny-skia = { version = "0.12.0", optional = true, default-features = false, features = ["std"] }
+# Writes the `iTXt` chunk tiny-skia's encoder cannot.
+png = { version = "0.18.1", optional = true }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_path_to_error = "0.1.20"
 # `float_roundtrip`: the disclosure `content_hash` is computed over the

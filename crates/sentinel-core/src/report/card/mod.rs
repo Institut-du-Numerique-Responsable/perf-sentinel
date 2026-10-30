@@ -7,6 +7,7 @@ pub mod keys;
 #[cfg_attr(not(test), expect(dead_code, reason = "called by render_card, Task 8"))]
 mod layout;
 pub mod payload;
+pub mod raster;
 #[cfg(test)]
 mod test_fixtures;
 
