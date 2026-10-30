@@ -10,7 +10,9 @@ use sentinel_core::report::card::binding::{
 use sentinel_core::report::card::jxl::JXL_SIGNATURE_BOX;
 use sentinel_core::report::card::raster::MAX_CARD_PNG_BYTES;
 use sentinel_core::report::card::svg::looks_like_svg;
-use sentinel_core::report::card::verify::{CardSource, Integrity, check_integrity};
+use sentinel_core::report::card::verify::{
+    CardSource, ContentVerdict, Integrity, SignedFigures, check_integrity,
+};
 use serde::Serialize;
 
 use crate::card::{finish_error, input_error, read_file};
@@ -25,15 +27,18 @@ const JXL_CODESTREAM: [u8; 2] = [0xFF, 0x0A];
 #[derive(Serialize)]
 struct VerifyLine<'a> {
     integrity: &'static str,
+    content: ContentVerdict,
     level: u8,
     domain: Option<&'a str>,
     key: KeyStatus,
     reason: &'static str,
+    figures: Option<&'a SignedFigures>,
 }
 
-/// Verify the card at `target` (a PNG, a PDF, an SVG or its verify URL), then
-/// bind its key through `--keys`, or through `--online` the key list its
-/// domain publishes.
+/// Verify the card at `target` (a PNG, a PDF, an SVG, a JPEG XL or its
+/// verify URL), then bind its key through `--keys`, or through `--online`
+/// the key list its domain publishes. A modified file carries no key, so
+/// its binding is never judged and nothing is requested.
 pub async fn cmd_verify_card(
     target: &str,
     keys: Option<&Path>,
@@ -76,7 +81,7 @@ pub async fn cmd_verify_card(
     let untrusted = !integrity.ok
         || matches!(
             binding.reason,
-            "key_revoked" | "signed_outside_validity" | "public_key_mismatch"
+            "content_modified" | "key_revoked" | "signed_outside_validity" | "public_key_mismatch"
         );
     print_line(&integrity, binding, i32::from(untrusted))
 }
@@ -142,10 +147,12 @@ fn unbound(reason: &'static str) -> Binding {
 fn print_line(integrity: &Integrity, binding: Binding, code: i32) -> i32 {
     let line = VerifyLine {
         integrity: if integrity.ok { "ok" } else { "tampered" },
+        content: integrity.content,
         level: binding.level,
         domain: integrity.domain.as_deref(),
         key: binding.key,
         reason: binding.reason,
+        figures: integrity.figures.as_ref(),
     };
     println!(
         "{}",

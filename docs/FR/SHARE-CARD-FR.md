@@ -61,27 +61,58 @@ La clé privée ne passe jamais en argument de ligne de commande : le Hub passe 
 perf-sentinel verify-card <card.png|card.pdf|card.svg|card.jxl|URL> [--keys <published.json>] [--online [--doh <URL>]]
 ```
 
-Lit un fichier de carte (16 Mio au plus, un PNG, un PDF, un JPEG XL ou un SVG d'après ses premiers octets, un JPEG XL commençant par sa boîte de signature ou par `FF 0A`, un SVG commençant par `<?xml` ou `<svg` après un BOM UTF-8 facultatif et des blancs) ou une URL de vérification (toute cible qui commence par `https://` ou `http://`), vérifie la signature, puis le lien de la clé avec le domaine de la carte. Elle fonctionne hors ligne par défaut. `--keys` lit une copie locale du `/.well-known/perf-sentinel-key` du domaine (64 Kio au plus). `--online` lit les clés publiées par le réseau, voir [`--online`](#--online). `--keys` et `--online` s'excluent, et `--doh` demande `--online`. La commande affiche :
+Lit un fichier de carte (16 Mio au plus, un PNG, un PDF, un JPEG XL ou un SVG d'après ses premiers octets, un JPEG XL commençant par sa boîte de signature ou par `FF 0A`, un SVG commençant par `<?xml` ou `<svg` après un BOM UTF-8 facultatif et des blancs) ou une URL de vérification (toute cible qui commence par `https://` ou `http://`), vérifie la signature de la charge utile et, sur un fichier, la signature du fichier lui-même, puis le lien de la clé avec le domaine de la carte. Elle fonctionne hors ligne par défaut. `--keys` lit une copie locale du `/.well-known/perf-sentinel-key` du domaine (64 Kio au plus). `--online` lit les clés publiées par le réseau, voir [`--online`](#--online). `--keys` et `--online` s'excluent, et `--doh` demande `--online`. La commande affiche :
 
 ```json
-{"integrity":"ok","level":2,"domain":"acme.fr","key":"current","reason":"key_published"}
+{"integrity":"ok","content":"intact","level":2,"domain":"acme.fr","key":"current","reason":"key_published","figures":{"angle":"story","period":{"kind":"month","from":"2026-09-01","to":"2026-09-30"},"before_fix_period":{"from":"2026-07-01","to":"2026-07-31"},"before_fix_ops":1937000,"cited_ops":41}}
+```
+
+Le même fichier avec un pixel changé affiche, avec la sortie 1 :
+
+```json
+{"integrity":"ok","content":"modified","level":1,"domain":null,"key":"unknown","reason":"content_modified","figures":null}
 ```
 
 | Clé | Valeurs |
 |---|---|
-| `integrity` | `ok`, ou `tampered` quand la signature ne tient pas sur la charge utile ou que la `key` de la charge utile n'est pas l'empreinte de sa clé publique. |
+| `integrity` | `ok` quand la signature tient sur la charge utile et que la `key` de la charge utile est l'empreinte de sa clé publique, sinon `tampered`. `integrity` seul n'est pas le verdict : `"integrity":"ok"` dit seulement que la signature de la charge utile tient, et un fichier retouché l'affiche aussi, à côté de `"content":"modified"` et de la sortie 1. |
+| `content` | Sur un fichier, `intact` quand c'est le fichier signé, `modified` sinon (voir [Ce que couvre la signature du fichier](#ce-que-couvre-la-signature-du-fichier)). `not_checked` sur une URL de vérification, qui n'a pas de fichier, et sur une ligne `tampered`. |
 | `level` | `1` : la signature tient, rien ne lie la clé au domaine. `2` : le domaine publie cette clé pour le jour où la carte a été signée. |
-| `domain` | Le `org.domain` de la carte, ou `null`. |
+| `domain` | Le `org.domain` de la carte, ou `null`. Aussi `null` quand la vérification s'est arrêtée avant les règles de la charge utile (`tampered`, `content_modified`). |
 | `key` | `current`, `retired`, `revoked` ou `unknown`, ce que la liste publiée dit de la clé. |
 | `reason` | Pourquoi, tiré de la liste fermée ci-dessous. |
+| `figures` | Les grands chiffres de la carte tels que signés, pour qu'un lecteur les compare avec l'image, ou `null` quand la vérification s'est arrêtée avant les règles de la charge utile. |
 
-La signature est vérifiée d'abord, sur les octets exacts que porte la carte. Seule une charge utile intacte est ensuite confrontée aux règles : une mauvaise signature donne `tampered` quoi que disent les octets, et une signature valide sur une charge utile qui enfreint une règle donne `malformed_input`.
+`figures` contient `angle`, `period` (`{"kind","from","to"}`) et `before_fix_period` (`{"from","to"}`, absent quand la carte n'en imprime pas), puis les chiffres de la charge utile compacte sous ces noms. Les valeurs sont les entiers signés, sans arrondi : la page de vérification et le Hub les mettent en forme. Un fichier et son QR code donnent les mêmes `figures`.
 
-Le verdict porte sur la charge utile signée, pas sur les pixels. Quelqu'un peut copier le chunk `iTXt`, la pièce jointe PDF, l'élément `<metadata>` du SVG, la boîte `pscd` du JPEG XL ou le QR code d'une vraie carte sur une image retouchée, et `verify-card` imprime toujours `"integrity":"ok"`. Comparez les chiffres de la charge utile avec l'image : la page de vérification les affiche.
+| Nom | Lettre compacte | Unité |
+|---|---|---|
+| `cited_ops` | `o` | Opérations de la trace citée (histoire) |
+| `cited_ms` | `m` | Millisecondes de l'appel cité (histoire) |
+| `before_fix_ops` | `b` | Opérations sur la période avant correction (histoire) |
+| `threshold_ops` | `t` | Opérations, le seuil que dépasse la trace citée (histoire) |
+| `threshold_ms` | `u` | Millisecondes, le seuil que dépasse l'appel cité (histoire) |
+| `last_waste_permille` | `w` | Pour mille d'I/O gaspillées sur la période de la carte (courbe) |
+| `previous_waste_permille` | `x` | Pour mille d'I/O gaspillées sur la période précédente (courbe) |
+| `confirmed_fixes_count` | `n` | Corrections confirmées par la mesure (collectif) |
+| `services_count` | `e` | Services que ces corrections touchent (collectif) |
+
+Les vérifications suivent un ordre fixe, et la première qui échoue décide de la ligne : l'enveloppe et son support, la signature de la charge utile sur les octets exacts que porte la carte, l'empreinte, la signature du contenu du fichier, les règles de la charge utile, puis le lien de la clé. Une mauvaise signature donne `tampered` quoi que disent les octets, et une signature valide sur une charge utile qui enfreint une règle donne `malformed_input`. Un fichier dont la signature de contenu ne tient pas donne `content_modified`, et sa clé n'est pas jugée : aucune lecture de `--keys`, aucune requête réseau sous `--online`.
+
+Sur un fichier original, `content` dit si le fichier est celui qui a été signé, si bien qu'une vraie enveloppe copiée sur une image retouchée donne `content_modified`. Une image republiée ne garde que son QR code (LinkedIn réencode les images et retire leurs métadonnées), et le QR code prouve les chiffres, jamais les pixels qui l'entourent : comparez `figures`, ou la page de vérification, avec l'image.
+
+#### Vérifier dans un script
+
+Lisez d'abord le code de sortie, 0 seulement quand rien ne cloche, puis `reason` et `content` pour savoir pourquoi. Ne décidez jamais sur `integrity` seul : un fichier retouché affiche `"integrity":"ok"`.
+
+```bash
+perf-sentinel verify-card card.png > verdict.json; echo "exit $?"
+jq -r .reason verdict.json
+```
 
 ### Codes de sortie et raisons
 
-Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` sur `unsupported_characters` quand le texte vient de `free.title`, `free.team`, `free.label` ou `org.name`. Tout autre texte que les polices ne savent pas dessiner (périmètre, service, endpoint) donne `unsupported_characters` sans `field`.
+Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` sur `unsupported_characters` quand le texte vient de `free.title`, `free.team`, `free.label` ou `org.name`, et sur le `malformed_input` d'un `free.title` qui contient le marqueur de l'emplacement PDF (`"field":"free.title"`, voir C3). Tout autre texte que les polices ne savent pas dessiner (périmètre, service, endpoint) donne `unsupported_characters` sans `field`.
 
 | Sortie | `result` | Raisons de `card keygen` et `card render` |
 |---|---|---|
@@ -92,8 +123,8 @@ Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` 
 
 | Sortie | Ligne et raisons de `verify-card` |
 |---|---|
-| 0 | `integrity` `ok`. Niveau 2 : `key_published`. Niveau 1 : `no_key_list`, `key_not_published`. |
-| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), ou une clé dont la liste ne se porte pas garante (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), au niveau 1. |
+| 0 | `integrity` `ok` et `content` `intact` (un fichier) ou `not_checked` (une URL). Niveau 2 : `key_published`. Niveau 1 : `no_key_list`, `key_not_published`. |
+| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), un fichier qui n'est pas celui qui a été signé (`content_modified`), ou une clé dont la liste ne se porte pas garante (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), au niveau 1. |
 | 3 | `{"result":"input_error"}` : `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`. |
 | 4 | `--online` n'a pas pu lire les clés du domaine : la ligne de vérification au niveau 1 avec `binding_check_failed` ou `binding_partial`, ou `no_http_client` sur une compilation sans les features HTTP. |
 | 5 | `{"result":"unrenderable","reason":"unsupported_version"}` : le format de la carte est plus récent que ce moteur. |
@@ -116,7 +147,7 @@ Le Hub l'écrit, le moteur le lit. Les clés inconnues sont refusées, chaque no
 | `story` | sur une histoire seulement | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` est facultatif. `service` et `endpoint` tiennent chacun en 200 caractères. `done_at` tombe dans la période ou avant, `observed_at` le jour de `done_at` ou avant. |
 | `before_fix_period` | quand la carte en imprime une | `{"from","to"}`, une période civile de type `period.kind`, voir [la période d'avant la correction](#la-période-davant-la-correction). |
 | `equivalence` | non | Un `id` de la table des équivalences. Absent, le moteur en choisit une. |
-| `free` | oui, `{}` si vide | `{"title","team","label"}`, chacun facultatif : titre 48 caractères, équipe 48, libellé 80 (sur une histoire seulement). |
+| `free` | oui, `{}` si vide | `{"title","team","label"}`, chacun facultatif : titre 48 caractères, équipe 48, libellé 80 (sur une histoire seulement). Un titre ne peut pas contenir `{"content_sig":"`, le marqueur de l'emplacement de signature du PDF : `{"result":"input_error","reason":"malformed_input","field":"free.title"}`, sortie 3, quel que soit le format. |
 | `org` | oui | `{"name","domain"}`. `name` tient en 60 caractères. `domain` est facultatif, un nom DNS public : ASCII minuscule, 253 au plus, au moins deux étiquettes de 1 à 63 `[a-z0-9-]` sans tiret en bord, la dernière pas entièrement numérique. |
 | `generated_at_ms` | oui | Le moment où le Hub a construit la carte, en millisecondes epoch. |
 
@@ -210,7 +241,7 @@ La charge utile compacte de la fixture d'histoire :
 
 ### Enveloppes
 
-- **Enveloppe de fichier** : `{"payload":"<base64url de la charge utile complète canonique>","signature":"<base64url de la signature Ed25519 de 64 octets>"}`, sans autre clé. Le PNG la porte dans un chunk `iTXt` au mot-clé `perf-sentinel-card`, avant les données d'image. Le PDF la porte en pièce jointe `perf-sentinel-card.json`. Le SVG la porte comme texte de `<metadata id="perf-sentinel-card">`, écrite telle quelle. Le JPEG XL la porte comme charge d'une boîte `pscd` de premier niveau, avant le codestream. L'enveloppe tient en 64 Kio. Un second chunk `perf-sentinel-card` avant les données d'image, une seconde pièce jointe de ce nom, un second élément de ce type, ou une seconde boîte `pscd` de premier niveau, donne `duplicate_card_payload`.
+- **Enveloppe de fichier** : `{"content_sig":"<base64url de la signature Ed25519 de 64 octets sur le contenu du fichier>","payload":"<base64url de la charge utile complète canonique>","signature":"<base64url de la signature Ed25519 de 64 octets sur la charge utile>"}`, sans autre clé, écrite exactement ainsi (voir [Ce que couvre la signature du fichier](#ce-que-couvre-la-signature-du-fichier)). Une enveloppe sans `content_sig` donne `malformed_input`. Le PNG la porte dans un chunk `iTXt` au mot-clé `perf-sentinel-card`, avant les données d'image. Le PDF la porte en pièce jointe `perf-sentinel-card.json`. Le SVG la porte comme texte de `<metadata id="perf-sentinel-card">`, écrite telle quelle. Le JPEG XL la porte comme charge d'une boîte `pscd` de premier niveau, avant le codestream. L'enveloppe tient en 64 Kio. Un second chunk `perf-sentinel-card` avant les données d'image, une seconde pièce jointe de ce nom, un second élément de ce type, ou une seconde boîte `pscd` de premier niveau, donne `duplicate_card_payload`.
 - **URL compacte** : `https://perf-sentinel.dev/verifier#c=<base64url de la charge utile compacte canonique>.<base64url de sa signature>`. Le jeton voyage dans le fragment, qu'un navigateur n'envoie jamais au serveur. Un lecteur prend ce qui suit le premier `#c=` et le coupe sur son dernier `.`.
 
 ### Règles d'encodage
@@ -220,6 +251,54 @@ La charge utile compacte de la fixture d'histoire :
 - **Empreinte.** `ps1:` puis le base64url des 16 premiers octets du SHA-256 de la clé publique brute de 32 octets : 26 caractères.
 - **Entiers seulement.** Chaque nombre est un entier de 0 à 2^53 − 1, l'unité dans le nom de la clé (`_ug`, `_ops`, `_ms`, `_permille`, `_count`, `_days`). Un flottant, un nombre négatif ou un entier plus grand donne `malformed_input`.
 - **Signature.** Ed25519 (RFC 8032) sur les octets canoniques. Elle est déterministe : une charge utile et une clé donnent une seule signature.
+
+### Ce que couvre la signature du fichier
+
+`content_sig` est une seconde signature Ed25519 par la même clé, sur les octets du fichier lui-même moins le support de l'enveloppe. La charge utile ne peut pas porter l'empreinte du fichier : l'image dessine le QR code, qui contient la signature compacte, si bien qu'une charge utile qui nommerait l'empreinte de l'image se nommerait elle-même.
+
+**Le message.** `content_sig` signe ces lignes ASCII, l'hexadécimal en minuscules, sans saut de ligne après la dernière :
+
+```text
+perf-sentinel-card-content-v1
+<format>
+<SHA-256 en hexadécimal de la charge utile complète canonique>
+<SHA-256 en hexadécimal du contenu>
+```
+
+`<format>` vaut `png`, `svg`, `jxl` ou `pdf`. La première ligne distingue le message d'une charge utile, qui commence toujours par `{`. Le format empêche une enveloppe de passer à un autre format de la même carte. L'empreinte de la charge utile empêche l'échange entre deux vraies cartes d'une même clé : sans elle, la charge utile de la carte B à côté du fichier de la carte A et du `content_sig` de A donnerait « intact » alors que les pixels montrent A. Vecteur de test, format `png`, charge utile `{}`, contenu `abc` :
+
+```text
+perf-sentinel-card-content-v1
+png
+44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
+ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+```
+
+**Le texte de l'enveloppe est vérifié octet par octet.** Le contenu laisse de côté tout le support, si bien qu'aucune signature ne couvre le texte de l'enveloppe, et un analyseur JSON lit beaucoup de textes comme une seule valeur. Un lecteur décode les trois valeurs, réécrit l'enveloppe à partir d'elles et exige les mêmes octets, sinon `malformed_input`. Sans cette règle, un vrai PNG dont le texte `iTXt` reçoit ses clés dans un autre ordre, une espace après un deux-points, un saut de ligne final ou un échappement `\u0041` (CRC recalculé) garderait son contenu et donnerait « intact ». Il en va de même pour chaque format.
+
+**Le contenu, par format**, lu sur les octets bruts, sans rien décoder :
+
+- **PNG** : le fichier sans le chunk `iTXt` de la carte, retiré en entier (longueur, type, données et CRC), trouvé par le parcours PNG décrit plus bas.
+- **SVG** : le fichier sans les octets qui vont de `<metadata id="perf-sentinel-card">` au `</metadata>` suivant (le saut de ligne qui le suit reste). L'élément doit se trouver là où le moteur l'écrit, juste après le premier `</title>` et son saut de ligne, sinon `malformed_input`. Le titre est échappé pour XML, son texte ne contient donc jamais `</title>`.
+- **JPEG XL** : le fichier sans la boîte `pscd`, retirée en entier (taille, type et charge). La boîte doit se trouver là où le moteur l'écrit : les boîtes de premier niveau commencent par la boîte de signature, `ftyp`, `pscd` et `jxlc`, dans cet ordre, la boîte `pscd` à l'offset 32 avec une taille sur 32 bits (ni 0, ni 1). `verify-card` lit encore l'enveloppe d'une boîte `pscd` placée ailleurs, puis refuse le fichier avec `malformed_input`.
+- **PDF** : tout le fichier, les 86 octets de la valeur de `content_sig` remis à 86 `A`, le base64url de 64 octets nuls. Une recherche d'octets trouve cet emplacement : `{"content_sig":"` apparaît exactement une fois dans le fichier brut, les 86 octets qui suivent égalent le `content_sig` de l'enveloppe, et `","payload":"` les suit. Tout autre cas donne `content_modified`.
+
+Un élément SVG ou une boîte JPEG XL déplacés sont refusés plutôt que hachés : retirer le support de n'importe quel endroit laisse les mêmes octets, si bien que l'empreinte seule ne voit pas qu'il a bougé. Un élément SVG déplacé dans `<title>` ou dans l'attribut `d` d'un chemin donnerait « intact » alors que le fichier se nomme ou se dessine autrement.
+
+Le PDF utilise un emplacement fixe plutôt qu'une enveloppe dans une mise à jour incrémentale ajoutée à la fin. Une mise à jour demanderait une révision PDF écrite à la main (un nouveau catalogue, les entrées `/AF` et `/EmbeddedFiles` qu'exige PDF/A-3, une section xref avec `/Prev`), et une règle pour distinguer la mise à jour du moteur d'une autre ajoutée après elle. L'emplacement couvre tous les octets sauf 86, une mise à jour ajoutée comprise, et reste une recherche d'octets qu'un navigateur sait faire.
+
+**Le parcours PNG de la carte.** Un seul jeu de règles d'octets, qu'un second lecteur suit tel qu'écrit :
+
+1. Les 8 premiers octets valent `89 50 4E 47 0D 0A 1A 0A`, sinon `malformed_input`.
+2. À partir de l'offset 8, chaque chunk est une longueur sur 32 bits gros-boutiste, un type de 4 octets, les données et un CRC de 4 octets. Une longueur au-dessus de `0x7FFFFFFF`, un chunk qui dépasse la fin du fichier ou un en-tête coupé donnent `malformed_input`, et aucun tampon n'est dimensionné d'après un champ de longueur.
+3. Le premier chunk est `IHDR`, de longueur 13, sinon `malformed_input` : un PNG de carte commence comme tout PNG.
+4. Le parcours s'arrête au premier `IEND`, et un fichier sans `IEND` donne `malformed_input`. Les octets après `IEND` ne sont pas parcourus mais font partie du contenu, si bien que des octets ajoutés à un original donnent `content_modified`, jamais une erreur de format et jamais un oubli.
+5. Le chunk de la carte est un `iTXt` dont les données commencent par `perf-sentinel-card` et un NUL. Aucun dans le parcours : `no_card_payload`. Deux ou plus, avant ou après `IDAT` : `duplicate_card_payload`. Le seul placé après le premier `IDAT` : `no_card_payload`, puisqu'un décodeur qui s'arrête aux données d'image ne le voit jamais.
+6. Le CRC du chunk de la carte (CRC-32 sur son type et ses données) correspond. Les quatre octets qui suivent le NUL du mot-clé valent `00 00 00 00` : pas de compression, méthode 0, une étiquette de langue vide et un mot-clé traduit vide. Le texte, à partir de l'octet 23 des données, est en UTF-8 et fait au plus 64 Kio. Tout autre cas donne `malformed_input`. Ces octets d'en-tête se trouvent dans le chunk exclu, qu'aucune signature ne couvre, si bien qu'une étiquette de langue au contenu libre laisserait un fichier qui donne « intact » porter des données non signées, jusqu'au plafond de 16 Mio. Le texte est stocké sans compression pour que le support garde sa longueur entre le brouillon et le fichier scellé.
+
+Les CRC des autres chunks ne sont pas vérifiés : ils font partie du contenu, si bien qu'un CRC modifié là donne `content_modified`. La place du chunk de la carte parmi les chunks entre `IHDR` et le premier `IDAT` n'est pas signée, voir [`LIMITATIONS-FR.md`](./LIMITATIONS-FR.md#cartes-à-partager).
+
+**Brouillon, empreinte, signature, assemblage.** `card render` écrit le fichier avec un `content_sig` provisoire (86 `A`, la longueur d'une vraie valeur), prend son contenu par la fonction qu'utilise `verify-card`, signe le message, puis écrit la vraie valeur. Un PNG est encodé deux fois, un SVG écrit deux fois, un codestream JPEG XL encodé une fois et ses boîtes écrites deux fois. Le PDF est exporté une seule fois et la vraie valeur écrite sur la valeur provisoire, sur place : krilla tire le `/ID` du trailer et le `xmpMM:InstanceID` du XMP des octets qu'il écrit, si bien qu'un second export avec une autre enveloppe changerait des octets hors de l'emplacement. La longueur ne change pas, aucun offset de la xref ne bouge, et les `/Params` de la pièce jointe ne contiennent que `/Size` et `/ModDate`, sans somme de contrôle. La même entrée et la même clé donnent les mêmes octets dans chaque format.
 
 ### Résolution de C3
 
@@ -402,15 +481,16 @@ L'enveloppe ne contient que de la ponctuation JSON (`{`, `}`, `"`, `:`, `,`) et 
 | Aucun élément de ce type | `no_card_payload` |
 | L'élément deux fois | `duplicate_card_payload` |
 | Pas de `</metadata>`, plus de 64 Kio, ou un octet hors de l'ensemble ci-dessus | `malformed_input` |
+| L'élément ailleurs que juste après le premier `</title>` et son saut de ligne | `malformed_input` |
 
-Comme le chunk du PNG, l'enveloppe prouve la charge utile, pas le dessin qui l'entoure.
+Sur un fichier original, le `content_sig` de l'enveloppe couvre aussi le dessin, voir [Ce que couvre la signature du fichier](#ce-que-couvre-la-signature-du-fichier).
 
 Tailles mesurées sur les fixtures de test, enveloppe comprise :
 
 | Fixture | Anglais | Français |
 |---|---|---|
 | Histoire | 319 Kio | 324 Kio |
-| Courbe | 297 Kio | 293 Kio |
+| Courbe | 298 Kio | 293 Kio |
 | Collectif | 325 Kio | 338 Kio |
 
 ## Le JPEG XL
@@ -421,9 +501,9 @@ Tailles mesurées sur les fixtures de test (anglais, enveloppe comprise) :
 
 | Fixture | `card.jxl` | `card.png` | Rapport |
 |---|---|---|---|
-| Histoire | 44 719 o | 111 986 o | 0,40 |
-| Courbe | 41 383 o | 110 546 o | 0,37 |
-| Collectif | 42 011 o | 116 719 o | 0,36 |
+| Histoire | 44 822 o | 112 089 o | 0,40 |
+| Courbe | 41 486 o | 110 649 o | 0,37 |
+| Collectif | 42 114 o | 116 822 o | 0,36 |
 
 Le JPEG XL est un export d'archive ou de haute qualité. Le PNG reste le format à publier : LinkedIn n'accepte pas le JPEG XL ([sa page d'aide](https://www.linkedin.com/help/linkedin/answer/a564109) liste GIF, HEIF/HEIC sous iOS, JPEG, PNG et WEBP pour les images), et la prise en charge des navigateurs est récente et inégale : Chrome l'active par défaut depuis la version 155, Firefox depuis la 158, Safari la prend en charge partiellement depuis la 17, et Edge ne l'affiche pas ([caniuse](https://caniuse.com/jpegxl), vérifié le 2026-10-30).
 
@@ -452,7 +532,7 @@ Les tailles sont sur 32 bits gros-boutiste et comptent l'en-tête de 8 octets. R
 | Deux boîtes `pscd` de premier niveau | `duplicate_card_payload` |
 | Une charge de `pscd` de plus de 64 Kio ou pas en UTF-8 | `malformed_input` |
 
-Comme le chunk du PNG, l'enveloppe prouve la charge utile, pas les pixels.
+`verify-card` exige ensuite la boîte `pscd` là où le moteur l'écrit et vérifie la signature du contenu du fichier, voir [Ce que couvre la signature du fichier](#ce-que-couvre-la-signature-du-fichier).
 
 ## QR code
 

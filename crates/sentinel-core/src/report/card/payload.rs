@@ -3,6 +3,7 @@
 //! the QR code carries. Every rule here also runs on a signed payload,
 //! since anyone can make a key.
 
+use super::content::CONTENT_SIG_MARKER;
 use super::keys::b64url_decode;
 use super::{CardError, CardResult};
 use crate::detect::FindingType;
@@ -248,12 +249,12 @@ const MAX_SERVICE_CHARS: usize = 200;
 const MAX_SCOPE_CHARS: usize = 120;
 const NO_CAP: usize = usize::MAX;
 
-const ANGLE_LETTERS: [(Angle, &str); 3] = [
+pub(crate) const ANGLE_LETTERS: [(Angle, &str); 3] = [
     (Angle::Story, "s"),
     (Angle::Curve, "c"),
     (Angle::Collective, "k"),
 ];
-const KIND_LETTERS: [(PeriodKind, &str); 5] = [
+pub(crate) const KIND_LETTERS: [(PeriodKind, &str); 5] = [
     (PeriodKind::Week, "w"),
     (PeriodKind::Month, "m"),
     (PeriodKind::Quarter, "q"),
@@ -803,6 +804,19 @@ fn check_text(name: &str, text: &str, max_chars: usize) -> Result<(), CardError>
 
 fn check_texts(card: &Card<'_>) -> Result<(), CardError> {
     let free = card.free;
+    // The PDF writes the title raw into its metadata: a second marker there
+    // would leave the signature slot unfindable.
+    if free
+        .title
+        .as_deref()
+        .is_some_and(|title| title.contains(CONTENT_SIG_MARKER))
+    {
+        let mut error = malformed(format!(
+            "free.title holds {CONTENT_SIG_MARKER}, the PDF signature slot marker"
+        ));
+        error.field = Some("free.title");
+        return Err(error);
+    }
     let optional = [
         ("free.title", free.title.as_deref(), MAX_TITLE_CHARS),
         ("free.team", free.team.as_deref(), MAX_TEAM_CHARS),
@@ -974,7 +988,7 @@ fn letter<K: PartialEq>(table: &[(K, &'static str)], key: &K) -> String {
         .to_owned()
 }
 
-fn compact_of(full: &FullPayload) -> Result<CompactPayload, CardError> {
+pub(crate) fn compact_of(full: &FullPayload) -> Result<CompactPayload, CardError> {
     let r = match &full.before_fix_period {
         Some(range) => Some((day(&range.from)?, day(&range.to)?)),
         None => None,
@@ -1385,6 +1399,19 @@ mod tests {
         let mut curve = curve_input();
         curve["free"] = json!({"label": "Cart"});
         assert_eq!(reason(&curve), "malformed_input");
+    }
+
+    #[test]
+    fn a_title_holding_the_slot_marker_is_malformed() {
+        let marker = "{\"content_sig\":\"";
+        let free = |free: Value| with(story(), "/free", free);
+        let error =
+            parse(&free(json!({"title": format!("Q3 {marker} review")}))).expect_err("refused");
+        assert_eq!(error.reason, "malformed_input");
+        assert_eq!(error.field, Some("free.title"));
+        accepted(&free(json!({"title": "{\"content"})));
+        accepted(&free(json!({"team": marker, "label": marker})));
+        accepted(&with(story(), "/org/name", json!(marker)));
     }
 
     #[test]

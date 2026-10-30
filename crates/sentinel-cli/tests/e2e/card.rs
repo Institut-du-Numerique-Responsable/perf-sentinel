@@ -285,18 +285,54 @@ fn verify(args: &[&str]) -> Output {
         .expect("spawn perf-sentinel verify-card")
 }
 
+/// The line, compared whole. A verify line whose `expected` leaves out
+/// `figures` must carry an object there, or `null` when the check stopped
+/// before the payload's rules (a tamper, a modified file).
 fn assert_line(out: &Output, code: i32, expected: &serde_json::Value) {
     assert_eq!(out.status.code(), Some(code), "{out:?}");
-    assert_eq!(&stdout_json(out), expected);
+    let mut line = stdout_json(out);
+    if line.get("integrity").is_some() && expected.get("figures").is_none() {
+        let figures = line
+            .as_object_mut()
+            .expect("an object")
+            .remove("figures")
+            .expect("a figures key");
+        let stopped = line["integrity"] == "tampered" || line["reason"] == "content_modified";
+        assert_eq!(figures.is_null(), stopped, "{figures}");
+        assert_eq!(figures.is_object(), !stopped, "{figures}");
+    }
+    assert_eq!(&line, expected);
 }
 
-fn verified(level: u8, domain: Option<&str>, key: &str, reason: &str) -> serde_json::Value {
+/// A verified line; `content` is `intact` for a file, `not_checked` for a
+/// verify URL.
+fn verified(
+    level: u8,
+    domain: Option<&str>,
+    key: &str,
+    reason: &str,
+    content: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "integrity": "ok",
+        "content": content,
         "level": level,
         "domain": domain,
         "key": key,
         "reason": reason,
+    })
+}
+
+/// The line `verify-card` prints for a file that is not the one signed.
+fn content_modified() -> serde_json::Value {
+    serde_json::json!({
+        "integrity": "ok",
+        "content": "modified",
+        "level": 1,
+        "domain": null,
+        "key": "unknown",
+        "reason": "content_modified",
+        "figures": null,
     })
 }
 
@@ -337,7 +373,7 @@ fn verify_card_on_its_own_png_is_ok_level_1() {
     assert_line(
         &verify(&[path_str(&png)]),
         0,
-        &verified(1, Some("acme.fr"), "unknown", "no_key_list"),
+        &verified(1, Some("acme.fr"), "unknown", "no_key_list", "intact"),
     );
 }
 
@@ -348,17 +384,17 @@ fn verify_card_with_the_published_key_is_level_2() {
         (
             serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01"}),
             0,
-            verified(2, Some("acme.fr"), "current", "key_published"),
+            verified(2, Some("acme.fr"), "current", "key_published", "intact"),
         ),
         (
             serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "to": "2026-12-31"}),
             0,
-            verified(2, Some("acme.fr"), "retired", "key_published"),
+            verified(2, Some("acme.fr"), "retired", "key_published", "intact"),
         ),
         (
             serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "revoked": "2026-09-15"}),
             1,
-            verified(1, Some("acme.fr"), "revoked", "key_revoked"),
+            verified(1, Some("acme.fr"), "revoked", "key_revoked", "intact"),
         ),
     ];
     for (entry, code, expected) in cases {
@@ -383,7 +419,7 @@ fn verify_card_on_its_own_svg_is_ok_level_1() {
     assert_line(
         &verify(&[path_str(&svg)]),
         0,
-        &verified(1, Some("acme.fr"), "unknown", "no_key_list"),
+        &verified(1, Some("acme.fr"), "unknown", "no_key_list", "intact"),
     );
     let keys = key_list(
         dir.path(),
@@ -392,7 +428,7 @@ fn verify_card_on_its_own_svg_is_ok_level_1() {
     assert_line(
         &verify(&[path_str(&svg), "--keys", path_str(&keys)]),
         0,
-        &verified(2, Some("acme.fr"), "current", "key_published"),
+        &verified(2, Some("acme.fr"), "current", "key_published", "intact"),
     );
 }
 
@@ -441,7 +477,7 @@ fn verify_card_on_its_own_jxl_is_ok_level_1() {
     assert_line(
         &verify(&[path_str(&path)]),
         0,
-        &verified(1, Some("acme.fr"), "unknown", "no_key_list"),
+        &verified(1, Some("acme.fr"), "unknown", "no_key_list", "intact"),
     );
     let keys = key_list(
         dir.path(),
@@ -450,7 +486,7 @@ fn verify_card_on_its_own_jxl_is_ok_level_1() {
     assert_line(
         &verify(&[path_str(&path), "--keys", path_str(&keys)]),
         0,
-        &verified(2, Some("acme.fr"), "current", "key_published"),
+        &verified(2, Some("acme.fr"), "current", "key_published", "intact"),
     );
 }
 
@@ -512,13 +548,13 @@ fn verify_card_with_a_revoked_key_is_level_1_whatever_the_day() {
         (
             serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "revoked": "2026-12-31"}),
             1,
-            verified(1, Some("acme.fr"), "revoked", "key_revoked"),
+            verified(1, Some("acme.fr"), "revoked", "key_revoked", "intact"),
         ),
         // Retired on the same day: rotation keeps old cards.
         (
             serde_json::json!({"fingerprint": fingerprint, "from": "2026-01-01", "to": "2026-12-31"}),
             0,
-            verified(2, Some("acme.fr"), "retired", "key_published"),
+            verified(2, Some("acme.fr"), "retired", "key_published", "intact"),
         ),
     ];
     for (entry, code, expected) in cases {
@@ -551,7 +587,7 @@ fn verify_card_after_a_rotation_keeps_old_cards() {
     assert_line(
         &out,
         0,
-        &verified(2, Some("acme.fr"), "retired", "key_published"),
+        &verified(2, Some("acme.fr"), "retired", "key_published", "intact"),
     );
 }
 
@@ -563,7 +599,7 @@ fn verify_card_on_the_compact_url_is_ok() {
     assert_line(
         &verify(&[&url]),
         0,
-        &verified(1, Some("acme.fr"), "unknown", "no_key_list"),
+        &verified(1, Some("acme.fr"), "unknown", "no_key_list", "not_checked"),
     );
 
     // One payload character changed, the signature kept: the day it was
@@ -582,6 +618,7 @@ fn verify_card_on_the_compact_url_is_ok() {
         1,
         &serde_json::json!({
             "integrity": "tampered",
+            "content": "not_checked",
             "level": 1,
             "domain": null,
             "key": "unknown",
@@ -609,6 +646,7 @@ fn verify_card_on_a_url_with_one_payload_character_flipped_is_tampered() {
             1,
             &serde_json::json!({
                 "integrity": "tampered",
+            "content": "not_checked",
                 "level": 1,
                 "domain": null,
                 "key": "unknown",
@@ -669,9 +707,16 @@ fn verify_card_on_a_card_without_a_domain_prints_null() {
     let mut input = story_input();
     input["org"] = serde_json::json!({"name": "Acme"});
     let (_dir, png, _, url) = rendered_png(&input);
-    let expected = verified(1, None, "unknown", "no_key_list");
-    assert_line(&verify(&[path_str(&png)]), 0, &expected);
-    assert_line(&verify(&[&url]), 0, &expected);
+    assert_line(
+        &verify(&[path_str(&png)]),
+        0,
+        &verified(1, None, "unknown", "no_key_list", "intact"),
+    );
+    assert_line(
+        &verify(&[&url]),
+        0,
+        &verified(1, None, "unknown", "no_key_list", "not_checked"),
+    );
 }
 
 #[test]
@@ -735,6 +780,210 @@ fn verify_card_online_that_cannot_read_the_key_list_is_level_1() {
     assert_line(
         &out,
         4,
-        &verified(1, Some("acme.invalid"), "unknown", "binding_check_failed"),
+        &verified(
+            1,
+            Some("acme.invalid"),
+            "unknown",
+            "binding_check_failed",
+            "intact",
+        ),
+    );
+}
+
+/// A card of the story fixture in `format` under a fresh key: the
+/// directory holding it, its path and the key's fingerprint.
+fn rendered(format: &str) -> (tempfile::TempDir, std::path::PathBuf, String) {
+    let (out, dir, fingerprint) = render_json(&story_input(), format);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let path = dir.path().join(format!("out/card.{format}"));
+    (dir, path, fingerprint)
+}
+
+/// `png` with `retouched` appended after its `IEND` chunk, written next to it.
+fn retouched(png: &Path) -> std::path::PathBuf {
+    let mut bytes = fs::read(png).expect("card.png");
+    bytes.extend_from_slice(b"retouched");
+    let path = png.with_file_name("retouched.png");
+    fs::write(&path, bytes).expect("write");
+    path
+}
+
+#[test]
+fn verify_card_says_intact_for_each_format() {
+    for format in ["png", "svg", "jxl", "pdf"] {
+        let (dir, path, fingerprint) = rendered(format);
+        let out = verify(&[path_str(&path)]);
+        assert_eq!(out.status.code(), Some(0), "{format}: {out:?}");
+        let line = stdout_json(&out);
+        let keys: Vec<&str> = line
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted,
+            [
+                "content",
+                "domain",
+                "figures",
+                "integrity",
+                "key",
+                "level",
+                "reason"
+            ]
+        );
+        assert_eq!(line["content"], "intact", "{format}");
+        assert_eq!(line["figures"]["cited_ops"], 41, "{format}");
+        let keys = key_list(
+            dir.path(),
+            &serde_json::json!([{"fingerprint": fingerprint, "from": "2026-01-01"}]),
+        );
+        assert_line(
+            &verify(&[path_str(&path), "--keys", path_str(&keys)]),
+            0,
+            &verified(2, Some("acme.fr"), "current", "key_published", "intact"),
+        );
+    }
+}
+
+#[test]
+fn verify_card_on_a_retouched_png_is_content_modified() {
+    let (_dir, png, _, _) = rendered_png(&story_input());
+    assert_line(
+        &verify(&[path_str(&retouched(&png))]),
+        1,
+        &content_modified(),
+    );
+}
+
+#[test]
+fn verify_card_on_a_copied_envelope_is_content_modified() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (key, _) = key_in(dir.path());
+    let render_team = |team: &str, format: &str| {
+        let team_dir = dir.path().join(format!("{team}-{format}"));
+        fs::create_dir_all(&team_dir).expect("dir");
+        let mut input = story_input();
+        input["free"]["team"] = serde_json::json!(team);
+        let bytes = serde_json::to_vec(&input).expect("json");
+        let (out, out_dir) = render(&team_dir, &bytes, &key, format);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        out_dir.join(format!("card.{format}"))
+    };
+    let svg_a = fs::read_to_string(render_team("Team A", "svg")).expect("svg");
+    let svg_b_path = render_team("Team B", "svg");
+    let svg_b = fs::read_to_string(&svg_b_path).expect("svg");
+    let element = |svg: &str| {
+        let start = svg.find("<metadata").expect("the metadata");
+        let end = svg.find("</metadata>").expect("its end") + "</metadata>".len();
+        svg[start..end].to_owned()
+    };
+    fs::write(
+        &svg_b_path,
+        svg_b.replacen(&element(&svg_b), &element(&svg_a), 1),
+    )
+    .expect("write");
+    assert_line(&verify(&[path_str(&svg_b_path)]), 1, &content_modified());
+
+    let pdf_a = fs::read(render_team("Team A", "pdf")).expect("pdf");
+    let pdf_b_path = render_team("Team B", "pdf");
+    let pdf_b = fs::read(&pdf_b_path).expect("pdf");
+    let envelope = |pdf: &[u8]| {
+        let start = pdf
+            .windows(16)
+            .position(|w| w == br#"{"content_sig":""#)
+            .expect("the envelope");
+        let end = start
+            + pdf[start..]
+                .iter()
+                .position(|&b| b == b'}')
+                .expect("its end")
+            + 1;
+        start..end
+    };
+    let (a, b) = (envelope(&pdf_a), envelope(&pdf_b));
+    assert_eq!(a.len(), b.len());
+    let mut mixed = pdf_b.clone();
+    mixed[b].copy_from_slice(&pdf_a[a]);
+    fs::write(&pdf_b_path, mixed).expect("write");
+    assert_line(&verify(&[path_str(&pdf_b_path)]), 1, &content_modified());
+}
+
+#[test]
+fn verify_card_on_a_modified_file_makes_no_request() {
+    let (_dir, png, _, _) = rendered_png(&story_input());
+    let out = verify(&[
+        path_str(&retouched(&png)),
+        "--online",
+        "--doh",
+        "https://127.0.0.1:1/",
+    ]);
+    assert_line(&out, 1, &content_modified());
+}
+
+#[test]
+fn verify_card_with_keys_on_a_retouched_png_stays_level_1() {
+    let (dir, png, fingerprint, _) = rendered_png(&story_input());
+    let keys = key_list(
+        dir.path(),
+        &serde_json::json!([{"fingerprint": fingerprint, "from": "2026-01-01"}]),
+    );
+    assert_line(
+        &verify(&[path_str(&png), "--keys", path_str(&keys)]),
+        0,
+        &verified(2, Some("acme.fr"), "current", "key_published", "intact"),
+    );
+    assert_line(
+        &verify(&[path_str(&retouched(&png)), "--keys", path_str(&keys)]),
+        1,
+        &content_modified(),
+    );
+}
+
+#[test]
+fn verify_card_online_on_a_modified_card_without_domain_makes_no_request() {
+    let mut input = story_input();
+    input["org"] = serde_json::json!({"name": "Acme"});
+    let (_dir, png, _, _) = rendered_png(&input);
+    let out = verify(&[
+        path_str(&retouched(&png)),
+        "--online",
+        "--doh",
+        "https://127.0.0.1:1/",
+    ]);
+    assert_line(&out, 1, &content_modified());
+}
+
+#[test]
+fn card_render_refuses_the_slot_marker_in_the_title() {
+    let mut input = story_input();
+    input["free"]["title"] = serde_json::json!("Q3 {\"content_sig\":\" review");
+    for format in ["pdf", "png"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (key, _) = key_in(dir.path());
+        let bytes = serde_json::to_vec(&input).expect("json");
+        let (out, out_dir) = render(dir.path(), &bytes, &key, format);
+        assert_eq!(out.status.code(), Some(3), "{out:?}");
+        assert_eq!(
+            stdout_json(&out),
+            serde_json::json!({"result": "input_error", "reason": "malformed_input", "field": "free.title"})
+        );
+        assert_eq!(fs::read_dir(out_dir).expect("out dir").count(), 0);
+    }
+}
+
+#[test]
+fn verify_card_on_the_compact_url_does_not_check_content() {
+    let (_dir, png, _, url) = rendered_png(&story_input());
+    let out = verify(&[&url]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let line = stdout_json(&out);
+    assert_eq!(line["content"], "not_checked");
+    assert_eq!(
+        line["figures"],
+        stdout_json(&verify(&[path_str(&png)]))["figures"]
     );
 }

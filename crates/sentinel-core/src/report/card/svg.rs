@@ -3,6 +3,7 @@
 //! `<metadata>` element, and that envelope read back without an XML parser.
 
 use std::fmt::Write as _;
+use std::ops::Range;
 
 use skrifa::outline::OutlinePen;
 
@@ -20,6 +21,7 @@ pub const SVG_METADATA_ID: &str = CARD_PAYLOAD_KEYWORD;
 pub const MAX_CARD_SVG_BYTES: usize = 16 * 1024 * 1024;
 
 const METADATA_CLOSE: &str = "</metadata>";
+const TITLE_CLOSE: &str = "</title>";
 
 fn metadata_open() -> String {
     format!("<metadata id=\"{SVG_METADATA_ID}\">")
@@ -85,18 +87,46 @@ pub(crate) fn render_svg(
 ///
 /// # Errors
 ///
-/// `file_too_large`, `no_card_payload`, `duplicate_card_payload`, or
-/// `malformed_input`: not UTF-8, not an SVG, no closing tag, an envelope
-/// over 64 KiB or holding a byte outside its set.
+/// `file_too_large`, then as [`svg_envelope_range`], or `malformed_input`
+/// for an envelope over 64 KiB or holding a byte outside its set.
 pub fn read_svg_envelope(svg: &[u8]) -> Result<String, CardError> {
-    let input_error = |reason, detail: &str| CardError::new(CardResult::InputError, reason, detail);
     if svg.len() > MAX_CARD_SVG_BYTES {
         return Err(input_error(
             "file_too_large",
             &format!("the SVG is over {MAX_CARD_SVG_BYTES} bytes"),
         ));
     }
-    let malformed = |detail: &str| input_error("malformed_input", detail);
+    let element = svg_envelope_range(svg)?;
+    let envelope = &svg[element.start + metadata_open().len()..element.end - METADATA_CLOSE.len()];
+    if envelope.len() > MAX_ENVELOPE_BYTES {
+        return Err(malformed(&format!(
+            "the card payload is over {MAX_ENVELOPE_BYTES} bytes"
+        )));
+    }
+    if !envelope.iter().copied().all(envelope_byte) {
+        return Err(malformed("the card payload holds a byte outside its set"));
+    }
+    Ok(String::from_utf8_lossy(envelope).into_owned())
+}
+
+fn input_error(reason: &'static str, detail: &str) -> CardError {
+    CardError::new(CardResult::InputError, reason, detail)
+}
+
+fn malformed(detail: &str) -> CardError {
+    input_error("malformed_input", detail)
+}
+
+/// The card's `<metadata>` element, its opening tag through its closing
+/// one, found exactly once and only where the engine writes it: right after
+/// the first `</title>` and its newline. Removed from any other place, it
+/// would leave the same bytes, so a moved element is refused, not hashed.
+///
+/// # Errors
+///
+/// `malformed_input` (not UTF-8, not an SVG, no closing tag, the element
+/// elsewhere), `no_card_payload` or `duplicate_card_payload`.
+pub(crate) fn svg_envelope_range(svg: &[u8]) -> Result<Range<usize>, CardError> {
     let text = std::str::from_utf8(svg).map_err(|_| malformed("the SVG is not UTF-8"))?;
     if !looks_like_svg(svg) {
         return Err(malformed("not an SVG"));
@@ -115,20 +145,16 @@ pub fn read_svg_envelope(svg: &[u8]) -> Result<String, CardError> {
             "the SVG carries more than one card payload",
         ));
     }
-    let body = &text[at + open.len()..];
-    let end = body
+    let end = text[at..]
         .find(METADATA_CLOSE)
         .ok_or_else(|| malformed("the card payload has no closing tag"))?;
-    let envelope = &body[..end];
-    if envelope.len() > MAX_ENVELOPE_BYTES {
-        return Err(malformed(&format!(
-            "the card payload is over {MAX_ENVELOPE_BYTES} bytes"
-        )));
+    let title_end = text.find(TITLE_CLOSE).map(|t| t + TITLE_CLOSE.len() + 1);
+    if title_end != Some(at) || !text[..at].ends_with(&format!("{TITLE_CLOSE}\n")) {
+        return Err(malformed(
+            "the card payload is not right after the SVG's title",
+        ));
     }
-    if !envelope.bytes().all(envelope_byte) {
-        return Err(malformed("the card payload holds a byte outside its set"));
-    }
-    Ok(envelope.to_owned())
+    Ok(at..at + end + METADATA_CLOSE.len())
 }
 
 /// Fixed point, at most two decimals, no trailing zero, no `-0`, never an
@@ -366,6 +392,7 @@ fn draw_logo(out: &mut String, index: usize, (x, y): (f32, f32), height: f32) {
 mod tests {
     use super::*;
     use crate::detect::FindingType;
+    use crate::report::card::content::CONTENT_SIG_PLACEHOLDER;
     use crate::report::card::copy::story_sentence;
     use crate::report::card::keys::{CardSigner, file_envelope, generate_key};
     use crate::report::card::layout::{UNDERLINE_PX, layout_image};
@@ -395,7 +422,7 @@ mod tests {
     fn envelope(input: &Value) -> String {
         let signer = CardSigner::from_pkcs8(&generate_key().expect("key").pkcs8).expect("signer");
         let bytes = canonical_bytes(&full_payload(input));
-        file_envelope(&bytes, &signer.sign_b64(&bytes))
+        file_envelope(&bytes, &signer.sign_b64(&bytes), CONTENT_SIG_PLACEHOLDER)
     }
 
     fn svg_with(input: &Value, envelope: &str) -> Vec<u8> {

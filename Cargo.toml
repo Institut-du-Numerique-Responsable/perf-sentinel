@@ -19,6 +19,11 @@ strip = true
 panic = "abort"
 opt-level = 3
 
+# A debug JPEG XL encode of one card takes about 15 s, and the card
+# tests run several.
+[profile.dev.package.jixel]
+opt-level = 3
+
 # Release-grade build with symbols, for flamegraphs and samply runs.
 # The release profile strips symbols, which makes profiles unreadable.
 [profile.profiling]

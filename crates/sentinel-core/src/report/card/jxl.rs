@@ -3,9 +3,9 @@
 //! envelope ahead of the codestream, and that envelope read back by
 //! walking the top-level boxes, never decoding a pixel.
 
-use tiny_skia::Pixmap;
+use std::ops::Range;
 
-use super::raster::{MAX_CARD_PNG_BYTES, MAX_ENVELOPE_BYTES, opaque_rgb};
+use super::raster::{MAX_CARD_PNG_BYTES, MAX_ENVELOPE_BYTES};
 use super::{CardError, CardResult};
 
 /// The private top-level box holding the signed envelope.
@@ -36,7 +36,7 @@ fn malformed(detail: impl Into<String>) -> CardError {
 
 /// `rgb` as a lossless JPEG XL codestream. One thread, so the bytes do not
 /// depend on the host's core count.
-fn encode_codestream(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CardError> {
+pub(crate) fn encode_codestream(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CardError> {
     let (width, height) = (width as usize, height as usize);
     let expected = width.checked_mul(height).and_then(|n| n.checked_mul(3));
     if width == 0 || height == 0 || expected != Some(rgb.len()) {
@@ -69,20 +69,18 @@ fn push_box(out: &mut Vec<u8>, kind: [u8; 4], payload: &[u8]) -> Result<(), Card
     Ok(())
 }
 
-/// `pixmap` as a JPEG XL container: the signature box, `ftyp`, the
+/// A codestream as a JPEG XL container: the signature box, `ftyp`, the
 /// envelope in a `pscd` box, then the codestream in a `jxlc` box.
 ///
 /// # Errors
 ///
-/// `jxl_encode_failed` when the encoder refuses the pixels or a box is
-/// over 4 GiB.
-pub(crate) fn encode_jxl(pixmap: &Pixmap, envelope: &str) -> Result<Vec<u8>, CardError> {
-    let codestream = encode_codestream(&opaque_rgb(pixmap), pixmap.width(), pixmap.height())?;
+/// `jxl_encode_failed` when a box is over 4 GiB.
+pub(crate) fn jxl_container(codestream: &[u8], envelope: &str) -> Result<Vec<u8>, CardError> {
     let mut out = Vec::with_capacity(64 + envelope.len() + codestream.len());
     out.extend_from_slice(&JXL_SIGNATURE_BOX);
     push_box(&mut out, *b"ftyp", FTYP_PAYLOAD)?;
     push_box(&mut out, JXL_ENVELOPE_BOX, envelope.as_bytes())?;
-    push_box(&mut out, *b"jxlc", &codestream)?;
+    push_box(&mut out, *b"jxlc", codestream)?;
     Ok(out)
 }
 
@@ -107,43 +105,66 @@ fn box_header(rest: &[u8]) -> Result<([u8; 4], Option<u64>, usize), CardError> {
     }
 }
 
-/// A box's type, its payload, and the bytes after it.
-type SplitBox<'a> = ([u8; 4], &'a [u8], &'a [u8]);
+/// A top-level box: its type and its whole byte range, header included.
+pub(crate) type JxlBox = ([u8; 4], Range<usize>);
 
-/// The box at the start of `rest`: its type, its payload and what follows
-/// it. The size is checked against what is left before any slicing.
-fn split_box(rest: &[u8]) -> Result<SplitBox<'_>, CardError> {
-    let (kind, size, header) = box_header(rest)?;
-    let end = match size {
-        None => rest.len(),
-        Some(size) => {
-            if size < header as u64 {
+/// Every top-level box of a container, the signature box first, each as
+/// its type and its whole byte range, header included. A size is checked
+/// against what is left before any slicing.
+///
+/// # Errors
+///
+/// `malformed_input`: not a JPEG XL container, or a box whose size does
+/// not fit the file.
+pub(crate) fn jxl_boxes(jxl: &[u8]) -> Result<Vec<JxlBox>, CardError> {
+    if !jxl.starts_with(&JXL_SIGNATURE_BOX) {
+        return Err(malformed("not a JPEG XL container"));
+    }
+    let mut boxes = vec![(*b"JXL ", 0..JXL_SIGNATURE_BOX.len())];
+    let mut at = JXL_SIGNATURE_BOX.len();
+    while at < jxl.len() {
+        let rest = &jxl[at..];
+        let (kind, size, header) = box_header(rest)?;
+        let len = match size {
+            None => rest.len(),
+            Some(size) if size < header as u64 => {
                 return Err(malformed("a JPEG XL box is smaller than its header"));
             }
-            usize::try_from(size)
+            Some(size) => usize::try_from(size)
                 .ok()
-                .filter(|&end| end <= rest.len())
-                .ok_or_else(|| malformed("a JPEG XL box runs past the end of the file"))?
-        }
-    };
-    Ok((kind, &rest[header..end], &rest[end..]))
+                .filter(|&len| len <= rest.len())
+                .ok_or_else(|| malformed("a JPEG XL box runs past the end of the file"))?,
+        };
+        boxes.push((kind, at..at + len));
+        at += len;
+    }
+    Ok(boxes)
 }
 
-/// The payload of the one top-level `pscd` box among `boxes`. Every other
-/// box is skipped by its length and never read.
-fn envelope_box(mut boxes: &[u8]) -> Result<&[u8], CardError> {
-    let mut found = None;
-    while !boxes.is_empty() {
-        let (kind, payload, rest) = split_box(boxes)?;
-        if kind == JXL_ENVELOPE_BOX && found.replace(payload).is_some() {
-            return Err(input_error(
-                "duplicate_card_payload",
-                "the JPEG XL carries more than one card payload",
-            ));
+/// The `pscd` box, header included, where the engine writes it: the third
+/// top-level box after the signature box and `ftyp`, at offset 32, with a
+/// 32-bit size, `jxlc` next. Removed from any other place it would leave
+/// the same bytes, so a moved box is refused, not hashed.
+///
+/// # Errors
+///
+/// `malformed_input` for a box walk that fails or a `pscd` box elsewhere.
+pub(crate) fn jxl_envelope_range(jxl: &[u8]) -> Result<Range<usize>, CardError> {
+    let boxes = jxl_boxes(jxl)?;
+    let kinds: Vec<&[u8; 4]> = boxes.iter().take(4).map(|(kind, _)| kind).collect();
+    let pscd = boxes.get(2).map(|(_, range)| range.clone());
+    match pscd {
+        Some(range)
+            if kinds == [b"JXL ", b"ftyp", &JXL_ENVELOPE_BOX, b"jxlc"]
+                && range.start == 32
+                && !matches!(jxl[32..36], [0, 0, 0, 0 | 1]) =>
+        {
+            Ok(range)
         }
-        boxes = rest;
+        _ => Err(malformed(
+            "the card payload box is not where the engine writes it",
+        )),
     }
-    found.ok_or_else(|| input_error("no_card_payload", "the JPEG XL carries no card payload"))
 }
 
 /// The envelope a card JPEG XL carries, read from its top-level boxes
@@ -168,10 +189,20 @@ pub fn read_jxl_envelope(jxl: &[u8]) -> Result<String, CardError> {
             "a bare JPEG XL codestream carries no card payload",
         ));
     }
-    let boxes = jxl
-        .strip_prefix(&JXL_SIGNATURE_BOX)
-        .ok_or_else(|| malformed("not a JPEG XL container"))?;
-    let envelope = envelope_box(boxes)?;
+    let mut found = jxl_boxes(jxl)?
+        .into_iter()
+        .filter(|(kind, _)| *kind == JXL_ENVELOPE_BOX);
+    let (_, range) = found
+        .next()
+        .ok_or_else(|| input_error("no_card_payload", "the JPEG XL carries no card payload"))?;
+    if found.next().is_some() {
+        return Err(input_error(
+            "duplicate_card_payload",
+            "the JPEG XL carries more than one card payload",
+        ));
+    }
+    let (_, _, header) = box_header(&jxl[range.start..])?;
+    let envelope = &jxl[range.start + header..range.end];
     if envelope.len() > MAX_ENVELOPE_BYTES {
         return Err(malformed(format!(
             "the card payload is over {MAX_ENVELOPE_BYTES} bytes"
@@ -188,16 +219,27 @@ mod tests {
 
     use super::*;
     use crate::detect::FindingType;
+    use crate::report::card::content::CONTENT_SIG_PLACEHOLDER;
     use crate::report::card::keys::{b64url_encode, file_envelope};
     use crate::report::card::layout::layout_image;
     use crate::report::card::payload::canonical_bytes;
-    use crate::report::card::raster::{encode_png, rasterize};
+    use crate::report::card::raster::{encode_png, opaque_rgb, rasterize};
     use crate::report::card::test_fixtures::{
         collective_input, compact_url_of, curve_input, full_payload, story_input,
     };
     use serde_json::Value;
+    use tiny_skia::Pixmap;
 
     const CODESTREAM: [u8; 2] = [0xFF, 0x0A];
+
+    /// `pixmap` as a card JPEG XL, as `render_card` assembles one.
+    fn encode_jxl(pixmap: &Pixmap, envelope: &str) -> Result<Vec<u8>, CardError> {
+        let rgb = opaque_rgb(pixmap);
+        jxl_container(
+            &encode_codestream(&rgb, pixmap.width(), pixmap.height())?,
+            envelope,
+        )
+    }
 
     fn pixmap_of(input: &Value) -> Pixmap {
         let ops = layout_image(&full_payload(input), &compact_url_of(input)).expect("lays out");
@@ -208,6 +250,7 @@ mod tests {
         file_envelope(
             &canonical_bytes(&full_payload(input)),
             &b64url_encode(&[9u8; 64]),
+            CONTENT_SIG_PLACEHOLDER,
         )
     }
 
@@ -371,15 +414,20 @@ mod tests {
 
     #[test]
     fn the_jxl_is_smaller_than_the_png() {
-        let inputs = [
-            ("story", story_input(FindingType::NPlusOneSql)),
-            ("curve", curve_input()),
-            ("collective", collective_input()),
-        ];
-        for (name, input) in inputs {
+        let (story_pixmap, story_envelope, story_jxl) = story();
+        let mut cards = vec![(
+            "story",
+            story_pixmap.clone(),
+            story_envelope.clone(),
+            story_jxl.len(),
+        )];
+        for (name, input) in [("curve", curve_input()), ("collective", collective_input())] {
             let pixmap = pixmap_of(&input);
             let envelope = envelope(&input);
             let jxl = encode_jxl(&pixmap, &envelope).expect("encodes").len();
+            cards.push((name, pixmap, envelope, jxl));
+        }
+        for (name, pixmap, envelope, jxl) in cards {
             let png = encode_png(&pixmap, &envelope).expect("encodes").len();
             eprintln!("{name}: jxl {jxl} B, png {png} B");
             assert!(jxl * 10 < png * 6, "{name}: {jxl} B against {png} B");
@@ -452,8 +500,9 @@ mod tests {
             out.extend_from_slice(tail);
             out
         };
-        let cases: [&[u8]; 5] = [
+        let cases: [&[u8]; 6] = [
             b"\xFF\xFF\xFF\xFFjxlc\0\0",
+            b"\0\0\0\x01jxlc\0\0",
             b"\0\0\0\x04jxlc",
             b"\0\0\0\x01jxlc\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
             b"\0\0\0\x01jxlc\0\0\0\0\0\0\0\x08",

@@ -120,10 +120,13 @@ pub fn read_pdf_envelope(pdf: &[u8]) -> Result<String, CardError> {
 mod tests {
     use super::*;
     use crate::detect::FindingType;
-    use crate::report::card::keys::{b64url_encode, file_envelope};
+    use crate::report::card::content::{CONTENT_SIG_MARKER, CONTENT_SIG_PLACEHOLDER};
+    use crate::report::card::keys::{b64url_encode, file_envelope, generate_key};
     use crate::report::card::layout::layout_carousel;
     use crate::report::card::payload::canonical_bytes;
     use crate::report::card::test_fixtures::{compact_url_of, full_payload, story_input};
+    use crate::report::card::verify::{CardSource, ContentVerdict, check_integrity};
+    use crate::report::card::{CardFormat, render_card};
     use crate::report::periodic::pdf::tests::baked_report;
     use crate::report::periodic::pdf::{PdfInputs, render_disclosure_pdf};
     use serde_json::{Value, json};
@@ -136,6 +139,7 @@ mod tests {
         file_envelope(
             &canonical_bytes(&full_payload(input)),
             &b64url_encode(&[9u8; 64]),
+            CONTENT_SIG_PLACEHOLDER,
         )
     }
 
@@ -239,6 +243,31 @@ mod tests {
         pdf.resize(MAX_PDF_BYTES + 1, b' ');
         let error = read_pdf_envelope(&pdf).expect_err("over the cap");
         assert_eq!(error.reason, "file_too_large");
+    }
+
+    #[test]
+    fn only_the_title_reaches_the_pdf_bytes() {
+        let key = generate_key().expect("key");
+        let mut input = story();
+        input["free"] = json!({"title": "TitleMarkQ", "team": "TeamMarkQ", "label": "LabelMarkQ"});
+        input["org"]["name"] = json!("OrgMarkQ");
+        let render = |input: &Value| {
+            let json = serde_json::to_vec(input).expect("json");
+            render_card(&json, &key.pkcs8, CardFormat::Pdf)
+                .expect("renders")
+                .bytes
+        };
+        let pdf = render(&input);
+        let holds = |needle: &str| pdf.windows(needle.len()).any(|w| w == needle.as_bytes());
+        assert!(holds("TitleMarkQ"));
+        for absent in ["TeamMarkQ", "LabelMarkQ", "OrgMarkQ"] {
+            assert!(!holds(absent), "{absent} reached the PDF bytes");
+        }
+
+        input["free"]["team"] = json!(CONTENT_SIG_MARKER);
+        let pdf = render(&input);
+        let integrity = check_integrity(CardSource::Pdf(&pdf)).expect("checks");
+        assert_eq!(integrity.content, ContentVerdict::Intact);
     }
 
     #[test]

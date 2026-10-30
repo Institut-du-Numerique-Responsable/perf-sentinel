@@ -110,36 +110,57 @@ pub fn verify_signature(public_key: &[u8], message: &[u8], signature: &[u8]) -> 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope<'a> {
+    content_sig: &'a str,
     payload: &'a str,
     signature: &'a str,
 }
 
-/// `{"payload":"<b64url>","signature":"<b64url>"}`, the envelope a PNG
-/// or PDF card carries.
+/// The three values of a file envelope, decoded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileEnvelope {
+    pub payload: Vec<u8>,
+    pub signature: Vec<u8>,
+    pub content_sig: Vec<u8>,
+}
+
+/// `{"content_sig":"<b64url>","payload":"<b64url>","signature":"<b64url>"}`,
+/// the envelope a card file carries.
 ///
 /// # Panics
 ///
-/// Never: two strings always serialize.
+/// Never: three strings always serialize.
 #[must_use]
-pub fn file_envelope(payload: &[u8], signature_b64: &str) -> String {
+pub fn file_envelope(payload: &[u8], signature_b64: &str, content_sig_b64: &str) -> String {
     let payload = b64url_encode(payload);
     serde_json::to_string(&Envelope {
+        content_sig: content_sig_b64,
         payload: &payload,
         signature: signature_b64,
     })
-    .expect("two strings serialize")
+    .expect("three strings serialize")
 }
 
-/// The payload and signature bytes of a file envelope.
+/// The payload and both signatures of a file envelope.
 ///
 /// # Errors
 ///
-/// `malformed_input` unless the text is an object with exactly `payload`
-/// and `signature`, both canonical base64url, the signature 64 bytes.
-pub fn parse_file_envelope(text: &str) -> Result<(Vec<u8>, Vec<u8>), CardError> {
+/// `malformed_input` unless the text is exactly what [`file_envelope`]
+/// writes for its three values: no other key, no whitespace, no escape,
+/// canonical base64url, both signatures 64 bytes. No signature covers the
+/// envelope's own text, so only one text may stand for one envelope.
+pub fn parse_file_envelope(text: &str) -> Result<FileEnvelope, CardError> {
     let envelope: Envelope<'_> =
         serde_json::from_str(text).map_err(|e| malformed(format!("card envelope: {e}")))?;
-    decode_pair(envelope.payload, envelope.signature)
+    let (payload, signature) = decode_pair(envelope.payload, envelope.signature)?;
+    let content_sig = decode_signature(envelope.content_sig)?;
+    if text != file_envelope(&payload, envelope.signature, envelope.content_sig) {
+        return Err(malformed("the card envelope is not written canonically"));
+    }
+    Ok(FileEnvelope {
+        payload,
+        signature,
+        content_sig,
+    })
 }
 
 /// `VERIFY_URL_PREFIX` then `<b64url compact>.<b64url signature>`.
@@ -171,10 +192,13 @@ pub fn parse_compact_url(url: &str) -> Result<(Vec<u8>, Vec<u8>), CardError> {
 fn decode_pair(payload: &str, signature: &str) -> Result<(Vec<u8>, Vec<u8>), CardError> {
     let payload = b64url_decode(payload)
         .ok_or_else(|| malformed("the payload is not canonical base64url"))?;
-    let signature = b64url_decode(signature)
+    Ok((payload, decode_signature(signature)?))
+}
+
+fn decode_signature(signature: &str) -> Result<Vec<u8>, CardError> {
+    b64url_decode(signature)
         .filter(|bytes| bytes.len() == 64)
-        .ok_or_else(|| malformed("the signature is not 64 bytes of canonical base64url"))?;
-    Ok((payload, signature))
+        .ok_or_else(|| malformed("a signature is not 64 bytes of canonical base64url"))
 }
 
 fn malformed(detail: impl Into<String>) -> CardError {
@@ -244,22 +268,59 @@ mod tests {
     #[test]
     fn the_envelope_round_trips_and_is_canonical() {
         let sig = b64url_encode(&[7u8; 64]);
-        let envelope = file_envelope(b"{}", &sig);
-        assert!(envelope.starts_with(r#"{"payload":""#), "{envelope}");
-        let (payload, signature) = parse_file_envelope(&envelope).expect("parses");
-        assert_eq!(payload, b"{}");
-        assert_eq!(signature, vec![7u8; 64]);
+        let content = b64url_encode(&[8u8; 64]);
+        let envelope = file_envelope(b"{}", &sig, &content);
+        assert!(envelope.starts_with(r#"{"content_sig":""#), "{envelope}");
+        let parsed = parse_file_envelope(&envelope).expect("parses");
+        assert_eq!(parsed.payload, b"{}");
+        assert_eq!(parsed.signature, vec![7u8; 64]);
+        assert_eq!(parsed.content_sig, vec![8u8; 64]);
 
-        let extra = format!(r#"{{"extra":1,"payload":"e30","signature":"{sig}"}}"#);
-        let padded = format!(r#"{{"payload":"e30=","signature":"{sig}"}}"#);
+        let extra = format!(
+            r#"{{"content_sig":"{content}","extra":1,"payload":"e30","signature":"{sig}"}}"#
+        );
+        let padded =
+            format!(r#"{{"content_sig":"{content}","payload":"e30=","signature":"{sig}"}}"#);
         let short = format!(
-            r#"{{"payload":"e30","signature":"{}"}}"#,
-            b64url_encode(&[7u8; 63])
+            r#"{{"content_sig":"{}","payload":"e30","signature":"{sig}"}}"#,
+            b64url_encode(&[8u8; 63])
         );
         for bad in [extra, padded, short, String::from("not json")] {
             let error = parse_file_envelope(&bad).expect_err("refused");
             assert_eq!(error.reason, "malformed_input", "{bad}");
         }
+    }
+
+    #[test]
+    fn a_non_canonical_envelope_text_is_malformed() {
+        let sig = b64url_encode(&[7u8; 64]);
+        let content = b64url_encode(&[8u8; 64]);
+        let envelope = file_envelope(br#"{"v":1}"#, &sig, &content);
+        let payload = b64url_encode(br#"{"v":1}"#);
+        let escaped = format!(
+            "\\u{:04x}{}",
+            u32::from(payload.as_bytes()[0]),
+            &payload[1..]
+        );
+        let variants = [
+            format!(r#"{{"payload":"{payload}","content_sig":"{content}","signature":"{sig}"}}"#),
+            envelope.replacen(':', ": ", 1),
+            format!("{envelope}\n"),
+            envelope.replacen(&payload, &escaped, 1),
+        ];
+        for variant in variants {
+            let value: serde_json::Value = serde_json::from_str(&variant).expect("JSON");
+            assert_eq!(value["payload"], payload.as_str(), "{variant}");
+            let error = parse_file_envelope(&variant).expect_err("refused");
+            assert_eq!(error.reason, "malformed_input", "{variant}");
+        }
+    }
+
+    #[test]
+    fn an_envelope_without_content_sig_is_malformed() {
+        let text = format!(r#"{{"payload":"e30","signature":"{}"}}"#, "A".repeat(86));
+        let error = parse_file_envelope(&text).expect_err("refused");
+        assert_eq!(error.reason, "malformed_input");
     }
 
     #[test]

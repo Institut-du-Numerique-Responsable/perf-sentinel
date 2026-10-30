@@ -98,3 +98,46 @@ fn payloads(input: &Value) -> (FullPayload, CompactPayload) {
     )
     .expect("fixture builds")
 }
+
+/// The chunks of a PNG after its signature, each as its type and its whole
+/// byte range (length field through CRC). Test-side walker, no checks.
+pub(crate) fn png_chunks(png: &[u8]) -> Vec<([u8; 4], std::ops::Range<usize>)> {
+    let mut at = 8;
+    let mut out = Vec::new();
+    while at + 12 <= png.len() {
+        let len = u32::from_be_bytes(png[at..at + 4].try_into().expect("4 bytes")) as usize;
+        let end = at + 12 + len;
+        out.push((png[at + 4..at + 8].try_into().expect("4 bytes"), at..end));
+        at = end;
+    }
+    out
+}
+
+/// A whole PNG chunk: length, type, data and its CRC.
+pub(crate) fn png_chunk(kind: [u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut out = u32::try_from(data.len())
+        .expect("small chunk")
+        .to_be_bytes()
+        .to_vec();
+    out.extend_from_slice(&kind);
+    out.extend_from_slice(data);
+    let crc = super::raster::png_crc(&out[4..]);
+    out.extend_from_slice(&crc.to_be_bytes());
+    out
+}
+
+/// The card's `iTXt` chunk holding `text`, written as the engine writes it:
+/// no compression, empty language tag and translated keyword.
+pub(crate) fn card_itxt(text: &str) -> Vec<u8> {
+    let mut data = b"perf-sentinel-card\0\0\0\0\0".to_vec();
+    data.extend_from_slice(text.as_bytes());
+    png_chunk(*b"iTXt", &data)
+}
+
+/// `bytes` with `range` replaced by `with`.
+pub(crate) fn splice(bytes: &[u8], range: std::ops::Range<usize>, with: &[u8]) -> Vec<u8> {
+    let mut out = bytes[..range.start].to_vec();
+    out.extend_from_slice(with);
+    out.extend_from_slice(&bytes[range.end..]);
+    out
+}

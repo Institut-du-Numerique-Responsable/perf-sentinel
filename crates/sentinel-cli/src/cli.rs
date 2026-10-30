@@ -1103,9 +1103,10 @@ pub(crate) enum Commands {
     /// card's domain.
     ///
     /// Reads a `card.png`, a `card.pdf`, a `card.svg`, a `card.jxl` or the
-    /// verify URL its QR code holds, offline by default. Prints one JSON line on stdout, the
-    /// contract; stderr carries the detail. The verdict covers the signed
-    /// payload, not the pixels: compare its figures with the image.
+    /// verify URL its QR code holds, offline by default. Prints one JSON
+    /// line on stdout, the contract; stderr carries the detail. On a file,
+    /// `content` says whether it is the file signed; a verify URL proves
+    /// the figures it prints, not the pixels around its QR code.
     #[cfg(feature = "card")]
     #[command(after_help = help_examples::VERIFY_CARD)]
     VerifyCard {
@@ -1536,9 +1537,11 @@ Exit codes, with one JSON line on stdout:
   perf-sentinel verify-card card.png --online
 
 Exit codes, with one JSON line on stdout:
-  0  integrity ok: {\"integrity\":\"ok\",\"level\",\"domain\",\"key\",\"reason\"}
-  1  tampered (signature_invalid, fingerprint_mismatch), or a key the list does not
-     vouch for (key_revoked, signed_outside_validity, public_key_mismatch)
+  0  integrity ok, content intact (a file) or not_checked (a URL):
+     {\"integrity\":\"ok\",\"content\",\"level\",\"domain\",\"key\",\"reason\",\"figures\"}
+  1  tampered (signature_invalid, fingerprint_mismatch), a file that is not the one
+     signed (content_modified), or a key the list does not vouch for (key_revoked,
+     signed_outside_validity, public_key_mismatch)
   3  input error (missing_file, file_too_large, malformed_input, no_card_payload,
      duplicate_card_payload, no_domain)
   4  --online could not read the domain's key list (binding_check_failed, binding_partial,

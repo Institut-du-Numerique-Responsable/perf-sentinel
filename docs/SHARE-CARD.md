@@ -61,27 +61,58 @@ The private key never travels as a command-line argument: the Hub passes the pat
 perf-sentinel verify-card <card.png|card.pdf|card.svg|card.jxl|URL> [--keys <published.json>] [--online [--doh <URL>]]
 ```
 
-Reads a card file (16 MiB at most, a PNG, a PDF, a JPEG XL or an SVG by its first bytes, a JPEG XL starting with its signature box or with `FF 0A`, an SVG starting with `<?xml` or `<svg` after an optional UTF-8 BOM and whitespace) or a verify URL (any target starting with `https://` or `http://`), checks the signature, then the key's binding to the card's domain. It works offline by default. `--keys` reads a local copy of the domain's `/.well-known/perf-sentinel-key` (64 KiB at most). `--online` reads the published keys over the network, see [`--online`](#--online). `--keys` and `--online` exclude each other, and `--doh` needs `--online`. It prints:
+Reads a card file (16 MiB at most, a PNG, a PDF, a JPEG XL or an SVG by its first bytes, a JPEG XL starting with its signature box or with `FF 0A`, an SVG starting with `<?xml` or `<svg` after an optional UTF-8 BOM and whitespace) or a verify URL (any target starting with `https://` or `http://`), checks the payload's signature and, on a file, the signature over the file itself, then the key's binding to the card's domain. It works offline by default. `--keys` reads a local copy of the domain's `/.well-known/perf-sentinel-key` (64 KiB at most). `--online` reads the published keys over the network, see [`--online`](#--online). `--keys` and `--online` exclude each other, and `--doh` needs `--online`. It prints:
 
 ```json
-{"integrity":"ok","level":2,"domain":"acme.fr","key":"current","reason":"key_published"}
+{"integrity":"ok","content":"intact","level":2,"domain":"acme.fr","key":"current","reason":"key_published","figures":{"angle":"story","period":{"kind":"month","from":"2026-09-01","to":"2026-09-30"},"before_fix_period":{"from":"2026-07-01","to":"2026-07-31"},"before_fix_ops":1937000,"cited_ops":41}}
+```
+
+The same file with one pixel changed prints, with exit 1:
+
+```json
+{"integrity":"ok","content":"modified","level":1,"domain":null,"key":"unknown","reason":"content_modified","figures":null}
 ```
 
 | Key | Values |
 |---|---|
-| `integrity` | `ok`, or `tampered` when the signature does not hold over the payload or the payload's `key` is not its public key's fingerprint. |
+| `integrity` | `ok` when the payload's signature holds and the payload's `key` is its public key's fingerprint, else `tampered`. `integrity` alone is not the verdict: `"integrity":"ok"` only says the payload's signature holds, and a retouched file prints it too, beside `"content":"modified"` and exit 1. |
+| `content` | On a file, `intact` when it is the file signed, `modified` when it is not (see [What the file signature covers](#what-the-file-signature-covers)). `not_checked` on a verify URL, which has no file, and on a `tampered` line. |
 | `level` | `1`: the signature holds, nothing ties the key to the domain. `2`: the domain publishes this key for the day the card was signed. |
-| `domain` | The card's `org.domain`, or `null`. |
+| `domain` | The card's `org.domain`, or `null`. Also `null` when the check stopped before the payload's rules (`tampered`, `content_modified`). |
 | `key` | `current`, `retired`, `revoked` or `unknown`, what the published list says of the key. |
 | `reason` | Why, from the closed list below. |
+| `figures` | The card's big figures as signed, so a reader compares them with the image, or `null` when the check stopped before the payload's rules. |
 
-The signature is checked first, over the exact bytes the card carries. Only an intact payload is then read against the rules: a bad signature is `tampered` whatever the bytes say, and a valid signature over a payload that breaks a rule is `malformed_input`.
+`figures` holds `angle`, `period` (`{"kind","from","to"}`) and `before_fix_period` (`{"from","to"}`, absent when the card prints none), then the compact payload's figures under these names. Values are the signed integers, unrounded: the verify page and the Hub format them. A file and its QR code give the same `figures`.
 
-The verdict covers the signed payload, not the pixels. Someone can copy a genuine card's `iTXt` chunk, PDF attachment, SVG `<metadata>` element, JPEG XL `pscd` box or QR code onto an edited image, and `verify-card` still prints `"integrity":"ok"`. Compare the payload's figures with the image: the verify page shows them.
+| Name | Compact letter | Unit |
+|---|---|---|
+| `cited_ops` | `o` | Operations in the cited trace (story) |
+| `cited_ms` | `m` | Milliseconds of the cited call (story) |
+| `before_fix_ops` | `b` | Operations over the before-fix period (story) |
+| `threshold_ops` | `t` | Operations, the threshold the cited trace exceeds (story) |
+| `threshold_ms` | `u` | Milliseconds, the threshold the cited call exceeds (story) |
+| `last_waste_permille` | `w` | Per mille of wasted I/O over the card's period (curve) |
+| `previous_waste_permille` | `x` | Per mille of wasted I/O over the period before (curve) |
+| `confirmed_fixes_count` | `n` | Fixes confirmed by measurement (collective) |
+| `services_count` | `e` | Services those fixes touched (collective) |
+
+The checks run in a fixed order, and the first that fails decides the line: the envelope and its carrier, the payload's signature over the exact bytes the card carries, the fingerprint, the file's content signature, the payload's rules, then the key's binding. A bad signature is `tampered` whatever the bytes say, and a valid signature over a payload that breaks a rule is `malformed_input`. A file whose content signature does not hold is `content_modified`, and its key is not judged: no `--keys` lookup, no network request under `--online`.
+
+On an original file, `content` says whether the file is the one signed, so a genuine envelope copied onto an edited image reads `content_modified`. A republished image keeps only its QR code (LinkedIn re-encodes images and strips their metadata), and the QR code proves the figures, never the pixels around it: compare `figures`, or the verify page, with the image.
+
+#### Scripting a check
+
+Read the exit code first, 0 only when nothing is wrong, then `reason` and `content` for the why. Never branch on `integrity` alone: a retouched file prints `"integrity":"ok"`.
+
+```bash
+perf-sentinel verify-card card.png > verdict.json; echo "exit $?"
+jq -r .reason verdict.json
+```
 
 ### Exit codes and reasons
 
-An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `unsupported_characters` when the text comes from `free.title`, `free.team`, `free.label` or `org.name`. Any other text the fonts cannot draw (scope, service, endpoint) gives `unsupported_characters` without `field`.
+An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `unsupported_characters` when the text comes from `free.title`, `free.team`, `free.label` or `org.name`, and on the `malformed_input` of a `free.title` holding the PDF slot marker (`"field":"free.title"`, see C3). Any other text the fonts cannot draw (scope, service, endpoint) gives `unsupported_characters` without `field`.
 
 | Exit | `result` | `card keygen` and `card render` reasons |
 |---|---|---|
@@ -92,8 +123,8 @@ An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `
 
 | Exit | `verify-card` line and reasons |
 |---|---|
-| 0 | `integrity` `ok`. Level 2: `key_published`. Level 1: `no_key_list`, `key_not_published`. |
-| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), or a key the list does not vouch for (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), level 1. |
+| 0 | `integrity` `ok` and `content` `intact` (a file) or `not_checked` (a URL). Level 2: `key_published`. Level 1: `no_key_list`, `key_not_published`. |
+| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), a file that is not the one signed (`content_modified`), or a key the list does not vouch for (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), level 1. |
 | 3 | `{"result":"input_error"}`: `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`. |
 | 4 | `--online` could not read the domain's keys: the verify line at level 1 with `binding_check_failed` or `binding_partial`, or `no_http_client` on a build without the HTTP features. |
 | 5 | `{"result":"unrenderable","reason":"unsupported_version"}`: the card's format is newer than this engine. |
@@ -116,7 +147,7 @@ The Hub writes it, the engine reads it. Unknown keys are refused, every number i
 | `story` | on a story only | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` is optional. `service` and `endpoint` take at most 200 characters each. `done_at` falls in or before the period, `observed_at` on or before `done_at`. |
 | `before_fix_period` | when the card prints one | `{"from","to"}`, one calendar period of `period.kind`, see [the before-fix period](#the-before-fix-period). |
 | `equivalence` | no | An `id` of the equivalence table. Absent, the engine picks one. |
-| `free` | yes, `{}` when empty | `{"title","team","label"}`, each optional: title 48 characters, team 48, label 80 (a story only). |
+| `free` | yes, `{}` when empty | `{"title","team","label"}`, each optional: title 48 characters, team 48, label 80 (a story only). A title may not hold `{"content_sig":"`, the marker of the PDF's signature slot: `{"result":"input_error","reason":"malformed_input","field":"free.title"}`, exit 3, in every format. |
 | `org` | yes | `{"name","domain"}`. `name` takes at most 60 characters. `domain` is optional, a public DNS name: lowercase ASCII, at most 253, two labels or more of 1 to 63 `[a-z0-9-]` with no edge hyphen, the last one not all digits. |
 | `generated_at_ms` | yes | When the Hub built the card, in epoch milliseconds. |
 
@@ -210,7 +241,7 @@ The story fixture's compact payload:
 
 ### Envelopes
 
-- **File envelope**: `{"payload":"<base64url of the canonical full payload>","signature":"<base64url of the 64-byte Ed25519 signature>"}`, no other key. The PNG carries it in an `iTXt` chunk with the keyword `perf-sentinel-card`, ahead of the image data. The PDF carries it as the attachment `perf-sentinel-card.json`. The SVG carries it as the text of `<metadata id="perf-sentinel-card">`, written as is. The JPEG XL carries it as the payload of a top-level `pscd` box, ahead of the codestream. The envelope takes at most 64 KiB. A second `perf-sentinel-card` chunk ahead of the image data, a second attachment of that name, a second such element, or a second top-level `pscd` box, is `duplicate_card_payload`.
+- **File envelope**: `{"content_sig":"<base64url of the 64-byte Ed25519 signature over the file's content>","payload":"<base64url of the canonical full payload>","signature":"<base64url of the 64-byte Ed25519 signature over the payload>"}`, no other key, written exactly so (see [What the file signature covers](#what-the-file-signature-covers)). An envelope without `content_sig` is `malformed_input`. The PNG carries it in an `iTXt` chunk with the keyword `perf-sentinel-card`, ahead of the image data. The PDF carries it as the attachment `perf-sentinel-card.json`. The SVG carries it as the text of `<metadata id="perf-sentinel-card">`, written as is. The JPEG XL carries it as the payload of a top-level `pscd` box, ahead of the codestream. The envelope takes at most 64 KiB. A second `perf-sentinel-card` chunk ahead of the image data, a second attachment of that name, a second such element, or a second top-level `pscd` box, is `duplicate_card_payload`.
 - **Compact URL**: `https://perf-sentinel.dev/verifier#c=<base64url of the canonical compact payload>.<base64url of its signature>`. The token travels in the fragment, which a browser never sends to the server. A reader takes what follows the first `#c=` and splits it on its last `.`.
 
 ### Encoding rules
@@ -220,6 +251,54 @@ The story fixture's compact payload:
 - **Fingerprint.** `ps1:` then the base64url of the first 16 bytes of the SHA-256 of the raw 32-byte public key: 26 characters.
 - **Integers only.** Every number is an integer from 0 to 2^53 − 1, the unit in the key's name (`_ug`, `_ops`, `_ms`, `_permille`, `_count`, `_days`). A float, a negative number or a larger integer is `malformed_input`.
 - **Signature.** Ed25519 (RFC 8032) over the canonical bytes. It is deterministic: one payload and one key give one signature.
+
+### What the file signature covers
+
+`content_sig` is a second Ed25519 signature by the same key, over the file's own bytes minus the envelope's carrier. The payload cannot carry the file's hash: the image draws the QR code, which holds the compact signature, so a payload that named the image's hash would name itself.
+
+**The message.** `content_sig` signs these ASCII lines, hex in lowercase, with no newline after the last:
+
+```text
+perf-sentinel-card-content-v1
+<format>
+<hex SHA-256 of the canonical full payload>
+<hex SHA-256 of the content>
+```
+
+`<format>` is `png`, `svg`, `jxl` or `pdf`. The first line keeps the message apart from a payload, which always starts with `{`. The format stops an envelope from moving to another format of the same card. The payload's hash stops a swap between two genuine cards of one key: without it, card B's payload next to card A's file and A's `content_sig` would read intact while the pixels show A. Test vector, format `png`, payload `{}`, content `abc`:
+
+```text
+perf-sentinel-card-content-v1
+png
+44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
+ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+```
+
+**The envelope text is checked byte for byte.** The content leaves the whole carrier out, so no signature covers the envelope's own text, and a JSON parser reads many texts as one value. A reader decodes the three values, writes the envelope again from them, and requires the same bytes, else `malformed_input`. Without this rule, a genuine PNG whose `iTXt` text gets its keys reordered, a space after a colon, a trailing newline or a `\u0041` escape (CRC recomputed) would keep its content and read intact. The same holds for every format.
+
+**The content, by format**, read from the raw bytes, nothing decoded:
+
+- **PNG**: the file without the card's `iTXt` chunk, removed whole (length, type, data and CRC), found by the PNG card walk below.
+- **SVG**: the file without the bytes from `<metadata id="perf-sentinel-card">` through the next `</metadata>` (the newline after it stays). The element must sit where the engine writes it, right after the first `</title>` and its newline, else `malformed_input`. The title is XML-escaped, so its text never holds `</title>`.
+- **JPEG XL**: the file without the `pscd` box, removed whole (size, type and payload). The box must sit where the engine writes it: the top-level boxes start with the signature box, `ftyp`, `pscd` and `jxlc`, in that order, the `pscd` box at offset 32 with a 32-bit size (not 0, not 1). `verify-card` still reads the envelope of a `pscd` box anywhere else, then refuses the file with `malformed_input`.
+- **PDF**: the whole file, with the 86 bytes of the `content_sig` value reset to 86 `A`, the base64url of 64 zero bytes. A byte search finds this slot: `{"content_sig":"` occurs exactly once in the raw file, the 86 bytes after it equal the envelope's `content_sig`, and `","payload":"` follows them. Anything else reads `content_modified`.
+
+A moved SVG element or JPEG XL box is refused rather than hashed: taking the carrier out of any place leaves the same bytes, so the hash alone cannot tell that it moved. An SVG element moved into `<title>` or into a path's `d` attribute would read intact while the file names itself or draws differently.
+
+The PDF uses a slot rather than an envelope in an appended incremental update. An update would need a hand-written PDF revision (a new catalog, the `/AF` and `/EmbeddedFiles` entries PDF/A-3 wants, an xref section with `/Prev`), and a rule telling the engine's update from one appended after it. The slot covers every byte but 86, an appended update included, and stays a byte search that a browser can run.
+
+**The PNG card walk.** One set of byte rules, which a second reader follows as written:
+
+1. The first 8 bytes are `89 50 4E 47 0D 0A 1A 0A`, else `malformed_input`.
+2. From offset 8, each chunk is a big-endian 32-bit length, a 4-byte type, the data and a 4-byte CRC. A length above `0x7FFFFFFF`, a chunk that runs past the end of the file, or a header cut short is `malformed_input`, and no buffer is sized from a length field.
+3. The first chunk is `IHDR`, of length 13, else `malformed_input`: a card PNG starts as every PNG does.
+4. The walk stops at the first `IEND`, and a file with no `IEND` is `malformed_input`. Bytes after `IEND` are not walked but are content, so bytes appended to an original read `content_modified`, never malformed and never skipped.
+5. The card chunk is an `iTXt` whose data starts with `perf-sentinel-card` and a NUL. None in the walk: `no_card_payload`. Two or more, before or after `IDAT`: `duplicate_card_payload`. The only one lying after the first `IDAT`: `no_card_payload`, since a decoder that stops at the image data never sees it.
+6. The card chunk's CRC (CRC-32 over its type and data) matches. The four bytes after the keyword's NUL are `00 00 00 00`: no compression, method 0, an empty language tag and an empty translated keyword. The text, from byte 23 of the data, is UTF-8 of at most 64 KiB. Anything else is `malformed_input`. Those header bytes sit inside the excluded chunk, where no signature covers them, so a language tag holding anything would let a file that reads intact carry unsigned data, up to the 16 MiB cap. The text is stored uncompressed so the carrier keeps its length between the draft and the sealed file.
+
+The CRCs of the other chunks are not checked: they are content, so a changed CRC there reads `content_modified`. The card chunk's place among the chunks between `IHDR` and the first `IDAT` is not signed, see [`LIMITATIONS.md`](./LIMITATIONS.md#share-cards).
+
+**Draft, hash, sign, assemble.** `card render` writes the file with a placeholder `content_sig` (86 `A`, the length of a real one), takes its content through the function `verify-card` uses, signs the message, then writes the real value. A PNG is encoded twice, an SVG written twice, a JPEG XL codestream encoded once and its boxes written twice. The PDF is exported once and the real value written over the placeholder in place: krilla derives the trailer `/ID` and the XMP `xmpMM:InstanceID` from the bytes it writes, so a second export with another envelope would change bytes outside the slot. The length does not change, so no xref offset moves, and the attachment's `/Params` hold only `/Size` and `/ModDate`, no checksum. The same input and key give the same bytes in every format.
 
 ### Resolution of C3
 
@@ -402,15 +481,16 @@ The envelope only holds JSON punctuation (`{`, `}`, `"`, `:`, `,`) and base64url
 | No such element | `no_card_payload` |
 | The element twice | `duplicate_card_payload` |
 | No `</metadata>`, more than 64 KiB, or a byte outside the set above | `malformed_input` |
+| The element anywhere but right after the first `</title>` and its newline | `malformed_input` |
 
-Like the PNG chunk, the envelope proves the payload, not the drawing around it.
+On an original file, the envelope's `content_sig` covers the drawing too, see [What the file signature covers](#what-the-file-signature-covers).
 
 Sizes measured on the test fixtures, envelope included:
 
 | Fixture | English | French |
 |---|---|---|
 | Story | 319 KiB | 324 KiB |
-| Curve | 297 KiB | 293 KiB |
+| Curve | 298 KiB | 293 KiB |
 | Collective | 325 KiB | 338 KiB |
 
 ## The JPEG XL
@@ -421,9 +501,9 @@ Sizes measured on the test fixtures (English, envelope included):
 
 | Fixture | `card.jxl` | `card.png` | Ratio |
 |---|---|---|---|
-| Story | 44,719 B | 111,986 B | 0.40 |
-| Curve | 41,383 B | 110,546 B | 0.37 |
-| Collective | 42,011 B | 116,719 B | 0.36 |
+| Story | 44,822 B | 112,089 B | 0.40 |
+| Curve | 41,486 B | 110,649 B | 0.37 |
+| Collective | 42,114 B | 116,822 B | 0.36 |
 
 JPEG XL is an archival or high-quality export. The PNG stays the format to post: LinkedIn does not accept JPEG XL ([its help page](https://www.linkedin.com/help/linkedin/answer/a564109) lists GIF, HEIF/HEIC on iOS, JPEG, PNG and WEBP for images), and browser support is recent and uneven: Chrome turns it on by default from version 155, Firefox from 158, Safari has partial support since 17, and Edge does not display it ([caniuse](https://caniuse.com/jpegxl), checked 2026-10-30).
 
@@ -452,7 +532,7 @@ Sizes are 32-bit big-endian and count the 8-byte header. Nothing follows `jxlc`.
 | Two top-level `pscd` boxes | `duplicate_card_payload` |
 | A `pscd` payload over 64 KiB or not UTF-8 | `malformed_input` |
 
-Like the PNG chunk, the envelope proves the payload, not the pixels.
+`verify-card` then requires the `pscd` box where the engine writes it and checks the file's content signature, see [What the file signature covers](#what-the-file-signature-covers).
 
 ## QR code
 
