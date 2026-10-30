@@ -350,7 +350,7 @@ The other lines:
 | Curve CO2 line | `Avoidable in {period}: {n} operations, at least {co2} CO2e (estimate)` |
 | Collective CO2 line | `{before}, before the fix of work done more than once: ...` with one N+1 or redundant fix, `{before}, before the {n} fixes of work done more than once: ...` with several |
 | Equivalence | `Equal to at least {n} {unit}`, then `1 {unit} = {factor} CO2e. Source: {source}, {vintage}` |
-| Collective | `{n} fixes confirmed by measurement, across {s} services,` then `against {p} the month before` (or week, quarter, half-year, year) when the Hub counted the previous period |
+| Collective | `{n} fixes confirmed by measurement, across {s} services`, with a trailing comma and then `against {p} the month before` (or week, quarter, half-year, year) when the Hub counted the previous period |
 | Collective families | `What was fixed`: `Work done more than once`, `Slow steps`, `How the work was ordered` |
 | Curve | `Share of the work that was avoidable`, `in {period}, against {x} in {previous period}`, `The lower, the better.`, and the legend `Share of the work that was avoidable, month by month` (or week by week, quarter by quarter, half-year by half-year, year by year) |
 | Slow story bars | `Slowest runs, before the fix` and the dashed `Alert threshold` |

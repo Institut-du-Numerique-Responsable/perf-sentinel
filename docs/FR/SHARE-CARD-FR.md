@@ -350,7 +350,7 @@ Les autres lignes :
 | Ligne CO2 d'une courbe | `Évitable {période} : {n} opérations, au moins {co2} CO2e (estimation)` |
 | Ligne CO2 d'un collectif | `{before}, avant la correction de travail fait plusieurs fois : ...` avec une correction N+1 ou redondante, `{before}, avant les {n} corrections de travail fait plusieurs fois : ...` avec plusieurs |
 | Équivalence | `L'équivalent d'au moins {n} {unité}`, puis `1 {unité} = {facteur} CO2e. Source : {source}, {millésime}` |
-| Collectif | `{n} corrections confirmées par la mesure, sur {s} services,` puis `contre {p} le mois précédent` (ou la semaine précédente, le trimestre précédent, le semestre précédent, l'année précédente) quand le Hub a compté la période précédente |
+| Collectif | `{n} corrections confirmées par la mesure, sur {s} services`, suivi d'une virgule puis de `contre {p} le mois précédent` (ou la semaine précédente, le trimestre précédent, le semestre précédent, l'année précédente) quand le Hub a compté la période précédente |
 | Familles du collectif | `Ce qui a été corrigé` : `Travail fait plusieurs fois`, `Étapes lentes`, `Ordre dans lequel le travail était fait` |
 | Courbe | `Part du travail évitable`, `en {période}, contre {x} en {période précédente}`, `Plus c'est bas, mieux c'est.`, et la légende `Part du travail évitable, mois par mois` (ou semaine par semaine, trimestre par trimestre, semestre par semestre, année par année) |
 | Barres d'une étape lente | `Passages les plus lents, avant la correction` et, en pointillés, `Seuil d'alerte` |

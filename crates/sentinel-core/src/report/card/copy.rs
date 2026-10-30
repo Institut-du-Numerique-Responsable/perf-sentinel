@@ -211,7 +211,7 @@ const EN: Words = Words {
     factor: "1 {unit} = {factor} CO2e.",
     source: "Source: {source}, {vintage}",
 
-    collective: "{n} {fixes} {confirmed} by measurement, across {s} {services},",
+    collective: "{n} {fixes} {confirmed} by measurement, across {s} {services}",
     fixes: ["fix", "fixes"],
     confirmed: ["confirmed", "confirmed"],
     services: ["service", "services"],
@@ -331,7 +331,7 @@ const FR: Words = Words {
     factor: "1 {unit} = {factor} CO2e.",
     source: "Source\u{a0}: {source}, {vintage}",
 
-    collective: "{n} {fixes} {confirmed} par la mesure, sur {s} {services},",
+    collective: "{n} {fixes} {confirmed} par la mesure, sur {s} {services}",
     fixes: ["correction", "corrections"],
     confirmed: ["confirmée", "confirmées"],
     services: ["service", "services"],
@@ -870,6 +870,7 @@ pub(crate) fn collective_lines(payload: &FullPayload) -> Vec<String> {
         ],
     )];
     if let Some(previous) = f.previous_fixes_count {
+        lines[0].push(',');
         lines.push(fill(
             w.against,
             &[
@@ -1406,10 +1407,15 @@ mod tests {
             .as_object_mut()
             .expect("figures")
             .remove("previous_fixes_count");
-        let lines = collective_lines(&payload(input, Lang::En));
-        assert!(
-            lines.iter().all(|line| !line.contains("against")),
-            "{lines:?}"
+        let lines = collective_lines(&payload(input.clone(), Lang::En));
+        assert_eq!(
+            lines,
+            ["7 fixes confirmed by measurement, across 3 services"]
+        );
+        let lines = collective_lines(&payload(input, Lang::Fr));
+        assert_eq!(
+            lines,
+            ["7 corrections confirmées par la mesure, sur 3 services"]
         );
         for lang in LANGS {
             for family in ["extra_calls", "slow_calls", "call_architecture"] {
