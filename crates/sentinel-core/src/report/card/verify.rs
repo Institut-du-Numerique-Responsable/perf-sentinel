@@ -42,9 +42,9 @@ pub struct Integrity {
 ///
 /// The input errors of the envelope readers (`file_too_large`,
 /// `no_card_payload`, `duplicate_card_payload`, `malformed_input`),
-/// `malformed_input` for a JSON payload that names no usable public key or
-/// breaks a rule under a valid signature, and `unsupported_version`. A
-/// payload that is not JSON at all is a tamper, not an error.
+/// `malformed_input` for a compact payload in a full envelope or a payload
+/// that breaks a rule under a valid signature, and `unsupported_version`. A
+/// payload with no usable public key is a tamper, not an error.
 pub fn check_integrity(source: CardSource<'_>) -> Result<Integrity, CardError> {
     match source {
         CardSource::Png(png) => check_full(&read_png_envelope(png)?),
@@ -59,7 +59,12 @@ fn check_full(envelope: &str) -> Result<Integrity, CardError> {
         return Ok(unreadable_payload());
     };
     let Some((public_key, raw_key)) = named_key(&value, "public_key") else {
-        return Err(no_key(parse_full_payload(&payload).err()));
+        // A compact payload under a full envelope is the wrong card, not an edit.
+        return if parse_compact_payload(&payload).is_ok() {
+            Err(malformed("a compact payload is not a full card"))
+        } else {
+            Ok(unreadable_payload())
+        };
     };
     if !verify_signature(&raw_key, &payload, &signature) {
         return Ok(tampered("signature_invalid"));
@@ -87,7 +92,7 @@ fn check_compact(url: &str) -> Result<Integrity, CardError> {
         return Ok(unreadable_payload());
     };
     let Some((public_key, raw_key)) = named_key(&value, "k") else {
-        return Err(no_key(parse_compact_payload(&payload).err()));
+        return Ok(unreadable_payload());
     };
     if !verify_signature(&raw_key, &payload, &signature) {
         return Ok(tampered("signature_invalid"));
@@ -106,14 +111,6 @@ fn named_key(value: &Value, field: &str) -> Option<(String, Vec<u8>)> {
     let text = value.get(field)?.as_str()?;
     let raw = b64url_decode(text).filter(|bytes| bytes.len() == 32)?;
     Some((text.to_owned(), raw))
-}
-
-/// No key to check a signature with: the parser says what is wrong.
-fn no_key(parse_error: Option<CardError>) -> CardError {
-    parse_error.map_or_else(
-        || malformed("the payload names no public key"),
-        signed_rules_error,
-    )
 }
 
 /// Every rule a payload breaks reads as a malformed input, but for a
@@ -153,9 +150,10 @@ fn tampered(reason: &'static str) -> Integrity {
     }
 }
 
-/// Bytes that are not JSON cannot be what the signer signed: a card
-/// edited (one flipped character is enough) reads as tampered, not as a
-/// bad input, even though no key is left to check the signature with.
+/// Bytes with no usable public key (not JSON, or the key field gone or
+/// broken) cannot be what the signer signed: a card edited (one flipped
+/// character is enough) reads as tampered, not as a bad input, even though
+/// no key is left to check the signature with.
 fn unreadable_payload() -> Integrity {
     tampered("signature_invalid")
 }
@@ -329,13 +327,16 @@ mod tests {
         assert_eq!(error.reason, "malformed_input");
         assert_eq!(error.result, CardResult::InputError);
 
-        // A public key that is not 32 bytes leaves nothing to verify with.
+        // A public key that is not 32 bytes leaves nothing to verify with:
+        // the signature cannot hold, so the card reads as tampered.
         let short = resigned(&full, |v| {
             v["public_key"] = json!(b64url_encode(&[7u8; 31]));
         });
         let png = png_with(&file_envelope(&short, &signer.sign_b64(&short)));
-        let error = check_integrity(CardSource::Png(&png)).expect_err("refused");
-        assert_eq!(error.reason, "malformed_input");
+        assert_eq!(
+            check_integrity(CardSource::Png(&png)).expect("checks"),
+            tampered("signature_invalid")
+        );
     }
 
     #[test]
@@ -357,9 +358,8 @@ mod tests {
         );
     }
 
-    /// A payload character changed (here: the next base64url letter), the
-    /// signature kept, is a tamper in all but the rare case where the edit
-    /// renames the key field and leaves valid JSON.
+    /// A payload character changed (here: A and B swapped), the signature
+    /// kept, is a tamper wherever the edit lands, the key field included.
     #[test]
     fn a_flipped_payload_character_is_tampered_not_malformed() {
         let signer = signer();
@@ -373,7 +373,6 @@ mod tests {
             bytes[at] = if bytes[at] == b'A' { b'B' } else { b'A' };
             String::from_utf8(bytes).expect("ascii")
         };
-        let (mut tampered_count, mut malformed_count) = (0, 0);
         let prefix = compact_url(&[], "")
             .split_once("#c=")
             .expect("fragment")
@@ -388,14 +387,8 @@ mod tests {
                     .to_string();
             let png = png_with(&envelope);
             match check_integrity(CardSource::Png(&png)) {
-                Ok(integrity) => {
-                    assert!(!integrity.ok, "flip {at} verified");
-                    tampered_count += 1;
-                }
-                Err(error) => {
-                    assert_eq!(error.reason, "malformed_input");
-                    malformed_count += 1;
-                }
+                Ok(integrity) => assert!(!integrity.ok, "flip {at} verified"),
+                Err(error) => panic!("flip {at} read as {}", error.reason),
             }
         }
         for at in 0..compact_text.len() {
@@ -405,20 +398,9 @@ mod tests {
                 signer.sign_b64(&compact)
             );
             match check_integrity(CardSource::Url(&url)) {
-                Ok(integrity) => {
-                    assert!(!integrity.ok, "flip {at} verified");
-                    tampered_count += 1;
-                }
-                Err(error) => {
-                    assert_eq!(error.reason, "malformed_input");
-                    malformed_count += 1;
-                }
+                Ok(integrity) => assert!(!integrity.ok, "flip {at} verified"),
+                Err(error) => panic!("flip {at} read as {}", error.reason),
             }
         }
-        assert!(
-            malformed_count * 20 <= tampered_count,
-            "{malformed_count} of {} flips read as malformed",
-            tampered_count + malformed_count
-        );
     }
 }

@@ -401,8 +401,8 @@ fn verify_card_on_a_url_with_one_payload_character_flipped_is_tampered() {
     let (prefix, fragment) = url.split_once("#c=").expect("fragment");
     let (compact, signature) = fragment.rsplit_once('.').expect("signature");
     // The raw edit, no decode and re-encode: an unreadable payload is a
-    // tamper, not an input error.
-    for at in [2, 5, 9, 20, 40] {
+    // tamper, not an input error. 75..100 spans the `"k":"` key field.
+    for at in [2, 5, 9, 20, 40].into_iter().chain(75..100) {
         let mut bytes = compact.as_bytes().to_vec();
         bytes[at] = if bytes[at] == b'A' { b'B' } else { b'A' };
         let flipped = format!(
