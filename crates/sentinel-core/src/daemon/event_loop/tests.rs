@@ -258,6 +258,7 @@ async fn ledger_counts_even_with_zero_retention() {
         &crate::config::DaemonDetectionsConfig::default(),
         false,
         1.0,
+        super::super::detection_ledger::DayThresholds::default(),
         now,
     );
     let store = findings_store::FindingsStore::new(0);
@@ -312,6 +313,7 @@ async fn run_ledger_batches(
         &crate::config::DaemonDetectionsConfig::default(),
         green_enabled,
         1.0,
+        super::super::detection_ledger::DayThresholds::default(),
         current_time_ms(),
     );
     let store = findings_store::FindingsStore::new(100);

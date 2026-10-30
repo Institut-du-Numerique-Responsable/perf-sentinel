@@ -286,7 +286,7 @@ mod tests {
 
     use super::*;
     use crate::config::DaemonDetectionsConfig;
-    use crate::daemon::detection_ledger::{DAY_MS, DayCarbon, DetectionLedger};
+    use crate::daemon::detection_ledger::{DAY_MS, DayCarbon, DayThresholds, DetectionLedger};
     use crate::daemon::hub_export::HubClient;
     use crate::daemon::hub_export::HubExportBuffer;
     use crate::daemon::hub_export::tests::{count, finding, spawn_with_detections, wait_for};
@@ -300,6 +300,7 @@ mod tests {
             &DaemonDetectionsConfig::default(),
             true,
             1.0,
+            DayThresholds::default(),
             day * DAY_MS,
         ))
     }
