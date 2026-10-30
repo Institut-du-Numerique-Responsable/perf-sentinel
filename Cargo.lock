@@ -2201,6 +2201,7 @@ version = "0.38.0"
 dependencies = [
  "arc-swap",
  "axum",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "criterion",
@@ -2221,6 +2222,7 @@ dependencies = [
  "prost",
  "rcgen",
  "regex",
+ "ring",
  "rustls",
  "serde",
  "serde_json",

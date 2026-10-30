@@ -19,7 +19,7 @@ path = "src/main.rs"
 workspace = true
 
 [features]
-default = ["tui", "daemon", "tempo", "jaeger-query", "pdf"]
+default = ["tui", "daemon", "tempo", "jaeger-query", "pdf", "card"]
 tui = ["ratatui", "crossterm"]
 daemon = [
     "perf-sentinel-core/daemon",
@@ -31,6 +31,7 @@ daemon = [
 tempo = ["perf-sentinel-core/tempo"]
 jaeger-query = ["perf-sentinel-core/jaeger-query"]
 pdf = ["perf-sentinel-core/pdf"]
+card = ["pdf", "perf-sentinel-core/card"]
 
 [dependencies]
 perf-sentinel-core = { version = "0.38.0", path = "../sentinel-core" }

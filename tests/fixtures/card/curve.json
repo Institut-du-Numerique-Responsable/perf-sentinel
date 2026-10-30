@@ -1,0 +1,20 @@
+{
+  "angle": "curve",
+  "lang": "en",
+  "period": { "kind": "month", "from": "2026-09-01", "to": "2026-09-30" },
+  "scope": {
+    "environment": "production",
+    "sources": ["prod-eu"],
+    "covered_days": 30,
+    "restart_days": 0,
+    "sampled_permille": 1000
+  },
+  "figures": {
+    "waste_permille": [62, 48, 31],
+    "avoidable_ops": 2480000,
+    "co2_low_ug": 15800000000
+  },
+  "free": {},
+  "org": { "name": "Acme", "domain": "acme.fr" },
+  "generated_at_ms": 1790856000000
+}
