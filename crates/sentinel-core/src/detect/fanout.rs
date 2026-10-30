@@ -127,7 +127,7 @@ fn fanout_impl<'a>(
 
 /// The most frequent template among the children, ties going to the smallest,
 /// so the same fanout yields the same template in every trace.
-fn dominant_template<'t>(trace: &'t Trace, child_indices: &[usize]) -> &'t str {
+pub(crate) fn dominant_template<'t>(trace: &'t Trace, child_indices: &[usize]) -> &'t str {
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for &i in child_indices {
         *counts.entry(&trace.spans[i].template).or_default() += 1;

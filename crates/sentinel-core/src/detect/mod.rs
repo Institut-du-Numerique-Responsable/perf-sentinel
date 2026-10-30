@@ -1,5 +1,6 @@
 //! Detection stage: identifies performance anti-patterns in traces.
 
+pub mod below_threshold;
 pub mod chatty;
 pub mod correlate_cross;
 pub mod fanout;
@@ -533,6 +534,23 @@ impl FindingType {
                 | Self::NPlusOneMessaging
                 | Self::RedundantSql
                 | Self::RedundantHttp
+        )
+    }
+
+    /// Whether a configured threshold decides this finding type, so a run
+    /// at or under it counts as a below-threshold pass
+    /// (`below_threshold.rs`). The seven non-avoidable kinds.
+    #[must_use]
+    pub const fn is_thresholded(&self) -> bool {
+        matches!(
+            self,
+            Self::SlowSql
+                | Self::SlowHttp
+                | Self::SlowMessaging
+                | Self::ExcessiveFanout
+                | Self::ChattyService
+                | Self::PoolSaturation
+                | Self::SerializedCalls
         )
     }
 }

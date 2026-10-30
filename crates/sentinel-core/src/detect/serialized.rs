@@ -149,6 +149,14 @@ fn timed_children<'a>(trace: &'a Trace, child_indices: &[usize]) -> Vec<TimedSpa
     timed
 }
 
+/// Length of the longest non-overlapping chain among the children, with
+/// the same sibling filter and end-time order as the detector.
+pub(crate) fn longest_chain_len(trace: &Trace, child_indices: &[usize]) -> usize {
+    let mut timed = timed_children(trace, child_indices);
+    timed.sort_unstable_by_key(|s| (s.end_us, s.span_idx));
+    longest_non_overlapping(&timed).len()
+}
+
 /// The chain's span ids, in chronological order. Empty on the detection
 /// path, which discards them.
 fn chain_span_ids<'a>(

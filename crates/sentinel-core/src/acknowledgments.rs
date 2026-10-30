@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::config::Config;
-use crate::detect::Finding;
+use crate::detect::{Finding, FindingType};
 use crate::quality_gate;
 use crate::report::{AcknowledgedFinding, Report, Warning, warnings};
 
@@ -98,33 +98,54 @@ pub struct AcknowledgmentsFile {
 /// identical signatures cannot map to distinct ack entries.
 #[must_use]
 pub fn compute_signature(finding: &Finding) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(finding.pattern.template.as_bytes());
-    let digest = hasher.finalize();
-    let safe_service = crate::text_safety::strip_bidi_and_invisible(&finding.service);
-    let sanitized_endpoint = sanitize_endpoint(&finding.source_endpoint);
-    let safe_endpoint = crate::text_safety::strip_bidi_and_invisible(&sanitized_endpoint);
-    let kind = finding.finding_type.as_str();
     // Pre-size: type + 2 separators + service + endpoint + ':' + 32 hex.
-    let mut out = String::with_capacity(kind.len() + safe_service.len() + safe_endpoint.len() + 35);
-    out.push_str(kind);
+    let mut out = String::with_capacity(
+        finding.finding_type.as_str().len()
+            + finding.service.len()
+            + finding.source_endpoint.len()
+            + 35,
+    );
+    push_signature_head(
+        &mut out,
+        &finding.finding_type,
+        &finding.service,
+        &finding.source_endpoint,
+    );
     out.push(':');
-    out.push_str(safe_service.as_ref());
-    out.push(':');
-    out.push_str(safe_endpoint.as_ref());
-    out.push(':');
-    for byte in &digest[..16] {
+    for byte in template_digest(&finding.pattern.template) {
         let _ = write!(out, "{byte:02x}");
     }
     out
 }
 
-fn sanitize_endpoint(endpoint: &str) -> Cow<'_, str> {
-    if endpoint.bytes().any(|b| matches!(b, b'/' | b' ')) {
-        Cow::Owned(endpoint.replace(['/', ' '], "_"))
-    } else {
-        Cow::Borrowed(endpoint)
-    }
+/// The signature up to its last `:`: `<finding_type>:<service>:<endpoint>`,
+/// sanitized as [`compute_signature`] describes. Written char by char into
+/// `out`, so a caller rebuilding heads in a loop reuses one buffer.
+pub(crate) fn push_signature_head(
+    out: &mut String,
+    kind: &FindingType,
+    service: &str,
+    endpoint: &str,
+) {
+    use crate::text_safety::is_bidi_or_invisible;
+    out.push_str(kind.as_str());
+    out.push(':');
+    out.extend(service.chars().filter(|&c| !is_bidi_or_invisible(c)));
+    out.push(':');
+    out.extend(
+        endpoint
+            .chars()
+            .filter(|&c| !is_bidi_or_invisible(c))
+            .map(|c| if matches!(c, '/' | ' ') { '_' } else { c }),
+    );
+}
+
+/// The first 16 bytes of the template's SHA-256, the signature's last part.
+pub(crate) fn template_digest(template: &str) -> [u8; 16] {
+    let digest = Sha256::digest(template.as_bytes());
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest[..16]);
+    out
 }
 
 /// Fill in the `signature` field of every finding in place.

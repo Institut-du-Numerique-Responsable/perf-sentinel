@@ -65,7 +65,7 @@ fn saturated_services(trace: &Trace, threshold: u32) -> Vec<(&str, Vec<usize>, u
 /// Partition a trace's SQL span indices by service and effective grouping. HTTP
 /// and other event types are skipped. Returns borrowed service names
 /// (lifetime tied to `trace`) so grouping stays allocation-light.
-fn group_sql_indices_by_service(trace: &Trace) -> HashMap<PoolKey<'_>, Vec<usize>> {
+pub(crate) fn group_sql_indices_by_service(trace: &Trace) -> HashMap<PoolKey<'_>, Vec<usize>> {
     let mut sql_by_service: HashMap<PoolKey<'_>, Vec<usize>> =
         HashMap::with_capacity(trace.spans.len().min(16));
     for (i, span) in trace.spans.iter().enumerate() {
@@ -91,7 +91,7 @@ fn group_sql_indices_by_service(trace: &Trace) -> HashMap<PoolKey<'_>, Vec<usize
 /// ms-precision check would truncate `duration_us / 1000 = 0` and let
 /// `end_ms == start_ms` slip the `false < true` ordering, undercounting
 /// peak concurrency on hot reactive workloads.
-fn compute_peak_concurrency(trace: &Trace, indices: &[usize]) -> u32 {
+pub(crate) fn compute_peak_concurrency(trace: &Trace, indices: &[usize]) -> u32 {
     let mut sweep: Vec<(u64, bool)> = Vec::with_capacity(indices.len() * 2);
     for &idx in indices {
         let span = &trace.spans[idx];
