@@ -1222,6 +1222,52 @@ mod tests {
         }
     }
 
+    // One story sentence per type, language, threshold and label: it cites its own figure,
+    // starts with the label when there is one, and holds no technical word or bold claim.
+    fn assert_story_case(
+        finding_type: &FindingType,
+        lang: Lang,
+        threshold: bool,
+        label: Option<&str>,
+    ) {
+        let mut input = if threshold {
+            story_input_with_threshold(finding_type.clone())
+        } else {
+            story_input(finding_type.clone())
+        };
+        if let Some(label) = label {
+            input["free"]["label"] = json!(label);
+        }
+        let payload = payload(input, lang);
+        let sentence = story_sentence(&payload);
+        let case = format!("{finding_type:?} {lang:?} {threshold} {label:?}");
+        assert!(
+            sentence.contains(&cited_figure(&payload)),
+            "{case}: {sentence}"
+        );
+        if let Some(label) = label {
+            assert!(sentence.starts_with(label), "{case}: {sentence}");
+        }
+        for word in TECHNICAL_WORDS {
+            assert!(!has_word(&sentence, word), "{case}: {word} in {sentence}");
+        }
+        let lower = sentence.to_lowercase();
+        for phrase in [
+            "against",
+            "today",
+            "up to",
+            "contre",
+            "aujourd'hui",
+            "jusqu'à",
+        ] {
+            assert!(!lower.contains(phrase), "{case}: {phrase} in {sentence}");
+        }
+        if *finding_type == FindingType::ExcessiveFanout {
+            assert!(!has_word(&sentence, "system"), "{case}: {sentence}");
+            assert!(!has_word(&sentence, "système"), "{case}: {sentence}");
+        }
+    }
+
     #[test]
     fn every_story_sentence_cites_its_own_figure_and_no_technical_word() {
         for lang in LANGS {
@@ -1236,46 +1282,8 @@ mod tests {
                     &[false]
                 };
                 for &threshold in thresholds {
-                    for with_label in [false, true] {
-                        let mut input = if threshold {
-                            story_input_with_threshold(finding_type.clone())
-                        } else {
-                            story_input(finding_type.clone())
-                        };
-                        if with_label {
-                            input["free"]["label"] = json!(label);
-                        }
-                        let payload = payload(input, lang);
-                        let sentence = story_sentence(&payload);
-                        let case = format!("{finding_type:?} {lang:?} {threshold} {with_label}");
-                        assert!(
-                            sentence.contains(&cited_figure(&payload)),
-                            "{case}: {sentence}"
-                        );
-                        if with_label {
-                            assert!(sentence.starts_with(label), "{case}: {sentence}");
-                        }
-                        for word in TECHNICAL_WORDS {
-                            assert!(!has_word(&sentence, word), "{case}: {word} in {sentence}");
-                        }
-                        for phrase in [
-                            "against",
-                            "today",
-                            "up to",
-                            "contre",
-                            "aujourd'hui",
-                            "jusqu'à",
-                        ] {
-                            assert!(
-                                !sentence.to_lowercase().contains(phrase),
-                                "{case}: {phrase} in {sentence}"
-                            );
-                        }
-                        if finding_type == FindingType::ExcessiveFanout {
-                            assert!(!has_word(&sentence, "system"), "{case}: {sentence}");
-                            assert!(!has_word(&sentence, "système"), "{case}: {sentence}");
-                        }
-                    }
+                    assert_story_case(&finding_type, lang, threshold, None);
+                    assert_story_case(&finding_type, lang, threshold, Some(label));
                 }
             }
         }
