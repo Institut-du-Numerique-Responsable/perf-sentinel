@@ -1521,7 +1521,8 @@ Exit codes, with one JSON line on stdout:
      vouch for (key_revoked, signed_outside_validity, public_key_mismatch)
   3  input error (missing_file, file_too_large, malformed_input, no_card_payload,
      duplicate_card_payload, no_domain)
-  4  --online could not read the domain's key list (binding_check_failed, no_http_client)
+  4  --online could not read the domain's key list (binding_check_failed, binding_partial,
+     no_http_client)
   5  the card's format is newer than this engine (unsupported_version), upgrade perf-sentinel";
 
     pub const HASH_BAKE: &str = "Examples:

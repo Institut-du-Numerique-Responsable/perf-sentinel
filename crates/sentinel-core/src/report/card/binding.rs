@@ -237,9 +237,9 @@ struct DohRecord {
 ///
 /// # Errors
 ///
-/// `binding_check_failed` when a lookup failed and none found a key (an
-/// empty list counts as none), since the missing one might have revoked
-/// the key.
+/// When a lookup failed, since the unread one might have revoked the key:
+/// `binding_partial` if the other found at least one key, else
+/// `binding_check_failed` (an empty list counts as no key).
 pub fn merge_lookups(
     dns: Lookup,
     well_known: Lookup,
@@ -260,8 +260,12 @@ pub fn merge_lookups(
             }
         }
     }
-    if failed && !found {
-        return Err("binding_check_failed");
+    if failed {
+        return Err(if found {
+            "binding_partial"
+        } else {
+            "binding_check_failed"
+        });
     }
     Ok(Some(merged))
 }
@@ -597,8 +601,6 @@ mod tests {
         for (dns, well_known) in [
             (Lookup::Found(vec![only.clone()]), Lookup::Absent),
             (Lookup::Absent, Lookup::Found(vec![only.clone()])),
-            (Lookup::Found(vec![only.clone()]), Lookup::Failed),
-            (Lookup::Failed, Lookup::Found(vec![only.clone()])),
         ] {
             assert_eq!(merge_lookups(dns, well_known), Ok(Some(vec![only.clone()])));
         }
@@ -609,6 +611,23 @@ mod tests {
             judge(FP, PK, SIGNED, Some(&keys)).reason,
             "key_not_published"
         );
+    }
+
+    #[test]
+    fn partial_lookup_never_reaches_level_2() {
+        // The unread source might be the one that revokes the key.
+        let current = key("2026-01-01", None, None);
+        let revoked = key("2026-01-01", None, Some("2026-09-15"));
+        for entry in [current, revoked] {
+            assert_eq!(
+                merge_lookups(Lookup::Failed, Lookup::Found(vec![entry.clone()])),
+                Err("binding_partial")
+            );
+            assert_eq!(
+                merge_lookups(Lookup::Found(vec![entry]), Lookup::Failed),
+                Err("binding_partial")
+            );
+        }
     }
 
     #[test]

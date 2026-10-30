@@ -93,7 +93,7 @@ An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `
 | 0 | `integrity` `ok`. Level 2: `key_published`. Level 1: `no_key_list`, `key_not_published`. |
 | 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), or a key the list does not vouch for (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), level 1. |
 | 3 | `{"result":"input_error"}`: `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`. |
-| 4 | `--online` could not read the domain's keys: the verify line at level 1 with `binding_check_failed`, or `no_http_client` on a build without the HTTP features. |
+| 4 | `--online` could not read the domain's keys: the verify line at level 1 with `binding_check_failed` or `binding_partial`, or `no_http_client` on a build without the HTTP features. |
 | 5 | `{"result":"unrenderable","reason":"unsupported_version"}`: the card's format is newer than this engine. |
 
 A payload whose last base64url character is changed to a non-canonical one (trailing bits not zero) is `malformed_input`, exit 3, not `tampered`: both reject the card. An envelope over 64 KiB inside a PDF is `malformed_input`, a PDF over 4 MiB `file_too_large`.
@@ -274,7 +274,7 @@ To rotate, publish the new key with its `from` and set `to` on the old one: card
 1. The TXT records of `_perf-sentinel.<domain>`, from a DNS-over-HTTPS JSON service (`application/dns-json`): `https://cloudflare-dns.com/dns-query` by default, or the `https://` URL `--doh` names.
 2. `https://<domain>/.well-known/perf-sentinel-key`, on the domain itself, with no port and no user part.
 
-Each lookup has 5 s and reads 64 KiB at most. No redirect is followed: a domain whose apex redirects to `www` fails the well-known lookup, so publish the file on the apex, or rely on the DNS record. A 404, an NXDOMAIN or no `v=ps1` record means "publishes nothing". A timeout, an error status, a redirect or a body that is not the expected shape means "could not check". The two answers merge by fingerprint. When a lookup could not check and the other found no key, the result is `binding_check_failed` at level 1, exit 4: "could not check" never reads as "not published", since the missing answer might have revoked the key.
+Each lookup has 5 s and reads 64 KiB at most. No redirect is followed: a domain whose apex redirects to `www` fails the well-known lookup, so publish the file on the apex, or rely on the DNS record. A 404, an NXDOMAIN or no `v=ps1` record means "publishes nothing". A timeout, an error status, a redirect or a body that is not the expected shape means "could not check". The two answers merge by fingerprint. When a lookup could not check and the other found no key, the result is `binding_check_failed` at level 1, exit 4: "could not check" never reads as "not published", since the missing answer might have revoked the key. When one lookup could not check and the other found the key, the result is `binding_partial` at level 1, exit 4, for the same reason: the unread source might be the one that revokes the key. An NXDOMAIN or a 404 is an answer, not a failure, so a domain that publishes in one place only still reaches level 2.
 
 These are the only network calls the engine makes for a card, and only when `--online` is passed. Without it, `verify-card` stays offline.
 
