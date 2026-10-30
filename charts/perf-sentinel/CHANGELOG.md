@@ -10,6 +10,19 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.39.0]
+
+### Added
+
+- **`appVersion` moves to `0.39.0`.** The image carries the share-card
+  commands (`card keygen`, `card render`, `verify-card`) that PerfSentinelHub
+  0.10.0 runs to sign cards, and the daemon counts, per day, the runs of the
+  signatures the Hub asks it to watch that stayed at or under their threshold.
+  An older Hub sends no watch list and ignores the new keys. See the
+  application `CHANGELOG.md`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.38.0]
 
 ### Added
