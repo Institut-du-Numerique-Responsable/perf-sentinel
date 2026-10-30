@@ -34,7 +34,7 @@ const limitsButton = () => el('button', { class: 'vf-lnk', type: 'button', 'data
 
 function show(state, ...nodes) {
   result.dataset.state = state;
-  result.replaceChildren(...nodes);
+  result.replaceChildren(...nodes.filter(Boolean)); // an absent block is null, never the text "null"
   const loaded = state !== 'empty';
   dropZone.toggleAttribute('data-compact', loaded);
   phone.hidden = loaded;
@@ -164,10 +164,8 @@ function classOf(path, v) {
   if (MONO.has(path)) return 'vf-m';
   if (path.startsWith('free.')) return 'vf-free';
   if (path === 'figures.waste_permille' || path === 'figures.fixes_by_family_count') return 'vf-big-list';
-  if (path.startsWith('figures.') && typeof v === 'number') {
-    if (path === 'figures.co2_low_ug') return undefined;
-    return path === 'figures.previous_fixes_count' ? 'vf-n' : 'vf-n vf-big';
-  }
+  // Large type belongs to #verifier-figures alone; the details stay a plain reference list.
+  if (path.startsWith('figures.') && typeof v === 'number' && path !== 'figures.co2_low_ug') return 'vf-n';
   return undefined;
 }
 
@@ -276,8 +274,9 @@ function verdict(r, compact, n, resolver) {
   if (resolver) {
     // DNS vouches for the domain, never for the name.
     const line = filled(org.name) && el('p', { class: 'vf-org', id: 'verifier-org' }, fill(T.level2Org, { domain, org: org.name }));
-    top = head(headline(fill(T.level2, { domain })), 'shield-check', line, contentLine);
-    dns = el('div', { class: 'vf-dns' }, bindingLine('bound', fill(T.boundVia, { resolver: RESOLVERS[resolver] })));
+    // The answer stays with the headline it proves, as in the approved mockup.
+    top = head(headline(fill(T.level2, { domain })), 'shield-check',
+      bindingLine('bound', fill(T.boundVia, { resolver: RESOLVERS[resolver] })), line, contentLine);
   } else {
     const line = orgLine(org);
     const [first, second] = T.level1.split(/(?<=\.) /);

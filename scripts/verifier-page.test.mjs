@@ -187,12 +187,17 @@ test('a valid link shows the neutral level 1 state', async () => {
   await close();
 });
 
+/** Text written straight into #verifier-result: every state wraps its words in elements. */
+const strayText = (page) => page.$$eval('#verifier-result', ([r]) =>
+  [...r.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent));
+
 test('a card without a domain shows no domain check', async () => {
   let { page, close } = await open(link('nodomain'));
   await waitState(page, 'level1');
   assert.equal(await page.locator('[data-field="org.domain"]').count(), 0);
   assert.equal(await visible(page, '#verifier-dns'), false);
   assert.equal(await page.locator('#verifier-org').count(), 0);
+  assert.deepEqual(await strayText(page), []);
   await close();
 
   ({ page, close } = await openFile('nodomain.png', fixture('nodomain.png')));
@@ -628,6 +633,18 @@ test('a published key gives the verified state', async () => {
 });
 
 const DOH_URL = { cloudflare: 'https://cloudflare-dns.com/dns-query?name=_perf-sentinel.cards.example.org&type=TXT' };
+
+test('the DNS answer sits under the verified headline', async () => {
+  for (const path of [link('story'), 'story.png']) {
+    const { page, close } = await checkDomain(path, cloudflareTxt(''));
+    await waitState(page, 'level2');
+    assert.equal(await page.locator('.vf-hd #verifier-binding').count(), 1, path);
+    assert.equal(await precedes(page, '#verifier-headline', '#verifier-binding'), true, path);
+    assert.equal(await precedes(page, '#verifier-binding', '#verifier-figures'), true, path);
+    assert.deepEqual(await strayText(page), [], path);
+    await close();
+  }
+});
 
 test('a key exposed before the card is not verified', async () => {
   for (const [path, lang, day] of [[link('story'), 'en', 'exposed since 1 October 2026'], ['/fr' + link('story'), 'fr', '1er octobre 2026']]) {
