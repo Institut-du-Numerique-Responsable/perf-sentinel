@@ -347,10 +347,6 @@ impl DetectionLedger {
         self.lock().watch = Arc::new(watch);
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Hub export and the event loop wire it next")
-    )]
     pub(crate) fn watch(&self) -> Arc<WatchIndex> {
         Arc::clone(&self.lock().watch)
     }
@@ -358,10 +354,6 @@ impl DetectionLedger {
     /// Adds one batch's below-threshold passes to their day. A signature
     /// without a row gets one only while the day has watch-row room, else
     /// its passes are dropped, never sent to overflow.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Hub export and the event loop wire it next")
-    )]
     pub(crate) fn record_below(&self, passes: &HashMap<Arc<str>, u64>, now_ms: u64) {
         // Sorted so the rows kept at the cap do not depend on hash order.
         let mut passes: Vec<_> = passes.iter().filter(|(_, n)| **n > 0).collect();

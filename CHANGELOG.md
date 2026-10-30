@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- The daemon reads a `watch` list of signatures from the reply of the detection push to PerfSentinelHub, counts per day the runs of those threshold-type signatures that stayed at or under their threshold, and exports them as `below_threshold_passes` on the count rows of `GET /api/detections` and of the push, a watched signature getting a row even with `detections: 0`. Each `days` object gains `thresholds`, the slow, fanout, chatty, pool and serialized thresholds the daemon applied. Without a Hub that sends `watch` nothing is counted; the list is lost on restart and a polled daemon never gets one.
+
 ## [0.38.0] - 2026-10-29
 
 ### Added

@@ -1816,6 +1816,7 @@ async fn process_traces(
     // Every scored batch, findings or not, so `total_io_ops` counts the clean ones.
     if let Some(ledger) = ctx.detection_ledger {
         record_carbon_in_ledger(ledger, &green_summary, now_ms);
+        record_below_in_ledger(ledger, &trace_structs, ctx.detect_config, now_ms);
     }
 
     if !findings.is_empty() {
@@ -1926,6 +1927,24 @@ fn record_carbon_in_ledger(ledger: &DetectionLedger, green_summary: &GreenSummar
             total_io_ops: green_summary.total_io_ops as u64,
         };
         ledger.record_avoidable(batch, now_ms);
+    }
+}
+
+/// Adds a batch's below-threshold passes of the watched signatures to the
+/// ledger's day. A no-op until the Hub sends a watch list.
+fn record_below_in_ledger(
+    ledger: &DetectionLedger,
+    traces: &[Trace],
+    config: &DetectConfig,
+    now_ms: u64,
+) {
+    let watch = ledger.watch();
+    if watch.is_empty() {
+        return;
+    }
+    let passes = detect::below_threshold::count_below_threshold(traces, config, &watch);
+    if !passes.is_empty() {
+        ledger.record_below(&passes, now_ms);
     }
 }
 
