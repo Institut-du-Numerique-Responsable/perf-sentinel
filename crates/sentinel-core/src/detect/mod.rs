@@ -811,14 +811,15 @@ fn detect_impl<'t>(
 }
 
 /// Every per-trace detector over one trace. A threshold detector gets
-/// `below` only when its kind is watched, so the others keep the batch
-/// iteration set.
+/// `below` only when its kind is watched and the trace touches a watched
+/// service and endpoint, so the others keep the batch iteration set.
 fn detect_trace<'t>(
     trace: &'t Trace,
     config: &DetectConfig,
-    mut below: Option<&mut BelowPass<'_, 't>>,
+    below: Option<&mut BelowPass<'_, 't>>,
     findings: &mut Vec<Finding>,
 ) {
+    let mut below = below.and_then(|b| b.touches(trace).then_some(b));
     // Span-relationship indices are built once per trace and shared
     // by the detectors that need them (fanout, serialized).
     let indices = TraceIndices::build(trace);

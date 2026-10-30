@@ -24,10 +24,10 @@
 //! [`compute_signature`](crate::acknowledgments::compute_signature) builds
 //! it for the finding the detector would emit.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::acknowledgments::{push_signature_head, template_digest};
+use crate::acknowledgments::{push_signature_head, push_signature_pair, template_digest};
 use crate::correlate::Trace;
 use crate::normalize::NormalizedEvent;
 
@@ -43,6 +43,9 @@ type Entries = [Entry];
 #[derive(Debug, Default)]
 pub struct WatchIndex {
     by_head: HashMap<Box<str>, Vec<Entry>>,
+    /// Every head without its kind prefix, so a trace none of whose spans
+    /// carries a watched service and endpoint is skipped whole.
+    pairs: HashSet<Box<str>>,
     /// One [`kind_bit`] per watched kind.
     kinds: u8,
 }
@@ -59,6 +62,11 @@ const fn kind_bit(kind: &FindingType) -> u8 {
         FindingType::SerializedCalls => 1 << 6,
         _ => 0,
     }
+}
+
+/// The thresholded kind's slot in [`BelowPass`]'s per-kind cache.
+const fn kind_slot(kind: &FindingType) -> usize {
+    kind_bit(kind).trailing_zeros() as usize
 }
 
 const SLOW_BITS: u8 = kind_bit(&FindingType::SlowSql)
@@ -84,6 +92,8 @@ impl WatchIndex {
                 continue;
             }
             entries.push((digest, Arc::from(signature)));
+            let (_, pair) = head.split_once(':').unwrap_or_default();
+            index.pairs.insert(pair.into());
             index.kinds |= kind_bit(&kind);
             kept += 1;
         }
@@ -133,8 +143,8 @@ const fn nibble(byte: u8) -> Option<u8> {
     }
 }
 
-/// The last head looked up, and what it matched.
-type LastHead<'w, 't> = (FindingType, &'t str, &'t str, Option<&'w Entries>);
+/// One kind's last looked-up service and endpoint, and what they matched.
+type LastHead<'w, 't> = (&'t str, &'t str, Option<&'w Entries>);
 
 /// One batch's matching state: the reused head buffer, the per-batch
 /// digest memo and the counts. The threshold detectors feed it through
@@ -143,7 +153,9 @@ type LastHead<'w, 't> = (FindingType, &'t str, &'t str, Option<&'w Entries>);
 pub(crate) struct BelowPass<'w, 't> {
     watch: &'w WatchIndex,
     head: String,
-    last: Option<LastHead<'w, 't>>,
+    /// One slot per thresholded kind ([`kind_slot`]), so interleaved SQL
+    /// and HTTP spans do not evict each other's lookup.
+    last: [Option<LastHead<'w, 't>>; 7],
     digests: HashMap<&'t str, [u8; 16]>,
     counts: HashMap<Arc<str>, u64>,
 }
@@ -153,7 +165,7 @@ impl<'w, 't> BelowPass<'w, 't> {
         Self {
             watch,
             head: String::new(),
-            last: None,
+            last: [None; 7],
             digests: HashMap::new(),
             counts: HashMap::new(),
         }
@@ -173,26 +185,47 @@ impl<'w, 't> BelowPass<'w, 't> {
         self.watch.kinds & SLOW_BITS != 0
     }
 
-    /// The watched entries under this head, the lookup cached while the
-    /// triple repeats (spans of one trace mostly share service and endpoint).
+    /// Whether any span of `trace` carries a watched service and endpoint,
+    /// checked once per run of spans sharing them. Every pass identity is
+    /// one of the trace's spans, so a trace that touches none counts none.
+    pub(crate) fn touches(&mut self, trace: &Trace) -> bool {
+        let mut last: Option<(&str, &str)> = None;
+        for span in &trace.spans {
+            let pair = (&*span.event.service, span.event.source.endpoint.as_str());
+            if last == Some(pair) {
+                continue;
+            }
+            last = Some(pair);
+            self.head.clear();
+            push_signature_pair(&mut self.head, pair.0, pair.1);
+            if self.watch.pairs.contains(self.head.as_str()) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The watched entries under this head, the lookup cached per kind
+    /// while service and endpoint repeat (spans of one trace mostly share
+    /// them).
     fn entries(
         &mut self,
         kind: &FindingType,
         service: &'t str,
         endpoint: &'t str,
     ) -> Option<&'w Entries> {
-        if let Some((k, s, e, hit)) = &self.last
-            && k == kind
-            && *s == service
-            && *e == endpoint
+        let slot = kind_slot(kind);
+        if let Some((s, e, hit)) = self.last[slot]
+            && s == service
+            && e == endpoint
         {
-            return *hit;
+            return hit;
         }
         self.head.clear();
         push_signature_head(&mut self.head, kind, service, endpoint);
         let watch = self.watch;
         let hit = watch.by_head.get(self.head.as_str()).map(Vec::as_slice);
-        self.last = Some((kind.clone(), service, endpoint, hit));
+        self.last[slot] = Some((service, endpoint, hit));
         hit
     }
 

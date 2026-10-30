@@ -127,9 +127,15 @@ pub(crate) fn push_signature_head(
     service: &str,
     endpoint: &str,
 ) {
-    use crate::text_safety::is_bidi_or_invisible;
     out.push_str(kind.as_str());
     out.push(':');
+    push_signature_pair(out, service, endpoint);
+}
+
+/// The head after its `<finding_type>:` prefix: `<service>:<endpoint>`,
+/// sanitized the same way.
+pub(crate) fn push_signature_pair(out: &mut String, service: &str, endpoint: &str) {
+    use crate::text_safety::is_bidi_or_invisible;
     out.extend(service.chars().filter(|&c| !is_bidi_or_invisible(c)));
     out.push(':');
     out.extend(

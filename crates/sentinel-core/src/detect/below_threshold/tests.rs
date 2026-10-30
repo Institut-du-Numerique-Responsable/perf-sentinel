@@ -408,6 +408,13 @@ fn harvest(traces: &[Trace]) -> Vec<String> {
 fn assert_fused_equals_reference(traces: &[Trace]) -> HashSet<FindingType> {
     let signatures = harvest(traces);
     let watch = WatchIndex::from_signatures(signatures.iter().map(String::as_str), usize::MAX);
+    assert_fused_equals_reference_under(traces, &watch)
+}
+
+fn assert_fused_equals_reference_under(
+    traces: &[Trace],
+    watch: &WatchIndex,
+) -> HashSet<FindingType> {
     let mut kinds = HashSet::new();
     for config in [
         DetectConfig::default(),
@@ -415,10 +422,10 @@ fn assert_fused_equals_reference(traces: &[Trace]) -> HashSet<FindingType> {
         mid_config(),
         ceiling_config(),
     ] {
-        let (findings, fused) = run_full_detection_with_below(traces, &config, Some(&watch));
+        let (findings, fused) = run_full_detection_with_below(traces, &config, Some(watch));
         assert_eq!(
             fused,
-            count_below_threshold_reference(traces, &config, &watch),
+            count_below_threshold_reference(traces, &config, watch),
             "{config:?}"
         );
         assert_eq!(findings, run_full_detection(traces, &config), "{config:?}");
@@ -497,4 +504,59 @@ fn watch_none_and_watch_empty_run_plain_detection() {
         assert_eq!(findings, plain);
         assert!(passes.is_empty());
     }
+}
+
+#[test]
+fn fused_passes_equal_the_reference_when_the_watch_skips_traces() {
+    let traces = synth_traces();
+    let signatures = harvest(&traces);
+    let watch =
+        WatchIndex::from_signatures(signatures.iter().step_by(7).map(String::as_str), usize::MAX);
+    let mut pass = BelowPass::new(&watch);
+    let touched = traces.iter().filter(|trace| pass.touches(trace)).count();
+    assert!(
+        0 < touched && touched < traces.len(),
+        "{touched}/{}",
+        traces.len()
+    );
+    assert!(!assert_fused_equals_reference_under(&traces, &watch).is_empty());
+}
+
+#[test]
+fn touches_a_trace_through_any_span_with_a_watched_service_and_endpoint() {
+    let watched = slow_trace("svc:v2\u{202E}", "GET /a:b c");
+    let signature = signature_of(&watched, &slow_at(100), &FindingType::SlowSql);
+    let watch = WatchIndex::from_signatures([signature.as_str()], 10);
+    let mut pass = BelowPass::new(&watch);
+    assert!(pass.touches(&watched));
+
+    let mut last_span_only = slow_trace("other", "GET /x");
+    assert!(!pass.touches(&last_span_only));
+    last_span_only.spans[2].event = watched.spans[0].event.clone();
+    assert!(pass.touches(&last_span_only));
+
+    assert!(!pass.touches(&slow_trace("svc:v2\u{202E}", "GET /a:b d")));
+}
+
+#[test]
+fn interleaved_sql_and_http_spans_count_under_their_own_kind() {
+    let trace = make_trace(
+        (0..6)
+            .map(|i| {
+                let id = format!("s{i}");
+                if i % 2 == 0 {
+                    make_sql_event_with_duration("t", &id, "SELECT 1", &ts(i * 300), 200_000)
+                } else {
+                    make_http_event_with_duration("t", &id, "GET /api/x", &ts(i * 300), 200_000)
+                }
+            })
+            .collect(),
+    );
+    let sql = signature_of(&trace, &slow_at(100), &FindingType::SlowSql);
+    let http = signature_of(&trace, &slow_at(100), &FindingType::SlowHttp);
+    let watch = WatchIndex::from_signatures([sql.as_str(), http.as_str()], 10);
+    assert_eq!(
+        count(&trace, &slow_at(200), &watch),
+        HashMap::from([(Arc::from(sql.as_str()), 3), (Arc::from(http.as_str()), 3)])
+    );
 }
