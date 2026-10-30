@@ -41,6 +41,7 @@
 - [Tempo ingestion](#tempo-ingestion): protobuf format requirement.
 - [gCO2eq energy constant (legacy section)](#gco2eq-energy-constant-legacy-section-kept-for-cross-references): cross-reference to Carbon estimates accuracy.
 - [pg_stat_statements ingestion](#pg_stat_statements-ingestion): no trace correlation, complementary hotspot signal.
+- [Share cards](#share-cards): what a signed card proves, and what it does not.
 
 ## OTLP capture reliability
 
@@ -979,3 +980,17 @@ The carbon estimation uses a fixed energy constant (`0.1 mWh per I/O operation`)
 - **Pre-normalized queries.** PostgreSQL normalizes `pg_stat_statements` queries at the server level. Perf Sentinel applies its own normalization on top for cross-referencing, which may produce slightly different templates.
 - **No direct PostgreSQL connection.** In file mode (`--input`), Perf Sentinel reads exported CSV or JSON files. The `--prometheus` flag scrapes `postgres_exporter` metrics instead of connecting to PostgreSQL directly. See "Automated pg_stat ingestion from Prometheus" above for Prometheus-specific limitations.
 - **Entry count.** The parser pre-allocates memory based on input size, capped at 100,000 entries. Files exceeding 1,000,000 entries (CSV rows or JSON array elements) are rejected with an error to prevent memory exhaustion.
+
+## Share cards
+
+A share card proves that a key signed these figures and that nobody changed them since, nothing more. See [`SHARE-CARD.md`](./SHARE-CARD.md) for the contract.
+
+- **No third-party timestamp.** The signed day is the signer's own claim. Someone who steals a key can sign a card dated before the leak, and revoking the key from the day of the leak does not catch it. Only cards signed after the revocation day fail.
+- **Social networks strip metadata.** LinkedIn re-encodes images, which drops the PNG `iTXt` chunk, and probably the PDF attachment of a carousel too. Dropping a file on the verify page only works with the original file, so the QR code is the main path.
+- **The QR code carries less than the file.** The compact payload holds the angle, the period, the large figures, the before-fix period, the domain, the key and the day. It carries neither the free fields, the scope, the equivalence nor the CO2 line: only the original file proves those.
+- **Level 1 proves integrity, not who signed.** Anyone can make a key. Without a key published by the card's domain (level 2), a valid signature only says the card was not edited after signing.
+- **The DNS-over-HTTPS resolver sees the lookup.** `verify-card --online` sends the card's domain to the resolver (`cloudflare-dns.com` by default, or `--doh`), along with the caller's IP address, and fetches the domain's `/.well-known/perf-sentinel-key`, which shows that IP to the domain.
+- **PNG bytes are reproducible per target.** The same input and key give the same PNG on one build target. Floating-point rasterization may differ across architectures, so two machines can produce different bytes for the same card. Both verify.
+- **A threshold story is narrow.** Its before-fix period is the period of the trace its figure comes from, not a measured period of the whole endpoint. "No longer triggers the alert" means that on a day after the fix, the daemon saw passes below the threshold and no detection, not that every pass stays under it.
+- **A curve's earlier bars are checked by the Hub.** The signed `covered_days` and `restart_days` cover the card's period only. The scope line counts the days of every bar, but the completeness of the earlier periods is checked by the Hub when it builds the card, not signed.
+- **The curve names no fix.** A curve card prints no "confirmed by measurement" line, since it shows a trend, not a fix.

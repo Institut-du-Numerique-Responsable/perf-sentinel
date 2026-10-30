@@ -52,7 +52,7 @@ Les deux invocations de clippy couvrent l'ensemble des features par défaut et l
 
 ### 2.5 Fraîcheur des données de référence GreenOps
 
-C'est un audit opérateur, aucun script ne le vérifie automatiquement. Les données de référence embarquées alimentent le pipeline de scoring carbone et sont livrées comme source Rust (donc couvertes par `cargo test --workspace` à l'étape 2). Les tests garantissent la correction, pas la fraîcheur. Le workflow `refresh-datasets` régénère les deux tables scriptées deux fois par an (ou via `workflow_dispatch`) et ouvre une PR. Cette étape vérifie que ces PR ont été fusionnées assez récemment. Avant de taguer, confirmer les millésimes déclarés dans :
+C'est un audit opérateur, aucun script ne le vérifie automatiquement. Les données de référence embarquées alimentent le pipeline de scoring carbone et sont livrées comme source Rust (donc couvertes par `cargo test --workspace` à l'étape 2). Les tests garantissent la correction, pas la fraîcheur. Le workflow `refresh-datasets` régénère les trois tables scriptées deux fois par an (ou via `workflow_dispatch`) et ouvre une PR. Cette étape vérifie que ces PR ont été fusionnées assez récemment. Avant de taguer, confirmer les millésimes déclarés dans :
 
 - `crates/sentinel-core/src/score/cloud_energy/table_data.rs` : `SPECPOWER_VINTAGE`, estampillé avec la date de l'instantané `ccf-coefficients` par `scripts/refresh-instance-power.py`. Les lignes manuelles (familles absentes des CSV CCF) restent dans `table.rs`.
 - `crates/sentinel-core/src/score/carbon_data.rs` : `CARBON_TABLE_VINTAGE` (`ember-<latest-data-year>`), estampillé par `scripts/refresh-carbon-data.py`. Les lignes subnationales (Amérique du Nord, Brésil BR-CS) restent manuelles dans `carbon.rs`.

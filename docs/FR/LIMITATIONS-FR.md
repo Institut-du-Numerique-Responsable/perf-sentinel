@@ -41,6 +41,7 @@
 - [Ingestion Tempo](#ingestion-tempo) : prérequis du format protobuf.
 - [Constante énergétique gCO2eq (section legacy)](#constante-énergétique-gco2eq-section-legacy-conservée-pour-les-références-croisées) : référence croisée vers Précision des estimations carbone.
 - [Ingestion pg_stat_statements](#ingestion-pg_stat_statements) : pas de corrélation par trace, signal hotspot complémentaire.
+- [Cartes à partager](#cartes-à-partager) : ce que prouve une carte signée, et ce qu'elle ne prouve pas.
 
 ## Fiabilité de la capture OTLP
 
@@ -988,3 +989,17 @@ L'estimation carbone utilise une constante énergétique fixe (`0,1 mWh par opé
 - **Requêtes pré-normalisées.** PostgreSQL normalise les requêtes `pg_stat_statements` au niveau du serveur. Perf Sentinel applique sa propre normalisation par dessus pour la référence croisée, ce qui peut produire des templates légèrement différents.
 - **Pas de connexion directe à PostgreSQL.** En mode fichier (`--input`), Perf Sentinel lit des fichiers CSV ou JSON exportés. Le flag `--prometheus` scrape les métriques `postgres_exporter` au lieu de se connecter directement à PostgreSQL. Voir "Ingestion automatisée pg_stat depuis Prometheus" ci-dessus pour les limitations spécifiques au mode Prometheus.
 - **Nombre d'entrées.** Le parseur pré-alloue la mémoire en fonction de la taille de l'entrée, plafonné à 100 000 entrées. Les fichiers dépassant 1 000 000 d'entrées (lignes CSV ou éléments de tableau JSON) sont rejetés avec une erreur pour prévenir l'épuisement mémoire.
+
+## Cartes à partager
+
+Une carte à partager prouve qu'une clé a signé ces chiffres et que personne ne les a changés depuis, rien de plus. Voir [`SHARE-CARD-FR.md`](./SHARE-CARD-FR.md) pour le contrat.
+
+- **Pas d'horodatage tiers.** Le jour signé est une affirmation du signataire. Qui vole une clé peut signer une carte datée d'avant la fuite, et révoquer la clé à partir du jour de la fuite ne l'attrape pas. Seules les cartes signées après le jour de révocation échouent.
+- **Les réseaux sociaux retirent les métadonnées.** LinkedIn réencode les images, ce qui supprime le chunk PNG `iTXt`, et probablement aussi la pièce jointe PDF d'un carrousel. Déposer un fichier sur la page de vérification ne marche qu'avec le fichier d'origine, le QR code est donc le chemin principal.
+- **Le QR code porte moins que le fichier.** La charge utile compacte contient l'angle, la période, les chiffres imprimés en gros, la période d'avant la correction, le domaine, la clé et le jour. Elle ne porte ni les champs libres, ni le périmètre, ni l'équivalence, ni la ligne CO2 : seul le fichier d'origine les prouve.
+- **Le niveau 1 prouve l'intégrité, pas l'identité du signataire.** N'importe qui peut fabriquer une clé. Sans clé publiée par le domaine de la carte (niveau 2), une signature valide dit seulement que la carte n'a pas été modifiée après sa signature.
+- **Le résolveur DNS-over-HTTPS voit la requête.** `verify-card --online` envoie le domaine de la carte au résolveur (`cloudflare-dns.com` par défaut, ou `--doh`), avec l'adresse IP de l'appelant, et lit le `/.well-known/perf-sentinel-key` du domaine, qui voit donc cette IP.
+- **Les octets du PNG sont reproductibles par cible.** La même entrée et la même clé donnent le même PNG sur une cible de compilation. La rastérisation en virgule flottante peut varier d'une architecture à l'autre, deux machines peuvent donc produire des octets différents pour la même carte. Les deux se vérifient.
+- **Une histoire à seuil est étroite.** Sa période d'avant la correction est celle de la trace d'où vient son chiffre, pas une période mesurée de tout l'endpoint. « Ne déclenche plus l'alerte » signifie qu'un jour après la correction, le daemon a vu des passages sous le seuil et aucune détection, pas que chaque passage reste sous le seuil.
+- **Les barres anciennes d'une courbe sont vérifiées par le Hub.** Les `covered_days` et `restart_days` signés ne couvrent que la période de la carte. La ligne de périmètre compte les jours de toutes les barres, mais la complétude des périodes antérieures est vérifiée par le Hub quand il construit la carte, elle n'est pas signée.
+- **La courbe ne nomme aucune correction.** Une carte courbe n'imprime pas de ligne « confirmée par la mesure », puisqu'elle montre une tendance, pas une correction.

@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- Share cards: a signed image or carousel that prints the CO2 a team avoided next to an everyday equivalent, for PerfSentinelHub to offer its users. Three new commands carry it. `perf-sentinel card keygen --out-dir <DIR>` writes an Ed25519 key (`<fingerprint>.pk8`, PKCS#8 v2, mode 0600, Unix only) and prints its fingerprint and public key. `perf-sentinel card render --input card.json --signing-key <key> --out-dir <DIR> --format png|pdf` checks the Hub's `card.json` against every rule of contract C3, refuses a card whose figures would claim more than they show, and writes a signed `card.png` (1080 x 1350) or a four-page PDF/A-3b carousel, English or French, with a QR code (version 12 at most, level L) holding the verify URL and a compact signed payload. `perf-sentinel verify-card <file|URL> [--keys <file>] [--online [--doh <URL>]]` checks the signature offline, then the key's binding to the card's domain, from a local key list or, with `--online`, from the domain's `_perf-sentinel` TXT record through DNS-over-HTTPS and its `/.well-known/perf-sentinel-key` file. Each command prints one JSON line with a closed list of reasons and exit codes. The contract, the payloads and the wording of every card line are in `docs/SHARE-CARD.md`, the limits in `docs/LIMITATIONS.md`.
+- The `card` Cargo feature, on in the CLI and off in the core, gates the three commands. It implies `pdf` and adds `tiny-skia` (the PNG raster), `png`, `fdeflate` and `miniz_oxide` to the lock file, plus a direct dependency on `ring` for Ed25519, already in the tree through rustls.
+- An embedded table of ADEME Base Carbone equivalences (meals, km by high-speed train, km by car, smartphones), vintage `V23.6 (2025-07-03)`, under the Licence Ouverte 2.0. A card counts the equivalence on the CO2 as it prints it, rounded down, and prints the factor, the source and the vintage. `scripts/refresh-equivalences.py` regenerates the table and the `refresh-datasets` workflow runs it twice a year. The binary never fetches it.
+
 ## [0.38.0] - 2026-10-29
 
 ### Added

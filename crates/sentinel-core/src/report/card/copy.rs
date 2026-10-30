@@ -1506,4 +1506,30 @@ mod tests {
         );
         assert_eq!(why_it_matters(Lang::Fr).len(), 2);
     }
+
+    /// The docs quote every story template, placeholders included, so a
+    /// reviewed wording cannot change in one place only.
+    #[test]
+    fn docs_list_every_story_sentence() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+        for (lang, relative) in [
+            (Lang::En, "SHARE-CARD.md"),
+            (Lang::Fr, "FR/SHARE-CARD-FR.md"),
+        ] {
+            let doc = std::fs::read_to_string(root.join(relative)).expect("read share card docs");
+            let w = words(lang);
+            assert!(doc.contains(w.lead_none), "{relative}: {}", w.lead_none);
+            for finding_type in ALL_TYPES {
+                let index = plain_index(&finding_type);
+                let plain = w.plain[index];
+                assert!(doc.contains(plain), "{relative}: {finding_type:?}: {plain}");
+                if let Some(template) = index.checked_sub(2).and_then(|i| w.with_threshold.get(i)) {
+                    assert!(
+                        doc.contains(template),
+                        "{relative}: {finding_type:?}: {template}"
+                    );
+                }
+            }
+        }
+    }
 }
