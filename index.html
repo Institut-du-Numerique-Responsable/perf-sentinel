@@ -1164,6 +1164,30 @@
   [data-sample-b] a+a{color:var(--text);background:var(--surface);border:1px solid var(--border)}[data-sample-b] a+a:hover{border-color:var(--accent)}
   [data-sample-b] svg{flex:none}
   @media(max-width:620px){[data-sample]{grid-template-columns:minmax(0,1fr);gap:26px}[data-sample-doc]{width:148px}[data-sample-b] a{width:100%;justify-content:center}}
+  /* Plugin panel in #modes. The Claude mark and its orange #D97757 (simple-icons brand hex) name the product the plugin runs in, text stays on the page palette */
+  [data-ico="claude"]{--ico:url(/assets/claude.svg)}
+  [data-cc]{margin-top:30px;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);grid-template-areas:"head head" "rail side";gap:20px 44px;align-items:start;padding:26px 28px;background:var(--surface);border:1px solid var(--border);border-radius:14px}
+  [data-cc-head]{grid-area:head}[data-cc-rail]{grid-area:rail}[data-cc-side]{grid-area:side}
+  [data-cc-h]{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;color:var(--text)}
+  [data-cc-p]{margin:8px 0 0;max-width:70ch;font-size:15px;line-height:1.6;color:var(--text-2);text-wrap:pretty}
+  [data-cc-avail]{margin:10px 0 0;font-size:15px;line-height:1.6;color:var(--text-2)}
+  [data-cc-prod]{white-space:nowrap}[data-cc-prod] b{font-weight:600;color:var(--text)}
+  [data-cc-prod] [data-ico]{display:inline-block;width:16px;height:16px;vertical-align:-2px;margin:0 6px 0 2px;color:#D97757}
+  [data-cc-rail]{list-style:none;margin:0;padding:0}
+  [data-cc-rail] li{position:relative;padding:0 0 22px 26px}
+  [data-cc-rail] li:last-child{padding-bottom:0}
+  [data-cc-rail] li::before{content:'';position:absolute;left:0;top:5px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2px solid #D97757}
+  [data-cc-rail] li:last-child::before{background:#D97757}
+  [data-cc-rail] li:not(:last-child)::after{content:'';position:absolute;left:5px;top:19px;bottom:2px;width:2px;background:color-mix(in srgb,#D97757 45%,transparent)}
+  [data-cc-tag]{display:block;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.02em;color:var(--text-2)}
+  [data-cc-rail] .dc-cmd{display:inline-block;margin-top:6px;font-size:13.5px}
+  [data-cc-rail] p{margin:8px 0 0;font-size:14.5px;line-height:1.6;color:var(--text-2);text-wrap:pretty}
+  [data-cc-term]{font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.9;color:#F5F4EF;background:#1F1E1D;border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:13px 16px;max-width:100%}
+  [data-cc-term] .ps-l1{align-items:center}[data-cc-term] .cc-cm{color:#A8A69D}[data-cc-term] .ps-pr{color:#D97757}[data-cc-term] .ps-nw{white-space:nowrap}
+  [data-cc-term]>div:not(.ps-l1){padding-left:2ch;text-indent:-2ch}
+  [data-cc-more]{display:inline-flex;align-items:center;gap:7px;min-height:44px;margin-top:6px;font-size:14px;font-weight:600;color:var(--accent-strong)}
+  [data-cc-note]{margin:2px 0 0;font-size:12.5px;line-height:1.5;color:var(--text-2)}
+  @media(max-width:860px){[data-cc]{grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "rail" "side";padding:22px 20px}}
   [data-hub-also]{margin-top:2px;padding-top:12px;border-top:1px dashed color-mix(in srgb,var(--dotnet) 40%,transparent);font-size:13px;line-height:1.5;color:var(--text-2)}
   [data-proof="proc"] li{font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.4;padding:5px 10px;color:var(--text);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;white-space:nowrap}[data-proof="proc"] li>span{color:var(--accent-strong)}
   @media(max-width:860px){[data-proof="proc"]{display:flex;flex-wrap:wrap}}@media(max-width:400px){[data-proof="proc"] li{white-space:normal}}
@@ -1772,7 +1796,21 @@
             </div>
           </div>
         </sc-for>
-      </div> <div data-links="" style="margin-top:24px"><a data-plain href="{{ guideBase }}#deploy" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ modesMore }}</span><span data-arrow> →</span></a><a data-plain href="{{ refBase }}CI" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ modesCi }}</span><span data-arrow> →</span></a><a data-plain href="{{ synModesHref }}" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ synModes }}</span><span data-arrow> →</span></a></div>
+      </div>
+      <div data-cc="" data-claude="">
+        <div data-cc-head=""><h3 data-cc-h="">{{ ccTitle }}</h3><p data-cc-p="">{{ ccLead }}</p><p data-cc-avail="">{{ ccAvailPre }} <span data-cc-prod=""><span data-ico="claude" aria-hidden="true"></span><b>Claude&nbsp;Code</b></span>.</p></div>
+        <ol data-cc-rail=""><sc-for list="{{ ccRows }}" as="r" hint-placeholder-count="2"><li><span data-cc-tag="">{{ r.tag }}</span><code class="dc-cmd">{{ r.cmd }}</code><p>{{ r.text }}</p></li></sc-for></ol>
+        <div data-cc-side="">
+          <div data-term="" data-cc-term="">
+            <div class="ps-l1"><span class="cc-cm"># {{ ccTermCmt }}</span><button type="button" data-copy="/plugin marketplace add Institut-du-Numerique-Responsable/perf-sentinel-claude&#10;/plugin install perf-sentinel@perf-sentinel" data-copied="{{ copiedLabel }}" aria-live="polite">{{ copyLabel }}</button></div>
+            <div><span class="ps-pr">&gt;</span> /plugin marketplace add <span class="ps-nw">Institut-du-Numerique-Responsable/</span><wbr><span class="ps-nw">perf-sentinel-claude</span></div>
+            <div><span class="ps-pr">&gt;</span> /plugin install <span class="ps-nw">perf-sentinel@perf-sentinel</span></div>
+          </div>
+          <a data-plain data-cc-more="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-claude" target="_blank" rel="noopener"><span data-ltext>{{ ccMore }}</span><span data-arrow="ext"> ↗</span></a>
+          <p data-cc-note="">{{ ccNote }}</p>
+        </div>
+      </div>
+      <div data-links="" style="margin-top:24px"><a data-plain href="{{ guideBase }}#deploy" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ modesMore }}</span><span data-arrow> →</span></a><a data-plain href="{{ refBase }}CI" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ modesCi }}</span><span data-arrow> →</span></a><a data-plain href="{{ synModesHref }}" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--accent-strong)" style-hover="gap:11px"><span data-ltext>{{ synModes }}</span><span data-arrow> →</span></a></div>
     </section>
 
     <!-- PERFORMANCE -->
@@ -2830,6 +2868,12 @@ class Component extends DCLogic {
         hubSurvives: ['a restart', 'an eviction', 'a template change'],
         hubBrowser: 'Browser', hubLauncher: 'LAUNCHER', hubPick: 'picks a source and the run settings', hubRun: 'the Hub runs Perf Sentinel, then serves the dashboard',
         hubMore: 'PerfSentinelHub on GitHub',
+        ccTitle: 'With an AI coding assistant', ccLead: 'A plugin brings Perf Sentinel into the change you are working on. It asks before every change it makes.', ccAvailPre: 'Available today for',
+        ccRows: [
+          { tag: 'before production', cmd: '/perf-sentinel:perf-tests', text: 'Writes performance integration tests for your current change, runs them under Perf Sentinel and, if you agree, wires them into your CI.' },
+          { tag: 'in production, with the Hub', cmd: '/perf-sentinel:prod-findings', text: 'Reads your services’ findings from the Hub, ranks them by avoidable I/O and fixes them in small batches, each proved by a non\u2011regression test.' },
+        ],
+        ccTermCmt: 'in Claude Code', ccMore: 'The plugin on GitHub', ccNote: 'Published by the Perf Sentinel project, independent of Anthropic. Claude Code is an Anthropic product.',
         hubAlso: 'For team reviews: a recap by day, week or month, and signed share cards.', hubRecapLink: 'Recap demo',
         modEyebrow: '// four ways to run it',
         modTitle: '1 binary, 2 modes, 4 ways to deploy',
@@ -3053,6 +3097,12 @@ class Component extends DCLogic {
         hubSurvives: ['au redémarrage', 'à l’éviction', 'au changement de template'],
         hubBrowser: 'Navigateur', hubLauncher: 'LANCEUR', hubPick: 'choisit une source et les réglages du run', hubRun: 'le Hub lance Perf Sentinel, puis sert le tableau de bord',
         hubMore: 'PerfSentinelHub sur GitHub',
+        ccTitle: 'Avec un assistant de code IA', ccLead: 'Un plugin amène Perf Sentinel dans le changement sur lequel vous travaillez. Il demande avant chaque modification.', ccAvailPre: 'Disponible aujourd’hui pour',
+        ccRows: [
+          { tag: 'avant la production', cmd: '/perf-sentinel:perf-tests', text: 'Écrit des tests d’intégration de performance pour votre changement en cours, les lance sous Perf Sentinel et, si vous le voulez, les branche dans votre CI.' },
+          { tag: 'en production, avec le Hub', cmd: '/perf-sentinel:prod-findings', text: 'Lit dans le Hub les findings de vos services, les classe par I/O évitable et les corrige par petits lots, chacun prouvé par un test de non\u2011régression.' },
+        ],
+        ccTermCmt: 'dans Claude Code', ccMore: 'Le plugin sur GitHub', ccNote: 'Publié par le projet Perf Sentinel, indépendant d’Anthropic. Claude Code est un produit d’Anthropic.',
         hubAlso: 'Pour les revues d’équipe : un récap par jour, semaine ou mois, et des cartes signées à partager.', hubRecapLink: 'Démo du récap',
         modEyebrow: "// quatre façons de l'exécuter",
         modTitle: '1 binaire, 2 modes, 4 façons de le déployer',
@@ -3322,6 +3372,7 @@ class Component extends DCLogic {
       hubLeadA: t.hubLeadA, hubLeadB: t.hubLeadB, pubEyebrow: t.pubEyebrow, pubT1: t.pubT1, pubTWord: t.pubTWord, pubT2: t.pubT2, pubIntroA: t.pubIntroA, pubIntroB: t.pubIntroB, pubIntroC: t.pubIntroC, pubVerT: t.pubVerT, pubVerText: t.pubVerText, pubCopyTitle: t.pubCopyTitle,
       hubMore: t.hubMore, hubDmnNote: t.hubDmnNote, hubPush: t.hubPush, hubPull: t.hubPull, hubKeepA: t.hubKeepA, hubKeepB: t.hubKeepB, hubKeepC: t.hubKeepC,
       hubAlso: t.hubAlso, hubRecapLink: t.hubRecapLink,
+      ccTitle: t.ccTitle, ccLead: t.ccLead, ccAvailPre: t.ccAvailPre, ccRows: t.ccRows, ccTermCmt: t.ccTermCmt, ccMore: t.ccMore, ccNote: t.ccNote,
       hubSurvives: t.hubSurvives, hubBrowser: t.hubBrowser, hubLauncher: t.hubLauncher, hubPick: t.hubPick, hubRun: t.hubRun,
       // SVG <text> drops the sc-interp span around a string, a one-element array renders as a bare text node
       patterns: t.patterns.map((p) => ({ ...p, labels: p.labels.map((s) => [s]) })),
