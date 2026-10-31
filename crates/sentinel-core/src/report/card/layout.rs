@@ -120,14 +120,17 @@ pub(crate) fn layout_image(payload: &FullPayload, compact_url: &str) -> Result<V
     );
     let room = (top + MAIN_GAP, IMAGE_MAIN_BOTTOM);
     let block = match payload.angle {
-        Angle::Story => fit(room, IMAGE_HEROES, IMAGE_SENTENCES, |hero, sentence| {
-            story_image(payload, hero, sentence)
+        Angle::Story => fit(
+            room,
+            IMAGE_HEROES,
+            IMAGE_SENTENCES,
+            |hero, sentence, tight| story_image(payload, hero, sentence, tight),
+        ),
+        Angle::Curve => fit(room, IMAGE_HEROES, &[0.0], |hero, _, tight| {
+            curve_image(payload, hero, tight)
         }),
-        Angle::Curve => fit(room, IMAGE_HEROES, &[0.0], |hero, _| {
-            curve_image(payload, hero)
-        }),
-        Angle::Collective => fit(room, IMAGE_HEROES, &[0.0], |hero, _| {
-            collective_image(payload, hero)
+        Angle::Collective => fit(room, IMAGE_HEROES, &[0.0], |hero, _, tight| {
+            collective_image(payload, hero, tight)
         }),
     };
     place(&mut ops, block, room);
@@ -219,25 +222,29 @@ fn step_size(text: &str, face: Face, sizes: &[f32], width: f32, max_lines: usize
         .unwrap_or(0.0)
 }
 
-/// The first block that fits `room`: the hero steps down first, then the
-/// sentence.
+/// The first block that fits `room`: the equivalence tightens first, then
+/// the hero steps down, then the sentence. `build` takes the hero size,
+/// the sentence size and whether the equivalence is tight.
 fn fit(
     (top, bottom): (f32, f32),
     heroes: &[f32],
     sentences: &[f32],
-    build: impl Fn(f32, f32) -> Block,
+    build: impl Fn(f32, f32, bool) -> Block,
 ) -> Block {
     let smallest = heroes.last().copied().unwrap_or(0.0);
     let first_sentence = sentences.first().copied().unwrap_or(0.0);
-    let candidates = heroes.iter().map(|&hero| (hero, first_sentence)).chain(
-        sentences
-            .iter()
-            .skip(1)
-            .map(|&sentence| (smallest, sentence)),
-    );
+    let candidates = heroes
+        .iter()
+        .flat_map(|&hero| [(hero, first_sentence, false), (hero, first_sentence, true)])
+        .chain(
+            sentences
+                .iter()
+                .skip(1)
+                .map(|&sentence| (smallest, sentence, true)),
+        );
     let mut block = Block::new(MARGIN, CONTENT);
-    for (hero, sentence) in candidates {
-        block = build(hero, sentence);
+    for (hero, sentence, tight) in candidates {
+        block = build(hero, sentence, tight);
         if block.y <= bottom - top {
             break;
         }
@@ -576,11 +583,12 @@ fn scope(b: &mut Block, payload: &FullPayload) {
     b.para(Face::Regular, 30.0, 38.0, TEXT, &scope_line(payload));
 }
 
-/// Sizes of a CO2 block: text, its line, the equivalence and its line,
-/// the source and its line.
+/// Sizes of a CO2 block: text, its line, the gap above the equivalence,
+/// the equivalence and its line, the source and its line.
 struct Co2Sizes {
     text: f32,
     line: f32,
+    gap: f32,
     count: f32,
     count_line: f32,
     source: f32,
@@ -608,7 +616,7 @@ fn co2_block(b: &mut Block, payload: &FullPayload, s: &Co2Sizes) {
 
 fn equivalence(b: &mut Block, payload: &FullPayload, s: &Co2Sizes) {
     if let Some((count, factor)) = equivalence_lines(payload) {
-        b.gap(10.0);
+        b.gap(s.gap);
         b.para(Face::Bold, s.count, s.count_line, TEXT, &count);
         b.para(Face::Regular, s.source, s.source_line, TEXT_2, &factor);
     }
@@ -617,14 +625,24 @@ fn equivalence(b: &mut Block, payload: &FullPayload, s: &Co2Sizes) {
 const IMAGE_CO2: Co2Sizes = Co2Sizes {
     text: 26.0,
     line: 35.0,
+    gap: 10.0,
     count: 28.0,
     count_line: 36.0,
     source: 22.0,
     source_line: 30.0,
 };
+/// The image's CO2 block when a long equivalence would otherwise push the
+/// hero down a step: same text sizes, closer lines.
+const IMAGE_CO2_TIGHT: Co2Sizes = Co2Sizes {
+    gap: 4.0,
+    count_line: 32.0,
+    source_line: 27.0,
+    ..IMAGE_CO2
+};
 const PAGE_CO2: Co2Sizes = Co2Sizes {
     text: 36.0,
     line: 49.0,
+    gap: 10.0,
     count: 38.0,
     count_line: 50.0,
     source: 26.0,
@@ -866,7 +884,7 @@ fn quoted_title(payload: &FullPayload) -> Option<String> {
 
 // ------------------------------------------------------- the image
 
-fn story_image(payload: &FullPayload, hero_size: f32, sentence: f32) -> Block {
+fn story_image(payload: &FullPayload, hero_size: f32, sentence: f32, tight: bool) -> Block {
     let mut b = Block::new(MARGIN, CONTENT);
     if let Some(title) = quoted_title(payload) {
         b.para(Face::Regular, 34.0, 42.0, TEXT_2, &title);
@@ -896,11 +914,16 @@ fn story_image(payload: &FullPayload, hero_size: f32, sentence: f32) -> Block {
             p.para(Face::Bold, 72.0, 78.0, TEXT, &figure);
             p.para(Face::Regular, 28.0, 36.0, TEXT, &rest);
             if let Some((count, factor)) = equivalence_lines(payload) {
-                p.gap(12.0);
+                let (gap, count_line, factor_line) = if tight {
+                    (6.0, 34.0, 27.0)
+                } else {
+                    (12.0, 38.0, 30.0)
+                };
+                p.gap(gap);
                 p.rule(ACCENT_BD);
-                p.gap(12.0);
-                p.para(Face::Bold, 30.0, 38.0, TEXT, &count);
-                p.para(Face::Regular, 22.0, 30.0, TEXT_2, &factor);
+                p.gap(gap);
+                p.para(Face::Bold, 30.0, count_line, TEXT, &count);
+                p.para(Face::Regular, 22.0, factor_line, TEXT_2, &factor);
             }
         });
     } else {
@@ -909,7 +932,7 @@ fn story_image(payload: &FullPayload, hero_size: f32, sentence: f32) -> Block {
     b
 }
 
-fn curve_image(payload: &FullPayload, hero_size: f32) -> Block {
+fn curve_image(payload: &FullPayload, hero_size: f32, tight: bool) -> Block {
     let mut b = Block::new(MARGIN, CONTENT);
     let w = words(payload.lang);
     let (current, previous) = curve_comparison(payload);
@@ -940,8 +963,12 @@ fn curve_image(payload: &FullPayload, hero_size: f32) -> Block {
     );
     scope(&mut b, payload);
     b.gap(18.0);
-    co2_block(&mut b, payload, &IMAGE_CO2);
+    co2_block(&mut b, payload, image_co2(tight));
     b
+}
+
+fn image_co2(tight: bool) -> &'static Co2Sizes {
+    if tight { &IMAGE_CO2_TIGHT } else { &IMAGE_CO2 }
 }
 
 fn curve_share(payload: &FullPayload) -> String {
@@ -953,7 +980,7 @@ fn curve_share(payload: &FullPayload) -> String {
     }
 }
 
-fn collective_image(payload: &FullPayload, hero_size: f32) -> Block {
+fn collective_image(payload: &FullPayload, hero_size: f32, tight: bool) -> Block {
     let mut b = Block::new(MARGIN, CONTENT);
     collective_heroes(&mut b, payload, hero_size, 44.0, false);
     b.gap(22.0);
@@ -963,7 +990,7 @@ fn collective_image(payload: &FullPayload, hero_size: f32) -> Block {
     scope(&mut b, payload);
     if co2_parts(payload).is_some() {
         b.gap(18.0);
-        co2_block(&mut b, payload, &IMAGE_CO2);
+        co2_block(&mut b, payload, image_co2(tight));
     }
     b
 }
@@ -1113,7 +1140,10 @@ fn room_fit(
     sentences: &[f32],
     build: impl Fn(f32, f32) -> Block,
 ) -> Block {
-    fit((0.0, room), heroes, sentences, build)
+    // The carousel has room for its equivalence: no tight variant.
+    fit((0.0, room), heroes, sentences, |hero, sentence, _| {
+        build(hero, sentence)
+    })
 }
 
 fn hook_page(payload: &FullPayload, room: f32) -> Block {
@@ -1789,6 +1819,86 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn every_equivalence_label_stays_in_the_margins() {
+        for lang in LANGS {
+            for e in crate::score::equivalence::equivalences() {
+                let mut input = in_lang(story(), lang);
+                input["equivalence_country"] =
+                    serde_json::to_value(e.countries[0]).expect("serializes");
+                input["equivalence"] = json!(e.id);
+                // The longest count a chosen row allows.
+                input["figures"]["co2_low_ug"] = json!(e.per_unit_ug * 999);
+                let mut pages = carousel(&input);
+                pages.push(image(&input));
+                for op in pages.iter().flatten() {
+                    if matches!(op, Op::Text { .. }) {
+                        assert!(
+                            bounds(op).2 <= RIGHT + 0.5,
+                            "{} {lang:?} past the margin: {op:?}",
+                            e.id
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn hero_sizes(ops: &[Op]) -> Vec<f32> {
+        heroes(ops).iter().map(|t| t.size).collect()
+    }
+
+    /// Every row in both languages and the three angles, at a short and
+    /// the longest count: the hero keeps the size it has with no
+    /// equivalence, and nothing runs into the proof band or the footer.
+    #[test]
+    fn an_equivalence_never_shrinks_the_hero_nor_runs_low() {
+        for lang in LANGS {
+            for base in angles() {
+                for e in crate::score::equivalence::equivalences() {
+                    for count in [3, 999] {
+                        check_equivalence_layout(&base, lang, e, count);
+                    }
+                }
+            }
+        }
+    }
+
+    fn check_equivalence_layout(
+        base: &Value,
+        lang: Lang,
+        e: &crate::score::equivalence::Equivalence,
+        count: u64,
+    ) {
+        let mut input = in_lang(base.clone(), lang);
+        input["equivalence_country"] = serde_json::to_value(e.countries[0]).expect("serializes");
+        input["equivalence"] = json!(e.id);
+        input["figures"]["co2_low_ug"] = json!(e.per_unit_ug * count);
+        let url = compact_url_of(&input);
+        let mut payload = full_payload(&input);
+        assert!(equivalence_lines(&payload).is_some(), "{} {count}", e.id);
+        let case = format!("{} {lang:?} {} x{count}", input["angle"], e.id);
+        let ops = layout_image(&payload, &url).expect("the image lays out");
+        let pages = layout_carousel(&payload, &url).expect("the carousel");
+        for op in above_band(&ops) {
+            assert!(bounds(op).3 <= BAND_TOP, "{case} over the band: {op:?}");
+        }
+        let rule = footer(&mut Vec::new(), &payload);
+        for op in pages[..3].iter().flatten() {
+            let (_, top, _, bottom) = bounds(op);
+            if matches!(op, Op::Text { .. }) && top < rule {
+                assert!(bottom <= rule, "{case} over the footer: {op:?}");
+            }
+        }
+        payload.equivalence = None;
+        let bare = layout_image(&payload, &url).expect("the image lays out");
+        assert_eq!(hero_sizes(&ops), hero_sizes(&bare), "{case} image");
+        let bare = layout_carousel(&payload, &url).expect("the carousel");
+        for (page, bare) in pages.iter().zip(&bare) {
+            assert_eq!(hero_sizes(page), hero_sizes(bare), "{case} carousel");
         }
     }
 

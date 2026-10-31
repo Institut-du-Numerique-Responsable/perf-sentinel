@@ -1,6 +1,7 @@
 # Semiannual refresh of the embedded datasets: carbon intensity from
 # Ember, instance power from the CCF coefficients, share-card
-# equivalences from the ADEME Base Carbone. Human in the loop: the
+# equivalences from the ADEME Base Carbone, the DESNZ conversion
+# factors and the US EPA calculator. Human in the loop: the
 # scripts regenerate the *_data.rs files and this workflow opens a
 # PR for review. It never pushes to main. PRs created with GITHUB_TOKEN
 # do not trigger `on: pull_request` workflows, so CI is dispatched on
@@ -107,7 +108,7 @@ jobs:
             echo "- [ ] On SPECPOWER_VINTAGE bump: CHANGELOG note for operator TOMLs pinning specpower_table_version"
             echo "- [ ] Turin proxy still justified (docs/LIMITATIONS.md)"
             echo "- [ ] Manual rows now covered upstream (script warnings) moved to the generated manifest"
-            echo "- [ ] Base Carbone equivalences: every row still Valide générique, labels still true, vintage updated in docs/SHARE-CARD.md and FR"
+            echo "- [ ] Equivalences: ADEME rows still Valide générique, DESNZ and EPA constants still the latest edition, labels still true, vintages updated in docs/SHARE-CARD.md and FR"
           } > "$RUNNER_TEMP/body.md"
           gh pr create --title "chore(data): refresh embedded datasets" --body-file "$RUNNER_TEMP/body.md" --base main --head "$branch"
           gh workflow run ci.yml --ref "$branch"

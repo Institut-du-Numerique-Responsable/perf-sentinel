@@ -112,7 +112,7 @@ jq -r .reason verdict.json
 
 ### Exit codes and reasons
 
-An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `unsupported_characters` when the text comes from `free.title`, `free.team`, `free.label` or `org.name`, and on the `malformed_input` of a `free.title` holding the PDF slot marker (`"field":"free.title"`, see C3). Any other text the fonts cannot draw (scope, service, endpoint) gives `unsupported_characters` without `field`.
+An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `unsupported_characters` when the text comes from `free.title`, `free.team`, `free.label` or `org.name`, and on the `malformed_input` of a `free.title` holding the PDF slot marker (`"field":"free.title"`, see C3) or of an unknown `equivalence_country` (`"field":"equivalence_country"`). Any other text the fonts cannot draw (scope, service, endpoint) gives `unsupported_characters` without `field`.
 
 | Exit | `result` | `card keygen` and `card render` reasons |
 |---|---|---|
@@ -146,7 +146,8 @@ The Hub writes it, the engine reads it. Unknown keys are refused, every number i
 | `figures` | yes | Integers whose name carries the unit, read by angle, see below. |
 | `story` | on a story only | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` is optional. `service` and `endpoint` take at most 200 characters each. `done_at` falls in or before the period, `observed_at` on or before `done_at`. |
 | `before_fix_period` | when the card prints one | `{"from","to"}`, one calendar period of `period.kind`, see [the before-fix period](#the-before-fix-period). |
-| `equivalence` | no | An `id` of the equivalence table. Absent, the engine picks one. |
+| `equivalence_country` | no | `fr`, `gb` or `us`, `fr` when absent. It selects the equivalence table, see [Equivalences](#equivalences). Any other value is `malformed_input`, with `"field":"equivalence_country"`. |
+| `equivalence` | no | An `id` of the table of the card's country. Absent, the engine picks one from that table. Any other `id`, including one that belongs to another country, is `unknown_equivalence`. |
 | `free` | yes, `{}` when empty | `{"title","team","label"}`, each optional: title 48 characters, team 48, label 80 (a story only). A title may not hold `{"content_sig":"`, the marker of the PDF's signature slot: `{"result":"input_error","reason":"malformed_input","field":"free.title"}`, exit 3, in every format. |
 | `org` | yes | `{"name","domain"}`. `name` takes at most 60 characters. `domain` is optional, a public DNS name: lowercase ASCII, at most 253, two labels or more of 1 to 63 `[a-z0-9-]` with no edge hyphen, the last one not all digits. |
 | `generated_at_ms` | yes | When the Hub built the card, in epoch milliseconds. |
@@ -203,6 +204,8 @@ The full payload is what the PNG and the PDF carry. It holds `card.json` with th
 | `equivalence` | `{"id","per_unit_ug","unit","source","vintage"}`, absent when the card prints no equivalence. |
 | `key` | The fingerprint of the signing key. |
 | `public_key` | The raw 32-byte Ed25519 public key, base64url. |
+
+The equivalence object is the same for every country. The country is not signed apart: it reads in the `id`, which is unique across the tables, and in `source`. `equivalence_country` only selects the row, so a verifier never needs it.
 
 The verifier applies the `card.json` rules to a signed payload too, since anyone can make a key. The equivalence is checked on its own terms (non-empty strings, a factor above 0, a count of at least 2 on the printed CO2), never against the embedded table, so a card stays verifiable after a Base Carbone refresh.
 
@@ -361,40 +364,52 @@ These are the only network calls the engine makes for a card, and only when `--o
 
 ## Equivalences
 
-The equivalences come from the ADEME Base Carbone. The table ships embedded in the binary, which never fetches it at runtime.
+The equivalences come from three official sources: the ADEME Base Carbone (France), the DESNZ greenhouse gas conversion factors (United Kingdom) and the US EPA Greenhouse Gas Equivalencies Calculator (United States). The table ships embedded in the binary, which never fetches it at runtime.
+
+The `equivalence_country` key of `card.json` (`fr`, `gb` or `us`, `fr` by default) selects the rows a card may use. Other countries: use `fr`, and every row that holds only for France names France in its label, so the card never passes a French factor off as a local one. The smartphone row, from the ADEME, is in all three tables: its 39.1 kg is almost all raw materials and has no use phase, so it does not depend on the French electricity grid.
+
+The `tgv_km` row is never picked by the engine. A card prints it only when `card.json` names `"equivalence":"tgv_km"` and the country is `fr`. So the smallest saving that prints an equivalence is two units of the lightest row the engine picks, counted on the printed CO2 (two significant figures, rounded down): 520 g in France (two kilometres by average car), 80 g in the UK (two kilometres by train), 790 g in the US (two miles by average car). Under it the card prints no equivalence.
 
 <!-- equivalences:begin -->
-Embedded vintage: Base Carbone `V23.6 (2025-07-03)`.
+Embedded vintages: Base Carbone `V23.6 (2025-07-03)`, DESNZ `2026, v1.2`, US EPA `2024-10`.
 
-| `id` | Base Carbone id | Base Carbone element | Factor | `per_unit_ug` | `unit` | `label` | Validity |
-|---|---:|---|---|---:|---|---|---|
-| `tgv_km` | 43256 | TGV, 2022 | 0.00293 kgCO2e/passager.km | 2_930_000 | `passenger_km` | km by high-speed train | avr-24 |
-| `car_km` | 43791 | Voiture, Motorisation moyenne | 0.256 kgCO2e/km | 256_000_000 | `vehicle_km` | km driven by an average car | 2026 |
-| `meal` | 20682 | Repas | 2.04 kgCO2e/repas | 2_040_000_000 | `meal` | average meals | déc-21 |
-| `smartphone` | 27013 | Smartphone, de plus de 5,5 pouces | 39.1 kgCO2e/unité | 39_100_000_000 | `unit` | smartphones | 20/12/2021 |
+| `id` | Countries | Auto | Source | Source reference | Factor | `per_unit_ug` | `unit` | `label` | Validity |
+|---|---|---|---|---|---|---:|---|---|---|
+| `tgv_km` | fr | no | ADEME, Base Carbone | 43256 | 0.00293 kgCO2e/passager.km | 2_930_000 | `passenger_km` | km by high-speed train in France | avr-24 |
+| `gb_rail_km` | gb | yes | DESNZ, GHG conversion factors | 25_315_3147_11_1 + 26_911_3147_11_1 | 0.03092 + 0.00897 kgCO2e/passenger.km | 39_890_000 | `passenger_km` | km by train in the UK | 2026 |
+| `gb_car_km` | gb | yes | DESNZ, GHG conversion factors | 4_301_3074_4_1 + 26_904_3074_4_1 | 0.16591 + 0.04399 kgCO2e/km | 209_900_000 | `vehicle_km` | km driven by an average car in the UK | 2026 |
+| `car_km` | fr | yes | ADEME, Base Carbone | 43791 | 0.256 kgCO2e/km | 256_000_000 | `vehicle_km` | km driven by an average car in France | 2026 |
+| `us_car_mile` | us | yes | US EPA, GHG Equivalencies Calculator | Miles driven by the average gasoline-powered passenger vehicle | 3.93 x 10-4 metric tons CO2e/mile | 393_000_000 | `vehicle_mile` | miles driven by an average US car, tailpipe only | 2024-10 |
+| `meal` | fr | yes | ADEME, Base Carbone | 20682 | 2.04 kgCO2e/repas | 2_040_000_000 | `meal` | average meals in France | déc-21 |
+| `smartphone` | fr, gb, us | yes | ADEME, Base Carbone | 27013 | 39.1 kgCO2e/unité | 39_100_000_000 | `unit` | smartphones | 20/12/2021 |
 <!-- equivalences:end -->
 
 Base Carbone keeps a row `Valide générique` after its validity period has lapsed, so the last column shows how old each factor is.
 
 ### Selection rules
 
-1. Each row is a Base Carbone `Elément` line, `Valide générique`, located in `France continentale`, with the unit the script expects for it.
-2. The unit is one everyday countable thing: a passenger kilometre, a kilometre, a meal, a unit. Never per euro, per kg or per kWh.
-3. Sorted by factor, each row is at most 100 times the previous one, so a CO2 figure always has a row that gives a readable count.
-4. When the label does not tell variants apart, the highest factor wins, so the count stays an "at least". The smartphone row is the over 5.5 inch model (39.1 kg), not the "classique" one (16.5 kg).
-5. No flight, and no comparison implying a cost the measurement does not show.
+1. Each row comes from an official publication of its country (the ADEME for France and for the smartphone, the DESNZ for the UK, the US EPA for the US), under a licence that allows embedding it with attribution: Licence Ouverte 2.0, Open Government Licence v3.0, US federal public domain.
+2. The unit is one everyday countable thing: a passenger kilometre, a kilometre, a mile, a meal, a unit. Never per euro, per kg or per kWh.
+3. Sorted by factor, the auto rows of one country are at most 200 times apart, so a CO2 figure always has a row that gives a readable count. An automatic count is therefore at most 399.
+4. Between variants, the highest factor wins, and always the widest scope the source publishes: exhaust plus upstream emissions in the UK, the EPA calculator (which counts SUVs) rather than the "Passenger Car" line of the GHG Emission Factors Hub. The smartphone row is the over 5.5 inch model (39.1 kg), not the "classique" one (16.5 kg).
+5. No flight, no comparison implying a cost the measurement does not show, no avoided emission and no sequestration (recycled bags, EPA trees).
+6. A scope narrower than the French row's says so in the label ("tailpipe only").
 
-`scripts/refresh-equivalences.py` enforces rules 1 and 2 and exits 1 when a row fails them. The tests enforce rule 3.
+`scripts/refresh-equivalences.py` enforces rules 1 (the identifiers, status and place each row must have in its source), 2 and 3, and exits 1 when a row fails them. The tests enforce rule 3 too. Rules 4 to 6 are judged by hand when a row is added to the script's `ROWS`.
 
 ### How the count is computed
 
 The count uses the CO2 as the card prints it, never the raw measurement. The printed CO2 keeps two significant figures, rounded down, and the count is a floor division of that figure by the factor. A saving of 12.4 kg prints "12 kg" and 5 average meals (12 ÷ 2.04 = 5.88), where the raw 12.4 kg would have given 6. Both roundings go down, so the card never claims more than was measured.
 
-When the caller does not choose an equivalence, the card takes the largest factor that still counts at least 2. A chosen equivalence must count between 2 and 1000.
+When the caller does not choose an equivalence, the card takes the largest auto row of the card's country whose factor still counts at least 2. A chosen equivalence must belong to that country's table and count between 2 and 1000.
 
 ### Attribution and licence
 
-Every card prints the factor it used, the source "ADEME, Base Carbone" and the embedded vintage. The Base Carbone is published under the Licence Ouverte 2.0 (Etalab), which allows reuse with attribution.
+Every card prints the factor it used, its source ("ADEME, Base Carbone", "DESNZ, GHG conversion factors" or "US EPA, GHG Equivalencies Calculator") and the embedded vintage of that source. The Base Carbone is published under the Licence Ouverte 2.0 (Etalab), which allows reuse with attribution.
+
+Contains public sector information licensed under the Open Government Licence v3.0.
+
+The US EPA calculator is in the US federal public domain. The source is cited as a courtesy, as on every card.
 
 ### Refresh
 
@@ -403,7 +418,9 @@ python3 scripts/refresh-equivalences.py
 cargo fmt -p perf-sentinel-core
 ```
 
-The script reads the dataset through the data.ademe.fr API, rewrites `crates/sentinel-core/src/score/equivalence_data.rs` and the table between the `equivalences:begin` and `equivalences:end` markers of this page and of its French mirror. Edit outside the markers only. The `refresh-datasets` workflow runs it twice a year and opens a pull request, and release step 2.5 audits `EQUIVALENCE_TABLE_VINTAGE` (see [`RELEASE-PROCEDURE.md`](./RELEASE-PROCEDURE.md)).
+The script reads the three sources: the dataset through the data.ademe.fr API, the DESNZ flat-format XLSX file and the EPA calculator page. It exits 1 when a row, a DESNZ identifier or the EPA factor is missing, or when a selection rule fails. It rewrites `crates/sentinel-core/src/score/equivalence_data.rs` and the table between the `equivalences:begin` and `equivalences:end` markers of this page and of its French mirror. Edit outside the markers only. The `refresh-datasets` workflow runs it twice a year and opens a pull request, and release step 2.5 audits `BASE_CARBONE_VINTAGE`, `DESNZ_VINTAGE` and `EPA_VINTAGE` (see [`RELEASE-PROCEDURE.md`](./RELEASE-PROCEDURE.md)).
+
+`DESNZ_URL`, `DESNZ_VINTAGE`, `EPA_URL` and `EPA_VINTAGE` are constants of the script, changed by hand when a new edition is out: the DESNZ publishes one every June, and its file URL changes with it. `bash scripts/test/refresh-equivalences.sh` checks the parsers offline.
 
 ## Card wording
 
@@ -446,7 +463,7 @@ The other lines:
 
 In the `Measured with` line, the two names Perf Sentinel and Institut du Numérique Responsable print in bold, underlined, in the brand green `#107a56`, and each stays whole on one line. The words are the same as in the table.
 
-Every figure is rounded down: counts are exact below 10 000, then two significant figures ("1.9 million"), durations in whole milliseconds below 100 ms, then seconds with one decimal, and a share under 0.1 % reads "under 0.1%". The units an equivalence counts are `average meal(s)`, `km by high-speed train`, `km driven by an average car` and `smartphone(s)`.
+Every figure is rounded down: counts are exact below 10 000, then two significant figures ("1.9 million"), durations in whole milliseconds below 100 ms, then seconds with one decimal, and a share under 0.1 % reads "under 0.1%". The units an equivalence counts are `average meal(s) in France`, `km by high-speed train in France`, `km driven by an average car in France`, `smartphone(s)`, `km by train in the UK`, `km driven by an average car in the UK` and `mile(s) driven by an average US car, tailpipe only`.
 
 A story CO2 line covers the before-fix period only, a curve's covers the card's period, and a collective's covers the before-fix period of its N+1 and redundant fixes only. A curve's scope line counts the days of every period it shows, from the first bar to the last.
 

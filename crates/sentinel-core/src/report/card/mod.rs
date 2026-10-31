@@ -49,7 +49,8 @@ impl CardResult {
 /// A card failure. `reason` comes from the closed list of C2; `field` is
 /// the `card.json` path of the text at fault, set on
 /// `unsupported_characters` (the first text the fonts cannot draw) and on
-/// the `malformed_input` of a `free.title` holding the PDF slot marker.
+/// the `malformed_input` of a `free.title` holding the PDF slot marker or
+/// of an unknown `equivalence_country`.
 #[derive(Debug, thiserror::Error)]
 #[error("{reason}: {detail}")]
 pub struct CardError {

@@ -4,6 +4,14 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- Share cards: per-country equivalences. `card.json` gains an optional `equivalence_country` key, `fr` (default), `gb` or `us`, that selects the equivalence table; any other value is `malformed_input` with `"field":"equivalence_country"`, and an `equivalence` `id` outside the country's table is `unknown_equivalence`. The United Kingdom rows (km by train, km by average car) come from the DESNZ greenhouse gas conversion factors 2026 (v1.2) under the Open Government Licence v3.0, the United States row (miles by average car, tailpipe only) from the US EPA Greenhouse Gas Equivalencies Calculator (2024-10). The signed payload keeps its five equivalence fields, so a 0.39 verifier still reads a new card. `scripts/refresh-equivalences.py` now reads the three sources, and the release audit covers `BASE_CARBONE_VINTAGE`, `DESNZ_VINTAGE` and `EPA_VINTAGE`.
+
+### Changed
+
+- Share cards: the French equivalence labels say "in France" (average meals, km driven by an average car, km by high-speed train), and the engine no longer picks the TGV: it is chosen only by `"equivalence":"tgv_km"`. A French saving under 520 g, which used to count at least two kilometres by TGV, now prints no equivalence.
+
 ## [0.39.0] - 2026-10-30
 
 ### Added
