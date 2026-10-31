@@ -430,8 +430,10 @@ const svg=$("#syn"),Y=330;
 const L={rails:el("g",{},svg),dots:el("g",{},svg),mods:el("g",{},svg),deco:el("g",{},svg)};
 const fx=(v,d=1)=>v.toExponential(d).replace(".",L_DEC);
 const DETN=["N+1","Redondant","Lent","Fanout","Bavard (HTTP)","Pool saturé","Sérialisé"],DETK=["rep","rep","slow","count","count","pool","ser"];
+// the drawn width of a text node: WebKit leaves letter-spacing out of getComputedTextLength, its box keeps it
+function textW(t){let w=0;try{w=t.getComputedTextLength()}catch(e){}try{w=Math.max(w,t.getBBox().width)}catch(e){}return w}
 // shrinks a text node until it fits its box
-function fitText(t,max){if(!t||!max)return;t.style.removeProperty("font-size");let L_=0;try{L_=t.getComputedTextLength()}catch(e){}if(L_>max){const fs=parseFloat(getComputedStyle(t).fontSize)||12;t.style.setProperty("font-size",Math.max(7,fs*max/L_)+"px","important")}}
+function fitText(t,max){if(!t||!max)return;t.style.removeProperty("font-size");const L_=textW(t);if(L_>max){const fs=parseFloat(getComputedStyle(t).fontSize)||12;t.style.setProperty("font-size",Math.max(7,fs*max/L_)+"px","important")}}
 
 /* ---------- the run, as the engine reported it ---------- */
 const TR=[
@@ -2569,7 +2571,7 @@ const mPs=(g,x,y,s)=>mImg(g,["psn","psj"],x,y,s);
 // a few words on hover or keyboard focus, in one fixed spot at the top right of the map so they never cover a label
 const mCap=el("g",{class:"mtip"},mG.ui),mCapT=tx(mCap,1510,874,"","mtipt","end"),mCapH=tx(mCap,1510,874,"","mtipt mtiph","end");
 function mTip(g,lines){// name and details on one line: the details right-aligned, the name just before them
-const on=v=>()=>{mCapT.textContent=v?lines.slice(1).join(" "):"";mCapH.textContent=v?lines[0]+" · ":"";mCapH.setAttribute("x",1510-(v&&mCapT.textContent?mCapT.getComputedTextLength():0))};
+const on=v=>()=>{mCapT.textContent=v?lines.slice(1).join(" "):"";mCapH.textContent=v?lines[0]+" · ":"";mCapH.setAttribute("x",1510-(v&&mCapT.textContent?textW(mCapT):0))};
  g.addEventListener("mouseenter",on(1));g.addEventListener("mouseleave",on(0));g.addEventListener("focus",on(1));g.addEventListener("blur",on(0))}
 // the environment each instance runs in, so two instances never share a name for a screen reader
 const MZONE={psLB:"Poste du développeur",psLD:"Poste du développeur",psCI:"CI",psCap:"CI",psP:"Production"};
@@ -2582,7 +2584,7 @@ for(const id in ME){if(ME[id][2]==="ghost")continue;const [x,y,kind,icon,n,s,mod
  else if(kind==="ps"){
   // the frame first: the zoom grows the overview out of it
   el("rect",{x:-w/2,y:-h/2,width:w,height:h,rx:w/2,class:"mbx"},g);el("circle",{r:w/2-9,class:"mring"},g);mPs(g,-16,-46,32);tx(g,0,4,n,"mn","middle");
-  const c=el("g",{},g),ct=tx(c,0,26,ml,"mchipt","middle"),fit=()=>{const L=ct.getComputedTextLength();c.querySelector("rect")?.remove();c.insertBefore(el("rect",{x:-L/2-7,y:13,width:L+14,height:18,rx:5,class:"mchip"}),ct)};mFit(fit);
+  const c=el("g",{},g),ct=tx(c,0,26,ml,"mchipt","middle"),fit=()=>{const L=textW(ct);c.querySelector("rect")?.remove();c.insertBefore(el("rect",{x:-L/2-7,y:13,width:L+14,height:18,rx:5,class:"mchip"}),ct)};mFit(fit);
   if(id==="psLB"){tx(mG.e,128,MT("outDev")+68,"à distance aussi :","mcap");tx(mG.e,128,MT("outDev")+84,"tempo · jaeger-query","ms");tx(mG.e,128,MT("outDev")+100,"pg-stat · mysql-stat","ms")}
   const bx=w*.354,by=-w*.354;el("circle",{cx:bx,cy:by,r:8,class:"mbadge"},g);el("path",{d:`M${bx-4},${by}h8M${bx},${by-4}v8`,class:"mbadge"},g);
   g.setAttribute("tabindex","0");g.setAttribute("role","button");g.setAttribute("aria-label",`Ouvrir Perf Sentinel (${ml}), ${MZONE[id]}`);const go=()=>mapZoom(id);
@@ -2590,7 +2592,7 @@ for(const id in ME){if(ME[id][2]==="ghost")continue;const [x,y,kind,icon,n,s,mod
  else if(id==="outDev"){el("rect",{x:-w/2,y:-h/2,width:w,height:h,rx:10,class:"mbx mgrp"},g);tx(g,-w/2+14,-7,n,"mn");
   // English puts the noun last, tr_ would read "rapport" alone as the first line of "rapport\npériodique"
   const pills=[LANG==="en"?[["HTML "],["report","mpilla"]]:[["rapport ","mpilla"],["HTML"]],[["TUI · logs"]],[["JSON · SARIF"]]].map(segs=>{const pg=el("g",{},g),t=tx(pg,0,15,"","mpillt");segs.forEach(([v,c])=>{el("tspan",c?{class:c}:{},t).textContent=v});return[pg,t]});
-  mFit(()=>{const ls=pills.map(([,t])=>t.getComputedTextLength());let px=-(ls.reduce((a,L)=>a+L+24,0)-8)/2;pills.forEach(([pg,t],i)=>{const L=ls[i];pg.querySelector("rect")?.remove();t.setAttribute("x",px+8);pg.insertBefore(el("rect",{x:px,y:3,width:L+16,height:17,rx:8.5,class:"mpill"}),t);px+=L+24})})}
+  mFit(()=>{const ls=pills.map(([,t])=>textW(t));let px=-(ls.reduce((a,L)=>a+L+24,0)-8)/2;pills.forEach(([pg,t],i)=>{const L=ls[i];pg.querySelector("rect")?.remove();t.setAttribute("x",px+8);pg.insertBefore(el("rect",{x:px,y:3,width:L+16,height:17,rx:8.5,class:"mpill"}),t);px+=L+24})})}
  else if(id==="hub"){g.classList.add("hub");el("rect",{x:-w/2,y:-h/2,width:w,height:h,style:"fill:none;stroke:none"},g);g.setAttribute("tabindex","0");g.setAttribute("role","button");g.setAttribute("aria-label","Ouvrir la vue d'ensemble du Hub");g.style.cursor="zoom-in";g.addEventListener("click",()=>hubZoom());g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();hubZoom()}});const k=h/2*.577;el("polygon",{points:`${-w/2},0 ${-w/2+k},${-h/2} ${w/2-k},${-h/2} ${w/2},0 ${w/2-k},${h/2} ${-w/2+k},${h/2}`,class:"mbx"},g);
   mPs(g,-w/2+20,-15,30);tx(g,-w/2+58,s?-2:6,n,"mn");if(s)tx(g,-w/2+58,14,s,"ms");
   // zoomable like the instances: the same ⊕ badge, in the Hub's colour
@@ -2603,10 +2605,10 @@ for(const id in ME){if(ME[id][2]==="ghost")continue;const [x,y,kind,icon,n,s,mod
   const wide=w>=300||id==="nrj",x0=-w/2+(L?16+L.length*26:MIC[icon]?40:14),rw=R?R.reduce((m,[,dx,,lw=15])=>Math.max(m,dx+lw),0)+6:0,tn=tx(g,x0,R||wide&&s?-3:6,n,"mn"),ts=wide&&s?tx(g,x0+rw,14,s,"ms"):null,lg=el("g",{},g);
   // a name too long for its box goes on two lines rather than shrinking, the logos of that box then stack on the right
   const fit=()=>{tn.textContent=n;tn.style.removeProperty("font-size");lg.textContent="";const full=tn.textContent,lw=R?Math.max(...R.map(([,, ,l=15])=>l)):0;let avail=w/2-x0-8;
-   const two=tn.getComputedTextLength()>avail&&full.includes(" ");
+   const two=textW(tn)>avail&&full.includes(" ");
    if(two){const k=full.includes(" · ")?full.indexOf(" · "):[...full.matchAll(/ /g)].map(m=>m.index).reduce((b,i)=>Math.abs(i-full.length/2)<Math.abs(b-full.length/2)?i:b),a=full.slice(0,k),z=full.slice(k).replace(/^ · | /,"");
     if(R)avail-=lw+6;tn.textContent="";[[a,-4],[z,13]].forEach(([v,yy])=>el("tspan",{x:x0,y:yy},tn).appendChild(document.createTextNode(v)))}
-   const L2=Math.max(...[...(two?tn.children:[tn])].map(e=>e.getComputedTextLength()));if(L2>avail)tn.style.fontSize=Math.max(11,parseFloat(getComputedStyle(tn).fontSize)*avail/L2)+"px";
+   const L2=Math.max(...[...(two?tn.children:[tn])].map(e=>textW(e)));if(L2>avail)tn.style.fontSize=Math.max(11,parseFloat(getComputedStyle(tn).fontSize)*avail/L2)+"px";
    if(R)R.forEach(([k,dx,sz,l=15],i)=>two?mImg(lg,k,w/2-8-l,i*19-17,sz,l):mImg(lg,k,x0+dx,sz<15?5:4,sz,l));if(ts)fitText(ts,w/2-x0-rw-10)};mFit(fit);
   if(s&&!wide){const tn_=tr_(n),ts_=tr_(s);g.setAttribute("role","img");g.setAttribute("aria-label",tn_+", "+ts_);mTip(g,[n,s])}}
  g.addEventListener("mouseenter",()=>{mHov=id;mPaint()});g.addEventListener("mouseleave",()=>{mHov=null;mPaint()})}
@@ -2674,7 +2676,7 @@ function hFlow(pts,col,style,lab,la,both,layer){const g=layer||hG.f,p=el("path",
  const L=p.getTotalLength();if(lab)hText(hG.t,la[0],la[1]+4,lab,"hlbl","middle");hFlows.push({p,L,col,style});return p}
 // a daemon of the fleet, drawn like the instances of the map
 function hDaemon(x,y,name){const g=el("g",{},hG.e);el("circle",{cx:x,cy:y,r:74,class:"hps"},g);mPs(g,x-21,y-54,42);hText(g,x,y+6,"Perf Sentinel","hn","middle");
- const c=el("g",{},g),t=hText(c,x,y+26,name,"hchipt","middle");mFit(()=>{const L=Math.max(t.getComputedTextLength(),t.textContent.length*6.6);// the Hub view may still be hidden when fonts load, DM Mono 11px advances 6.6px a glyph
+ const c=el("g",{},g),t=hText(c,x,y+26,name,"hchipt","middle");mFit(()=>{const L=Math.max(textW(t),t.textContent.length*6.6);// the Hub view may still be hidden when fonts load, DM Mono 11px advances 6.6px a glyph
  c.querySelector("rect")?.remove();c.insertBefore(el("rect",{x:x-L/2-7,y:y+13,width:L+14,height:18,rx:5,class:"hchip"}),t)});return g}
 
 hText(hG.t,40,40,"SOURCES","hcap");hText(hG.t,1430,40,"LECTEURS","hcap");
