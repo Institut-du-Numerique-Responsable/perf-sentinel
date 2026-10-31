@@ -277,13 +277,13 @@
   // load and leave a light launcher inside a dark page now, so the attribute is
   // set outright. This is where the launcher differs from the dashboard, whose
   // own resolution runs from an IIFE at the end of body.
-  // The site owns the theme in a frame, and the launcher's own control reads its
-  // label from application state this patch does not reach. Hidden rather than
-  // fought, the same choice the dashboard embed makes.
+  // The site owns the theme and the language in a frame, and the launcher's own
+  // controls read their labels from application state this patch does not reach.
+  // Hidden rather than fought, the same choice the dashboard embed makes.
   if (window.self !== window.top) {
     try {
       var hide = document.createElement('style');
-      hide.textContent = '#theme-toggle{display:none!important}';
+      hide.textContent = '#theme-toggle,#lang-toggle{display:none!important}';
       (document.head || document.documentElement).appendChild(hide);
     } catch (e) {}
   }
@@ -297,6 +297,11 @@
       localStorage.setItem('perf-sentinel:theme', initial);
     } catch (e) {}
   }
+
+  // The showcase page's language, read before app.js boots on <html lang>. Nothing is
+  // stored: the Hub's own choice, outside the showcase, stays the visitor's.
+  var lang = (location.search.match(/[?&]lang=(en|fr)(?:&|$)/) || [])[1];
+  if (lang) document.documentElement.lang = lang;
 
   // The launcher has no postMessage listener of its own, and neither store
   // crosses an origin, so the parent's theme arrives here and nowhere else.

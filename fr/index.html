@@ -3683,7 +3683,9 @@ class Component extends DCLogic {
   function th(){var r=liveRoot();return (r&&r.getAttribute('data-theme'))||'dark';}
   // Absolute path so the embed and open link resolve from /fr/ as well as /.
   function dashUrl(){return '/exemple/dashboard?theme='+th();}
-  function hubUrl(){return '/exemple/hub/?theme='+th();}
+  function pageLang(){return document.documentElement.lang.indexOf('fr')===0?'fr':'en';}
+  // The Hub follows the page's language as it follows its theme; a language switch reloads the page.
+  function hubUrl(){return '/exemple/hub/?theme='+th()+'&lang='+pageLang();}
   // A third target no longer fits a ternary. The Hub launcher takes the theme
   // the same way the dashboard does; the TUI is a terminal cast with its colours
   // baked in, so it stays out of the sync below.
