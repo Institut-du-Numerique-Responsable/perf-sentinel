@@ -54,6 +54,7 @@ const REFUSALS = {
   'cannot-verify': ['cannotVerify', 'circle-alert'],
   'no-card-data': ['noCardData', 'image-off', true, () => el('p', { class: 'vf-phone' }, T.phone)],
   'file-too-large': ['fileTooLarge', 'file-x'],
+  'file-unreadable': ['fileUnreadable', 'file-x'],
   'file-type': ['fileType', 'file-x'],
 };
 
@@ -180,8 +181,16 @@ function row(path, card, compact, verified) {
   return el('div', { 'data-field': path }, el('dt', null, verified && path === 'org.domain' ? T.domainVerified : labelOf(path, card, compact)), el('dd', { class: classOf(path, v) }, shown));
 }
 
+/** The paths #verifier-figures already shows, left out of the details so no figure shows twice. */
+function figurePaths(card) {
+  const { values, ...periods } = bigFigures(card);
+  return new Set([...Object.keys(periods), ...values.map(([name]) => `figures.${name}`)]);
+}
+
 function details(card, compact, verified) {
-  const paths = [...new Set(leafPaths(card).map((p) => WHOLE.find((w) => p.startsWith(w + '.')) ?? p))];
+  const shown = figurePaths(card);
+  const paths = [...new Set(leafPaths(card).map((p) => WHOLE.find((w) => p.startsWith(w + '.')) ?? p))]
+    .filter((p) => !shown.has(p));
   paths.sort((a, b) => rank(a) - rank(b));
   const groups = { card: [], free: [], cover: [], fix: [], co2: [], sig: [] };
   for (const p of paths) groups[groupOf(p)].push(row(p, card, compact, verified));
@@ -197,13 +206,13 @@ function details(card, compact, verified) {
 }
 
 /** The figures the QR code signs, first, so a reader compares them with the image they saw. */
-function figures(card) {
+function figures(card, compact) {
   const { values, ...periods } = bigFigures(card);
   const rows = [
     ...Object.entries(periods).map(([name, v]) => [name, name, formatValue(name, v, lang)]),
     ...values.map(([name, v]) => [name, `figures.${name}`, formatValue(`figures.${name}`, v, lang)]),
   ].map(([name, path, shown]) => el('div', { 'data-figure': name },
-    el('dt', null, labelOf(path, card, true)), el('dd', { class: path.startsWith('figures.') ? 'vf-n vf-big' : undefined }, shown)));
+    el('dt', null, labelOf(path, card, compact)), el('dd', { class: path.startsWith('figures.') ? 'vf-n vf-big' : undefined }, shown)));
   return el('section', { class: 'vf-fig', id: 'verifier-figures' },
     el('h2', { class: 'vf-gh' }, T.figuresTitle), el('p', { class: 'vf-gnote' }, T.figuresCompare), el('dl', { class: 'vf-dl' }, ...rows));
 }
@@ -289,7 +298,7 @@ function verdict(r, compact, n, resolver) {
       });
     }
   }
-  show(resolver ? 'level2' : 'level1', top, figures(card), dns, details(card, compact, Boolean(resolver)),
+  show(resolver ? 'level2' : 'level1', top, figures(card, compact), dns, details(card, compact, Boolean(resolver)),
     el('div', { class: 'vf-ft' }, el('a', { href: T.methodHref, 'data-plain': true }, T.method), limitsButton()));
 }
 
@@ -341,7 +350,7 @@ async function fromFile(file) {
     bytes = new Uint8Array(await file.arrayBuffer());
   } catch {
     // NotReadableError and the like: never leave the previous card's verdict on screen.
-    return n === latest ? refuse('no-card-data') : undefined;
+    return n === latest ? refuse('file-unreadable') : undefined;
   }
   if (n !== latest) return;
   const format = sniff(bytes);

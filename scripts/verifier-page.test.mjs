@@ -103,8 +103,10 @@ async function openFile(name, bytes, { how = 'choose', path = '/verifier', init 
 }
 
 const text = (page, sel) => page.locator(sel).first().textContent();
-const label = (page, path) => text(page, `[data-field="${path}"] dt`);
-const value = (page, path) => text(page, `[data-field="${path}"] dd`);
+// A signed figure shows once, in #verifier-figures; every other value in the details list.
+const cell = (path, part) => `[data-field="${path}"] ${part}, [data-figure="${path.replace(/^figures\./, '')}"] ${part}`;
+const label = (page, path) => text(page, cell(path, 'dt'));
+const value = (page, path) => text(page, cell(path, 'dd'));
 const visible = (page, sel) => page.locator(sel).first().isVisible();
 const pageText = (page) => page.evaluate(() => document.body.innerText);
 
@@ -211,14 +213,14 @@ test('a card without a domain shows no domain check', async () => {
 test('every angle renders', async () => {
   let { page, close } = await open(link('curve'));
   await waitState(page, 'level1');
-  assert.ok(await page.locator('[data-field^="figures."]').count() >= 2);
+  assert.ok(await page.locator('[data-figure]').count() >= 3);
   assert.ok((await label(page, 'figures.previous_waste_permille')).includes('August 2026'));
   assert.equal(await value(page, 'figures.previous_waste_permille'), '4.8%');
   await close();
 
   ({ page, close } = await open(link('collective')));
   await waitState(page, 'level1');
-  assert.ok(await page.locator('[data-field^="figures."]').count() >= 2);
+  assert.ok(await page.locator('[data-figure]').count() >= 3);
   assert.ok((await value(page, 'before_fix_period')).includes('August 2026'));
   await close();
 });
@@ -441,6 +443,24 @@ const FORMATS = ['png', 'svg', 'jxl', 'pdf'];
 const precedes = (page, a, b) => page.evaluate(([x, y]) => Boolean(document.querySelector(x)
   .compareDocumentPosition(document.querySelector(y)) & Node.DOCUMENT_POSITION_FOLLOWING), [a, b]);
 const figure = (page, name) => text(page, `[data-figure="${name}"]`);
+
+test('a signed figure shows once, with the label its file gives it', async () => {
+  for (const [how, opened] of [['link', () => open(link('story'))], ['file', () => openFile('story.png', fixture('story.png'))],
+    ['curve', () => open(link('curve'))], ['collective', () => open(link('collective'))]]) {
+    const { page, close } = await opened();
+    await waitState(page, 'level1');
+    const names = await page.$$eval('#verifier-figures [data-figure]', (els) => els.map((e) => e.dataset.figure));
+    const fields = await page.$$eval('#verifier-details [data-field]', (els) => els.map((e) => e.dataset.field));
+    for (const name of names) {
+      assert.equal(fields.includes(name) || fields.includes('figures.' + name), false, `${how}: ${name} twice`);
+    }
+    await close();
+  }
+  const { page, close } = await openFile('story.png', fixture('story.png'));
+  await waitState(page, 'level1');
+  assert.equal(await text(page, '[data-figure="cited_ops"] dt'), COPY.en.typedFields.nPlusOneCitedOps);
+  await close();
+});
 
 test('the signed figures come first, with the compare line', async () => {
   let { page, close } = await open(link('story'));
@@ -714,7 +734,8 @@ test('an unreadable file never leaves the previous verdict standing', async () =
     File.prototype.arrayBuffer = () => Promise.reject(new DOMException('unreadable', 'NotReadableError'));
   });
   await choose(page, 'other.png', fixture('story.png'));
-  await waitState(page, 'no-card-data');
+  await waitState(page, 'file-unreadable');
+  assert.equal(await text(page, '#verifier-headline'), COPY.en.fileUnreadable);
   assert.equal(await page.locator('#verifier-binding').count(), 0);
   await close();
 });

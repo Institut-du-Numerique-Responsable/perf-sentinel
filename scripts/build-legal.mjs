@@ -243,7 +243,8 @@ const verifierCss = `<style>${['shield-check', 'shield-alert', 'link-2-off', 'ci
   `.vf-drop{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:30px;padding:34px 24px;text-align:center;border:1.5px dashed color-mix(in srgb,var(--text-2) 45%,var(--border));border-radius:14px;background:var(--surface);cursor:pointer;transition:border-color .16s ease,background-color .16s ease}` +
   `.vf-drop:hover,.vf-drop[data-over]{border-color:var(--accent);background:color-mix(in srgb,var(--accent-soft) 45%,var(--surface))}` +
   `.vf-drop[data-over]{border-style:solid}` +
-  `.vf-drop:has(input:focus-visible),[data-ps-root] .vf-lim>summary:focus-visible{outline:2px solid var(--text);outline-offset:2px}` +
+  `.vf-drop:has(input:focus-visible){outline:2px solid var(--text);outline-offset:2px}` +
+  `[data-ps-root] .vf-lim>summary:focus-visible{outline:2px solid var(--text);outline-offset:2px}` +
   `.vf-drop input{position:absolute;width:1px;height:1px;opacity:0}` +
   `.vf-drop [data-ico]{width:26px;height:26px;color:var(--text-2)}` +
   `.vf-drop[data-over] [data-ico]{color:var(--accent-strong)}` +
