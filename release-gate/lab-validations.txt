@@ -759,3 +759,13 @@ v0.38.0	d63192e	2026-10-29	PASS
 # checks. Not run: the cluster scenarios, verify-all-scenarios and
 # validate-findings.
 v0.39.0	5c1d26a	2026-10-30	PASS
+# v0.40.0: targeted pass on the share card's equivalence countries, local
+# release binary 0.40.0, no cluster. Scenarios run: card-cli and card-signal,
+# and no other. card-cli (K1-K9) PASS, K9 new: one SVG card per country signs
+# that country's row with its source (fr meal ADEME, gb gb_car_km DESNZ, us
+# us_car_mile US EPA) and no equivalence_country; us 800 g signs 2 miles, us
+# 700 g and gb 70 g none; tgv_km only on request in France; another
+# country's row unknown_equivalence exit 1, country de malformed_input exit
+# 3. card-signal (S1-S7) PASS as a regression check. Not run: the cluster
+# scenarios, verify-all-scenarios and validate-findings.
+v0.40.0	46fa190	2026-10-31	PASS
