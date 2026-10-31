@@ -1793,6 +1793,31 @@ mod tests {
     }
 
     #[test]
+    fn every_equivalence_label_stays_in_the_margins() {
+        for lang in LANGS {
+            for e in crate::score::equivalence::equivalences() {
+                let mut input = in_lang(story(), lang);
+                input["equivalence_country"] =
+                    serde_json::to_value(e.countries[0]).expect("serializes");
+                input["equivalence"] = json!(e.id);
+                // The longest count a chosen row allows.
+                input["figures"]["co2_low_ug"] = json!(e.per_unit_ug * 999);
+                let mut pages = carousel(&input);
+                pages.push(image(&input));
+                for op in pages.iter().flatten() {
+                    if matches!(op, Op::Text { .. }) {
+                        assert!(
+                            bounds(op).2 <= RIGHT + 0.5,
+                            "{} {lang:?} past the margin: {op:?}",
+                            e.id
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn the_qr_encodes_the_compact_url_on_whole_pixels() {
         let input = story();
         let url = compact_url_of(&input);

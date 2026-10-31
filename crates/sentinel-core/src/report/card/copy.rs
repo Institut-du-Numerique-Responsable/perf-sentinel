@@ -1045,12 +1045,24 @@ pub(crate) fn brand_split(text: &str) -> Vec<(bool, &str)> {
 /// `label` stays the English docs label.
 pub(crate) fn equivalence_unit(id: &str, count: u64, lang: Lang) -> &'static str {
     let forms: Forms = match (id, lang) {
-        ("meal", Lang::En) => ["average meal", "average meals"],
-        ("meal", Lang::Fr) => ["repas moyen", "repas moyens"],
-        ("tgv_km", Lang::En) => ["km by high-speed train"; 2],
+        ("meal", Lang::En) => ["average meal in France", "average meals in France"],
+        ("meal", Lang::Fr) => ["repas moyen en France", "repas moyens en France"],
+        ("tgv_km", Lang::En) => ["km by high-speed train in France"; 2],
         ("tgv_km", Lang::Fr) => ["km en TGV"; 2],
-        ("car_km", Lang::En) => ["km driven by an average car"; 2],
-        ("car_km", Lang::Fr) => ["km parcourus par une voiture moyenne"; 2],
+        ("car_km", Lang::En) => ["km driven by an average car in France"; 2],
+        ("car_km", Lang::Fr) => ["km parcourus par une voiture moyenne en France"; 2],
+        ("gb_rail_km", Lang::En) => ["km by train in the UK"; 2],
+        ("gb_rail_km", Lang::Fr) => ["km en train au Royaume-Uni"; 2],
+        ("gb_car_km", Lang::En) => ["km driven by an average car in the UK"; 2],
+        ("gb_car_km", Lang::Fr) => ["km parcourus par une voiture moyenne au Royaume-Uni"; 2],
+        ("us_car_mile", Lang::En) => [
+            "mile driven by an average US car, tailpipe only",
+            "miles driven by an average US car, tailpipe only",
+        ],
+        ("us_car_mile", Lang::Fr) => [
+            "mile parcouru par une voiture moyenne aux États-Unis, à l'échappement seul",
+            "miles parcourus par une voiture moyenne aux États-Unis, à l'échappement seul",
+        ],
         ("smartphone", _) => ["smartphone", "smartphones"],
         // shortcut: an id this binary does not know prints the English docs
         // label, or nothing; upgrade when a card renders a payload it did not build.
@@ -1374,16 +1386,16 @@ mod tests {
         assert_eq!(
             equivalence_lines(&payload(story_input(FindingType::NPlusOneSql), Lang::En)),
             Some((
-                "Equal to at least 5 average meals".to_owned(),
-                "1 average meal = 2.04 kg CO2e. Source: ADEME, Base Carbone, V23.6 (2025-07-03)"
+                "Equal to at least 5 average meals in France".to_owned(),
+                "1 average meal in France = 2.04 kg CO2e. Source: ADEME, Base Carbone, V23.6 (2025-07-03)"
                     .to_owned()
             ))
         );
         assert_eq!(
             equivalence_lines(&payload(story_input(FindingType::NPlusOneSql), Lang::Fr)),
             Some((
-                "L'équivalent d'au moins 5 repas moyens".to_owned(),
-                "1 repas moyen = 2,04\u{a0}kg CO2e. Source\u{a0}: ADEME, Base Carbone, V23.6 (2025-07-03)"
+                "L'équivalent d'au moins 5 repas moyens en France".to_owned(),
+                "1 repas moyen en France = 2,04\u{a0}kg CO2e. Source\u{a0}: ADEME, Base Carbone, V23.6 (2025-07-03)"
                     .to_owned()
             ))
         );
@@ -1394,11 +1406,11 @@ mod tests {
         };
         assert_eq!(
             count_line(curve_input()),
-            "Equal to at least 7 average meals"
+            "Equal to at least 7 average meals in France"
         );
         assert_eq!(
             count_line(collective_input()),
-            "Equal to at least 9 average meals"
+            "Equal to at least 9 average meals in France"
         );
     }
 
@@ -1523,14 +1535,84 @@ mod tests {
 
     #[test]
     fn equivalence_units_agree_with_their_count() {
-        assert_eq!(equivalence_unit("meal", 1, Lang::En), "average meal");
-        assert_eq!(equivalence_unit("meal", 5, Lang::En), "average meals");
-        assert_eq!(equivalence_unit("meal", 5, Lang::Fr), "repas moyens");
-        assert_eq!(equivalence_unit("tgv_km", 5, Lang::Fr), "km en TGV");
-        assert_eq!(equivalence_unit("smartphone", 1, Lang::Fr), "smartphone");
+        let units = [
+            ("meal", 1, Lang::En, "average meal in France"),
+            ("meal", 5, Lang::En, "average meals in France"),
+            ("meal", 1, Lang::Fr, "repas moyen en France"),
+            ("meal", 5, Lang::Fr, "repas moyens en France"),
+            ("tgv_km", 5, Lang::Fr, "km en TGV"),
+            ("tgv_km", 5, Lang::En, "km by high-speed train in France"),
+            ("smartphone", 1, Lang::Fr, "smartphone"),
+            ("smartphone", 5, Lang::En, "smartphones"),
+            (
+                "car_km",
+                3,
+                Lang::En,
+                "km driven by an average car in France",
+            ),
+            ("gb_rail_km", 3, Lang::En, "km by train in the UK"),
+            (
+                "gb_car_km",
+                3,
+                Lang::Fr,
+                "km parcourus par une voiture moyenne au Royaume-Uni",
+            ),
+            (
+                "us_car_mile",
+                1,
+                Lang::En,
+                "mile driven by an average US car, tailpipe only",
+            ),
+            (
+                "us_car_mile",
+                30,
+                Lang::En,
+                "miles driven by an average US car, tailpipe only",
+            ),
+            (
+                "us_car_mile",
+                1,
+                Lang::Fr,
+                "mile parcouru par une voiture moyenne aux États-Unis, à l'échappement seul",
+            ),
+            (
+                "us_car_mile",
+                30,
+                Lang::Fr,
+                "miles parcourus par une voiture moyenne aux États-Unis, à l'échappement seul",
+            ),
+        ];
+        for (id, count, lang, expected) in units {
+            assert_eq!(
+                equivalence_unit(id, count, lang),
+                expected,
+                "{id} {count} {lang:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_row_has_a_label_in_both_languages() {
+        for e in crate::score::equivalence::equivalences() {
+            for lang in LANGS {
+                for count in [1, 5] {
+                    let unit = equivalence_unit(e.id, count, lang);
+                    assert!(!unit.is_empty() && unit != e.unit, "{} {lang:?}", e.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_us_card_counts_miles_and_names_the_epa() {
+        let mut input = story_input(FindingType::NPlusOneSql);
+        input["equivalence_country"] = json!("us");
         assert_eq!(
-            equivalence_unit("car_km", 3, Lang::En),
-            "km driven by an average car"
+            equivalence_lines(&payload(input, Lang::En)),
+            Some((
+                "Equal to at least 30 miles driven by an average US car, tailpipe only".to_owned(),
+                "1 mile driven by an average US car, tailpipe only = 393 g CO2e. Source: US EPA, GHG Equivalencies Calculator, 2024-10".to_owned()
+            ))
         );
     }
 
