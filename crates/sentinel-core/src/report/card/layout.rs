@@ -1860,37 +1860,45 @@ mod tests {
             for base in angles() {
                 for e in crate::score::equivalence::equivalences() {
                     for count in [3, 999] {
-                        let mut input = in_lang(base.clone(), lang);
-                        input["equivalence_country"] =
-                            serde_json::to_value(e.countries[0]).expect("serializes");
-                        input["equivalence"] = json!(e.id);
-                        input["figures"]["co2_low_ug"] = json!(e.per_unit_ug * count);
-                        let url = compact_url_of(&input);
-                        let mut payload = full_payload(&input);
-                        assert!(equivalence_lines(&payload).is_some(), "{} {count}", e.id);
-                        let case = format!("{} {lang:?} {} x{count}", input["angle"], e.id);
-                        let ops = layout_image(&payload, &url).expect("the image lays out");
-                        let pages = layout_carousel(&payload, &url).expect("the carousel");
-                        for op in above_band(&ops) {
-                            assert!(bounds(op).3 <= BAND_TOP, "{case} over the band: {op:?}");
-                        }
-                        let rule = footer(&mut Vec::new(), &payload);
-                        for op in pages[..3].iter().flatten() {
-                            let (_, top, _, bottom) = bounds(op);
-                            if matches!(op, Op::Text { .. }) && top < rule {
-                                assert!(bottom <= rule, "{case} over the footer: {op:?}");
-                            }
-                        }
-                        payload.equivalence = None;
-                        let bare = layout_image(&payload, &url).expect("the image lays out");
-                        assert_eq!(hero_sizes(&ops), hero_sizes(&bare), "{case} image");
-                        let bare = layout_carousel(&payload, &url).expect("the carousel");
-                        for (page, bare) in pages.iter().zip(&bare) {
-                            assert_eq!(hero_sizes(page), hero_sizes(bare), "{case} carousel");
-                        }
+                        check_equivalence_layout(&base, lang, e, count);
                     }
                 }
             }
+        }
+    }
+
+    fn check_equivalence_layout(
+        base: &Value,
+        lang: Lang,
+        e: &crate::score::equivalence::Equivalence,
+        count: u64,
+    ) {
+        let mut input = in_lang(base.clone(), lang);
+        input["equivalence_country"] = serde_json::to_value(e.countries[0]).expect("serializes");
+        input["equivalence"] = json!(e.id);
+        input["figures"]["co2_low_ug"] = json!(e.per_unit_ug * count);
+        let url = compact_url_of(&input);
+        let mut payload = full_payload(&input);
+        assert!(equivalence_lines(&payload).is_some(), "{} {count}", e.id);
+        let case = format!("{} {lang:?} {} x{count}", input["angle"], e.id);
+        let ops = layout_image(&payload, &url).expect("the image lays out");
+        let pages = layout_carousel(&payload, &url).expect("the carousel");
+        for op in above_band(&ops) {
+            assert!(bounds(op).3 <= BAND_TOP, "{case} over the band: {op:?}");
+        }
+        let rule = footer(&mut Vec::new(), &payload);
+        for op in pages[..3].iter().flatten() {
+            let (_, top, _, bottom) = bounds(op);
+            if matches!(op, Op::Text { .. }) && top < rule {
+                assert!(bottom <= rule, "{case} over the footer: {op:?}");
+            }
+        }
+        payload.equivalence = None;
+        let bare = layout_image(&payload, &url).expect("the image lays out");
+        assert_eq!(hero_sizes(&ops), hero_sizes(&bare), "{case} image");
+        let bare = layout_carousel(&payload, &url).expect("the carousel");
+        for (page, bare) in pages.iter().zip(&bare) {
+            assert_eq!(hero_sizes(page), hero_sizes(bare), "{case} carousel");
         }
     }
 
