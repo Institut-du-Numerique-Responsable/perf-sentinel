@@ -1164,6 +1164,7 @@
   [data-sample-b] a+a{color:var(--text);background:var(--surface);border:1px solid var(--border)}[data-sample-b] a+a:hover{border-color:var(--accent)}
   [data-sample-b] svg{flex:none}
   @media(max-width:620px){[data-sample]{grid-template-columns:minmax(0,1fr);gap:26px}[data-sample-doc]{width:148px}[data-sample-b] a{width:100%;justify-content:center}}
+  [data-hub-also]{margin-top:2px;padding-top:12px;border-top:1px dashed color-mix(in srgb,var(--dotnet) 40%,transparent);font-size:13px;line-height:1.5;color:var(--text-2)}
   [data-proof="proc"] li{font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.4;padding:5px 10px;color:var(--text);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;white-space:nowrap}[data-proof="proc"] li>span{color:var(--accent-strong)}
   @media(max-width:860px){[data-proof="proc"]{display:flex;flex-wrap:wrap}}@media(max-width:400px){[data-proof="proc"] li{white-space:normal}}
   [data-df-cols]{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-top:14px}
@@ -1823,6 +1824,7 @@
           <div style="font-size:18px;font-weight:700;color:var(--dotnet)">Perf Sentinel Hub</div>
           <div style="font-size:14px;line-height:1.5;color:var(--text)">{{ hubKeepA }}<b>{{ hubKeepB }}</b>{{ hubKeepC }}</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px"><sc-for list="{{ hubSurvives }}" as="c" hint-placeholder-count="3"><span data-hub-chip="">{{ c }}</span></sc-for></div>
+          <div data-hub-also="">{{ hubAlso }}</div>
         </div>
         <div data-hub-links="" aria-hidden="true" style="padding:0 8px;color:var(--dotnet)">
           <div data-hub-arrow=""><svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M10 0L0 5L10 10Z"></path></svg><i></i></div>
@@ -1842,7 +1844,7 @@
           </sc-for>
         </div>
       </div>
-      <div data-links="" style="margin-top:18px"><a data-plain href="{{ hubBenchHref }}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--dotnet)" style-hover="gap:11px"><span data-ltext>{{ hubBench }}</span><span data-arrow> →</span></a> <a data-plain href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--dotnet)" style-hover="gap:11px" data-clink="1"><span data-ltext>{{ hubMore }}</span><span data-arrow="ext"> ↗</span></a> <a data-plain href="{{ synHubHref }}" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--dotnet)" style-hover="gap:11px"><span data-ltext>{{ synHub }}</span><span data-arrow> →</span></a></div>
+      <div data-links="" style="margin-top:18px"><a data-plain href="/exemple/hub/#/recap" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--dotnet)" style-hover="gap:11px"><span data-ltext>{{ hubRecapLink }}</span><span data-arrow="ext"> ↗</span></a> <a data-plain href="{{ hubBenchHref }}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--dotnet)" style-hover="gap:11px"><span data-ltext>{{ hubBench }}</span><span data-arrow> →</span></a> <a data-plain href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--dotnet)" style-hover="gap:11px" data-clink="1"><span data-ltext>{{ hubMore }}</span><span data-arrow="ext"> ↗</span></a> <a data-plain href="{{ synHubHref }}" style="display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--dotnet)" style-hover="gap:11px"><span data-ltext>{{ synHub }}</span><span data-arrow> →</span></a></div>
       <button type="button" class="ps-dmore" data-tech-only="" data-depth-only="ess" onClick="{{ dMoreHub }}">{{ dMoreHubL }} <span aria-hidden="true">▸</span></button>
     </section>
 
@@ -2822,12 +2824,13 @@ class Component extends DCLogic {
         smpOpen: 'Open the sample (PDF, 86\u00a0KB)', smpHub: 'See it in the Hub demo',
         smpAlt: 'First page of the sample report: energy 18.42\u00a0kWh, carbon 1.91\u00a0kgCO₂eq, avoidable 0.34\u00a0kgCO₂eq for the first quarter of 2026.',
         hubLeadA: 'In daemon mode, Perf Sentinel holds findings in memory, oldest evicted first, and ',
-        hubLeadB: ' answers at most 1,000 rows: current state, not history. The Hub, a separate service, collects from every daemon and keeps what an eviction or restart would erase, such as when a finding first appeared. It also receives the periodic reports a scheduled job publishes, checks them, renders their PDF and shares them under an expiring link.',
+        hubLeadB: ' answers at most 1,000 rows: current state, not history. The Hub, a separate service, collects from every daemon and keeps what an eviction or restart would erase, such as when a finding first appeared. It also receives the periodic reports a scheduled job publishes, checks them, renders their PDF and shares them under an expiring link. Its recap ranks what to fix first and what moved, in an engineering and a management view, and a confirmed fix becomes a signed share card.',
         hubDmnNote: 'bounded memory, oldest evicted first', hubPush: 'push + retry', hubPull: 'fallback pull (the Hub polls)',
         hubKeepA: 'Keeps the finding history, including the ', hubKeepB: 'first-seen date', hubKeepC: ', which survives:',
         hubSurvives: ['a restart', 'an eviction', 'a template change'],
         hubBrowser: 'Browser', hubLauncher: 'LAUNCHER', hubPick: 'picks a source and the run settings', hubRun: 'the Hub runs Perf Sentinel, then serves the dashboard',
         hubMore: 'PerfSentinelHub on GitHub',
+        hubAlso: 'For team reviews: a recap by day, week or month, and signed share cards.', hubRecapLink: 'Recap demo',
         modEyebrow: '// four ways to run it',
         modTitle: '1 binary, 2 modes, 4 ways to deploy',
         modCols: ['SOURCE', 'MODE', 'OUTPUTS', 'DEPLOYMENTS'],
@@ -3044,12 +3047,13 @@ class Component extends DCLogic {
         smpOpen: 'Ouvrir l’exemple (PDF, 86\u00a0Ko)', smpHub: 'Le voir dans la démo du Hub',
         smpAlt: 'Première page du rapport d’exemple\u00a0: énergie 18,42\u00a0kWh, carbone 1,91\u00a0kgCO₂eq, évitable 0,34\u00a0kgCO₂eq sur le premier trimestre 2026.',
         hubLeadA: 'En mode daemon, Perf Sentinel garde ses findings en mémoire, les plus anciens évincés d’abord, et ',
-        hubLeadB: " répond au plus 1 000 lignes : l’état courant, pas l’historique. Le Hub, service séparé, collecte chaque daemon et garde ce qu’une éviction ou un redémarrage effacerait, comme la première apparition d’un finding. Il reçoit aussi les rapports périodiques qu’une tâche planifiée publie, les vérifie, rend leur PDF et les partage par un lien qui expire.",
+        hubLeadB: " répond au plus 1 000 lignes : l’état courant, pas l’historique. Le Hub, service séparé, collecte chaque daemon et garde ce qu’une éviction ou un redémarrage effacerait, comme la première apparition d’un finding. Il reçoit aussi les rapports périodiques qu’une tâche planifiée publie, les vérifie, rend leur PDF et les partage par un lien qui expire. Son récap classe ce qu’il faut corriger d’abord et ce qui a bougé, en vue technique et en vue pilotage, et une correction confirmée devient une carte signée à partager.",
         hubDmnNote: 'mémoire bornée, éviction des plus anciens', hubPush: 'push + reprise', hubPull: 'pull de secours (le Hub interroge)',
         hubKeepA: 'Conserve l’historique des findings, dont la ', hubKeepB: 'date de première apparition', hubKeepC: ', qui survit\u00a0:',
         hubSurvives: ['au redémarrage', 'à l’éviction', 'au changement de template'],
         hubBrowser: 'Navigateur', hubLauncher: 'LANCEUR', hubPick: 'choisit une source et les réglages du run', hubRun: 'le Hub lance Perf Sentinel, puis sert le tableau de bord',
         hubMore: 'PerfSentinelHub sur GitHub',
+        hubAlso: 'Pour les revues d’équipe : un récap par jour, semaine ou mois, et des cartes signées à partager.', hubRecapLink: 'Démo du récap',
         modEyebrow: "// quatre façons de l'exécuter",
         modTitle: '1 binaire, 2 modes, 4 façons de le déployer',
         modCols: ['SOURCE', 'MODE', 'SORTIES', 'DÉPLOIEMENTS'],
@@ -3174,7 +3178,7 @@ class Component extends DCLogic {
         },
         text: {
           detFootEss: 'Chaque finding indique sa sévérité, le template en cause, l’endpoint source, une suggestion de correction et son impact GreenOps.',
-          hubLeadEss: 'En mode daemon, Perf Sentinel garde un nombre borné de findings en mémoire : l’état courant, pas l’historique. Le Hub, service séparé, collecte chaque daemon et garde ce qu’une éviction ou un redémarrage effacerait. Il reçoit aussi les rapports périodiques, les vérifie et les partage.',
+          hubLeadEss: 'En mode daemon, Perf Sentinel garde un nombre borné de findings en mémoire : l’état courant, pas l’historique. Le Hub, service séparé, collecte chaque daemon et garde ce qu’une éviction ou un redémarrage effacerait. Il vérifie et partage aussi les rapports périodiques, classe ce qu’il faut corriger d’abord dans un récap, technique ou pilotage, et signe des cartes à partager.',
           goEssB1: ' suit la méthode ', goEssB2: ' (', goEssB3: '), sommée sur les traces analysées.',
           goEssNoteA: 'Une estimation directionnelle, assez pour prioriser et comparer avant et après. ', goEssNoteB: ' l’affine. Elle sert de donnée d’activité pour vos outils carbone ou une démarche RGESN, et peut être publiée en rapport périodique.',
           mesRedfishEss: 'Aucune VM cloud n’expose de BMC.',
@@ -3200,7 +3204,7 @@ class Component extends DCLogic {
         },
         text: {
           detFootEss: 'Every finding gives its severity, the template at fault, the source endpoint, a fix suggestion and its GreenOps impact.',
-          hubLeadEss: 'In daemon mode, Perf Sentinel holds a bounded number of findings in memory: current state, not history. The Hub, a separate service, collects from every daemon and keeps what an eviction or restart would erase. It also receives the periodic reports, checks them and shares them.',
+          hubLeadEss: 'In daemon mode, Perf Sentinel holds a bounded number of findings in memory: current state, not history. The Hub, a separate service, collects from every daemon and keeps what an eviction or restart would erase. It also checks and shares the periodic reports, ranks what to fix first in a recap for engineers and management, and signs share cards.',
           goEssB1: ' follows the ', goEssB2: ' method (', goEssB3: '), summed over the analyzed traces.',
           goEssNoteA: 'A directional estimate, enough to prioritize and compare before and after. ', goEssNoteB: ' sharpens it. It also serves as activity data for your carbon tools or RGESN work, and can be published as a periodic report.',
           mesRedfishEss: 'Cloud VMs expose no BMC.',
@@ -3317,6 +3321,7 @@ class Component extends DCLogic {
       hubEyebrow: t.hubEyebrow, hubStats: t.hubStats, hubBench: t.hubBench, hubBenchHref: t.hubBenchHref, hubTitleB1: t.hubTitleB1, hubWCs: t.hubWCs, hubTitleB2: t.hubTitleB2, hubBadge: t.hubBadgeTpl.replace('{v}', this.state.dotnetVersion || '10.0.403'),
       hubLeadA: t.hubLeadA, hubLeadB: t.hubLeadB, pubEyebrow: t.pubEyebrow, pubT1: t.pubT1, pubTWord: t.pubTWord, pubT2: t.pubT2, pubIntroA: t.pubIntroA, pubIntroB: t.pubIntroB, pubIntroC: t.pubIntroC, pubVerT: t.pubVerT, pubVerText: t.pubVerText, pubCopyTitle: t.pubCopyTitle,
       hubMore: t.hubMore, hubDmnNote: t.hubDmnNote, hubPush: t.hubPush, hubPull: t.hubPull, hubKeepA: t.hubKeepA, hubKeepB: t.hubKeepB, hubKeepC: t.hubKeepC,
+      hubAlso: t.hubAlso, hubRecapLink: t.hubRecapLink,
       hubSurvives: t.hubSurvives, hubBrowser: t.hubBrowser, hubLauncher: t.hubLauncher, hubPick: t.hubPick, hubRun: t.hubRun,
       // SVG <text> drops the sc-interp span around a string, a one-element array renders as a bare text node
       patterns: t.patterns.map((p) => ({ ...p, labels: p.labels.map((s) => [s]) })),
