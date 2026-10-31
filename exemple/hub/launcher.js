@@ -33,38 +33,36 @@
     }
 
     /**
+     * A code-to-sentence table read from the text tables on each access, so it follows the
+     * shown language without being rebuilt.
+     * @param {string} prefix
+     * @param {string[]} codes
+     * @returns {Record<string, string>}
+     */
+    function textTable(prefix, codes) {
+        /** @type {Record<string, string>} */
+        const table = {};
+        codes.forEach(function (code) {
+            Object.defineProperty(table, code, {enumerable: true, get: () => t(prefix + code)});
+        });
+        return table;
+    }
+
+    /**
      * One actionable sentence per code, naming the next action. The service refuses to
      * expose raw stderr, so this table is the entire failure vocabulary the operator gets.
      * @type {Record<import('../types').ErrorCode, string>}
      */
-    const ERRORS = {
-        source_unreachable: 'nothing answered at its address. Check the daemon or backend is up and that the Hub still has a route to it, then run this again.',
-        source_auth_failed: 'it answered and refused the Hub\'s credentials. Rotate the configured auth header or API key in the source\'s Secret. Nothing here will work until that is done.',
-        source_rejected_request: 'it answered and refused these arguments, usually an unknown service name or a window it does not keep. Check the service against the backend and try a shorter lookback.',
-        timeout: 'the run passed this Hub\'s time ceiling, or the backend took too long to answer. A wide window is the usual cause, halve the trace cap or shorten it. If it repeats instantly whatever the window, the address is probably not answering at all, check the endpoint.',
-        output_too_large: 'the source returned more than one run is allowed to hold. Narrow the window or lower the trace cap so less comes back, then run it again.',
-        binary_failed: 'the analysis binary failed for a reason none of the other codes covers, and nothing was stored. Run it once more. If it repeats, send this analysis ID to whoever operates the Hub.',
-        invalid_request: 'the arguments were rejected before the run started, so nothing was read and nothing was spent. Fix the trace ID or the lookback value and submit again.',
-        hub_memory_low: 'the Hub refused to start the analysis binary: its container had too little memory left for it, and running it anyway would have got the whole Hub killed. Retry when the Hub is quieter, or have whoever operates it raise its memory limit.',
-        internal: 'the Hub itself failed and never touched the source. Retry now. If it fails the same way, the Hub needs attention rather than your request.'
-    };
+    const ERRORS = textTable('error.run.', ['source_unreachable', 'source_auth_failed', 'source_rejected_request',
+        'timeout', 'output_too_large', 'binary_failed', 'invalid_request', 'hub_memory_low', 'internal']);
 
     /**
      * What a failed read of a source means. A different vocabulary from ERRORS,
      * which describes a failed analysis run: these are the codes the collector
      * records, from a settings read or from a poll, the last three from a poll only.
      */
-    const READ_ERRORS = {
-        network_error: 'nothing answered at its address. Check the daemon is up and that the Hub still has a route to it.',
-        http_error: 'it answered with an error status, so it is running and reachable. This is the daemon refusing or failing the request rather than a network problem.',
-        timeout: 'it did not answer inside this Hub\'s HTTP timeout. Busy is as likely as down.',
-        invalid_status: 'it answered, but not with a status this Hub can read. Its /api/status has to carry a version string.',
-        response_too_large: 'it answered with more than this Hub reads in one go. A `[daemon]` section past that cap is worth reporting.',
-        hub_busy: 'the Hub capped how many daemon reads run at once and this one hit the cap. It clears in about a second.',
-        invalid_findings: 'it answered, but not with a findings list this Hub can read. A daemon this Hub does not support yet is the usual cause.',
-        database_full: 'the daemon answered, but the Hub\'s own database is full and could not store it. Grow the Hub\'s volume or shorten Hub:Retention, then look for a source creating abnormally many signatures.',
-        storage_error: 'the daemon answered, but the Hub\'s own database refused to store it. Check the Hub\'s logs and volume, not the daemon.'
-    };
+    const READ_ERRORS = textTable('error.read.', ['network_error', 'http_error', 'timeout', 'invalid_status',
+        'response_too_large', 'hub_busy', 'invalid_findings', 'database_full', 'storage_error']);
 
     /**
      * The health a source's row shows. A full database is the Hub's, so it is named
@@ -97,32 +95,23 @@
 
     function sourceHealth(source, now) {
         if (source.last_error_code === 'database_full' && !source.reachable)
-            return {tone: 'crit', text: 'Hub database full'};
+            return {tone: 'crit', text: t('health.database_full')};
         if (!source.reachable)
-            return {tone: 'crit', text: 'unreachable ' + dur(now - source.unreachable_since_ms)};
+            return {tone: 'crit', text: t('health.unreachable', {duration: dur(now - source.unreachable_since_ms)})};
         if (source.signature_rate_warning)
-            return {tone: 'warn', text: source.new_signatures_last_hour + ' new signatures in the last hour'};
-        return {tone: 'ok', text: source.last_attempt_ms == null ? 'not yet observed' : 'reachable'};
+            return {tone: 'warn', text: t('health.signature_rate', {count: source.new_signatures_last_hour})};
+        return {tone: 'ok', text: source.last_attempt_ms == null ? t('health.unobserved') : t('health.reachable')};
     }
 
     /** @type {Record<import('../types').ErrorCode, string>} */
-    const ERROR_TITLES = {
-        source_unreachable: 'No connection could be opened.',
-        source_auth_failed: 'The source rejected the Hub\'s credentials.',
-        source_rejected_request: 'The source refused the request.',
-        timeout: 'The run exceeded the execution ceiling.',
-        output_too_large: 'The source returned too much data.',
-        binary_failed: 'The analysis binary failed.',
-        invalid_request: 'The arguments were rejected before the run started.',
-        hub_memory_low: 'The Hub had too little memory left to run it.',
-        internal: 'The Hub failed on its own side.'
-    };
+    const ERROR_TITLES = textTable('error.title.', ['source_unreachable', 'source_auth_failed',
+        'source_rejected_request', 'timeout', 'output_too_large', 'binary_failed', 'invalid_request', 'hub_memory_low',
+        'internal']);
 
     /** @type {Record<import('../types').SourceKind, string>} */
     const KIND_LABEL = {daemon: 'daemon', tempo: 'tempo', jaeger_query: 'victoria traces'};
 
     const UNIT_MS = {m: 60000, h: 3600000, d: 86400000};
-    const UNIT_WORD = {m: 'minute', h: 'hour', d: 'day'};
 
     /**
      * Coarse duration. Drops a zero remainder so an exact hour reads "1 h", not "1 h 0 m".
@@ -130,15 +119,15 @@
      * @returns {string}
      */
     function dur(ms) {
-        if (ms == null) return 'n/a';
+        if (ms == null) return t('unit.na');
         const s = Math.max(0, Math.round(ms / 1000));
-        if (s < 60) return s + ' s';
+        if (s < 60) return s + ' ' + t('unit.s');
         const m = Math.floor(s / 60);
-        if (m < 60) return s % 60 ? m + ' m ' + (s % 60) + ' s' : m + ' m';
+        if (m < 60) return s % 60 ? m + ' ' + t('unit.min') + ' ' + (s % 60) + ' ' + t('unit.s') : m + ' ' + t('unit.min');
         const h = Math.floor(m / 60);
-        if (h < 24) return m % 60 ? h + ' h ' + (m % 60) + ' m' : h + ' h';
+        if (h < 24) return m % 60 ? h + ' ' + t('unit.h') + ' ' + (m % 60) + ' ' + t('unit.min') : h + ' ' + t('unit.h');
         const d = Math.floor(h / 24);
-        return h % 24 ? d + ' d ' + (h % 24) + ' h' : d + ' d';
+        return h % 24 ? d + ' ' + t('unit.d') + ' ' + (h % 24) + ' ' + t('unit.h') : d + ' ' + t('unit.d');
     }
 
     /**
@@ -151,16 +140,16 @@
      * @returns {string}
      */
     function durDown(ms, floor) {
-        if (ms == null) return 'n/a';
+        if (ms == null) return t('unit.na');
         const s = Math.max(0, Math.round(ms / 1000));
         const d = Math.floor(s / 86400);
         const h = Math.floor(s / 3600) % 24;
         const m = Math.floor(s / 60) % 60;
         const parts = [];
-        if (d) parts.push(d + ' d');
-        if (d || h) parts.push(h + ' h');
-        if (d || h || m || floor === 'm') parts.push(m + ' m');
-        if (floor === 's') parts.push((s % 60) + ' s');
+        if (d) parts.push(d + ' ' + t('unit.d'));
+        if (d || h) parts.push(h + ' ' + t('unit.h'));
+        if (d || h || m || floor === 'm') parts.push(m + ' ' + t('unit.min'));
+        if (floor === 's') parts.push((s % 60) + ' ' + t('unit.s'));
         return parts.join(' ');
     }
 
@@ -200,7 +189,7 @@
      */
     function durParts(ms) {
         const s = dur(ms);
-        if (s === 'n/a') return [{n: s, u: ''}];
+        if (ms == null) return [{n: s, u: ''}];
         /** @type {{n: string, u: string}[]} */
         const out = [];
         const re = /(\d+)\s*([a-z]+)/g;
@@ -239,7 +228,7 @@
         const m = /^(\d+)([mhd])$/.exec(s || '');
         if (!m) return s;
         const n = Number(m[1]);
-        return n + ' ' + UNIT_WORD[/** @type {'m'|'h'|'d'} */ (m[2])] + (n > 1 ? 's' : '');
+        return t('unit.word.' + m[2] + (n > 1 ? '.many' : '.one'), {count: n});
     }
 
     /**
@@ -332,18 +321,27 @@
         return c < 0
             ? {
                 dir: 'behind',
-                label: g.count + ' ' + g.unit + ' behind',
+                label: t('skew.behind', {count: g.count, unit: skewUnit(g)}),
                 fg: 'var(--warn-fg)',
                 bg: 'var(--warn-bg)',
                 bd: 'var(--warn-bd)'
             }
             : {
                 dir: 'ahead',
-                label: g.count + ' ' + g.unit + ' ahead',
+                label: t('skew.ahead', {count: g.count, unit: skewUnit(g)}),
                 fg: 'var(--info-fg)',
                 bg: 'var(--info-bg)',
                 bd: 'var(--info-bd)'
             };
+    }
+
+    /**
+     * The segment a gap is counted in, singular or plural with its count.
+     * @param {{count: number, unit: string}} gap
+     * @returns {string}
+     */
+    function skewUnit(gap) {
+        return t('skew.unit.' + gap.unit + (gap.count > 1 ? '.many' : '.one'));
     }
 
     /**
@@ -383,17 +381,16 @@
         const r = /** @type {Record<string, unknown>} */ (a.request || {});
         /** @type {string[]} */
         const parts = [];
-        if (r['service']) parts.push('service = ' + r['service']);
-        if (r['trace_id']) parts.push('trace_id = ' + r['trace_id']);
-        if (r['lookback']) parts.push('lookback = ' + r['lookback']);
-        if (r['from_ms']) parts.push('from_ms = ' + r['from_ms']);
-        if (r['to_ms']) parts.push('to_ms = ' + r['to_ms']);
-        if (r['max_traces'] != null) parts.push('max_traces = ' + r['max_traces']);
+        // The engine's own argument names, never translated: this line restates what was sent.
+        ['service', 'trace_id', 'lookback', 'from_ms', 'to_ms'].forEach(function (name) {
+            if (r[name]) parts.push(name + ' = ' + r[name]);
+        });
+        if (r['max_traces'] != null) parts.push(['max_traces', r['max_traces']].join(' = '));
         const detection = /** @type {Record<string, number|string>} */ (r['detection'] || {});
         Object.keys(detection).forEach(function (name) {
             parts.push(name + ' = ' + detection[name]);
         });
-        return parts.length ? parts.join('   ·   ') : 'no parameters  ·  daemon in-memory snapshot';
+        return parts.length ? parts.join('   ·   ') : t('run.args.none');
     }
 
     /**
@@ -417,40 +414,19 @@
      */
     function weightBand(n, cap) {
         const hardCap = typeof cap === 'number' && cap > 0 ? cap : 2000;
-        if (!Number.isFinite(n) || n < 1) {
-            return {
-                key: 'invalid', label: 'not a count',
-                fg: 'var(--crit-fg)', bg: 'var(--crit-bg)', bd: 'var(--crit-bd)', needsAck: false,
-                body: 'A run needs at least one trace. Drag the handle or type a number between 1 and '
-                    + hardCap + '.'
-            };
-        }
-        if (n <= Math.min(500, hardCap)) {
-            return {
-                key: 'safe', label: 'comfortable',
-                fg: 'var(--ok-fg)', bg: 'var(--ok-bg)', bd: 'var(--ok-bd)', needsAck: false,
-                body: 'Well inside what the sink returns whole. At this count the report is bounded by how much your traffic is doing wrong, not by the sink.'
-            };
-        }
-        if (n <= Math.min(1200, hardCap)) {
-            return {
-                key: 'heavy', label: 'heavy',
-                fg: 'var(--warn-fg)', bg: 'var(--warn-bg)', bd: 'var(--warn-bd)', needsAck: false,
-                body: 'More traces means more findings, and every one of them reaches the report. The span trees stop at the embed cap, so the extra weight here is the list itself, not the trees.'
-            };
-        }
-        if (n <= hardCap) {
-            return {
-                key: 'ceiling', label: 'at the ceiling',
-                fg: 'var(--crit-fg)', bg: 'var(--crit-bg)', bd: 'var(--crit-bd)', needsAck: true,
-                body: 'At this count the report still keeps every finding, and that is what makes it heavy: the file has no fixed ceiling and takes a moment to open. The run is also long enough to be worth watching against this Hub\'s time limit.'
-            };
-        }
-        return {
-            key: 'over', label: 'above the hard cap',
-            fg: 'var(--crit-fg)', bg: 'var(--crit-bg)', bd: 'var(--crit-bd)', needsAck: false,
-            body: 'The service rejects this before the run starts. Nothing is read and nothing is spent.'
-        };
+        /**
+         * @param {import('../types').WeightBand} key @param {string} tone @param {boolean} needsAck
+         */
+        const band = (key, tone, needsAck) => ({
+            key: key, label: t('weight.' + key + '.label'),
+            fg: 'var(--' + tone + '-fg)', bg: 'var(--' + tone + '-bg)', bd: 'var(--' + tone + '-bd)', needsAck: needsAck,
+            body: t('weight.' + key + '.body', {cap: hardCap})
+        });
+        if (!Number.isFinite(n) || n < 1) return band('invalid', 'crit', false);
+        if (n <= Math.min(500, hardCap)) return band('safe', 'ok', false);
+        if (n <= Math.min(1200, hardCap)) return band('heavy', 'warn', false);
+        if (n <= hardCap) return band('ceiling', 'crit', true);
+        return band('over', 'crit', false);
     }
 
     /**
@@ -461,12 +437,12 @@
      */
     function bytes(n) {
         if (!Number.isFinite(n) || n < 0) return '';
-        if (n < 1024) return n + ' B';
+        if (n < 1024) return n + ' ' + t('unit.byte');
         const kb = Math.round(n / 1024);
         // Rounding can carry into the next unit: 1023.5 KiB must read
         // "1.0 MB", never "1024 KB".
-        if (kb < 1024) return kb + ' KB';
-        return (n / (1024 * 1024)).toFixed(1) + ' MB';
+        if (kb < 1024) return kb + ' ' + t('unit.kb');
+        return decimal((n / (1024 * 1024)).toFixed(1)) + ' ' + t('unit.mb');
     }
 
     /**
@@ -665,9 +641,8 @@
         const header = source.auth_header_name;
         if (!header) return null;
         return header.toLowerCase() === 'x-api-key'
-            ? 'Set `PERF_SENTINEL_DAEMON_API_KEY` to this daemon\'s read key first.'
-            : 'This daemon is behind an `' + header + '` header. `query monitor` takes no such flag, '
-            + 'so this command works only from somewhere that reaches the daemon without it.';
+            ? t('daemon.monitor.api_key')
+            : t('daemon.monitor.header', {header: header});
     }
 
     /**
@@ -724,6 +699,34 @@
         const open = {};
         Object.keys(folds || {}).forEach(function (key) {
             if (folds[key] === true) open[key] = true;
+        });
+        return open;
+    }
+
+    /** The settings groups' fold keys named each group by its English heading before the French launcher. */
+    const OLD_DAEMON_GROUPS = {
+        '// declared': 'declared',
+        '// ingestion and memory': 'ingestion',
+        '// what it keeps for readers': 'readers',
+        '// metrics labels': 'labels',
+        '// listeners': 'listeners',
+        '// sub-systems': 'subsystems',
+        '// correlation': 'correlation'
+    };
+
+    /**
+     * The open settings groups, with a `<source>|<old heading>` key renamed to its group key, so
+     * an upgrade keeps them open and the next save drops the old key.
+     * @param {Record<string, boolean>} folds
+     * @returns {Record<string, true>}
+     */
+    function daemonGroupFolds(folds) {
+        /** @type {Record<string, true>} */
+        const open = {};
+        Object.keys(openFolds(folds)).forEach(function (key) {
+            const bar = key.lastIndexOf('|');
+            const group = OLD_DAEMON_GROUPS[key.slice(bar + 1)];
+            open[group ? key.slice(0, bar + 1) + group : key] = true;
         });
         return open;
     }
@@ -885,13 +888,8 @@
      * them. Anything else was already folded to `other` by the Hub's parser.
      * @type {Record<string, string>}
      */
-    const INCIDENT_KIND_LABEL = {
-        oom_kill: 'OOM kill',
-        memory_saturation: 'memory saturation',
-        restart: 'restart',
-        deploy: 'deploy',
-        other: 'other'
-    };
+    const INCIDENT_KIND_LABEL = textTable('incident.kind.',
+        ['oom_kill', 'memory_saturation', 'restart', 'deploy', 'other']);
 
     /**
      * The engine's twelve finding types, worded as its own dashboard words them.
@@ -904,20 +902,9 @@
      * thirteenth type, and it belongs on screen as itself.
      * @type {Record<string, string>}
      */
-    const FINDING_TYPE_LABEL = {
-        n_plus_one_sql: 'N+1 SQL',
-        n_plus_one_http: 'N+1 HTTP',
-        n_plus_one_messaging: 'N+1 messaging',
-        redundant_sql: 'Redundant SQL',
-        redundant_http: 'Redundant HTTP',
-        slow_sql: 'Slow SQL',
-        slow_http: 'Slow HTTP',
-        slow_messaging: 'Slow messaging',
-        excessive_fanout: 'Excessive fanout',
-        chatty_service: 'Chatty service',
-        pool_saturation: 'Pool saturation',
-        serialized_calls: 'Serialized calls'
-    };
+    const FINDING_TYPE_LABEL = textTable('finding.type.', ['n_plus_one_sql', 'n_plus_one_http',
+        'n_plus_one_messaging', 'redundant_sql', 'redundant_http', 'slow_sql', 'slow_http', 'slow_messaging',
+        'excessive_fanout', 'chatty_service', 'pool_saturation', 'serialized_calls']);
 
     /**
      * The daemon's own reading of `oldest_finding_ms`: at or below the window's
@@ -944,7 +931,7 @@
         const set = ['namespace', 'environment', 'source_id'].filter(function (key) {
             return filter[key] !== '';
         }).length;
-        return set === 0 ? 'More filters' : 'More filters, ' + set + ' set';
+        return set === 0 ? t('incident.filter.more') : t('incident.filter.more_set.' + plural(set), {count: set});
     }
 
     const SEVERITY_RANK = {critical: 3, warning: 2, info: 1};
@@ -998,7 +985,7 @@
     function ackCommand(source, signature, shellId) {
         const quote = shellById(shellId).quote;
         return 'perf-sentinel ack --daemon ' + quote(source.base_url) + ' create --signature '
-            + quote(signature) + ' --reason ' + quote('why it can wait');
+            + quote(signature) + ' --reason ' + quote(t('ack.command.reason'));
     }
 
     /**
@@ -1059,9 +1046,9 @@
      * @returns {string}
      */
     function phaseLabel(phase, kind) {
-        if (phase !== 'after') return ' before the incident';
-        if (kind === 'restart' || kind === 'oom_kill') return ' after the restart';
-        return kind === 'deploy' ? ' after the deploy' : ' after the incident';
+        if (phase !== 'after') return t('incident.phase.before');
+        if (kind === 'restart' || kind === 'oom_kill') return t('incident.phase.after_restart');
+        return t(kind === 'deploy' ? 'incident.phase.after_deploy' : 'incident.phase.after');
     }
 
     /**
@@ -1082,11 +1069,7 @@
      * which is already there.
      * @type {Record<string, string>}
      */
-    const INCIDENT_READ_STATE = {
-        absent: 'it publishes no incidents route',
-        unauthorized: 'it refused the Hub\'s key',
-        error: 'the read failed'
-    };
+    const INCIDENT_READ_STATE = textTable('incident.read.', ['absent', 'unauthorized', 'error']);
 
     /**
      * How the service and namespace filters of the incidents screen show. They
@@ -1113,8 +1096,9 @@
      * @returns {string}
      */
     function incidentsCopy(source, nowMs) {
-        if (source.incidents_read_ms == null) return source.name + ': never read';
-        const age = source.name + ': read ' + dur(Math.max(0, nowMs - source.incidents_read_ms)) + ' ago';
+        if (source.incidents_read_ms == null) return t('incident.copy.never', {name: source.name});
+        const age = t('incident.copy.read',
+            {name: source.name, duration: dur(Math.max(0, nowMs - source.incidents_read_ms))});
         const state = INCIDENT_READ_STATE[source.incidents_state || ''];
         return state ? age + ', ' + state : age;
     }
@@ -1300,8 +1284,8 @@
      */
     function lagText(ms) {
         if (ms == null) return '—';
-        if (ms < 1000) return Math.round(ms) + ' ms';
-        if (ms < 60000) return (ms / 1000).toFixed(1) + ' s';
+        if (ms < 1000) return Math.round(ms) + ' ' + t('unit.ms');
+        if (ms < 60000) return decimal((ms / 1000).toFixed(1)) + ' ' + t('unit.s');
         return dur(ms);
     }
 
@@ -1312,9 +1296,8 @@
      * @returns {string}
      */
     function episodeSpan(startMs, endMs) {
-        const start = dtHuman(startMs);
-        const end = dtHuman(endMs);
-        return start + ' → ' + (end.slice(0, 10) === start.slice(0, 10) ? end.slice(11) : end);
+        const sameDay = dtHuman(endMs).slice(0, 10) === dtHuman(startMs).slice(0, 10);
+        return dateTime(startMs) + ' → ' + (sameDay ? time(endMs) : dateTime(endMs));
     }
 
     /**
@@ -1337,9 +1320,10 @@
      */
     function pairLabel(episode) {
         const side = function (end) {
-            return (FINDING_TYPE_LABEL[end.finding_type] || end.finding_type) + ' in ' + end.service;
+            return t('correlation.pair.side',
+                {type: FINDING_TYPE_LABEL[end.finding_type] || end.finding_type, service: end.service});
         };
-        return side(episode.source) + ', then ' + side(episode.target);
+        return t('correlation.pair.label', {first: side(episode.source), then: side(episode.target)});
     }
 
     /**
@@ -1349,7 +1333,7 @@
      * @returns {string}
      */
     function episodeEndNote(episode) {
-        return episode.ended_by === 'stale' ? 'stale' : '';
+        return episode.ended_by === 'stale' ? t('correlation.ended_stale') : '';
     }
 
     /**
@@ -1456,15 +1440,13 @@
             const relay = Boolean(source && source.ack_relay);
             let action = 'none';
             let note = null;
-            if (!source) note = 'The Hub no longer configures this source.';
-            else if (!relay) note = 'The Hub holds no ack credential for this source.';
+            if (!source) note = t('ack.note.unconfigured');
+            else if (!relay) note = t('ack.note.no_credential');
             else if (ack && ack.source === 'daemon') action = 'revoke';
-            else if (ack) note = 'Acknowledged by the CI baseline, which is edited through a pull request.';
+            else if (ack) note = t('ack.note.ci_baseline');
             else if (ACK_STATES_KNOWN.indexOf(source.acks_state) < 0) {
                 action = 'either';
-                note = 'The ack state of this daemon is unknown, acks_state is '
-                    + (source.acks_state || 'never read') + '. Acknowledge and Revoke both apply, the daemon '
-                    + 'refuses the one that does not, and its answer shows in the result line.';
+                note = t('ack.note.unknown_state', {state: source.acks_state || t('ack.note.never_read')});
             } else action = 'ack';
             return {
                 id: carrier.id,
@@ -1497,7 +1479,7 @@
      */
     function formatDetections(detections, complete) {
         if (detections === null || detections === undefined) return '?';
-        const count = detections.toLocaleString('en');
+        const count = num(detections);
         return complete === false ? '\u2265 ' + count : count;
     }
 
@@ -1514,28 +1496,12 @@
         return {from: (Math.floor(nowMs / dayMs) - days + 1) * dayMs, to: nowMs};
     }
 
-    const GAP_LABEL = {
-        uncovered_days: 'days the ledger does not cover',
-        open_day: 'a day still open',
-        restart: 'a daemon restart',
-        sampling: 'sampled traces',
-        shed: 'traces shed under memory pressure',
-        ingest_rejected: 'rejected ingest',
-        overflow: 'a full ledger',
-        multi_instance: 'several instances behind one source'
-    };
+    const GAP_REASONS = ['uncovered_days', 'open_day', 'restart', 'sampling', 'shed', 'ingest_rejected', 'overflow',
+        'multi_instance'];
+    const GAP_LABEL = textTable('gap.tech.', GAP_REASONS);
 
     /** The same reasons in a Management reader's words, as RecapText's twin. */
-    const GAP_LABEL_PILOTAGE = {
-        uncovered_days: 'days with no data',
-        open_day: 'a day not finished yet',
-        restart: 'a restart of the measuring tool',
-        sampling: 'only part of the traffic was looked at',
-        shed: 'some activity was dropped under load',
-        ingest_rejected: 'some data was refused',
-        overflow: 'too many problems to count them all',
-        multi_instance: 'several copies of one service'
-    };
+    const GAP_LABEL_PILOTAGE = textTable('gap.pilotage.', GAP_REASONS);
 
     /**
      * Why a detection count falls short, in a few words. A reason a newer
@@ -1547,7 +1513,7 @@
     function gapLabel(reason, view) {
         const own = Object.prototype.hasOwnProperty;
         if (view === 'pilotage') {
-            return own.call(GAP_LABEL_PILOTAGE, reason) ? GAP_LABEL_PILOTAGE[reason] : 'another measurement gap';
+            return own.call(GAP_LABEL_PILOTAGE, reason) ? GAP_LABEL_PILOTAGE[reason] : t('gap.pilotage.other');
         }
         return own.call(GAP_LABEL, reason) ? GAP_LABEL[reason] : reason;
     }
@@ -1567,9 +1533,9 @@
         const endMs = Date.parse(day + 'T23:59:59Z');
         // The engine rolls the 31st of February over rather than refusing it.
         if (!Number.isFinite(endMs) || isoUtc(endMs).slice(0, 10) !== day) {
-            throw new RangeError('The expiry is not a date.');
+            throw new RangeError(t('ack.expiry.not_a_date'));
         }
-        if (endMs <= nowMs) throw new RangeError('The expiry is in the past.');
+        if (endMs <= nowMs) throw new RangeError(t('ack.expiry.past'));
         return isoUtc(endMs);
     }
 
@@ -1583,8 +1549,7 @@
     function ackExpiryLine(dateValue, nowMs) {
         try {
             const end = ackExpiry(dateValue, nowMs);
-            return end === null ? 'No date: the ack is permanent.'
-                : 'Holds until ' + end.slice(0, 10) + ' 23:59:59 UTC.';
+            return end === null ? t('ack.expiry.permanent') : t('ack.expiry.until', {day: end.slice(0, 10)});
         } catch (error) {
             return error.message;
         }
@@ -1614,7 +1579,7 @@
      * @returns {string}
      */
     function sourceCount(count) {
-        return count + (count === 1 ? ' source' : ' sources');
+        return t('ack.sources.' + plural(count), {count: count});
     }
 
     /**
@@ -1642,8 +1607,8 @@
         const revoke = checked('revoke');
         let expiresAt = null;
         let blocker = null;
-        if (ack.length === 0) blocker = 'No checked source can take an ack.';
-        else if (String(reason || '').trim() === '') blocker = 'An ack needs a reason.';
+        if (ack.length === 0) blocker = t('ack.plan.no_ack_source');
+        else if (String(reason || '').trim() === '') blocker = t('ack.plan.no_reason');
         else {
             try {
                 expiresAt = ackExpiry(expiryValue, nowMs);
@@ -1653,17 +1618,17 @@
         }
         const sentences = [];
         if (ack.length > 0) {
-            sentences.push(blocker || 'Acknowledge writes to ' + sourceCount(ack.length)
-                + (expiresAt ? ', until ' + expiresAt + '.' : ', with no expiry.'));
+            sentences.push(blocker || (expiresAt
+                ? t('ack.plan.ack_until', {sources: sourceCount(ack.length), expires: expiresAt})
+                : t('ack.plan.ack_permanent', {sources: sourceCount(ack.length)})));
         }
         // The Hub mirrors no ack from a row of unknown state, so it claims none there.
         const unsure = revoke.some(function (row) {
             return row.action === 'either';
         });
         if (revoke.length > 0) {
-            sentences.push(unsure
-                ? 'Revoke asks ' + sourceCount(revoke.length) + ' to remove the ack, if there is one.'
-                : 'Revoke removes the ack on ' + sourceCount(revoke.length) + '.');
+            sentences.push(t(unsure ? 'ack.plan.revoke_unsure' : 'ack.plan.revoke',
+                {sources: sourceCount(revoke.length)}));
         }
         return {
             ack: ack,
@@ -1671,7 +1636,7 @@
             expiresAt: expiresAt,
             blocker: blocker,
             blocked: blocker !== null && revoke.length === 0,
-            sentence: sentences.join(' ') || 'No checked source can take an ack or a revoke.'
+            sentence: sentences.join(' ') || t('ack.plan.none')
         };
     }
 
@@ -1697,27 +1662,24 @@
      * got an answer. Every other refusal carries its own `detail`.
      * @type {Record<number, string>}
      */
-    const ACK_REFUSALS = {
-        0: 'The Hub did not answer.',
-        413: 'The request is larger than the Hub accepts.',
-        503: 'The Hub is already relaying two acks. Try again in a moment.'
-    };
+    const ACK_REFUSALS = textTable('ack.refusal.', ['0', '413', '503']);
 
     /**
      * One line per source a submit wrote to, in the order it wrote. `action` is
      * the button pressed, never `either`: on a row of unknown ack state the
      * relay's `detail` carries the daemon's refusal of the button that did not apply.
-     * @param {Array<{name: string, action: 'ack' | 'revoke', status: number, detail?: string | null}>} results
+     * @param {Array<{name: string, action: 'ack' | 'revoke', status: number, detail?: string | null,
+     *     code?: string | null}>} results
      * @returns {Array<{ok: boolean, text: string}>}
      */
     function ackSummary(results) {
         return results.map(function (result) {
             const ok = result.status >= 200 && result.status < 300;
             const said = ok
-                ? (result.action === 'revoke' ? 'ack revoked.' : 'acknowledged.')
-                : result.detail || ACK_REFUSALS[result.status]
-                || 'The Hub refused the request with status ' + result.status + '.';
-            return {ok: ok, text: result.name + ': ' + said};
+                ? t(result.action === 'revoke' ? 'ack.result.revoked' : 'ack.result.acknowledged')
+                : (result.detail ? problemText(result, result.status) : null) || ACK_REFUSALS[result.status]
+                || t('ack.result.refused', {status: result.status});
+            return {ok: ok, text: t('ack.result.line', {name: result.name, said: said})};
         });
     }
 
@@ -1730,9 +1692,7 @@
      * @returns {string | null}
      */
     function shellBanner(status) {
-        return status === 403
-            ? 'No grant on this Hub reaches you. An administrator grants access in the Hub\'s configuration.'
-            : null;
+        return status === 403 ? t('access.no_grant') : null;
     }
 
     /**
@@ -1778,7 +1738,7 @@
     function railCell(quarter, items, current, nowMs) {
         const year = Math.floor(quarter / 4);
         const cell = {
-            label: year + ' Q' + ((quarter % 4) + 1),
+            label: t('period.quarter', {year: year, quarter: (quarter % 4) + 1}),
             state: 'missing',
             level: null,
             id: null,
@@ -1828,6 +1788,31 @@
         return rail;
     }
 
+    /**
+     * A month's name, `October` in English and `octobre` in French.
+     * @param {number} month 1 to 12
+     * @param {string} [language] the shown language when omitted
+     * @returns {string}
+     */
+    function monthName(month, language = LANG) {
+        if (language !== 'fr') return CARD_MONTHS[month - 1];
+        return new Intl.DateTimeFormat('fr-FR', {month: 'long', timeZone: 'UTC'}).format(new Date(Date.UTC(2000, month - 1, 1)));
+    }
+
+    /**
+     * A disclosure's period in words: `2026 Q3`, `October 2026`, `2026`, or its two days.
+     * @param {{type: string, from: string, to: string}} period
+     * @returns {string}
+     */
+    function periodLabel(period) {
+        const parts = String(period.to).split('-');
+        const month = Number(parts[1]);
+        if (period.type === 'calendar-quarter') return t('period.quarter', {year: parts[0], quarter: Math.floor((month - 1) / 3) + 1});
+        if (period.type === 'calendar-year') return parts[0];
+        if (period.type === 'calendar-month') return monthName(month) + ' ' + parts[0];
+        return t('period.range', {from: day(period.from, {withYear: true}), to: day(period.to, {withYear: true})});
+    }
+
     /** Runtime coverage as a whole percent, and whether it falls under the official 75 %. */
     function coverageNotch(coverage) {
         if (coverage == null) return null;
@@ -1843,26 +1828,28 @@
         const checks = detail.checks;
         const audited = detail.disclosure.integrity_level === 'audited';
         const binding = checks.binding === 'no_attestation' ? 'absent' : checks.binding;
-        const bindingBy = {checked: 'this Hub, same run', absent: 'no attestation published'};
+        const notHere = t('disc.check.by.not_here');
+        const bindingBy = binding === 'checked' ? t('disc.check.by.same_run')
+            : binding === 'absent' ? t('disc.check.by.no_attestation') : notHere;
         return [
             {
-                claim: 'The figures match the content hash',
-                by: checks.content_hash === 'checked' ? 'this Hub, perf-sentinel ' + checks.engine_version : 'not checked here',
+                claim: t('disc.check.hash'),
+                by: checks.content_hash === 'checked' ? t('disc.check.by.hub', {version: checks.engine_version}) : notHere,
                 outcome: checks.content_hash
             },
             {
-                claim: 'The attestation names this content hash',
-                by: bindingBy[binding] || 'not checked here',
+                claim: t('disc.check.binding'),
+                by: bindingBy,
                 outcome: binding
             },
             {
-                claim: "The publisher's pipeline signed the attestation",
-                by: 'you, with verify-hash against the expected signer',
+                claim: t('disc.check.signature'),
+                by: t('disc.check.by.you'),
                 outcome: checks.signature === 'declared' ? 'declared' : 'absent'
             },
             {
-                claim: 'An auditor reviewed the figures',
-                by: audited ? 'declared by the report' : 'nobody, the audited level is reserved',
+                claim: t('disc.check.audit'),
+                by: audited ? t('disc.check.by.report') : t('disc.check.by.nobody'),
                 outcome: audited ? 'declared' : 'none'
             }
         ];
@@ -1877,8 +1864,8 @@
         const aggregate = (report && report.aggregate) || {};
         const breakdown = aggregate.carbon_breakdown || {};
         return [
-            ['Database hosts', aggregate.database_waste, breakdown.database_kgco2eq],
-            ['Broker hosts', aggregate.messaging_waste, breakdown.messaging_kgco2eq]
+            [t('disc.host.database'), aggregate.database_waste, breakdown.database_kgco2eq],
+            [t('disc.host.broker'), aggregate.messaging_waste, breakdown.messaging_kgco2eq]
         ].filter(function (row) {
             return row[1] && Number(row[1].in_totals_windows) > 0;
         }).map(function (row) {
@@ -1896,7 +1883,7 @@
 
     /** Host kWh with two decimals, scientific below 0.005 so a small in-total host never reads as zero. */
     function hostKwh(value) {
-        return value === 0 || value >= 0.005 ? value.toFixed(2) : value.toExponential(1);
+        return decimal(value === 0 || value >= 0.005 ? value.toFixed(2) : value.toExponential(1));
     }
 
     /** verify-hash on the downloaded PDF, with this Hub's expected signer when it has one. */
@@ -1917,7 +1904,7 @@
             '  --input /var/lib/perf-sentinel/archive --org-config org.toml \\',
             '  --output report.json --emit-attestation attestation.intoto.jsonl',
             'cosign sign-blob --bundle bundle.sig --new-bundle-format attestation.intoto.jsonl',
-            '# patch integrity.signature and integrity_level into report.json, see REPORTING.md',
+            t('disc.publish.patch'),
             'curl --fail -H "X-API-Key: $HUB_DISCLOSURES_KEY" \\',
             '  -F report=@report.json \\',
             '  -F attestation=@attestation.intoto.jsonl \\',
@@ -2018,15 +2005,13 @@
      * @returns {string}
      */
     function accessExpiry(expiresAtMs, nowMs) {
-        if (expiresAtMs <= nowMs) return 'expired';
+        if (expiresAtMs <= nowMs) return t('access.expiry.expired');
         const days = Math.floor((expiresAtMs - nowMs) / 86400000);
-        if (days === 0) return 'in less than a day';
-        return days === 1 ? 'in 1 day' : 'in ' + days + ' days';
+        if (days === 0) return t('access.expiry.within_day');
+        return t('access.expiry.days.' + plural(days), {count: days});
     }
 
-    const ACCESS_CALLER = {
-        session: 'a browser session', terminal_token: 'a terminal token', machine_token: 'a machine token'
-    };
+    const ACCESS_CALLER = textTable('access.caller.', ['session', 'terminal_token', 'machine_token']);
 
     /**
      * The access page's first block. A session ends within the day, so its time is
@@ -2038,22 +2023,19 @@
     function accessSignedIn(access, nowMs) {
         const expires = access.expires_at_ms;
         const until = expires == null ? ''
-            : ', until ' + (expires - nowMs < 86400000 ? dtHuman(expires).slice(11) : dtHuman(expires));
+            : t('access.until', {when: expires - nowMs < 86400000 ? time(expires) : dateTime(expires)});
         return {
-            line: 'Signed in as ' + (access.identity || access.subject) + ', through '
-                + (ACCESS_CALLER[/** @type {keyof typeof ACCESS_CALLER} */ (access.caller)] || access.caller)
-                + until + '.',
+            line: t('access.signed_in', {
+                who: access.identity || access.subject,
+                via: ACCESS_CALLER[/** @type {keyof typeof ACCESS_CALLER} */ (access.caller)] || access.caller,
+                until: until
+            }),
             // A machine token's group is configuration, read on every request.
-            note: access.caller === 'machine_token'
-                ? null
-                : 'A group change at your provider applies at your next sign-in.',
-            subjectLabel: 'Your id, for an administrator: ',
+            note: access.caller === 'machine_token' ? null : t('access.group_note'),
+            subjectLabel: t('access.subject_label'),
             subject: access.subject
         };
     }
-
-    const ACCESS_NO_REACH =
-        'No grant reaches your groups. An administrator grants access in the Hub\'s configuration.';
 
     /**
      * The "What you reach" table. A grant on `*` covers more than every project, and
@@ -2063,8 +2045,8 @@
      */
     function accessReachRows(access) {
         return access.reach.map(entry => ({
-            project: entry.project === '*' ? 'Everything, including records no project covers' : entry.project,
-            group: entry.group == null ? 'your id, in Admins' : entry.group,
+            project: entry.project === '*' ? t('access.reach.everything') : entry.project,
+            group: entry.group == null ? t('access.reach.admins') : entry.group,
             role: entry.role,
             permissions: entry.permissions.join(', ')
         }));
@@ -2086,9 +2068,7 @@
             .concat(unmatched.attributes.map(row => '- { attribute: ' + JSON.stringify(row.key + '=' + row.value) + ' }'))
             .concat(unmatched.sources.map(row => '- { source: ' + JSON.stringify(row.source_id) + ' }'));
         if (lines.length === 0) return null;
-        return ['# Add the lines a team owns to the patterns of its project in hub.access.projects,',
-            '# then restart the Hub. A finding without a service needs a source or attribute pattern.']
-            .concat(lines).join('\n');
+        return [t('coverage.snippet.line1'), t('coverage.snippet.line2')].concat(lines).join('\n');
     }
 
     /**
@@ -2099,10 +2079,9 @@
      */
     function accessRequestText(access) {
         const groups = access.groups.length === 0
-            ? 'none'
+            ? t('access.request.none')
             : access.groups.map(group => group.name + ' (' + group.origin + ')').join(', ');
-        return 'Please grant access to the Perf Sentinel Hub.\nname: ' + (access.identity || access.subject)
-            + '\nid: ' + access.subject + '\ngroups: ' + groups;
+        return t('access.request.text', {name: access.identity || access.subject, id: access.subject, groups: groups});
     }
 
     /**
@@ -2113,10 +2092,10 @@
      * @returns {string}
      */
     function sourceCountLabel(runnable, total) {
-        if (runnable === total) return total + ' configured';
+        if (runnable === total) return t('new.sources.count', {total: total});
         const missing = total - runnable;
-        return runnable + ' of ' + total + ' configured · ' + missing
-            + (missing === 1 ? ' needs' : ' need') + ' analyses.run';
+        return t(missing === 1 ? 'new.sources.count_missing.one' : 'new.sources.count_missing.many',
+            {runnable: runnable, total: total, missing: missing});
     }
 
     /**
@@ -2127,17 +2106,10 @@
      * @returns {{ok: boolean, text: string}}
      */
     function revokeOutcome(status, row) {
-        const which = 'the token of ' + row.owner + ' created ' + row.created;
-        if (status === 204) {
-            return {ok: true, text: 'Revoked ' + which + '. That terminal gets a 401 on its next request.'};
-        }
-        if (status === 404) return {ok: true, text: 'The ' + which.slice(4) + ' was already gone.'};
-        return {
-            ok: false,
-            text: status === 0
-                ? 'The Hub did not answer. The token is still valid. Try again in a moment.'
-                : 'The Hub could not revoke this token (status ' + status + '). It is still valid. Try again in a moment.'
-        };
+        const which = {owner: row.owner, created: row.created, status: status};
+        if (status === 204) return {ok: true, text: t('access.revoke.done', which)};
+        if (status === 404) return {ok: true, text: t('access.revoke.gone', which)};
+        return {ok: false, text: t(status === 0 ? 'access.revoke.no_answer' : 'access.revoke.failed', which)};
     }
 
     /**
@@ -2151,10 +2123,10 @@
         return tokens.map(token => ({
             id: token.id,
             owner: token.identity,
-            from: token.client_address || 'unknown',
-            created: dtHuman(token.created_at_ms),
-            expires: dtHuman(token.expires_at_ms),
-            lastUsed: token.last_used_at_ms == null ? 'never' : dtHuman(token.last_used_at_ms)
+            from: token.client_address || t('access.token.unknown'),
+            created: dateTime(token.created_at_ms),
+            expires: dateTime(token.expires_at_ms),
+            lastUsed: token.last_used_at_ms == null ? t('access.token.never') : dateTime(token.last_used_at_ms)
         }));
     }
 
@@ -2176,9 +2148,7 @@
      * @returns {string}
      */
     function deviceIntro(expiresAtMs) {
-        return 'Enter the code your terminal shows. Only enter a code from a perf-sentinel login you started '
-            + 'yourself, just now: approving gives that terminal your access until '
-            + (expiresAtMs == null ? 'your session ends' : dtHuman(expiresAtMs).slice(11)) + '.';
+        return t('device.intro', {until: expiresAtMs == null ? t('device.intro.session_end') : time(expiresAtMs)});
     }
 
     /**
@@ -2190,11 +2160,13 @@
      */
     function deviceRequestLine(verify, nowMs) {
         const minutes = Math.floor((nowMs - verify.requested_at_ms) / 60000);
-        const ago = minutes < 1 ? 'less than a minute ago' : minutes === 1 ? '1 minute ago' : minutes + ' minutes ago';
-        return 'Requested from ' + verify.client_address + ' at ' + clock(verify.requested_at_ms).slice(0, 8)
-            + ' (' + ago + '). You are signed in as ' + (verify.identity || 'unknown') + '. The token expires at '
-            + (verify.token_expires_at_ms == null ? 'the end of your session' : dtHuman(verify.token_expires_at_ms).slice(11))
-            + '.';
+        return t('device.request', {
+            address: verify.client_address,
+            at: clock(verify.requested_at_ms).slice(0, 8),
+            ago: minutes < 1 ? t('device.ago.less') : t('device.ago.' + plural(minutes), {count: minutes}),
+            who: verify.identity || t('device.identity.unknown'),
+            expires: verify.token_expires_at_ms == null ? t('device.expires.session_end') : time(verify.token_expires_at_ms)
+        });
     }
 
     /**
@@ -2204,10 +2176,7 @@
      * @returns {string | null}
      */
     function deviceNetworkAlert(verify) {
-        return verify.same_network
-            ? null
-            : 'This code was requested from another network than this browser (' + verify.client_address
-            + '). Approve only if you started that sign-in yourself on that machine.';
+        return verify.same_network ? null : t('device.network_alert', {address: verify.client_address});
     }
 
     /**
@@ -2250,8 +2219,8 @@
      * carbon and action tiles keep one label.
      */
     const RECAP_LABELS = {
-        tech: {io: 'Avoidable I/O', findings: 'Active findings', moved: 'What moved'},
-        pilotage: {io: 'Unnecessary operations', findings: 'Open problems', moved: 'What changed'}
+        tech: textTable('recap.label.tech.', ['io', 'findings', 'moved']),
+        pilotage: textTable('recap.label.pilotage.', ['io', 'findings', 'moved'])
     };
 
     /**
@@ -2259,38 +2228,10 @@
      * test: the Management set may not use the engine's words, and the frozen report (no
      * script, so no "?") prints the same sentences in its closing section.
      */
+    const RECAP_HELP_KEYS = ['period', 'io', 'co2', 'findings', 'actions', 'prio', 'moved'];
     const RECAP_HELP = {
-        tech: {
-            period: 'A week runs Monday to Sunday and a month is a calendar month, both counted in UTC '
-                + 'days. While the period is in progress, trends compare its closed days with the same days of '
-                + 'the previous period; today counts in the tiles only. Times elsewhere on the page are in '
-                + 'your local time, with the zone.',
-            io: 'Extra database, HTTP and messaging calls the engine counted as avoidable on this period, '
-                + 'summed over the detections. Measured, not estimated.',
-            co2: 'An order of magnitude, never a ranking key: each finding\'s avoidable calls times the day\'s '
-                + 'grams per avoidable call the daemon reports. "At least" when some sources send no coefficient.',
-            findings: 'Findings seen on this period and not acknowledged. Acknowledged ones are counted apart '
-                + 'and left out of the priorities.',
-            actions: 'Declared by the team, checked by the engine: confirmed after a sealed day with no '
-                + 'detection, still detected when it shows up after the done day.',
-            prio: 'Findings with avoidable calls first, by volume; then the others by severity. Trends compare '
-                + 'closed days only.',
-            moved: 'Gone means not detected this period: a presumption, not proof that the fix shipped.'
-        },
-        pilotage: {
-            period: 'A week runs Monday to Sunday, counted in UTC days. While it is not over, comparisons only '
-                + 'use the days already finished. Times elsewhere on the page are in your local time, with '
-                + 'the zone.',
-            io: 'Work the application did for nothing on this period, counted by Perf Sentinel. Measured, not '
-                + 'estimated.',
-            co2: 'A rough estimate of the carbon this unnecessary work cost. It gives a scale, not an exact '
-                + 'figure.',
-            findings: 'Problems seen on this period that the team has not set aside.',
-            actions: 'What the team said it would fix, and whether the measurements confirm it.',
-            prio: 'The problems that cost the most come first. A team can name its services and steps in the '
-                + 'Hub, so this report speaks its language.',
-            moved: '"Gone" means it was not seen this period: probably fixed, but not proven.'
-        }
+        tech: textTable('recap.help.tech.', RECAP_HELP_KEYS),
+        pilotage: textTable('recap.help.pilotage.', RECAP_HELP_KEYS)
     };
 
     const RECAP_PERIODS = ['day', 'week', 'month'];
@@ -2383,24 +2324,19 @@
      * @returns {string}
      */
     function recapReportLabel(report) {
-        const kind = report.period.kind.charAt(0).toUpperCase() + report.period.kind.slice(1);
-        const origin = report.subscription || 'on demand by ' + (report.created_by || 'someone');
-        return kind + ' ' + periodText(report.period) + ' · ' + origin + (report.complete ? '' : ' · incomplete');
+        const kind = report.period.kind;
+        const period = periodText(report.period);
+        const head = hasText('recap.report.kind.' + kind)
+            ? t('recap.report.kind.' + kind, {period: period})
+            : kind.charAt(0).toUpperCase() + kind.slice(1) + ' ' + period;
+        const origin = report.subscription
+            || t('recap.report.on_demand', {who: report.created_by || t('recap.report.someone')});
+        return head + ' · ' + origin + (report.complete ? '' : t('recap.report.incomplete'));
     }
 
     /** The fixed copy of the Reports section, pinned with the Management words test. */
-    const RECAP_REPORTS_COPY = {
-        title: 'Reports',
-        hint: 'frozen when written',
-        help: 'A report is a copy of a closed period that no later read changes. A subscription writes one when '
-            + 'its period ends; Generate a report freezes the period and filters above, in your name, '
-            + 'and sends it nowhere.',
-        generate: 'Generate a report',
-        generating: 'Generating\u2026',
-        none: 'No report yet.',
-        failed: 'The Hub did not return the reports.',
-        refused: 'The Hub did not make the report. Check the period and filters, or ask whoever runs the Hub for access.'
-    };
+    const RECAP_REPORTS_COPY = textTable('recap.reports.', ['title', 'hint', 'help', 'generate', 'generating', 'none',
+        'failed', 'refused']);
 
     /**
      * What Generate a report would freeze for a route.
@@ -2408,8 +2344,10 @@
      * @returns {string}
      */
     function recapFreezeText(route) {
-        return 'Freezes ' + (route.at ? 'the ' + route.period + ' that holds ' + route.at : 'the last closed ' + route.period)
-            + (route.environment || route.service || route.grouping ? ', with the filters above' : '') + '.';
+        const filters = route.environment || route.service || route.grouping ? t('recap.freeze.filters') : '';
+        return route.at
+            ? t('recap.freeze.at.' + route.period, {at: recapDay(route.at), filters: filters})
+            : t('recap.freeze.last.' + route.period, {filters: filters});
     }
 
     /**
@@ -2419,16 +2357,10 @@
      * @returns {string}
      */
     function recapErrorText(status, view) {
-        const management = view === 'pilotage';
-        if (status === 403) {
-            return management
-                ? 'The Hub did not let you read the recap: your access does not include it.'
-                : 'The Hub did not let you read the recap: your access holds no findings.read.';
-        }
-        if (status === 400) return 'The Hub could not read a recap for this period or these filters.';
-        return management
-            ? 'The Hub did not return the recap.'
-            : 'The Hub did not return the recap. This is the Hub itself, not any daemon.';
+        const audience = view === 'pilotage' ? 'pilotage' : 'tech';
+        if (status === 403) return t('recap.error.forbidden.' + audience);
+        if (status === 400) return t('recap.error.invalid');
+        return t('recap.error.other.' + audience);
     }
 
     /**
@@ -2437,8 +2369,7 @@
      * @returns {string}
      */
     function recapTruncatedText(view) {
-        return 'The Hub read the first 5,000 ' + (view === 'pilotage' ? 'problems' : 'findings')
-            + ' and stopped there. Narrow the filters to see the others.';
+        return t('recap.truncated.' + (view === 'pilotage' ? 'pilotage' : 'tech'));
     }
 
     /**
@@ -2448,8 +2379,7 @@
      * @returns {string}
      */
     function recapSourcesNote(sources, view) {
-        return (view === 'pilotage' ? 'No figures came from: ' : 'Sources without a detection volume: ')
-            + sources.join(', ') + '.';
+        return t('recap.sources_note.' + (view === 'pilotage' ? 'pilotage' : 'tech'), {sources: sources.join(', ')});
     }
 
     /**
@@ -2458,7 +2388,7 @@
      * @returns {string}
      */
     function recapLateNote(sources) {
-        return 'Left out, as they recorded nothing until after this period: ' + sources.join(', ') + '.';
+        return t('recap.late_note', {sources: sources.join(', ')});
     }
 
     /**
@@ -2467,9 +2397,9 @@
      * @returns {string}
      */
     function recapReportStatus(report) {
-        if (!report.subscription) return 'On demand, not sent';
-        if (report.nothing_moved) return 'Archived, not sent: nothing moved';
-        return report.deliveries.length === 0 ? 'Archived, no destination' : '';
+        if (!report.subscription) return t('recap.report.status.on_demand');
+        if (report.nothing_moved) return t('recap.report.status.nothing_moved');
+        return report.deliveries.length === 0 ? t('recap.report.status.no_destination') : '';
     }
 
     /**
@@ -2481,9 +2411,11 @@
      */
     function recapDeliveryText(delivery) {
         const attempts = delivery.attempts || 0;
-        return delivery.channel + ' ' + delivery.target + ': ' + delivery.state
+        const state = hasText('recap.delivery.state.' + delivery.state)
+            ? t('recap.delivery.state.' + delivery.state) : delivery.state;
+        return t('recap.delivery.line', {channel: delivery.channel, target: delivery.target, state: state})
             + (delivery.last_status === null || delivery.last_status === undefined ? '' : ' (' + delivery.last_status + ')')
-            + (attempts > 0 ? ', ' + attempts + (attempts === 1 ? ' try' : ' tries') : '');
+            + (attempts > 0 ? t('recap.delivery.attempts.' + plural(attempts), {count: attempts}) : '');
     }
 
     /**
@@ -2514,10 +2446,10 @@
      */
     function co2Parts(grams, sourcesWithoutCoefficient, missingReason, view) {
         if (grams === null || grams === undefined) {
-            if (view === 'pilotage') return {lead: '', figure: '—', unit: 'not available'};
+            if (view === 'pilotage') return {lead: '', figure: '—', unit: t('recap.co2.na')};
             return {
                 lead: '', figure: '—',
-                unit: missingReason === 'no_avoidable_io' ? 'no avoidable I/O' : 'no coefficient from the engine'
+                unit: t(missingReason === 'no_avoidable_io' ? 'recap.co2.no_avoidable_io' : 'recap.co2.no_coefficient')
             };
         }
         // A nonzero estimate never rounds to zero; "at least" would contradict "< 1 g".
@@ -2525,8 +2457,8 @@
         const kilos = grams >= 1000;
         const value = kilos ? Number((grams / 1000).toPrecision(3)) : Math.round(grams);
         return {
-            lead: sourcesWithoutCoefficient > 0 ? 'at least' : '',
-            figure: '~' + value.toLocaleString('en-US') + (kilos ? ' kg' : ' g'),
+            lead: sourcesWithoutCoefficient > 0 ? t('recap.co2.lead') : '',
+            figure: '~' + num(value) + (kilos ? ' kg' : ' g'),
             unit: 'CO2e'
         };
     }
@@ -2543,8 +2475,10 @@
     function co2Text(grams, sourcesWithoutCoefficient, missingReason, view) {
         const parts = co2Parts(grams, sourcesWithoutCoefficient, missingReason, view);
         if (grams === null || grams === undefined) return parts.figure + ' ' + parts.unit;
-        return (parts.lead ? parts.lead + ' ' : '') + parts.figure + ' ' + parts.unit + ', estimate'
-            + co2Tail(sourcesWithoutCoefficient, view);
+        return t('recap.co2.text', {
+            value: (parts.lead ? parts.lead + ' ' : '') + parts.figure + ' ' + parts.unit,
+            tail: co2Tail(sourcesWithoutCoefficient, view)
+        });
     }
 
     /**
@@ -2556,9 +2490,8 @@
     function co2Tail(sourcesWithoutCoefficient, view) {
         if (!(sourcesWithoutCoefficient > 0)) return '';
         return view === 'pilotage'
-            ? ', part of the activity has no CO2 estimate'
-            : ', ' + sourcesWithoutCoefficient + (sourcesWithoutCoefficient === 1 ? ' source' : ' sources')
-            + ' without a coefficient';
+            ? t('recap.co2.tail.pilotage')
+            : t('recap.co2.tail.tech.' + plural(sourcesWithoutCoefficient), {count: sourcesWithoutCoefficient});
     }
 
     /**
@@ -2589,12 +2522,10 @@
      * @returns {string}
      */
     function trendText(trend, change) {
-        if (trend === 'new') return 'new';
-        if (trend === 'gone') return 'gone';
-        if (trend === 'flat') return 'stable';
-        if (trend !== 'up' && trend !== 'down') return '';
-        if (change === null || change === undefined) return trend;
-        return (change > 0 ? '+' : '') + Math.round(change * 100) + '%';
+        if (['new', 'gone', 'flat', 'up', 'down'].indexOf(trend) < 0) return '';
+        if (trend !== 'up' && trend !== 'down' || change === null || change === undefined) return t('recap.trend.' + trend);
+        // The narrow space by hand, as pct writes it.
+        return (change > 0 ? '+' : '') + Math.round(change * 100) + (LANG === 'fr' ? '\u202f%' : '%');
     }
 
     /**
@@ -2605,16 +2536,13 @@
      * @returns {string}
      */
     function confirmationLabel(state, view) {
-        const management = view === 'pilotage';
         switch (state) {
             case 'confirmed':
-                return management ? 'Confirmed by the measurements' : 'Confirmed by the engine';
-            case 'contradicted':
-                return 'Still detected';
-            case 'came_back':
-                return 'Came back';
             case 'awaiting':
-                return management ? 'Waiting for a full day of measurements' : 'Waiting for a sealed day';
+                return t('recap.confirm.' + state + (view === 'pilotage' ? '.pilotage' : ''));
+            case 'contradicted':
+            case 'came_back':
+                return t('recap.confirm.' + state);
             default:
                 return '';
         }
@@ -2626,8 +2554,29 @@
      * @returns {string}
      */
     function periodText(period) {
-        const days = period.kind === 'day' ? period.from : period.from + ' to ' + period.to;
-        return days + (period.in_progress ? ', in progress' : '');
+        const days = period.kind === 'day'
+            ? recapDay(period.from) : t('recap.period.range', {from: recapDay(period.from), to: recapDay(period.to)});
+        return period.in_progress ? t('recap.period.in_progress', {days: days}) : days;
+    }
+
+    /**
+     * A recap day: `yyyy-MM-dd` as the server counts it in English, `29 oct. 2026` in French,
+     * as RecapText.Day.
+     * @param {string} iso
+     * @returns {string}
+     */
+    function recapDay(iso) {
+        return LANG === 'fr' ? day(iso, {withYear: true, short: true}) : iso;
+    }
+
+    /**
+     * A Management row's plain sentence, read now in the shown language: a frozen snapshot holds it in
+     * English, and a type this launcher does not know keeps the sentence it came with.
+     * @param {{finding_type: string, plain: string}} item
+     * @returns {string}
+     */
+    function recapPlain(item) {
+        return hasText('recap.plain.' + item.finding_type) ? t('recap.plain.' + item.finding_type) : item.plain;
     }
 
     /**
@@ -2636,9 +2585,11 @@
      * @returns {string}
      */
     function incompleteText(reasons, view) {
-        return reasons && reasons.length ? 'Incomplete: ' + reasons.map(function (reason) {
-            return gapLabel(reason, view);
-        }).join(', ') : '';
+        return reasons && reasons.length ? t('recap.incomplete', {
+            reasons: reasons.map(function (reason) {
+                return gapLabel(reason, view);
+            }).join(', ')
+        }) : '';
     }
 
     /**
@@ -2650,9 +2601,12 @@
     function notesText(notes, samplingRate, view) {
         if (!notes || !notes.length) return '';
         const hasRate = samplingRate !== null && samplingRate !== undefined;
-        return 'Note: ' + notes.map(function (note) {
-            return gapLabel(note, view) + (note === 'sampling' && hasRate ? ' (rate ' + samplingRate + ')' : '');
-        }).join(', ');
+        return t('recap.notes', {
+            notes: notes.map(function (note) {
+                return gapLabel(note, view)
+                    + (note === 'sampling' && hasRate ? t('recap.notes.rate', {rate: decimal(samplingRate)}) : '');
+            }).join(', ')
+        });
     }
 
     /**
@@ -2686,8 +2640,9 @@
         });
         // Some engines write midnight as 24.
         const hour = parts.hour === '24' ? '00' : parts.hour;
-        return parts.year + '-' + parts.month + '-' + parts.day + ' ' + hour + ':' + parts.minute + ' '
-            + parts.timeZoneName;
+        const date = LANG === 'fr'
+            ? parts.day + '/' + parts.month + '/' + parts.year : parts.year + '-' + parts.month + '-' + parts.day;
+        return date + ' ' + hour + ':' + parts.minute + ' ' + parts.timeZoneName;
     }
 
     // ------------------------------------------------------------ share cards
@@ -2695,29 +2650,18 @@
     /** The kinds a card covers, in the order the toggle shows them. */
     const CARD_PERIODS = ['week', 'month', 'quarter', 'semester', 'year'];
     /** "Semester" reads as a school term: the screen says Half-year, the value sent stays semester. */
-    const CARD_PERIOD_LABELS = {week: 'Week', month: 'Month', quarter: 'Quarter', semester: 'Half-year', year: 'Year'};
+    const CARD_PERIOD_LABELS = textTable('card.period.', CARD_PERIODS);
     const CARD_ANGLES = ['story', 'curve', 'collective'];
-    const CARD_ANGLE_NAMES = {story: 'Story', curve: 'Curve', collective: 'Collective'};
-    const CARD_ANGLE_LINES = {
-        story: 'One fix, told in everyday words.',
-        curve: 'How much of the work was avoidable, period after period.',
-        collective: 'How many fixes the measure confirmed, and where.'
-    };
+    const CARD_ANGLE_NAMES = textTable('card.angle.', CARD_ANGLES);
+    const CARD_ANGLE_LINES = textTable('card.angle_line.', CARD_ANGLES);
     const CARD_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',
         'October', 'November', 'December'];
     const CARD_KIND_MONTHS = {month: 1, quarter: 3, semester: 6, year: 12};
     /** The files a card downloads as; the bracketed type is the one the saved file carries. */
     const CARD_FORMATS = ['png', 'svg', 'jxl', 'pdf'];
-    const CARD_FORMAT_LABELS = {
-        png: 'Image (PNG)',
-        svg: 'Image to print or scale (SVG)',
-        jxl: 'Smaller image to archive (JPEG XL)',
-        pdf: 'Carousel (PDF)'
-    };
+    const CARD_FORMAT_LABELS = textTable('card.format.', CARD_FORMATS);
     /** The sentence under a format while it is picked, where the choice alone does not say where the file goes. */
-    const CARD_FORMAT_NOTES = {
-        jxl: 'LinkedIn does not accept this format. Post the PNG, and keep this one to archive or send.'
-    };
+    const CARD_FORMAT_NOTES = textTable('card.format_note.', ['jxl']);
 
     /** The format a preview renders: a JPEG XL previews as the PNG of the same card, which every browser shows. */
     function previewFormat(format) {
@@ -2735,86 +2679,23 @@
     }
 
     /** Every other sentence of the card section, in one place for the copy review. */
-    const CARD_COPY = {
-        title: 'Share a result',
-        hint: 'a signed card for a post or a slide',
-        help: 'The card prints figures this Hub measured over a closed period, with their scope. It is signed: '
-            + 'anyone who scans its code sees whether its figures changed since it was made.',
-        closed: 'Turn a measured result into an image or a carousel to post. The Hub writes every figure, you add '
-            + 'a title and a team name.',
-        create: 'Create a card',
-        intro: 'Pick what to tell and a closed period. The Hub writes every figure and sentence; you add a title, '
-            + 'a team name and, for a story, an everyday name for the action. The card is signed, so anyone can '
-            + 'check that its figures have not changed.',
-        engineOff: 'This Hub\'s engine cannot make cards yet. An administrator updates the engine to turn them on.',
-        optionsFailed: 'The Hub did not say what this period holds. Try again in a moment.',
-        noFix: 'No fix of this period is confirmed by the measure yet. A fix counts once its problem stays away '
-            + 'on the days after it is marked done.',
-        fixesWait: 'The list appears once the period can make a card.',
-        defaultPill: 'Largest volume before the fix',
-        labelHint: 'What a person was doing: "Showing a cart", "Paying an order". Without one, the card says '
-            + '"For one action in the application".',
-        rememberDenied: 'Only people allowed to name actions can remember a name. The card still prints it.',
-        freeNote: 'Printed as written, and shown on the check page as chosen by your organisation. The figures, '
-            + 'the sentences and the scope cannot be changed.',
-        carouselNote: 'Four pages for a LinkedIn document: the hook, why it matters, the figures, the proof. '
-            + 'Preview opens the PDF in your browser\'s viewer.',
-        fieldWhy: 'Fix the field marked above to make the card.',
-        stale: 'Your choices changed since this preview. Preview again to see them. Download makes the card from '
-            + 'your current choices.',
-        previewEmpty: 'Choose, then Preview. The card appears here as people will see it.',
-        previewBlocked: 'No card can be made with these choices.',
-        rendering: 'Rendering the card\u2026',
-        busy: 'Another card is being made. Trying again in a few seconds.',
-        pngNote: '1080 by 1350 pixels. Its code links to perf-sentinel.dev/verifier, which shows the signed figures.',
-        svgNote: 'Sharp at any size, to print or to enlarge. Its code links to perf-sentinel.dev/verifier, which '
-            + 'shows the signed figures.',
-        pdfNote: 'Four pages of 1080 by 1350 points. Their code links to perf-sentinel.dev/verifier, which shows '
-            + 'the signed figures.',
-        noDomain: 'Without a domain, the check page shows this Hub\'s cards as "Signer not verified". An '
-            + 'administrator can set one in Hub:Cards:Domain.',
-        keysTitle: 'Signing key and organisation',
-        keysOrigin: 'Both come from the Hub configuration, Hub:Cards:Organisation and Hub:Cards:Domain. Every '
-            + 'card signs them, and nobody changes them from this screen.',
-        keysNone: 'No key yet. The first card makes one, and the lines to publish appear here.',
-        keysPublish: 'Publish either form below, then use Verify attachment. The DNS: one TXT record per key, all '
-            + 'under the same name. Keep old keys published, so the cards they signed keep verifying.',
-        keysFile: 'Only the command line check reads it; the check page reads the DNS.',
-        rotate: 'Makes a new key for the next cards. The current one stays published with its end date, so the '
-            + 'cards it signed keep verifying. Publish the new line too.',
-        leaked: 'First day it may have leaked'
-    };
+    const CARD_COPY = textTable('card.copy.', ['title', 'hint', 'help', 'closed', 'create', 'intro', 'engineOff',
+        'optionsFailed', 'noFix', 'fixesWait', 'defaultPill', 'labelHint', 'rememberDenied', 'freeNote', 'carouselNote',
+        'fieldWhy', 'stale', 'previewEmpty', 'previewBlocked', 'rendering', 'busy', 'pngNote', 'svgNote', 'pdfNote',
+        'noDomain', 'keysTitle', 'keysOrigin', 'keysNone', 'keysPublish', 'keysFile', 'rotate', 'leaked']);
 
     /** One plain sentence per verify-card reason the engine answers at level 1. */
-    const ATTACH_REASONS = {
-        binding_check_failed: 'the places that publish the key under {domain} did not answer',
-        binding_partial: 'one of the two places that publish the key under {domain} did not answer',
-        key_not_published: 'the key is not published under {domain} yet',
-        no_domain: 'the card names no domain',
-        no_http_client: 'this Hub\'s engine cannot reach the network'
-    };
+    const ATTACH_REASONS = textTable('card.attach.reason.', ['binding_check_failed', 'binding_partial',
+        'key_not_published', 'no_domain', 'no_http_client']);
 
     /** Level 1 answers where the check succeeded: they state the verdict, never "Could not check". */
-    const ATTACH_VERDICTS = {
-        key_revoked: 'This card was signed with a key that is now revoked.',
-        public_key_mismatch: 'This card was signed with a key other than the one published under {domain}.',
-        signed_outside_validity: 'This card is dated outside the period its key was published for.'
-    };
+    const ATTACH_VERDICTS = textTable('card.attach.verdict.', ['key_revoked', 'public_key_mismatch',
+        'signed_outside_validity']);
 
     /** The signed figures verify-card reads back, in the order the screen lists them. */
-    const SIGNED_FIGURE_LABELS = {
-        period: 'Period',
-        before_fix_period: 'Period before the fix',
-        cited_ops: 'Headline figure on the card',
-        cited_ms: 'Headline figure on the card',
-        before_fix_ops: 'Unnecessary operations before the fix',
-        threshold_ops: 'Alert threshold the card cites',
-        threshold_ms: 'Alert threshold the card cites',
-        last_waste_permille: 'Share of the work that was avoidable, period of the card',
-        previous_waste_permille: 'Share of the work that was avoidable, period before',
-        confirmed_fixes_count: 'Fixes confirmed by measurement',
-        services_count: 'Services concerned'
-    };
+    const SIGNED_FIGURE_LABELS = textTable('card.figure.', ['period', 'before_fix_period', 'cited_ops', 'cited_ms',
+        'before_fix_ops', 'threshold_ops', 'threshold_ms', 'last_waste_permille', 'previous_waste_permille',
+        'confirmed_fixes_count', 'services_count']);
 
     /** @param {string} day yyyy-MM-dd @returns {Date} midnight UTC */
     function cardDate(day) {
@@ -2874,14 +2755,56 @@
      * A period in words, as CardRules.PeriodName writes it.
      * @param {string} kind @param {string} from @returns {string}
      */
-    function cardPeriodName(kind, from) {
+    function cardPeriodName(kind, from, language = LANG) {
         const date = cardDate(from);
         const year = String(date.getUTCFullYear());
-        if (kind === 'week') return 'the week of ' + cardDayText(from, true);
-        if (kind === 'month') return CARD_MONTHS[date.getUTCMonth()] + ' ' + year;
-        if (kind === 'quarter') return 'Q' + (Math.floor(date.getUTCMonth() / 3) + 1) + ' ' + year;
-        if (kind === 'semester') return (date.getUTCMonth() === 0 ? 'the first half of ' : 'the second half of ') + year;
+        if (kind === 'week') return tIn(language, 'card.period_name.week', {day: day(from, {withYear: true, language})});
+        if (kind === 'month') {
+            return tIn(language, 'card.period_name.month', {month: monthName(date.getUTCMonth() + 1, language), year});
+        }
+        if (kind === 'quarter') {
+            return tIn(language, 'card.period_name.quarter', {quarter: Math.floor(date.getUTCMonth() / 3) + 1, year});
+        }
+        if (kind === 'semester') {
+            return tIn(language, date.getUTCMonth() === 0 ? 'card.period_name.first_half' : 'card.period_name.second_half',
+                {year});
+        }
         return year;
+    }
+
+    /**
+     * Why no card, from its code and its period, as CardRules.Explain writes it in English: the
+     * period before is named for a curve's refusal, every other code reads its problem sentence.
+     * @param {string} code @param {string} kind @param {string} from
+     * @returns {string}
+     */
+    function cardRefusalText(code, kind, from) {
+        if (!hasText('card.refusal.' + code)) return problemText({code: code});
+        return t('card.refusal.' + code, {
+            period: cardPeriodName(kind, from), previous: cardPeriodName(kind, stepPeriod(kind, from, -1))
+        });
+    }
+
+    /** The equivalence countries the screen offers; another country has no table of its own and sends fr. */
+    const CARD_COUNTRIES = ['fr', 'gb', 'us', 'other'];
+
+    /**
+     * The country choice shown: the one a person picked, else the Hub's, else France.
+     * @param {string|null} picked @param {string|undefined} hubCountry @returns {string}
+     */
+    function cardCountry(picked, hubCountry) {
+        if (picked !== null && CARD_COUNTRIES.indexOf(picked) >= 0) return picked;
+        return hubCountry !== undefined && CARD_COUNTRIES.indexOf(hubCountry) >= 0 ? hubCountry : 'fr';
+    }
+
+    /** The equivalence_country a choice sends. @param {string} choice @returns {string} */
+    function cardCountryWire(choice) {
+        return choice === 'other' ? 'fr' : choice;
+    }
+
+    /** The card's language: the one a person picked, else the Hub's. @param {string|null} picked */
+    function cardLang(picked) {
+        return LANGS.indexOf(picked) >= 0 ? /** @type {'en' | 'fr'} */ (picked) : LANG;
     }
 
     /**
@@ -2889,10 +2812,10 @@
      * @param {string} from @param {string} to @returns {string}
      */
     function cardRangeText(from, to) {
-        let start = cardDayText(from, true);
-        if (from.slice(0, 7) === to.slice(0, 7)) start = String(cardDate(from).getUTCDate());
-        else if (from.slice(0, 4) === to.slice(0, 4)) start = cardDayText(from, false);
-        return start + ' to ' + cardDayText(to, true) + ', UTC';
+        let start = day(from, {withYear: true});
+        if (from.slice(0, 7) === to.slice(0, 7)) start = day(from).split(' ')[0];
+        else if (from.slice(0, 4) === to.slice(0, 4)) start = day(from);
+        return t('card.range', {from: start, to: day(to, {withYear: true})});
     }
 
     function cardText(value) {
@@ -2907,7 +2830,8 @@
     function cardBody(form) {
         /** @type {Object<string, string>} */
         const body = {};
-        ['angle', 'period', 'at', 'environment', 'source_id', 'signature', 'label', 'title', 'team', 'lang', 'format']
+        ['angle', 'period', 'at', 'environment', 'source_id', 'signature', 'label', 'title', 'team', 'lang',
+            'equivalence_country', 'format']
             .forEach(function (key) {
                 const value = cardText(form[key]);
                 if (value && ((key !== 'signature' && key !== 'label') || form.angle === 'story')) body[key] = value;
@@ -2940,8 +2864,8 @@
     function rememberState(typed, remembered, place) {
         const text = cardText(typed);
         return remembered
-            ? {text: 'Update the remembered name with this one', enabled: text !== '' && text !== remembered}
-            : {text: 'Remember this name for ' + place, enabled: text !== ''};
+            ? {text: t('card.remember.update'), enabled: text !== '' && text !== remembered}
+            : {text: t('card.remember.new', {place: place}), enabled: text !== ''};
     }
 
     // A heuristic for typing only, the engine's 422 stays the authority. (C) (R) and TM are pictographic
@@ -2951,21 +2875,23 @@
     /** The first character a free field holds that the card cannot draw, as a sentence, or null. */
     function cardFieldProblem(text) {
         const found = String(text || '').match(CARD_UNDRAWABLE);
-        return found ? 'The card\'s font cannot draw "' + found[0] + '". Remove it, or write it another way.' : null;
+        return found ? t('card.field_problem', {char: found[0]}) : null;
     }
 
     /**
      * Whether a curve's 422 is the refusal of the period before, which a story or a collective card
-     * escapes: CardRules.Explain writes only that one as "No curve for ...", the 422 carries no code.
+     * escapes. Its code starts with previous_; without a code, CardRules.Explain's "No curve for ...".
+     * @param {string | null | undefined} detail
+     * @param {string | null} [code]
      */
-    function isPreviousRefusal(detail) {
+    function isPreviousRefusal(detail, code) {
+        if (code) return code.indexOf('previous_') === 0;
         return String(detail || '').indexOf('No curve for ') === 0;
     }
 
     /** The two hosts the attachment check reaches. */
     function cardContactText(domain, view) {
-        return 'Checking contacts cloudflare-dns.com' + (view === 'pilotage' ? '' : ' (DNS over HTTPS)')
-            + ' and ' + domain + '.';
+        return t(view === 'pilotage' ? 'card.contact.pilotage' : 'card.contact.tech', {domain: domain});
     }
 
     /**
@@ -2975,34 +2901,23 @@
      * @returns {{text: string, title: string|null}}
      */
     function attachmentText(result, isAdmin) {
-        if (result.integrity !== 'ok') {
-            return {text: 'This card does not verify: its figures changed after signing.', title: null};
-        }
-        if (result.content === 'modified') {
-            return {
-                text: 'This card file was changed after it was signed. Make the card again before sharing it.',
-                title: 'content_modified'
-            };
-        }
-        if (result.level === 2) return {text: 'Attached: cards read "Signed by ' + result.domain + '".', title: null};
+        const domain = {domain: result.domain};
+        if (result.integrity !== 'ok') return {text: t('card.attach.tampered'), title: null};
+        if (result.content === 'modified') return {text: t('card.attach.modified'), title: 'content_modified'};
+        if (result.level === 2) return {text: t('card.attach.attached', domain), title: null};
         if (ATTACH_VERDICTS[result.reason]) {
             return {text: ATTACH_VERDICTS[result.reason].replace('{domain}', result.domain), title: result.reason};
         }
         if (result.reason && result.reason !== 'key_not_published') {
             const reason = ATTACH_REASONS[result.reason];
             return {
-                text: 'Could not check: ' + (reason ? reason.replace('{domain}', result.domain) : 'an unexpected answer')
-                    + '.',
+                text: t('card.attach.unchecked', {
+                    reason: reason ? reason.replace('{domain}', result.domain) : t('card.attach.unexpected')
+                }),
                 title: result.reason
             };
         }
-        return {
-            text: isAdmin
-                ? 'Not attached yet. Publish one of the lines below, then check again.'
-                : 'Not attached yet. An administrator publishes one line under ' + result.domain
-                + ', then you can check again.',
-            title: null
-        };
+        return {text: t(isAdmin ? 'card.attach.not_yet.admin' : 'card.attach.not_yet.other', domain), title: null};
     }
 
     /**
@@ -3010,7 +2925,7 @@
      * @param {{content: string}} result @returns {string|null}
      */
     function contentLine(result) {
-        return result.content === 'intact' ? 'File intact: this is the file that was signed.' : null;
+        return result.content === 'intact' ? t('card.content.intact') : null;
     }
 
     /**
@@ -3025,9 +2940,9 @@
             let text;
             if (key === 'period') text = cardPeriodName(value.kind, value.from);
             else if (key === 'before_fix_period') text = cardPeriodName(figures.period.kind, value.from);
-            else if (key.endsWith('_permille')) text = (value / 10).toFixed(1) + '%';
-            else if (key.endsWith('_ms')) text = value.toLocaleString('en-US') + ' milliseconds';
-            else text = value.toLocaleString('en-US');
+            else if (key.endsWith('_permille')) text = pct(value / 1000, 1);
+            else if (key.endsWith('_ms')) text = t('card.figure_ms', {n: num(value)});
+            else text = num(value);
             return {label: SIGNED_FIGURE_LABELS[key], value: text};
         });
     }
@@ -3040,56 +2955,438 @@
      * @returns {{alert: string, step: string}}
      */
     function revokeText(date, isCurrent, domain) {
-        const alert = 'Every card this key signed will read as revoked on the check page, whatever its date. The '
-            + 'check page will say the key may have been exposed since ' + date + '. This cannot be undone.';
-        const step = 'Republish this key\'s DNS line' + (domain ? ' under ' + domain : '') + ': the check page reads '
-            + 'the DNS line only, and keeps showing these cards as signed until the line says revoked.';
+        // English keeps the ISO day it always showed; French reads it in words, which never breaks at a hyphen.
+        const alert = t('card.revoke.alert', {date: LANG === 'fr' ? day(date, {withYear: true}) : date});
+        const step = domain ? t('card.revoke.step.domain', {domain: domain}) : t('card.revoke.step');
         if (!isCurrent) return {alert: alert, step: step};
         return {
             alert: alert,
-            step: step + ' The next card makes a new key' + (domain ? ': publish its line too, under ' + domain + '.' : '.')
+            step: step + ' ' + (domain ? t('card.revoke.next.domain', {domain: domain}) : t('card.revoke.next'))
         };
     }
 
     /** What the check page prints for the card: the signer only once a check found the key. */
     function levelLine(attached, domain) {
-        return 'On the check page, this card reads: '
-            + (attached ? 'Signed by ' + domain + '.' : 'Figures intact since their signature. Signer not verified.');
+        return t(attached ? 'card.level.attached' : 'card.level.unattached', {domain: domain});
     }
 
     /** Where the card's environment comes from, and what it covers. */
     function cardEnvironmentLine(environment, view) {
-        const lead = environment
-            ? 'Environment ' + environment + ', taken from the recap filter above. A card covers every service in it'
-            : 'Every environment, as the recap filter above reads. A card covers every service in them';
-        return lead + (view === 'pilotage' ? '.' : ': the service and namespace filters do not apply.');
+        return t('card.env.' + (environment ? 'one' : 'all') + '.' + (view === 'pilotage' ? 'pilotage' : 'tech'),
+            {environment: environment});
     }
 
     // Rounded down, so the screen never shows more than the card will sign.
     function cardVolume(value) {
-        if (value < 10000) return value.toLocaleString('en-US');
-        if (value < 1000000) return Math.floor(value / 1000) + ' thousand';
-        return (Math.floor(value / 100000) / 10) + ' million';
+        if (value < 10000) return num(value);
+        if (value < 1000000) return t('card.volume.thousand', {n: Math.floor(value / 1000)});
+        const millions = Math.floor(value / 100000) / 10;
+        return t('card.volume.million.' + plural(Math.floor(millions)), {n: decimal(millions)});
     }
 
     /**
      * What a fix row says the card prints: the volume before the fix, or the figure a problem with
-     * no volume cites instead.
+     * no volume cites instead. `period` names the period before the fix, the Hub's English name when omitted.
+     * @param {*} fix @param {string} [period]
      * @returns {{figure: string|null, text: string}}
      */
-    function cardFixLine(fix) {
+    function cardFixLine(fix, period) {
         if (fix.before_fix_ops !== null && fix.before_fix_ops !== undefined) {
             return {
                 figure: cardVolume(fix.before_fix_ops),
-                text: ' unnecessary operations in ' + fix.before_period_name + ', before the fix'
+                text: t(fix.before_fix_ops >= 1000000 ? 'card.fix.volume.million' : 'card.fix.volume',
+                    {period: period ?? fix.before_period_name})
             };
         }
         const type = String(fix.finding_type);
-        let text = 'the card shows how many calls one action made';
-        if (type.indexOf('slow_') === 0) text = 'the card shows how long its slowest runs took';
-        else if (type === 'pool_saturation') text = 'the card shows how many calls ran at the same time';
-        else if (type === 'serialized_calls') text = 'the card shows how many calls ran one after the other';
-        return {figure: null, text: text};
+        let key = 'card.fix.calls';
+        if (type.indexOf('slow_') === 0) key = 'card.fix.slow';
+        else if (type === 'pool_saturation') key = 'card.fix.pool';
+        else if (type === 'serialized_calls') key = 'card.fix.serialized';
+        return {figure: null, text: t(key)};
+    }
+
+    /** The languages the launcher is written in, English first: it is the fallback. */
+    const LANGS = ['en', 'fr'];
+    const LANG_KEY = 'perf-sentinel:lang';
+    /** @type {'en' | 'fr'} */
+    let LANG = 'en';
+    /** @type {Array<(lang: 'en' | 'fr') => void>} */
+    const LANG_LISTENERS = [];
+
+    /** @returns {'en' | 'fr'} */
+    function lang() {
+        return LANG;
+    }
+
+    /**
+     * Shows `next`, keeps the choice when storage allows it and tells every listener. An unknown
+     * language changes nothing. `persist` false adopts a language nobody chose (the browser's
+     * default at boot), so a later change of browser language is still followed.
+     * @param {string} next
+     * @param {boolean} [persist]
+     * @returns {void}
+     */
+    function setLang(next, persist = true) {
+        if (LANGS.indexOf(next) < 0) return;
+        LANG = /** @type {'en' | 'fr'} */ (next);
+        if (persist) {
+            try {
+                global.localStorage.setItem(LANG_KEY, LANG);
+            } catch (error) {
+                // Storage off or absent: the choice lasts as long as the page.
+            }
+            // The sign-in and device pages a redirect reaches carry no lang: HubLang.Of reads this cookie.
+            if (typeof document !== 'undefined') document.cookie = 'perf-sentinel-lang=' + LANG + ';max-age=31536000;samesite=lax';
+        }
+        if (typeof document !== 'undefined') document.documentElement.lang = LANG;
+        LANG_LISTENERS.forEach(listener => listener(LANG));
+    }
+
+    /**
+     * @param {(lang: 'en' | 'fr') => void} listener
+     * @returns {void}
+     */
+    function onLang(listener) {
+        LANG_LISTENERS.push(listener);
+    }
+
+    /**
+     * The language to show: the stored choice when it is one, else the first `fr` or `en` variant
+     * the browser lists, else English.
+     * @param {readonly string[] | undefined} languages `navigator.languages`
+     * @param {string | null} stored
+     * @returns {'en' | 'fr'}
+     */
+    function pickLang(languages, stored) {
+        if (LANGS.indexOf(stored) >= 0) return /** @type {'en' | 'fr'} */ (stored);
+        for (const tag of languages || []) {
+            const base = String(tag).toLowerCase().split('-')[0];
+            if (LANGS.indexOf(base) >= 0) return /** @type {'en' | 'fr'} */ (base);
+        }
+        return 'en';
+    }
+
+    /**
+     * @param {string} language @param {string} key
+     * @returns {string | undefined}
+     */
+    function textIn(language, key) {
+        const table = (global.PSL_TEXT || {})[language] || {};
+        return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+    }
+
+    /**
+     * Whether `key` has a text to show, in the shown language or in English. Never throws.
+     * @param {string} key
+     * @returns {boolean}
+     */
+    function hasText(key) {
+        return textIn(LANG, key) !== undefined || textIn('en', key) !== undefined;
+    }
+
+    /**
+     * The text of `key` in the shown language, English when the shown one lacks it, with each
+     * `{name}` replaced from `vars`. The tables are read here rather than at load, so a page that
+     * loads launcher.js first still finds them.
+     * @param {string} key
+     * @param {Record<string, string | number>} [vars]
+     * @returns {string}
+     */
+    function t(key, vars) {
+        return tIn(LANG, key, vars);
+    }
+
+    /**
+     * `t` in `language` rather than the shown one.
+     * @param {string} language @param {string} key
+     * @param {Record<string, string | number>} [vars]
+     * @returns {string}
+     */
+    function tIn(language, key, vars) {
+        const value = textIn(language, key) ?? textIn('en', key);
+        if (value === undefined) {
+            // Under Node (the tests) a key nobody wrote is a defect; on a page it shows as itself.
+            if (typeof document === 'undefined') throw new Error('no text for ' + key);
+            return key;
+        }
+        if (!vars) return value;
+        return value.replace(/\{(\w+)\}/g, (whole, name) => name in vars ? String(vars[name]) : whole);
+    }
+
+    /**
+     * What a refusal says in the shown language: the sentence of its code when the shown table has
+     * one, else the Hub's English detail, else `fallback` or the generic sentence. English keeps
+     * the detail first, which can name more than the table's general sentence.
+     * @param {{code?: string | null, detail?: string | null} | null | undefined} payload
+     * @param {number} [status]
+     * @param {string} [fallback]
+     * @returns {string}
+     */
+    function problemText(payload, status, fallback) {
+        const problem = payload || {};
+        const key = 'problem.' + problem.code;
+        if (problem.code && textIn(LANG, key) !== undefined && (LANG !== 'en' || !problem.detail)) {
+            return t(key, /** @type {Record<string, string | number>} */ (/** @type {unknown} */ (problem)));
+        }
+        if (problem.detail) return String(problem.detail);
+        return fallback ?? t('problem.generic', {status: status ?? 0});
+    }
+
+    /**
+     * @param {number} n
+     * @param {Intl.NumberFormatOptions} [options]
+     * @returns {string}
+     */
+    function num(n, options) {
+        return n.toLocaleString(LANG === 'fr' ? 'fr-FR' : 'en-US', options);
+    }
+
+    /**
+     * A number already written with a point, with the decimal comma in French.
+     * @param {string | number} text
+     * @returns {string}
+     */
+    function decimal(text) {
+        return LANG === 'fr' ? String(text).replace('.', ',') : String(text);
+    }
+
+    /**
+     * A ratio as a percentage with `digits` decimals: `3.1%` in English, `3,1 %` in French.
+     * @param {number} ratio
+     * @param {number} [digits]
+     * @returns {string}
+     */
+    function pct(ratio, digits = 0) {
+        if (LANG !== 'fr') return (ratio * 100).toFixed(digits) + '%';
+        // The narrow space by hand: ICU builds disagree on the one before `%` (Node 24 writes U+00A0).
+        return num(ratio * 100, {minimumFractionDigits: digits, maximumFractionDigits: digits}) + ' %';
+    }
+
+    /**
+     * A `yyyy-MM-dd` day in words, UTC: `29 October 2026` in English, as cardDayText writes it.
+     * @param {string} iso
+     * @param {{withYear?: boolean, short?: boolean, language?: string}} [options]
+     * @returns {string}
+     */
+    function day(iso, {withYear = false, short = false, language = LANG} = {}) {
+        if (language === 'fr') {
+            // French writes the first of the month as an ordinal, 1er, which Intl leaves to us.
+            return new Intl.DateTimeFormat('fr-FR', {
+                day: 'numeric', month: short ? 'short' : 'long', year: withYear ? 'numeric' : undefined, timeZone: 'UTC'
+            }).format(cardDate(iso)).replace(/^1(?= )/, '1er');
+        }
+        if (!short) return cardDayText(iso, withYear);
+        const date = cardDate(iso);
+        return date.getUTCDate() + ' ' + CARD_MONTHS[date.getUTCMonth()].slice(0, 3) + (withYear ? ' ' + date.getUTCFullYear() : '');
+    }
+
+    /**
+     * The plural form of `n` in the shown language, the suffix of a `.one` / `.other` key pair:
+     * English writes one for 1 alone, French for 0 and 1.
+     * @param {number} n
+     * @returns {'one' | 'other'}
+     */
+    function plural(n) {
+        return (LANG === 'fr' ? n <= 1 : n === 1) ? 'one' : 'other';
+    }
+
+    /**
+     * A moment's local time to the minute, `14:05`: the time dateTime writes, without the day.
+     * @param {number} ms
+     * @returns {string}
+     */
+    function time(ms) {
+        if (LANG !== 'fr') return dtHuman(ms).slice(11);
+        return new Intl.DateTimeFormat('fr-FR', {hour: '2-digit', minute: '2-digit'}).format(new Date(ms));
+    }
+
+    /**
+     * A moment in local time to the minute: `2026-10-29 14:05` in English, as dtHuman writes it.
+     * @param {number} ms
+     * @returns {string}
+     */
+    function dateTime(ms) {
+        if (LANG !== 'fr') return dtHuman(ms);
+        return new Intl.DateTimeFormat('fr-FR', {
+            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        }).format(new Date(ms));
+    }
+
+    /**
+     * The string literals of `source`, each with where it starts in a copy of the source that has
+     * no comments and every literal masked, so the code before a literal can be read as context.
+     * A literal that is a bare token stays in that copy unquoted, which keeps `'aria-label': x`
+     * and `'class': x` readable as keys. Template literals keep their `${}` and the literals inside
+     * those are listed too.
+     * @param {string} source
+     * @returns {{code: string, literals: Array<{text: string, at: number}>}}
+     */
+    function scanLiterals(source) {
+        /** @type {Array<{text: string, at: number}>} */
+        const literals = [];
+        let code = '';
+        let i = 0;
+
+        function regexAllowed() {
+            const before = code.trimEnd();
+            return before === '' || '(,=:[!&|?{};+-*%<>~^'.indexOf(before[before.length - 1]) >= 0
+                || /\b(?:return|typeof|case|in|of|void|delete|throw|new|else|do)$/.test(before);
+        }
+
+        function skipRegex() {
+            let inClass = false;
+            i++;
+            while (i < source.length && source[i] !== '\n') {
+                const c = source[i];
+                if (c === '\\') i++;
+                else if (c === '[') inClass = true;
+                else if (c === ']') inClass = false;
+                else if (c === '/' && !inClass) break;
+                i++;
+            }
+            i++;
+            while (/[a-z]/.test(source[i] || '')) i++;
+            code += 'R';
+        }
+
+        /** @param {string} quote */
+        function quoted(quote) {
+            let text = '';
+            i++;
+            while (i < source.length && source[i] !== quote && source[i] !== '\n') {
+                if (source[i] === '\\') i++;
+                text += source[i] ?? '';
+                i++;
+            }
+            i++;
+            literals.push({text: text, at: code.length});
+            code += /^[\w-]+$/.test(text) ? text : '""';
+        }
+
+        function template() {
+            const literal = {text: '', at: code.length};
+            literals.push(literal);
+            i++;
+            while (i < source.length && source[i] !== '`') {
+                if (source[i] === '\\') {
+                    literal.text += source.slice(i, i + 2);
+                    i += 2;
+                } else if (source[i] === '$' && source[i + 1] === '{') {
+                    const from = i;
+                    i += 2;
+                    scan(true);
+                    literal.text += source.slice(from, i);
+                } else {
+                    literal.text += source[i++];
+                }
+            }
+            i++;
+            code += '""';
+        }
+
+        /** @param {boolean} untilBrace stop after the `}` that closes a template's `${` */
+        function scan(untilBrace) {
+            let depth = 0;
+            while (i < source.length) {
+                const c = source[i], next = source[i + 1];
+                if (c === '/' && next === '/') {
+                    const end = source.indexOf('\n', i);
+                    i = end < 0 ? source.length : end;
+                } else if (c === '/' && next === '*') {
+                    const end = source.indexOf('*/', i + 2);
+                    i = end < 0 ? source.length : end + 2;
+                } else if (c === '\'' || c === '"') {
+                    quoted(c);
+                } else if (c === '`') {
+                    template();
+                } else if (c === '/' && regexAllowed()) {
+                    skipRegex();
+                } else {
+                    if (untilBrace && c === '{') depth++;
+                    if (untilBrace && c === '}' && depth-- === 0) {
+                        i++;
+                        return;
+                    }
+                    code += c;
+                    i++;
+                }
+            }
+        }
+
+        scan(false);
+        return {code: code, literals: literals};
+    }
+
+    /**
+     * From `open`, the index of the bracket that closes it.
+     * @param {string} code @param {number} open
+     * @returns {number}
+     */
+    function closingBracket(code, open) {
+        const pairs = /** @type {Record<string, string>} */ ({'(': ')', '{': '}'});
+        const opener = code[open], closer = pairs[opener];
+        let depth = 0;
+        for (let i = open; i < code.length; i++) {
+            if (code[i] === opener) depth++;
+            else if (code[i] === closer && --depth === 0) return i;
+        }
+        return code.length;
+    }
+
+    /** Attributes whose value is an identifier, never text a person reads. */
+    const TECHNICAL_KEY = '(?:class|className|id|href|src|type|role|name|for|rel)';
+    /** The code before a literal that makes it technical, whatever its shape. */
+    const TECHNICAL_CONTEXT = [
+        new RegExp('(?:^|[\\s{,(])' + TECHNICAL_KEY + '\\s*:\\s*(?:[^;,={}()]*?[?:]\\s*)?$'),
+        new RegExp('\\.' + TECHNICAL_KEY + '\\s*=\\s*(?:[^;,={}()]*?[?:]\\s*)?$'),
+        new RegExp('\\bsetAttribute\\(\\s*' + TECHNICAL_KEY + '\\s*,\\s*$'),
+        /\bclassList\.\w+\(\s*(?:[^;()]*,\s*)?$/,
+        /\b(?:querySelector|querySelectorAll|closest|matches|getElementById|matchMedia)\(\s*$/,
+        /\b(?:add|remove)EventListener\(\s*$/,
+        /\bt\(\s*$/
+    ];
+
+    /**
+     * Whether a literal reads as a sentence for a person: two words or more, one of them a
+     * lower-case word of three letters or more, and not a URL, a selector, a key or CSS.
+     * @param {string} text
+     * @returns {boolean}
+     */
+    function isProse(text) {
+        if (/:\/\//.test(text) || /^[.#[]/.test(text) || /^[a-z0-9_]+(\.[a-z0-9_-]+)+$/.test(text)) return false;
+        if (text.indexOf(':') >= 0 && text.indexOf(';') >= 0) return false;
+        const words = text.replace(/\$\{[^}]*\}/g, 'X').split(/\s+/).filter(Boolean);
+        return words.length >= 2 && words.some(word => /^[a-z]{3,}$/.test(word.replace(/[^A-Za-z]/g, '')));
+    }
+
+    /**
+     * The prose literals inside the functions named `functionNames` in `source`: the guard that
+     * keeps displayed text out of the code and in the text tables. A test helper, the page never
+     * calls it. A literal is skipped by its context first (a class, an id, a selector, an event, a
+     * `t(` key), then by its shape.
+     * @param {string} source
+     * @param {string[]} functionNames
+     * @returns {string[]}
+     */
+    function literalsIn(source, functionNames) {
+        const {code, literals} = scanLiterals(source);
+        /** @type {Array<[number, number]>} */
+        const bodies = [];
+        for (const name of functionNames) {
+            const header = new RegExp('\\bfunction\\s+' + name + '\\s*\\(', 'g');
+            let match;
+            while ((match = header.exec(code)) !== null) {
+                const params = closingBracket(code, match.index + match[0].length - 1);
+                const open = code.indexOf('{', params);
+                if (open >= 0) bodies.push([open, closingBracket(code, open)]);
+            }
+        }
+        return literals
+            .filter(literal => bodies.some(([open, close]) => literal.at > open && literal.at < close))
+            .filter(literal => !TECHNICAL_CONTEXT.some(pattern => pattern.test(code.slice(Math.max(0, literal.at - 120), literal.at))))
+            .filter(literal => isProse(literal.text))
+            .map(literal => literal.text);
     }
 
     global.PSL = {
@@ -3143,6 +3440,7 @@
         refreshPlan,
         releaseUrl,
         openFolds,
+        daemonGroupFolds,
         hubReleaseUrl,
         updateState,
         knownShell,
@@ -3196,6 +3494,8 @@
         screenOf,
         readDisclosureId,
         periodRail,
+        periodLabel,
+        monthName,
         coverageNotch,
         checkRows,
         hostRows,
@@ -3208,7 +3508,9 @@
         describePattern,
         accessExpiry,
         accessSignedIn,
-        ACCESS_NO_REACH,
+        get ACCESS_NO_REACH() {
+            return t('access.no_reach');
+        },
         accessReachRows,
         coverageSnippet,
         accessRequestText,
@@ -3230,6 +3532,7 @@
         recapPath,
         recapReportLabel,
         RECAP_REPORTS_COPY,
+        recapPlain,
         recapFreezeText,
         recapErrorText,
         recapTruncatedText,
@@ -3271,6 +3574,11 @@
         lastClosedPeriod,
         canStepForward,
         cardPeriodName,
+        cardRefusalText,
+        cardLang,
+        CARD_COUNTRIES,
+        cardCountry,
+        cardCountryWire,
         cardDayText,
         cardRangeText,
         cardBody,
@@ -3286,6 +3594,22 @@
         revokeText,
         levelLine,
         cardEnvironmentLine,
-        cardFixLine
+        cardFixLine,
+        lang,
+        setLang,
+        onLang,
+        pickLang,
+        hasText,
+        t,
+        problemText,
+        num,
+        decimal,
+        pct,
+        day,
+        dateTime,
+        time,
+        plural,
+        sourceCount,
+        literalsIn
     };
 })(globalThis);

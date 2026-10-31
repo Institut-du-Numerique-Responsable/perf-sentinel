@@ -1,6 +1,6 @@
 // The terminal sign-in approval page, served by GET /device only. The code is always typed:
 // nothing here reads location.search or location.hash, so no link can fill it in. The texts
-// come from launcher.js, where the Node tests pin them.
+// come from the launcher's tables, in the language the server wrote into <html lang>.
 (function () {
     'use strict';
 
@@ -16,6 +16,8 @@
         stored = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     }
     document.documentElement.dataset.theme = stored;
+    // The page's language, not a choice: storing it would override the launcher's own.
+    PSL.setLang(document.documentElement.lang, false);
 
     async function send(path, body) {
         const response = await fetch(path, {
@@ -53,12 +55,12 @@
         }
 
         function refused(answer) {
-            say(answer.payload?.detail || 'The Hub answered ' + answer.status + '.', 'crit');
+            say(PSL.problemText(answer.payload, answer.status, PSL.t('device.answered', {status: answer.status})), 'crit');
         }
 
         // No answer (network down, Hub restarting) or one the page could not use: never silent.
         function failed(error) {
-            say('The request could not be completed: ' + String(error?.message || error), 'crit');
+            say(PSL.t('device.failed', {error: String(error?.message || error)}), 'crit');
         }
 
         fetch('/api/access', {headers: {accept: 'application/json'}}).then(function (response) {
@@ -77,7 +79,7 @@
                 if (answer.status !== 200) return refused(answer);
                 verified = answer.payload;
                 armed = false;
-                approve.textContent = 'Approve';
+                approve.textContent = PSL.t('device.approve');
                 document.getElementById('device-request').textContent = PSL.deviceRequestLine(verified, Date.now());
                 const warning = PSL.deviceNetworkAlert(verified);
                 networkAlert.textContent = warning || '';
@@ -94,9 +96,7 @@
                 if (answer.status !== 204) return refused(answer);
                 form.hidden = true;
                 details.hidden = true;
-                say(approved
-                    ? 'Approved. Your terminal signs in within a few seconds. You can close this page.'
-                    : 'Denied. That terminal gets no access.', approved ? 'ok' : 'muted');
+                say(PSL.t(approved ? 'device.approved' : 'device.denied'), approved ? 'ok' : 'muted');
                 // The buttons that had the focus are gone: the outcome takes it.
                 result.focus();
             }).catch(failed);
@@ -105,10 +105,9 @@
         approve.addEventListener('click', function () {
             if (PSL.deviceApproveStep(verified.same_network, armed) === 'arm') {
                 armed = true;
-                approve.textContent = 'Approve anyway';
+                approve.textContent = PSL.t('device.approve_anyway');
                 approve.dataset.armed = 'true';
-                say('This code came from another network. Press Approve anyway only if you started that '
-                    + 'sign-in yourself, or Deny.', 'warn');
+                say(PSL.t('device.armed'), 'warn');
                 return;
             }
             decide(true);

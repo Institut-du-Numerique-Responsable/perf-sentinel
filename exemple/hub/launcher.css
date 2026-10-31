@@ -127,7 +127,7 @@ button {
 }
 
 /* Between a phone and a wide screen the bar keeps one row by dropping what the words
-   already say: the tab icons, and the theme's label, which a reader still hears. */
+   already say: the tab icons. */
 @media (min-width: 761px) and (max-width: 1400px) {
     .shell-tab svg {
         display: none;
@@ -137,7 +137,11 @@ button {
     .shell-tabs .shell-tab {
         padding: 0 12px;
     }
+}
 
+/* The theme keeps its glyph and drops its label, which a reader still hears, on a phone too:
+   there the cluster holds version, identity, theme and language on one row. */
+@media (max-width: 1400px) {
     .shell-cluster .shell-theme {
         width: 34px;
     }
@@ -185,11 +189,36 @@ button {
         gap: 4px;
     }
 
+    /* Version, identity, theme and language on one 390px row: tighter gaps, the language as
+       a circle beside the theme's, and a long name cut short (the access page shows it whole). */
     .shell-topbar .shell-cluster {
         flex: 1 1 auto;
         flex-wrap: wrap;
         justify-content: flex-end;
         min-width: 0;
+        gap: 6px;
+    }
+
+    /* Two classes each: the base rules come later in the file. */
+    .shell-cluster .shell-version {
+        padding: 0 8px;
+    }
+
+    #identity-name {
+        max-width: 8ch;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .shell-cluster .shell-lang {
+        justify-content: center;
+        width: 34px;
+        padding: 0;
+    }
+
+    .shell-cluster .shell-lang-globe {
+        display: none;
     }
 
     /* On a phone a long chip breaks rather than pushing the page sideways. */
@@ -416,6 +445,99 @@ a.shell-identity[aria-current="page"] {
         transform: none;
         opacity: 1
     }
+}
+
+/* The site's language pill: a globe and a 19px window on a two-code track (FR then EN). It rests
+   on the active language and slides to the other one on hover, the one a click shows. The
+   pre-paint script sets lang first, so a load never slides. */
+.shell-lang {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 12px 0 10px;
+    border: 1px solid var(--btn-bd);
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--btn-fg);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    cursor: pointer;
+}
+
+.shell-lang:hover {
+    border-color: var(--brand);
+    background: var(--accent-bg);
+}
+
+.shell-lang-globe {
+    width: 15px;
+    height: 15px;
+    color: var(--brand-text);
+    transition: transform .3s cubic-bezier(.22, 1, .36, 1);
+}
+
+.shell-lang:hover .shell-lang-globe {
+    transform: rotate(18deg);
+}
+
+.shell-lang-window {
+    display: inline-block;
+    width: 19px;
+    overflow: hidden;
+}
+
+.shell-lang-track {
+    display: flex;
+    width: 38px;
+    transform: translateX(-19px);
+    transition: transform .32s cubic-bezier(.22, 1, .36, 1);
+}
+
+.shell-lang-track > span {
+    flex: 0 0 19px;
+    text-align: center;
+}
+
+:root[lang="fr"] .shell-lang-track {
+    transform: none;
+}
+
+.shell-lang:hover .shell-lang-track {
+    transform: none;
+}
+
+:root[lang="fr"] .shell-lang:hover .shell-lang-track {
+    transform: translateX(-19px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .shell-lang-globe,
+    .shell-lang-track {
+        transition: none;
+    }
+}
+
+/* A block the engine wrote stays English on a French screen. Its own face is kept, a small
+   code before it says which language it is in. An English page needs no such mark. */
+:root[lang="fr"] .engine-text::before {
+    content: "EN";
+    content: "EN" / "";
+    display: inline-block;
+    margin-right: 6px;
+    padding: 0 4px;
+    border: 1px solid var(--border-2);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    font-style: normal;
+    letter-spacing: .08em;
+    line-height: 15px;
+    color: var(--text-3);
+    vertical-align: 1px;
 }
 
 .shell-main {
@@ -4179,7 +4301,12 @@ section > .banner + .banner,
     outline: none;
 }
 
-.device-brand {
+/* The wordmark, and the FR/EN pill of the launcher's header as a link to this page in the other language. */
+.device-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     margin-bottom: 26px;
 }
 
@@ -5985,7 +6112,8 @@ a.chip {
     color: var(--text-2);
 }
 
-.card-opt-format .segmented button {
+.card-opt-format .segmented button,
+.card-opt-country .segmented button {
     white-space: nowrap;
 }
 
@@ -5998,6 +6126,20 @@ a.chip {
     }
 
     .card-opt-format .segmented button {
+        height: 30px;
+        text-align: left;
+    }
+}
+
+/* The four countries need about 430px in a row, the French names a little more: below, they stack too. */
+@container share-form (max-width: 520px) {
+    .card-opt-country .segmented {
+        flex-direction: column;
+        height: auto;
+        border-radius: 16px;
+    }
+
+    .card-opt-country .segmented button {
         height: 30px;
         text-align: left;
     }
