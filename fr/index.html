@@ -930,57 +930,60 @@
     </section>
 
     
-    <section data-dc-tpl="1396" data-screen-label="CTA">
-      <div data-dc-tpl="1397" style="position: relative; overflow: hidden; border-radius: 20px; border: 1px solid var(--border); background: rgb(11, 82, 58); padding: clamp(34px, 5vw, 56px);">
-        <div data-dc-tpl="1398" data-grid="cta" style="position: relative; display: grid; grid-template-columns: minmax(0px, 1fr) minmax(0px, 1.15fr); gap: 28px 56px; align-items: center;">
-          <div data-dc-tpl="1399">
-            <h2 data-dc-tpl="1400" style="margin: 0px; font-size: clamp(26px, 3.2vw, 34px); font-weight: 700; line-height: 1.2; letter-spacing: -0.018em; color: rgb(224, 244, 237); text-wrap: balance;"><span class="sc-interp">Posez la sentinelle dans votre pipeline</span></h2>
-            <p data-dc-tpl="1401" style="margin: 14px 0px 0px; font-size: 16px; color: rgb(169, 216, 198); line-height: 1.6;"><span class="sc-interp">Démo intégrée sans rien installer côté apps, puis quality gate sur traces capturées ou daemon OTLP à côté de votre tracing.</span></p>
+    
+
+    
+    <section data-dc-tpl="1451" data-screen-label="CTA">
+      <div data-dc-tpl="1452" style="position: relative; overflow: hidden; border-radius: 20px; border: 1px solid var(--border); background: rgb(11, 82, 58); padding: clamp(34px, 5vw, 56px);">
+        <div data-dc-tpl="1453" data-grid="cta" style="position: relative; display: grid; grid-template-columns: minmax(0px, 1fr) minmax(0px, 1.15fr); gap: 28px 56px; align-items: center;">
+          <div data-dc-tpl="1454">
+            <h2 data-dc-tpl="1455" style="margin: 0px; font-size: clamp(26px, 3.2vw, 34px); font-weight: 700; line-height: 1.2; letter-spacing: -0.018em; color: rgb(224, 244, 237); text-wrap: balance;"><span class="sc-interp">Posez la sentinelle dans votre pipeline</span></h2>
+            <p data-dc-tpl="1456" style="margin: 14px 0px 0px; font-size: 16px; color: rgb(169, 216, 198); line-height: 1.6;"><span class="sc-interp">Démo intégrée sans rien installer côté apps, puis quality gate sur traces capturées ou daemon OTLP à côté de votre tracing.</span></p>
           </div>
-          <div data-dc-tpl="1402">
-            <div data-dc-tpl="1403" data-tech-only="" data-cta-view="try">
-              <div data-dc-tpl="1404" data-cta-tabs="" style="display: flex; gap: 8px; margin-bottom: 12px;"><button data-dc-tpl="1405" type="button" data-cta-tab="try" aria-pressed="true"><span class="sc-interp">Essayer</span></button><button data-dc-tpl="1406" type="button" data-cta-tab="ci" aria-pressed="false"><span class="sc-interp">En CI</span></button></div>
-              <div data-dc-tpl="1407" data-cta-panel="ci">
-                <div data-dc-tpl="1408" data-term="" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: rgb(224, 244, 237); background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(224, 244, 237, 0.14); border-radius: 10px; padding: 15px 18px; line-height: 2; max-width: 100%; overflow-x: auto;">
-                  <div data-dc-tpl="1409" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">1. les traces de vos tests d’intégration</span></div>
-                  <div data-dc-tpl="1410"><span data-dc-tpl="1411" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">capture</span> <span style="white-space: nowrap;">-o</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--</span> <span style="white-space: nowrap;">mvn</span> <span style="white-space: nowrap;">verify</span></div>
-                  <div data-dc-tpl="1412" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">2. le gate&nbsp;: code de sortie 1 si un seuil est franchi</span></div>
-                  <div data-dc-tpl="1413"><span data-dc-tpl="1414" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">analyze</span> <span style="white-space: nowrap;">--input</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--ci</span></div>
-                  <div data-dc-tpl="1415" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">3. les findings dans Code scanning (SARIF)</span></div>
-                  <div data-dc-tpl="1416"><span data-dc-tpl="1417" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">analyze</span> <span style="white-space: nowrap;">--input</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--format</span> <span style="white-space: nowrap;">sarif</span> <span style="white-space: nowrap;">&gt;</span> <span style="white-space: nowrap;">findings.sarif</span></div>
+          <div data-dc-tpl="1457">
+            <div data-dc-tpl="1458" data-tech-only="" data-cta-view="try">
+              <div data-dc-tpl="1459" data-cta-tabs="" style="display: flex; gap: 8px; margin-bottom: 12px;"><button data-dc-tpl="1460" type="button" data-cta-tab="try" aria-pressed="true"><span class="sc-interp">Essayer</span></button><button data-dc-tpl="1461" type="button" data-cta-tab="ci" aria-pressed="false"><span class="sc-interp">En CI</span></button></div>
+              <div data-dc-tpl="1462" data-cta-panel="ci">
+                <div data-dc-tpl="1463" data-term="" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: rgb(224, 244, 237); background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(224, 244, 237, 0.14); border-radius: 10px; padding: 15px 18px; line-height: 2; max-width: 100%; overflow-x: auto;">
+                  <div data-dc-tpl="1464" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">1. les traces de vos tests d’intégration</span></div>
+                  <div data-dc-tpl="1465"><span data-dc-tpl="1466" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">capture</span> <span style="white-space: nowrap;">-o</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--</span> <span style="white-space: nowrap;">mvn</span> <span style="white-space: nowrap;">verify</span></div>
+                  <div data-dc-tpl="1467" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">2. le gate&nbsp;: code de sortie 1 si un seuil est franchi</span></div>
+                  <div data-dc-tpl="1468"><span data-dc-tpl="1469" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">analyze</span> <span style="white-space: nowrap;">--input</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--ci</span></div>
+                  <div data-dc-tpl="1470" style="color: rgb(127, 182, 162); margin-bottom: 0px;"># <span class="sc-interp">3. les findings dans Code scanning (SARIF)</span></div>
+                  <div data-dc-tpl="1471"><span data-dc-tpl="1472" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">analyze</span> <span style="white-space: nowrap;">--input</span> <span style="white-space: nowrap;">traces.json</span> <span style="white-space: nowrap;">--format</span> <span style="white-space: nowrap;">sarif</span> <span style="white-space: nowrap;">&gt;</span> <span style="white-space: nowrap;">findings.sarif</span></div>
                 </div>
-              <a data-dc-tpl="1418" data-plain="" href="/docs/fr/CI" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-size: 14px; font-weight: 600; color: rgb(224, 244, 237);"><span data-dc-tpl="1419" data-ltext=""><span class="sc-interp">Modèles GitHub Actions, GitLab CI et Jenkins</span></span><span data-dc-tpl="1420" data-arrow=""> →</span></a>
+              <a data-dc-tpl="1473" data-plain="" href="/docs/fr/CI" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-size: 14px; font-weight: 600; color: rgb(224, 244, 237);"><span data-dc-tpl="1474" data-ltext=""><span class="sc-interp">Modèles GitHub Actions, GitLab CI et Jenkins</span></span><span data-dc-tpl="1475" data-arrow=""> →</span></a>
               </div>
-              <div data-dc-tpl="1421" data-cta-panel="try">
-              <div data-dc-tpl="1422" data-term="" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: rgb(224, 244, 237); background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(224, 244, 237, 0.14); border-radius: 10px; padding: 15px 18px; line-height: 2; max-width: 100%; overflow-x: auto;">
-                <div data-dc-tpl="1423" class="ps-l1"><span data-dc-tpl="1424"><span data-dc-tpl="1425" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">cargo</span> <span style="white-space: nowrap;">install</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">--locked</span></span><button data-dc-tpl="1426" type="button" data-copy="cargo install perf-sentinel --locked" data-copied="Copié" aria-live="polite"><span class="sc-interp">Copier</span></button></div>
-                <div data-dc-tpl="1427"><span data-dc-tpl="1428" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo <span data-dc-tpl="1429" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">rapport terminal</span></span></div>
-                <div data-dc-tpl="1430"><span data-dc-tpl="1431" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo --tui <span data-dc-tpl="1432" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">TUI interactif</span></span></div>
-                <div data-dc-tpl="1433"><span data-dc-tpl="1434" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo --html demo.html <span data-dc-tpl="1435" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">dashboard HTML</span></span></div>
+              <div data-dc-tpl="1476" data-cta-panel="try">
+              <div data-dc-tpl="1477" data-term="" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: rgb(224, 244, 237); background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(224, 244, 237, 0.14); border-radius: 10px; padding: 15px 18px; line-height: 2; max-width: 100%; overflow-x: auto;">
+                <div data-dc-tpl="1478" class="ps-l1"><span data-dc-tpl="1479"><span data-dc-tpl="1480" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> <span style="white-space: nowrap;">cargo</span> <span style="white-space: nowrap;">install</span> <span style="white-space: nowrap;">perf-sentinel</span> <span style="white-space: nowrap;">--locked</span></span><button data-dc-tpl="1481" type="button" data-copy="cargo install perf-sentinel --locked" data-copied="Copié" aria-live="polite"><span class="sc-interp">Copier</span></button></div>
+                <div data-dc-tpl="1482"><span data-dc-tpl="1483" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo <span data-dc-tpl="1484" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">rapport terminal</span></span></div>
+                <div data-dc-tpl="1485"><span data-dc-tpl="1486" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo --tui <span data-dc-tpl="1487" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">TUI interactif</span></span></div>
+                <div data-dc-tpl="1488"><span data-dc-tpl="1489" class="ps-pr" style="color: rgb(38, 205, 148);">$</span> perf-sentinel demo --html demo.html <span data-dc-tpl="1490" class="ps-cm" style="color: rgb(127, 182, 162);"># <span class="sc-interp">dashboard HTML</span></span></div>
               </div>
-              <a data-dc-tpl="1436" data-plain="" href="/fr/guide#install" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-size: 14px; font-weight: 600; color: rgb(224, 244, 237);"><span data-dc-tpl="1437" data-ltext=""><span class="sc-interp">Binaires précompilés, image Docker et chart Helm dans le guide</span></span><span data-dc-tpl="1438" data-arrow=""> →</span></a>
+              <a data-dc-tpl="1491" data-plain="" href="/fr/guide#install" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; font-size: 14px; font-weight: 600; color: rgb(224, 244, 237);"><span data-dc-tpl="1492" data-ltext=""><span class="sc-interp">Binaires précompilés, image Docker et chart Helm dans le guide</span></span><span data-dc-tpl="1493" data-arrow=""> →</span></a>
               </div>
             </div>
-            <div data-dc-tpl="1439" data-nontech-only="" style="display: flex; gap: 12px; flex-wrap: wrap;">
-              <a data-dc-tpl="1440" data-plain="" href="#modes" class="scp7" style="font-size: 15px; font-weight: 600; color: rgb(11, 82, 58); background: rgb(224, 244, 237); border-radius: 9px; padding: 13px 22px;"><span class="sc-interp">Comment ça marche</span></a>
-              <a data-dc-tpl="1441" data-plain="" href="#greenops" class="scp8" style="font-size: 15px; font-weight: 600; color: rgb(224, 244, 237); background: transparent; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; padding: 13px 22px;"><span class="sc-interp">Le volet carbone</span></a>
+            <div data-dc-tpl="1494" data-nontech-only="" style="display: flex; gap: 12px; flex-wrap: wrap;">
+              <a data-dc-tpl="1495" data-plain="" href="#modes" class="scp7" style="font-size: 15px; font-weight: 600; color: rgb(11, 82, 58); background: rgb(224, 244, 237); border-radius: 9px; padding: 13px 22px;"><span class="sc-interp">Comment ça marche</span></a>
+              <a data-dc-tpl="1496" data-plain="" href="#greenops" class="scp8" style="font-size: 15px; font-weight: 600; color: rgb(224, 244, 237); background: transparent; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; padding: 13px 22px;"><span class="sc-interp">Le volet carbone</span></a>
             </div>
           </div>
         </div>
 
-        <div data-dc-tpl="1442" data-stars-row="" style="position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 30px; padding-top: 24px; border-top: 1px solid rgba(224, 244, 237, 0.14);"><span data-dc-tpl="1443" style="font-size: 14px; color: rgb(169, 216, 198); margin-right: 6px;"><span class="sc-interp">Le projet vous sert&nbsp;? Une étoile l’aide à se faire connaître.</span></span><a data-dc-tpl="1444" data-plain="" data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" target="_blank" rel="noopener" aria-label="Ajouter une étoile à Perf Sentinel sur GitHub, 26 étoiles" class="scp8" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0px 16px; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; color: rgb(224, 244, 237); font-size: 14px; font-weight: 600;"><svg data-dc-tpl="1445" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon data-dc-tpl="1446" points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span data-dc-tpl="1447"><span class="sc-interp">Perf Sentinel</span></span><span data-dc-tpl="1448" data-stars="" data-n="26" style="padding-left: 9px; border-left: 1px solid rgba(224, 244, 237, 0.3); font-variant-numeric: tabular-nums; color: rgb(169, 216, 198);"><span class="sc-interp">26</span></span></a><a data-dc-tpl="1449" data-plain="" data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub" target="_blank" rel="noopener" aria-label="Ajouter une étoile à Perf Sentinel Hub sur GitHub, 1 étoiles" class="scp8" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0px 16px; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; color: rgb(224, 244, 237); font-size: 14px; font-weight: 600;"><svg data-dc-tpl="1450" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon data-dc-tpl="1451" points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span data-dc-tpl="1452"><span class="sc-interp">Perf Sentinel Hub</span></span><span data-dc-tpl="1453" data-stars="" data-n="1" style="padding-left: 9px; border-left: 1px solid rgba(224, 244, 237, 0.3); font-variant-numeric: tabular-nums; color: rgb(169, 216, 198);"><span class="sc-interp">1</span></span></a></div>
+        <div data-dc-tpl="1497" data-stars-row="" style="position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 30px; padding-top: 24px; border-top: 1px solid rgba(224, 244, 237, 0.14);"><span data-dc-tpl="1498" style="font-size: 14px; color: rgb(169, 216, 198); margin-right: 6px;"><span class="sc-interp">Le projet vous sert&nbsp;? Une étoile l’aide à se faire connaître.</span></span><a data-dc-tpl="1499" data-plain="" data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" target="_blank" rel="noopener" aria-label="Ajouter une étoile à Perf Sentinel sur GitHub, 26 étoiles" class="scp8" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0px 16px; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; color: rgb(224, 244, 237); font-size: 14px; font-weight: 600;"><svg data-dc-tpl="1500" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon data-dc-tpl="1501" points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span data-dc-tpl="1502"><span class="sc-interp">Perf Sentinel</span></span><span data-dc-tpl="1503" data-stars="" data-n="26" style="padding-left: 9px; border-left: 1px solid rgba(224, 244, 237, 0.3); font-variant-numeric: tabular-nums; color: rgb(169, 216, 198);"><span class="sc-interp">26</span></span></a><a data-dc-tpl="1504" data-plain="" data-star-btn="" href="https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub" target="_blank" rel="noopener" aria-label="Ajouter une étoile à Perf Sentinel Hub sur GitHub, 1 étoiles" class="scp8" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0px 16px; border: 1px solid rgba(224, 244, 237, 0.3); border-radius: 9px; color: rgb(224, 244, 237); font-size: 14px; font-weight: 600;"><svg data-dc-tpl="1505" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon data-dc-tpl="1506" points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg><span data-dc-tpl="1507"><span class="sc-interp">Perf Sentinel Hub</span></span><span data-dc-tpl="1508" data-stars="" data-n="1" style="padding-left: 9px; border-left: 1px solid rgba(224, 244, 237, 0.3); font-variant-numeric: tabular-nums; color: rgb(169, 216, 198);"><span class="sc-interp">1</span></span></a></div>
       </div>
     </section>
 
     
-    <section data-dc-tpl="1454" data-screen-label="Governance">
-      <div data-dc-tpl="1455" data-gov="" style="display: grid; grid-template-columns: minmax(0px, 180px) minmax(0px, 1fr); gap: 32px; align-items: center; border-top: 1px solid var(--border); padding-top: 32px;">
-        <a data-dc-tpl="1456" data-plain="" href="https://institutnr.org/" target="_blank" rel="noopener" style="display: block;"><img data-dc-tpl="1457" data-logo="light" src="/assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width: 100%; height: auto;"><img data-dc-tpl="1458" data-logo="dark" src="/assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width: 100%; height: auto;"></a>
-        <div data-dc-tpl="1459">
-          <div data-dc-tpl="1460" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: var(--accent); letter-spacing: 0.04em;"><span class="sc-interp">// gouvernance</span></div>
-          <h2 data-dc-tpl="1461" style="margin: 12px 0px 0px; font-size: clamp(24px, 2.7vw, 31px); font-weight: 700; letter-spacing: -0.018em; color: var(--text); text-wrap: balance;"><span class="sc-interp">Porté par l’</span><span data-dc-tpl="1462" style="color: var(--accent-strong);"><span class="sc-interp">Institut du Numérique Responsable</span></span></h2>
-          <p data-dc-tpl="1463" style="margin: 12px 0px 0px; font-size: 15px; line-height: 1.6; color: var(--text-2); max-width: 62ch;"><span class="sc-interp">Né comme projet personnel, Perf Sentinel a rejoint l’INR, association loi 1901 issue du Club Green IT. Son créateur, </span><a data-dc-tpl="1464" href="https://github.com/robintra" target="_blank" rel="noopener" style="color: var(--accent-strong); font-weight: 600;">Robin Trassard</a><span class="sc-interp">, continue de le diriger au sein de l’institut. Robin est par ailleurs développeur fullstack chez Onepoint, orienté back-end et spécialisé en performance et éco-conception. Le code reste sous AGPL-3.0 et se développe en public sur le GitHub de l’INR.</span></p>
-          <div data-dc-tpl="1465" data-links="" style="margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px 22px;"><a data-dc-tpl="1466" data-plain="" href="https://institutnr.org/" target="_blank" rel="noopener" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--accent-strong);"><span data-dc-tpl="1467" data-ltext="">institutnr.org</span><span data-dc-tpl="1468" data-arrow="ext"> ↗</span></a><a data-dc-tpl="1469" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable" target="_blank" rel="noopener" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--accent-strong);"><span data-dc-tpl="1470" data-ltext=""><span class="sc-interp">Le GitHub de l’INR</span></span><span data-dc-tpl="1471" data-arrow="ext"> ↗</span></a></div>
+    <section data-dc-tpl="1509" data-screen-label="Governance">
+      <div data-dc-tpl="1510" data-gov="" style="display: grid; grid-template-columns: minmax(0px, 180px) minmax(0px, 1fr); gap: 32px; align-items: center; border-top: 1px solid var(--border); padding-top: 32px;">
+        <a data-dc-tpl="1511" data-plain="" href="https://institutnr.org/" target="_blank" rel="noopener" style="display: block;"><img data-dc-tpl="1512" data-logo="light" src="/assets/inr-logo.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width: 100%; height: auto;"><img data-dc-tpl="1513" data-logo="dark" src="/assets/inr-logo-dark.svg" alt="Institut du Numérique Responsable" loading="lazy" style="width: 100%; height: auto;"></a>
+        <div data-dc-tpl="1514">
+          <div data-dc-tpl="1515" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 13px; color: var(--accent); letter-spacing: 0.04em;"><span class="sc-interp">// gouvernance</span></div>
+          <h2 data-dc-tpl="1516" style="margin: 12px 0px 0px; font-size: clamp(24px, 2.7vw, 31px); font-weight: 700; letter-spacing: -0.018em; color: var(--text); text-wrap: balance;"><span class="sc-interp">Porté par l’</span><span data-dc-tpl="1517" style="color: var(--accent-strong);"><span class="sc-interp">Institut du Numérique Responsable</span></span></h2>
+          <p data-dc-tpl="1518" style="margin: 12px 0px 0px; font-size: 15px; line-height: 1.6; color: var(--text-2); max-width: 62ch;"><span class="sc-interp">Né comme projet personnel, Perf Sentinel a rejoint l’INR, association loi 1901 issue du Club Green IT. Son créateur, </span><a data-dc-tpl="1519" href="https://github.com/robintra" target="_blank" rel="noopener" style="color: var(--accent-strong); font-weight: 600;">Robin Trassard</a><span class="sc-interp">, continue de le diriger au sein de l’institut. Robin est par ailleurs développeur fullstack chez Onepoint, orienté back-end et spécialisé en performance et éco-conception. Le code reste sous AGPL-3.0 et se développe en public sur le GitHub de l’INR.</span></p>
+          <div data-dc-tpl="1520" data-links="" style="margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px 22px;"><a data-dc-tpl="1521" data-plain="" href="https://institutnr.org/" target="_blank" rel="noopener" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--accent-strong);"><span data-dc-tpl="1522" data-ltext="">institutnr.org</span><span data-dc-tpl="1523" data-arrow="ext"> ↗</span></a><a data-dc-tpl="1524" data-plain="" href="https://github.com/Institut-du-Numerique-Responsable" target="_blank" rel="noopener" class="scp4" style="display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--accent-strong);"><span data-dc-tpl="1525" data-ltext=""><span class="sc-interp">Le GitHub de l’INR</span></span><span data-dc-tpl="1526" data-arrow="ext"> ↗</span></a></div>
         </div>
       </div>
     </section>
@@ -988,47 +991,47 @@
   </main>
 
   
-  <footer data-dc-tpl="1472" style="border-top: 1px solid var(--border); background: var(--surface-2);">
-    <div data-dc-tpl="1473" style="max-width: 1120px; margin: 0px auto; padding: 48px 28px 36px;">
-      <div data-dc-tpl="1474" data-grid="ftcols" style="display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px;">
-        <div data-dc-tpl="1475">
-          <img data-dc-tpl="1476" data-logo="light" src="/assets/logo-h-light.svg" alt="Perf Sentinel" style="height: 40px; width: auto;"><img data-dc-tpl="1477" data-logo="dark" src="/assets/logo-h-dark.svg" alt="Perf Sentinel" style="height: 40px; width: auto;">
-          <p data-dc-tpl="1478" style="margin: 16px 0px 0px; font-size: 13.5px; color: var(--text-2); max-width: 240px; line-height: 1.55;"><span class="sc-interp">Détecteur d'anti-patterns d'I/O au niveau protocole, auto-hébergeable et carbon-aware.</span></p>
+  <footer data-dc-tpl="1527" style="border-top: 1px solid var(--border); background: var(--surface-2);">
+    <div data-dc-tpl="1528" style="max-width: 1120px; margin: 0px auto; padding: 48px 28px 36px;">
+      <div data-dc-tpl="1529" data-grid="ftcols" style="display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px;">
+        <div data-dc-tpl="1530">
+          <img data-dc-tpl="1531" data-logo="light" src="/assets/logo-h-light.svg" alt="Perf Sentinel" style="height: 40px; width: auto;"><img data-dc-tpl="1532" data-logo="dark" src="/assets/logo-h-dark.svg" alt="Perf Sentinel" style="height: 40px; width: auto;">
+          <p data-dc-tpl="1533" style="margin: 16px 0px 0px; font-size: 13.5px; color: var(--text-2); max-width: 240px; line-height: 1.55;"><span class="sc-interp">Détecteur d'anti-patterns d'I/O au niveau protocole, auto-hébergeable et carbon-aware.</span></p>
         </div>
-        <div data-dc-tpl="1479">
-          <div data-dc-tpl="1480" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Produit</span></div>
-          <div data-dc-tpl="1481" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
-            <a data-dc-tpl="1482" href="/fr/#detection" data-tech-only="" class="scp9"><span class="sc-interp">Détection</span></a>
-            <a data-dc-tpl="1483" href="/fr/#modes" data-tech-only="" class="scp9"><span class="sc-interp">Déploiement</span></a>
-            <a data-dc-tpl="1484" href="/fr/#perf" data-tech-only="" class="scp9"><span class="sc-interp">Performance</span></a>
-            <a data-dc-tpl="1485" href="/fr/#greenops" class="scp9"><span class="sc-interp">GreenOps</span></a>
-            <a data-dc-tpl="1486" href="/fr/#comparatif" class="scp9"><span class="sc-interp">Comparatif</span></a>
+        <div data-dc-tpl="1534">
+          <div data-dc-tpl="1535" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Produit</span></div>
+          <div data-dc-tpl="1536" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
+            <a data-dc-tpl="1537" href="/fr/#detection" data-tech-only="" class="scp9"><span class="sc-interp">Détection</span></a>
+            <a data-dc-tpl="1538" href="/fr/#modes" data-tech-only="" class="scp9"><span class="sc-interp">Déploiement</span></a>
+            <a data-dc-tpl="1539" href="/fr/#perf" data-tech-only="" class="scp9"><span class="sc-interp">Performance</span></a>
+            <a data-dc-tpl="1540" href="/fr/#greenops" class="scp9"><span class="sc-interp">GreenOps</span></a>
+            <a data-dc-tpl="1541" href="/fr/#comparatif" class="scp9"><span class="sc-interp">Comparatif</span></a>
           </div>
         </div>
-        <div data-dc-tpl="1487">
-          <div data-dc-tpl="1488" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Documentation</span></div>
-          <div data-dc-tpl="1489" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
-            <a data-dc-tpl="1490" href="/fr/guide#quickstart" class="scp9"><span class="sc-interp">Démarrage rapide</span></a>
-            <a data-dc-tpl="1491" href="/fr/guide#cli" class="scp9"><span class="sc-interp">Référence CLI</span></a>
-            <a data-dc-tpl="1492" href="/fr/guide#config" class="scp9"><span class="sc-interp">Configuration</span></a>
-            <a data-dc-tpl="1493" href="/fr/guide#metrics" class="scp9"><span class="sc-interp">Méthodologie GreenOps</span></a>
+        <div data-dc-tpl="1542">
+          <div data-dc-tpl="1543" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Documentation</span></div>
+          <div data-dc-tpl="1544" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
+            <a data-dc-tpl="1545" href="/fr/guide#quickstart" class="scp9"><span class="sc-interp">Démarrage rapide</span></a>
+            <a data-dc-tpl="1546" href="/fr/guide#cli" class="scp9"><span class="sc-interp">Référence CLI</span></a>
+            <a data-dc-tpl="1547" href="/fr/guide#config" class="scp9"><span class="sc-interp">Configuration</span></a>
+            <a data-dc-tpl="1548" href="/fr/guide#metrics" class="scp9"><span class="sc-interp">Méthodologie GreenOps</span></a>
           </div>
         </div>
-        <div data-dc-tpl="1494">
-          <div data-dc-tpl="1495" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Projet</span></div>
-          <div data-dc-tpl="1496" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
-            <a data-dc-tpl="1497" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" class="scp9">GitHub</a>
-            <a data-dc-tpl="1498" href="https://crates.io/crates/perf-sentinel" class="scp9">crates.io</a>
-            <a data-dc-tpl="1499" href="https://docs.rs/perf-sentinel-core" class="scp9">docs.rs</a>
-            <a data-dc-tpl="1500" href="/fr/#license" data-hide-rse="" class="scp9"><span class="sc-interp">Licence AGPL-3.0</span></a>
-            <a data-dc-tpl="1501" href="/fr/#security" class="scp9"><span class="sc-interp">Sécurité</span></a>
+        <div data-dc-tpl="1549">
+          <div data-dc-tpl="1550" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 13px;"><span class="sc-interp">Projet</span></div>
+          <div data-dc-tpl="1551" style="display: flex; flex-direction: column; gap: 9px; font-size: 14px; color: var(--text-2);">
+            <a data-dc-tpl="1552" href="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel" class="scp9">GitHub</a>
+            <a data-dc-tpl="1553" href="https://crates.io/crates/perf-sentinel" class="scp9">crates.io</a>
+            <a data-dc-tpl="1554" href="https://docs.rs/perf-sentinel-core" class="scp9">docs.rs</a>
+            <a data-dc-tpl="1555" href="/fr/#license" data-hide-rse="" class="scp9"><span class="sc-interp">Licence AGPL-3.0</span></a>
+            <a data-dc-tpl="1556" href="/fr/#security" class="scp9"><span class="sc-interp">Sécurité</span></a>
           </div>
         </div>
       </div>
 
-      <div data-dc-tpl="1502" style="display: flex; justify-content: space-between; gap: 18px; margin-top: 26px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2);">
-        <div data-dc-tpl="1503" style="display: flex; flex-direction: column; gap: 6px;"><span data-dc-tpl="1504"><span class="sc-interp">© 2026 Robin Trassard et contributeurs · Institut du Numérique Responsable · AGPL-3.0 · Page éco-conçue, sans script de tracking</span></span><span data-dc-tpl="1505" style="display: flex; gap: 14px;"><a data-dc-tpl="1506" href="/mentions-legales"><span class="sc-interp">Mentions légales</span></a><a data-dc-tpl="1507" href="/confidentialite"><span class="sc-interp">Confidentialité</span></a></span></div>
-        <span data-dc-tpl="1508"><span class="sc-interp">Logo &amp; bannière, </span><a data-dc-tpl="1509" href="https://www.linkedin.com/in/gwendoline-meignen-b0224873/" target="_blank" rel="noopener">Gwendoline Meignen</a></span>
+      <div data-dc-tpl="1557" style="display: flex; justify-content: space-between; gap: 18px; margin-top: 26px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2);">
+        <div data-dc-tpl="1558" style="display: flex; flex-direction: column; gap: 6px;"><span data-dc-tpl="1559"><span class="sc-interp">© 2026 Robin Trassard et contributeurs · Institut du Numérique Responsable · AGPL-3.0 · Page éco-conçue, sans script de tracking</span></span><span data-dc-tpl="1560" style="display: flex; gap: 14px;"><a data-dc-tpl="1561" href="/mentions-legales"><span class="sc-interp">Mentions légales</span></a><a data-dc-tpl="1562" href="/confidentialite"><span class="sc-interp">Confidentialité</span></a></span></div>
+        <span data-dc-tpl="1563"><span class="sc-interp">Logo &amp; bannière, </span><a data-dc-tpl="1564" href="https://www.linkedin.com/in/gwendoline-meignen-b0224873/" target="_blank" rel="noopener">Gwendoline Meignen</a></span>
       </div>
     </div>
   </footer>
@@ -1180,6 +1183,47 @@
   [data-sample-b] a+a{color:var(--text);background:var(--surface);border:1px solid var(--border)}[data-sample-b] a+a:hover{border-color:var(--accent)}
   [data-sample-b] svg{flex:none}
   @media(max-width:620px){[data-sample]{grid-template-columns:minmax(0,1fr);gap:26px}[data-sample-doc]{width:148px}[data-sample-b] a{width:100%;justify-content:center}}
+  /* Review and share (Direction, RSE): a recap excerpt in plain words, then the share card */
+  [data-rc-flow]{margin-top:34px;display:grid;grid-template-columns:minmax(0,1fr) 112px minmax(0,272px);align-items:start}
+  [data-rc-recap],[data-rc-card]{margin:0}
+  [data-rc-panel]{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 22px 6px;box-shadow:0 20px 40px -32px rgba(6,31,44,.45)}
+  [data-ps-root][data-theme="dark"] [data-rc-panel]{box-shadow:none}
+  [data-rc-head]{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 16px;font-size:12.5px;color:var(--text-2);padding-bottom:12px;border-bottom:1px solid var(--border)}
+  [data-rc-head]>span:first-child{font-weight:600;color:var(--text)}
+  [data-rc-sub]{margin:14px 0 2px;font-size:16px;font-weight:700;color:var(--text)}
+  [data-rc-rows]{list-style:none;margin:0;padding:0}
+  [data-rc-row]{display:grid;grid-template-columns:22px minmax(0,1fr) 150px;gap:4px 14px;padding:14px 0;border-top:1px solid var(--border)}
+  [data-rc-row]:first-child{border-top:0}
+  [data-rc-i]{font-size:13px;font-weight:600;color:var(--text-2);padding-top:1px;font-variant-numeric:tabular-nums}
+  [data-rc-s]{font-size:14.5px;line-height:1.5;font-weight:500;color:var(--text)}
+  [data-rc-w]{margin-top:4px;font-size:13px;color:var(--text-2)}
+  [data-rc-fig]{display:flex;flex-direction:column;align-items:flex-end;gap:3px;text-align:right}
+  [data-rc-fig] b{font-size:22px;line-height:1.1;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+  [data-rc-fig] small{font-size:12px;color:var(--text-2)}
+  [data-rc-bar]{display:block;width:100%;height:4px;border-radius:2px;background:var(--border);overflow:hidden}
+  [data-rc-bar] i{display:block;height:100%;border-radius:2px;background:var(--accent)}
+  [data-rc-bar="100"] i{width:100%}[data-rc-bar="22"] i{width:22%}[data-rc-bar="5"] i{width:5%}
+  [data-rc-pill]{margin-top:4px;font-size:12px;font-weight:600;line-height:1;padding:4px 8px;border-radius:999px}
+  [data-rc-pill="up"]{color:var(--coral);background:color-mix(in srgb,var(--coral) 12%,transparent)}
+  [data-rc-pill="new"]{color:var(--text-2);background:var(--surface-2);border:1px solid var(--border)}
+  [data-rc-pill="down"]{color:var(--accent-strong);background:var(--accent-soft)}
+  [data-rc-recap] figcaption,[data-rc-card] figcaption{margin-top:12px;font-size:13.5px;line-height:1.55;color:var(--text-2);max-width:62ch}
+  [data-rc-co2]{display:block;margin-top:8px;color:var(--text)}
+  [data-rc-bridge]{align-self:center;display:flex;flex-direction:column;align-items:center;gap:8px;padding:0 10px;margin-top:-40px}
+  [data-rc-bridge] span{font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.4;color:var(--accent-strong);text-align:center}
+  [data-rc-bridge] i{position:relative;display:block;width:100%;height:2px;background:var(--accent)}
+  [data-rc-bridge] i::after{content:'';position:absolute;right:-1px;top:-4px;border:5px solid transparent;border-left:8px solid var(--accent);border-right:0}
+  [data-rc-card] img{display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--border);background:#fff;box-shadow:0 22px 40px -22px rgba(6,31,44,.55),0 2px 6px rgba(6,31,44,.08)}
+  [data-ps-root][data-theme="dark"] [data-rc-card] img{box-shadow:0 22px 40px -20px rgba(0,0,0,.75)}
+  [data-rc-never]{margin-top:40px;padding-top:26px;border-top:1px solid var(--border)}
+  [data-rc-never] h3{margin:0;font-size:16px;font-weight:700;color:var(--text)}
+  [data-rc-never] ul{list-style:none;margin:14px 0 0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 32px}
+  [data-rc-never] li{display:flex;gap:10px;align-items:flex-start;font-size:14.5px;line-height:1.55;color:var(--text-2)}
+  [data-rc-never] li svg{flex:none;margin-top:3px;color:var(--coral)}
+  [data-rc-foot]{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;margin-top:8px}
+  [data-rc-foot] small{margin-top:22px;font-size:12.5px;color:var(--text-2)}
+  @media(max-width:900px){[data-rc-flow]{grid-template-columns:minmax(0,1fr)}[data-rc-bridge]{margin:18px 0;flex-direction:row;justify-content:center}[data-rc-bridge] i{width:2px;height:28px;order:-1}[data-rc-bridge] i::after{right:auto;left:-4px;top:auto;bottom:-1px;border:5px solid transparent;border-top:8px solid var(--accent);border-bottom:0}[data-rc-card]{max-width:300px;justify-self:center}[data-rc-never] ul{grid-template-columns:minmax(0,1fr)}}
+  @media(max-width:620px){[data-rc-panel]{padding:16px 16px 4px}[data-rc-row]{grid-template-columns:18px minmax(0,1fr)}[data-rc-fig]{grid-column:2;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:6px 10px;text-align:left}[data-rc-fig] b{font-size:18px}[data-rc-bar]{width:80px;order:3}[data-rc-pill]{margin-top:0}[data-rc-foot] [data-sample-b]{width:100%}}
   /* Plugin panel in #modes. The Claude mark and its orange #D97757 (simple-icons brand hex) name the product the plugin runs in, text stays on the page palette */
   [data-ico="claude"]{--ico:url(/assets/claude.svg)}
   [data-cc]{margin-top:30px;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);grid-template-areas:"head head" "rail side";gap:20px 44px;align-items:start;padding:26px 28px;background:var(--surface);border:1px solid var(--border);border-radius:14px}
@@ -2137,6 +2181,33 @@
       <button type="button" class="ps-dmore" data-tech-only="" data-depth-only="ess" onClick="{{ dMoreSecurity }}">{{ dMoreSecurityL }} <span aria-hidden="true">▸</span></button>
     </section>
 
+    <!-- REVIEW AND SHARE (Direction, RSE) -->
+    <sc-if value="{{ shrT1 }}"><section id="partager" data-screen-label="Share">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent);letter-spacing:.04em">{{ shrEyebrow }}</div>
+      <h2 style="margin:12px 0 0;font-size:clamp(28px,3.4vw,38px);font-weight:700;letter-spacing:-.018em;color:var(--text);max-width:820px;text-wrap:balance">{{ shrT1 }}<span style="color:var(--accent)">{{ shrTW }}</span></h2>
+      <p data-intro="">{{ shrIntro }}</p>
+      <div data-rc-flow="">
+        <figure data-rc-recap="">
+          <div data-rc-panel="">
+            <div data-rc-head=""><span>{{ shrRecapHead }}</span><span>{{ shrPeriod }}</span></div>
+            <div data-rc-sub="">{{ shrFixFirst }}</div>
+            <ol data-rc-rows=""><sc-for list="{{ shrRows }}" as="r" hint-placeholder-count="3"><li data-rc-row=""><span data-rc-i="">{{ r.i }}</span><div><div data-rc-s="">{{ r.s }}</div><div data-rc-w="">{{ r.where }}</div></div><div data-rc-fig=""><b>{{ r.n }}</b><small>{{ shrUnit }}</small><span data-rc-bar="{{ r.w }}" aria-hidden="true"><i></i></span><span data-rc-pill="{{ r.k }}">{{ r.pill }}</span></div></li></sc-for></ol>
+          </div>
+          <figcaption>{{ shrRecapCap }}</figcaption>
+        </figure>
+        <div data-rc-bridge=""><span>{{ shrBridge }}</span><i aria-hidden="true"></i></div>
+        <figure data-rc-card="">
+          <img src="{{ shrImg }}" width="1080" height="1350" loading="lazy" decoding="async" alt="{{ shrAlt }}">
+          <figcaption>{{ shrCardCap }}<sc-if value="{{ shrCo2 }}"><span data-rc-co2="">{{ shrCo2 }}</span></sc-if></figcaption>
+        </figure>
+      </div>
+      <div data-rc-never="">
+        <h3>{{ shrNeverT }}</h3>
+        <ul><sc-for list="{{ shrNever }}" as="n" hint-placeholder-count="3"><li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/></svg><span>{{ n.t }}</span></li></sc-for></ul>
+      </div>
+      <div data-rc-foot=""><div data-sample-b=""><a data-plain href="/exemple/hub/#/recap?view=pilotage" target="_blank" rel="noopener">{{ shrB1 }}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg></a><a data-plain href="{{ shrVerifyHref }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>{{ shrB2 }}</a></div><small>{{ shrNote }}</small></div>
+    </section></sc-if>
+
     <!-- CTA -->
     <section id="start" data-screen-label="CTA">
       <div style="position:relative;overflow:hidden;border-radius:20px;border:1px solid var(--border);background:#0B523A;padding:clamp(34px,5vw,56px)">
@@ -2353,7 +2424,7 @@ class Component extends DCLogic {
     const root = document.querySelector('#dc-root [data-ps-root]');
     if (!root) return;
     const el = (id) => id === 'top' ? root.querySelector('section[data-screen-label="Hero"]') : root.querySelector('#' + id);
-    const ids = ['top', 'why', 'detection', 'stack', 'modes', 'perf', 'hub', 'carbone', 'greenops', 'mesure', 'comparatif', 'publier', 'license', 'security', 'start', 'governance'];
+    const ids = ['top', 'why', 'detection', 'stack', 'modes', 'perf', 'hub', 'carbone', 'greenops', 'mesure', 'comparatif', 'publier', 'license', 'security', 'partager', 'start', 'governance'];
     const vis = ids.filter(id => { const e = el(id); return e && e.getClientRects().length > 0; });
     const line = window.innerHeight * 0.4;
     let cur = vis[0] || null;
@@ -2474,6 +2545,22 @@ class Component extends DCLogic {
           { icon: 'flag', tag: 'SIGNALEMENT', title: 'Un circuit privé pour les failles', desc: 'Une faille se signale en privé, sans être rendue publique. Chaque dépôt publie ses délais de réponse et les versions qui reçoivent les correctifs.' },
         ],
         secMore: 'Le dossier complet, pour votre DSI',
+        shrEyebrow: '// faire le point, puis partager', shrT1: 'De la revue d’équipe à un résultat que vous pouvez ', shrTW: 'publier',
+        shrIntro: 'Le Hub fait de ce que Perf Sentinel détecte un récap pour vos revues, puis une carte que vos équipes peuvent publier. Aucune IA ne les rédige : chaque phrase est fixée à l’avance, chaque nombre vient des détections.',
+        shrRecapHead: 'Le récap, vue pilotage', shrPeriod: 'Mois de juillet 2026', shrFixFirst: 'À corriger d’abord', shrUnit: 'opérations inutiles',
+        shrRows: [
+          { i: '1', s: 'Pour chaque élément d’une page, l’application va rechercher le même type d’information, au lieu de tout chercher en une fois.', where: 'Afficher un panier', n: '1,9 million', w: '100', pill: 'plus qu’en juin', k: 'up' },
+          { i: '2', s: 'L’application envoie un petit message par élément au lieu de les regrouper en un seul.', where: 'Confirmer une commande', n: '412 000', w: '22', pill: 'nouveau ce mois-ci', k: 'new' },
+          { i: '3', s: 'L’application va chercher la même information plusieurs fois pour une seule action, quand une fois suffirait.', where: 'Ouvrir les réglages', n: '96 000', w: '5', pill: 'moins qu’en juin', k: 'down' },
+        ],
+        shrRecapCap: 'Par jour, semaine ou mois : ce qui gaspille le plus, ce qu’il faut corriger d’abord, ce qui a bougé. Aussi envoyé par e‑mail, tel qu’il était à la fin de la période.',
+        shrBridge: 'corrigé en août, confirmé par la mesure',
+        shrCardCap: 'Sur une période terminée : une correction, la courbe du travail évitable ou le nombre de corrections confirmées. Chacun la vérifie par QR code.',
+        shrNeverT: 'Ce qu’une carte ne fait jamais',
+        shrNever: [{ t: 'Arrondir vers le haut : ses chiffres sont arrondis vers le bas et donnés « au moins ».' }, { t: 'Couvrir une période en cours, ou à laquelle il manque un jour.' }, { t: 'Taire sa source : l’équivalent du quotidien cite la Base Carbone de l’ADEME.' }],
+        shrB1: 'Voir le récap dans la démo du Hub', shrB2: 'Comment vérifier une carte', shrVerifyHref: '/fr/verifier', shrImg: '/exemple/card/card-fr.png',
+        shrAlt: 'Exemple de carte à partager : pour afficher un panier, l’application allait chercher les informations 41 fois au lieu d’une. Correction confirmée par la mesure. Avant la correction, 1,9 million d’opérations inutiles, au moins 12 kg CO2e (estimation), l’équivalent d’au moins 5 repas moyens.',
+        shrNote: 'Récap adapté de la démo du Hub, entreprise fictive.',
       },
       en: {
         goT1: 'Every avoidable operation has a ',
@@ -2522,6 +2609,22 @@ class Component extends DCLogic {
           { icon: 'flag', tag: 'REPORTING', title: 'A private channel for vulnerabilities', desc: 'Vulnerabilities are reported privately, without being made public. Each repository publishes its response times and the versions that receive fixes.' },
         ],
         secMore: 'The full overview, for your security team',
+        shrEyebrow: '// review, then share', shrT1: 'From the team review to a result you can ', shrTW: 'post',
+        shrIntro: 'The Hub turns what Perf Sentinel detects into a recap for your reviews, then into a card your teams can post. No AI writes them: every sentence is set in advance, every count comes from the detections.',
+        shrRecapHead: 'The recap, management view', shrPeriod: 'Month of July 2026', shrFixFirst: 'What to fix first', shrUnit: 'unnecessary operations',
+        shrRows: [
+          { i: '1', s: 'For each item on a page, the application fetches the same kind of information again, instead of fetching it all at once.', where: 'Showing a cart', n: '1.9 million', w: '100', pill: 'more than in June', k: 'up' },
+          { i: '2', s: 'The application sends one small message per item instead of grouping them into one.', where: 'Confirming an order', n: '412,000', w: '22', pill: 'new this month', k: 'new' },
+          { i: '3', s: 'The application fetches the same information several times for one action, when once would do.', where: 'Opening the settings', n: '96,000', w: '5', pill: 'fewer than in June', k: 'down' },
+        ],
+        shrRecapCap: 'By day, week or month: what wastes the most, what to fix first, what moved. Also sent by e‑mail, as it stood at the end of the period.',
+        shrBridge: 'fixed in August, confirmed by measurement',
+        shrCardCap: 'Over a finished period: one fix, the curve of avoidable work, or the count of confirmed fixes. Anyone can check it by QR code.',
+        shrNeverT: 'What a card never does',
+        shrNever: [{ t: 'Round up: its figures are rounded down and given as “at least”.' }, { t: 'Cover a period still running, or one with a missing day.' }, { t: 'Hide its source: the everyday equivalent cites ADEME’s Base Carbone.' }],
+        shrB1: 'See the recap in the Hub demo', shrB2: 'How a card is checked', shrVerifyHref: '/verifier', shrImg: '/exemple/card/card-en.png',
+        shrAlt: 'Sample share card: showing a cart, the application fetched information 41 times instead of once. Fix confirmed by measurement. Before the fix, 1.9 million unnecessary operations, at least 12 kg CO2e (estimate), equal to at least 5 average meals.',
+        shrNote: 'Recap adapted from the Hub demo, fictional company.',
       },
     };
   }
@@ -2557,6 +2660,7 @@ class Component extends DCLogic {
     return {
       fr: {
         rse: {
+          shrCo2: 'Avant la correction, en juillet : au moins 12 kg CO₂e, une estimation, soit au moins 5 repas moyens selon la Base Carbone de l’ADEME.',
           eyebrowHero: 'Estimation bottom-up · SCI / ISO 21031 · ', eyebrowHeroGreen: 'Critères RGESN couverts',
           heroTitle: 'Le coût carbone du code non optimisé, estimé requête par requête.',
           heroSub: 'Perf Sentinel chiffre chaque requête évitable en énergie puis en CO₂, une par une et attribuable au code qui l’a produite. Vous pouvez vous en servir pour documenter votre démarche d’écoconception.',
@@ -2606,6 +2710,7 @@ class Component extends DCLogic {
           goNoteB: ', possible quand l’outil tourne en continu sur vos serveurs, rend l’énergie (E) plus fidèle. Au-delà du carbone, chaque requête évitable supprimée réduit la charge sur vos serveurs : le même décompte d’opérations éclaire les arbitrages de coût d’infrastructure, sans prétendre chiffrer votre facture.',
         },
         legal: {
+          shrT1: '',
           eyebrowHero: 'Résultats reproductibles · Rapports périodiques signables · ', eyebrowHeroGreen: 'Spans bruts en mémoire seule',
           heroTitle: 'Des éléments probants d’efficacité, vérifiables et signables, qui ne quittent pas votre infrastructure.',
           heroSub: 'Perf Sentinel produit des rapports reproductibles et vérifiables, qui peuvent être signés, sans exfiltrer vos données.',
@@ -2630,6 +2735,7 @@ class Component extends DCLogic {
           ctaEndA: 'Vérifier un rapport signé', ctaEndAHref: '/docs/fr/REPORTING#vérifier-un-rapport-publié', ctaEndB: 'Ce que l’outil collecte et conserve', ctaEndBHref: '/docs/fr/SECURITY-OVERVIEW',
         },
         proc: {
+          shrT1: '',
           eyebrowHero: 'Open source · Auto-hébergeable · ', eyebrowHeroGreen: 'Binaires à provenance attestée',
           heroTitle: 'Auto-hébergé et open source, donc vos données de trace restent chez vous.',
           heroSub: 'Pas de SaaS à l’usage, pas d’agent propriétaire dans vos chaînes de déploiement. Une brique légère, sous licence ouverte, avec une chaîne d’approvisionnement vérifiable.',
@@ -2651,6 +2757,7 @@ class Component extends DCLogic {
       },
       en: {
         rse: {
+          shrCo2: 'Before the fix, in July: at least 12 kg CO₂e, an estimate, or at least 5 average meals according to ADEME’s Base Carbone.',
           eyebrowHero: 'Bottom-up estimate · SCI / ISO 21031 · ', eyebrowHeroGreen: 'Maps to RGESN criteria',
           heroTitle: 'The carbon cost of unoptimized code, estimated query by query.',
           heroSub: 'Perf Sentinel prices every avoidable query in energy then CO₂, one by one and attributable to the code that produced it. You can use it to document your eco-design work.',
@@ -2700,6 +2807,7 @@ class Component extends DCLogic {
           goNoteB: ', possible when the tool runs continuously on your servers, makes the energy (E) more accurate. Beyond carbon, every avoidable query removed cuts the load on your servers: the same operation count informs infrastructure-cost trade-offs, without claiming to price your bill.',
         },
         legal: {
+          shrT1: '',
           eyebrowHero: 'Reproducible results · Signable periodic reports · ', eyebrowHeroGreen: 'Raw spans in memory only',
           heroTitle: 'Efficiency records that are verifiable and signable, and never leave your infrastructure.',
           heroSub: 'Perf Sentinel produces reproducible, verifiable reports that can be signed, without exfiltrating your data.',
@@ -2724,6 +2832,7 @@ class Component extends DCLogic {
           ctaEndA: 'Verify a signed report', ctaEndAHref: '/docs/REPORTING#verifying-a-published-disclosure', ctaEndB: 'What the tool collects and keeps', ctaEndBHref: '/docs/SECURITY-OVERVIEW',
         },
         proc: {
+          shrT1: '',
           eyebrowHero: 'Open source · Self-hostable · ', eyebrowHeroGreen: 'Binaries with attested provenance',
           heroTitle: 'Self-hosted and open source, so your trace data stays with you.',
           heroSub: 'No usage-based SaaS, no proprietary agent in your delivery pipelines. A lightweight component, openly licensed, with a verifiable supply chain.',
@@ -2751,7 +2860,7 @@ class Component extends DCLogic {
       en: {
         nav: ['Detection', 'Deploy', 'GreenOps', 'Comparison'],
         skipLink: 'Skip to content',
-        dots: { aria: 'Page sections', top: 'Home', why: 'Why', carbone: 'Carbon', detection: 'Detection', stack: 'Stack', modes: 'Deploy', perf: 'Performance', hub: 'Hub', greenops: 'GreenOps', mesure: 'Measurement', publier: 'Publish', comparatif: 'Comparison', license: 'License', security: 'Security', start: 'Get started', governance: 'Governance' },
+        dots: { aria: 'Page sections', top: 'Home', why: 'Why', carbone: 'Carbon', detection: 'Detection', stack: 'Stack', modes: 'Deploy', perf: 'Performance', hub: 'Hub', greenops: 'GreenOps', mesure: 'Measurement', publier: 'Publish', comparatif: 'Comparison', license: 'License', security: 'Security', partager: 'Share', start: 'Get started', governance: 'Governance' },
         eyebrowHero: 'Self-hosted single binary · OpenTelemetry · ', eyebrowHeroGreen: 'Open source AGPL-3.0',
         heroTitle: 'Spot the wasted I/O in your traces. Price it in energy and carbon.',
         heroSub: 'Perf Sentinel catches N+1s, redundant calls, slow queries and fanout in your OpenTelemetry traces, as a CI quality gate or an OTLP daemon, then turns every avoidable I/O into energy and CO₂.',
@@ -2980,7 +3089,7 @@ class Component extends DCLogic {
       fr: {
         nav: ['Détection', 'Déploiement', 'GreenOps', 'Comparatif'],
         skipLink: 'Aller au contenu',
-        dots: { aria: 'Sections de la page', top: 'Accueil', why: 'Pourquoi', carbone: 'Carbone', detection: 'Détection', stack: 'Technologies', modes: 'Déploiement', perf: 'Performance', hub: 'Hub', greenops: 'GreenOps', mesure: 'Mesure', publier: 'Publication', comparatif: 'Comparatif', license: 'Licence', security: 'Sécurité', start: 'Démarrer', governance: 'Gouvernance' },
+        dots: { aria: 'Sections de la page', top: 'Accueil', why: 'Pourquoi', carbone: 'Carbone', detection: 'Détection', stack: 'Technologies', modes: 'Déploiement', perf: 'Performance', hub: 'Hub', greenops: 'GreenOps', mesure: 'Mesure', publier: 'Publication', comparatif: 'Comparatif', license: 'Licence', security: 'Sécurité', partager: 'Partager', start: 'Démarrer', governance: 'Gouvernance' },
         eyebrowHero: 'Mono-binaire auto-hébergé · OpenTelemetry · ', eyebrowHeroGreen: 'Open source AGPL-3.0',
         heroTitle: 'Détectez les I/O gaspillées de vos traces. Chiffrez-⁠les en énergie et carbone.',
         heroSub: 'Perf Sentinel repère les N+1, appels redondants, requêtes lentes et fanout dans vos traces OpenTelemetry, en quality gate CI ou en daemon OTLP, puis convertit chaque I/O évitable en énergie et en CO₂.',
@@ -3411,6 +3520,7 @@ class Component extends DCLogic {
       goEqAria: t.goEqAria, goEqTotal: t.goEqTotal, goEqET: t.goEqET, goEqES: t.goEqES, goEqIT: t.goEqIT, goEqIS: t.goEqIS, goEqMT: t.goEqMT, goEqMS: t.goEqMS, goEqLo: t.goEqLo, goEqBounds: t.goEqBounds, goEqAvLabel: t.goEqAvLabel, goEqAvText: t.goEqAvText,
       lgcAria: t.lgcAria || '', lgcSteps: t.lgcSteps || [], lgcScope: t.lgcScope || '',
       proofAvT: t.proofAvT || '', proofAvS: t.proofAvS || '', proofEq: t.proofEq || '', proofFoot: t.proofFoot || '', proofCalls: t.proofCalls || '', proofChipsAria: t.proofChipsAria || '', proofChips: t.proofChips || [],
+      shrEyebrow: t.shrEyebrow || '', shrT1: t.shrT1 || '', shrTW: t.shrTW || '', shrIntro: t.shrIntro || '', shrRecapHead: t.shrRecapHead || '', shrPeriod: t.shrPeriod || '', shrFixFirst: t.shrFixFirst || '', shrUnit: t.shrUnit || '', shrRows: t.shrRows || [], shrRecapCap: t.shrRecapCap || '', shrBridge: t.shrBridge || '', shrCardCap: t.shrCardCap || '', shrCo2: t.shrCo2 || '', shrNeverT: t.shrNeverT || '', shrNever: t.shrNever || [], shrB1: t.shrB1 || '', shrB2: t.shrB2 || '', shrVerifyHref: t.shrVerifyHref || '/verifier', shrImg: t.shrImg || '', shrAlt: t.shrAlt || '', shrNote: t.shrNote || '',
       smpT: t.smpT || '', smpP: t.smpP || '', smpFacts: t.smpFacts || [], smpOpen: t.smpOpen || '', smpHub: t.smpHub || '', smpAlt: t.smpAlt || '',
       goEyebrow: t.goEyebrow, goT1: t.goT1, goWCost: t.goWCost, goT2: t.goT2, goWEnergy: t.goWEnergy, goT3: t.goT3, goWCarbon: t.goWCarbon, goBodyA: t.goBodyA, goBodyB1: t.goBodyB1, goBodyB2: t.goBodyB2, goBodyB3: t.goBodyB3, goNoteA: t.goNoteA, goNoteLink: t.goNoteLink, goNoteB: t.goNoteB,
       cmpEyebrow: t.cmpEyebrow, cmpT1: t.cmpT1, cmpWCarbon: t.cmpWCarbon, cmpHCap: t.cmpHCap, cmpHApm: t.cmpHApm, cmpFoot: t.cmpFoot, cpNotTitle: t.cpNotTitle, cpNot: t.cpNot,
