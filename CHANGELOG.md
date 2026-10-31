@@ -10,7 +10,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Changed
 
-- Share cards: the French equivalence labels say "in France" (average meals, km driven by an average car, km by high-speed train), and the engine no longer picks the TGV: it is chosen only by `"equivalence":"tgv_km"`. A French saving under 512 g, which used to count at least two kilometres by TGV, now prints no equivalence.
+- Share cards: the French equivalence labels say "in France" (average meals, km driven by an average car, km by high-speed train), and the engine no longer picks the TGV: it is chosen only by `"equivalence":"tgv_km"`. A French saving under 520 g, which used to count at least two kilometres by TGV, now prints no equivalence.
 
 ## [0.39.0] - 2026-10-30
 

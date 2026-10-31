@@ -368,7 +368,7 @@ The equivalences come from three official sources: the ADEME Base Carbone (Franc
 
 The `equivalence_country` key of `card.json` (`fr`, `gb` or `us`, `fr` by default) selects the rows a card may use. Other countries: use `fr`, and every French row says "in France" in its label, so the card never passes a French factor off as a local one. The smartphone row, from the ADEME, is in all three tables: its 39.1 kg is almost all raw materials and has no use phase, so it does not depend on the French electricity grid.
 
-The `tgv_km` row is never picked by the engine. A card prints it only when `card.json` names `"equivalence":"tgv_km"` and the country is `fr`. So the smallest saving that prints an equivalence is two kilometres by average car, per country: 512 g in France, 80 g in the UK (two kilometres by train), 786 g in the US (two miles). Under it the card prints no equivalence.
+The `tgv_km` row is never picked by the engine. A card prints it only when `card.json` names `"equivalence":"tgv_km"` and the country is `fr`. So the smallest saving that prints an equivalence is two units of the lightest row the engine picks, counted on the printed CO2 (two significant figures, rounded down): 520 g in France (two kilometres by average car), 80 g in the UK (two kilometres by train), 790 g in the US (two miles by average car). Under it the card prints no equivalence.
 
 <!-- equivalences:begin -->
 Embedded vintages: Base Carbone `V23.6 (2025-07-03)`, DESNZ `2026, v1.2`, US EPA `2024-10`.

@@ -368,7 +368,7 @@ Les équivalences viennent de trois sources officielles : la Base Carbone de l'A
 
 La clé `equivalence_country` de `card.json` (`fr`, `gb` ou `us`, `fr` par défaut) choisit les lignes qu'une carte peut utiliser. Autres pays : utilisez `fr`, et chaque ligne française dit « en France » dans son libellé, si bien que la carte ne fait jamais passer un facteur français pour un facteur local. La ligne smartphone, de l'ADEME, figure dans les trois tables : ses 39,1 kg sont presque tous des matières premières, sans phase d'usage, elle ne dépend donc pas du réseau électrique français.
 
-La ligne `tgv_km` n'est jamais choisie par le moteur. Une carte ne l'imprime que si `card.json` nomme `"equivalence":"tgv_km"` et que le pays est `fr`. La plus petite économie qui imprime une équivalence vaut donc deux kilomètres de voiture moyenne, par pays : 512 g en France, 80 g au Royaume-Uni (deux kilomètres en train), 786 g aux États-Unis (deux miles). En dessous, la carte n'imprime pas d'équivalence.
+La ligne `tgv_km` n'est jamais choisie par le moteur. Une carte ne l'imprime que si `card.json` nomme `"equivalence":"tgv_km"` et que le pays est `fr`. La plus petite économie qui imprime une équivalence vaut donc deux unités de la ligne la plus légère que choisit le moteur, comptées sur le CO2 imprimé (deux chiffres significatifs, arrondi par défaut) : 520 g en France (deux kilomètres de voiture moyenne), 80 g au Royaume-Uni (deux kilomètres en train), 790 g aux États-Unis (deux miles de voiture moyenne). En dessous, la carte n'imprime pas d'équivalence.
 
 <!-- equivalences:begin -->
 Millésimes embarqués : Base Carbone `V23.6 (2025-07-03)`, DESNZ `2026, v1.2`, US EPA `2024-10`.
