@@ -206,13 +206,26 @@ perf-sentinel calibrate --traces traces.json --measured-energy rapl.csv
 perf-sentinel completions zsh > ~/.zfunc/_perf-sentinel            # shell completions
 perf-sentinel man > perf-sentinel.1                                # man page
 perf-sentinel query findings --service order-svc                   # talk to a running daemon
+perf-sentinel verify-card card.png                                 # check a share card's signature
+perf-sentinel verify-hash --report report.json                     # recompute a disclosure's hash
+perf-sentinel login --hub https://hub.example.com                  # sign this terminal in to a Hub
+perf-sentinel hub findings --status active                         # findings through the Hub
 ```
 
 </details>
 
+### With Claude Code
+
+The [Perf Sentinel plugin for Claude Code](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-claude) adds two skills. `/perf-sentinel:perf-tests` writes performance integration tests for your current change, runs them under Perf Sentinel and can wire the CI step. `/perf-sentinel:prod-findings` reads production findings from the Hub through a CLI signed in with `perf-sentinel login --hub <url>`, ranks them by avoidable I/O and fixes them in small batches, each proved by a non-regression test. Both ask before every change. `prod-findings` needs Python 3, and CLI 0.37.0 with Hub 0.8.6 or later for the volumes.
+
+```
+/plugin marketplace add Institut-du-Numerique-Responsable/perf-sentinel-claude
+/plugin install perf-sentinel@perf-sentinel
+```
+
 ## Hub, optional but recommended
 
-A `watch` daemon holds its findings in memory. The ring buffer forgets, and `/api/findings` answers at most 1,000 rows. That covers the current state but not the history. [PerfSentinelHub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub) is a separate service that collects from every daemon and records when each finding was first seen, which the daemons cannot reconstruct.
+A `watch` daemon holds its findings in memory. The ring buffer forgets, and `/api/findings` pages through it 1,000 rows at a time. That covers the current state but not the history. [PerfSentinelHub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub) is a separate service that collects from every daemon and records when each finding was first seen, which the daemons cannot reconstruct.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher_dark.gif">
@@ -223,14 +236,19 @@ What it adds on top of a daemon:
 
 - **A durable timeline.** `first_seen` per acknowledgment signature, retained 180 days by default, so "this regressed last Tuesday" survives a restart.
 - **History in Grafana, per environment.** Since 0.24.0 the findings dashboard has a `History (Hub)` row that follows the time picker as far back as the Hub retains, and an `Ack` link on every finding that opens the Hub's ack page. See [docs/HELM-DEPLOYMENT.md](docs/HELM-DEPLOYMENT.md).
-- **Push, with poll as a fallback.** Daemons push into `/api/import/findings`, and the Hub polls them back as a safety net. Only a successful poll clears an unreachable marker, because a daemon reaching the Hub proves nothing about the Hub reaching the daemon.
+- **Push, with poll as a fallback.** Daemons with `[daemon.hub_export]` push their findings, incidents, cross-trace correlations and daily detection counts, and the Hub polls the daemons back as a safety net. Only a successful poll clears an unreachable marker, because a daemon reaching the Hub proves nothing about the Hub reaching the daemon.
+- **Incidents and correlations, kept.** The incidents your alerting posted to a daemon, with the findings it froze for each one, and the periods during which two findings kept following each other. Each opens a new analysis on its window. See [incidents](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LAUNCHER.md#the-incidents-screen) and [correlations](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LAUNCHER.md#the-correlations-screen).
 - **A browser that runs an analysis.** Against a daemon, a Tempo backend or a Jaeger query backend, serving the same HTML dashboard `report` renders.
-- **One read API for tooling.** `/api/findings` for IDE plugins and CI jobs, with a `status` derived at read time that tells "the endpoint runs without this finding" apart from "nobody is looking".
+- **A review recap.** By day, week or month: what to fix first, ranked by avoidable I/O, what moved since the previous period, and what the teams did about it, in an Engineering and a Management view. The figures come from the daemons' detection ledgers, computed without a language model, and the carbon figure is an estimate. A subscription freezes each closed period and delivers it by signed webhook and by e-mail. See [the recap screen](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LAUNCHER.md#the-recap-screen).
+- **Share cards.** Since Hub 0.10.0, with engine 0.39.0, a closed period's measured result becomes an image to post (PNG, SVG, JPEG XL) or a PDF carousel: one confirmed fix (story), the avoidable share period after period (curve), or the fixes confirmed over a period (collective). The CO2 is an estimate, with an everyday equivalent from the ADEME Base Carbone. Every figure is rounded down, and the CO2 and its equivalent read "at least". A period that is not closed, or that misses a day, is refused. The card is signed with Ed25519, so anyone can check that nobody changed its figures, at [perf-sentinel.dev/verifier](https://perf-sentinel.dev/verifier) or with `perf-sentinel verify-card`. Contract in [docs/SHARE-CARD.md](docs/SHARE-CARD.md).
+- **Periodic disclosures, published and shared.** A scheduled job publishes the report `perf-sentinel disclose` builds. The Hub recomputes its content hash and checks that the attestation names it, keeps the PDF/A-3b that `disclose-pdf` renders, and serves share links that expire within 30 days. The reader checks the signature with `verify-hash`, the Hub never does. Public transparency, not regulatory-grade. See [the disclosures screen](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/LAUNCHER.md#the-disclosures-screen).
+- **Access control, off by default.** Single sign-on through an OAuth2 provider (Keycloak, Entra ID, Google, GitLab, Bitbucket), projects, roles and grants per team, read-only machine tokens for CI jobs and dashboards, and a terminal sign-in for `perf-sentinel login`. See [AUTHENTICATION.md](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/AUTHENTICATION.md) and [ACCESS-CONTROL.md](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub/blob/main/docs/ACCESS-CONTROL.md).
+- **One read API for tooling.** `/api/findings` for IDE plugins and CI jobs, with a `status` derived at read time that tells "the endpoint runs without this finding" apart from "nobody is looking". From a terminal, `perf-sentinel login` then `perf-sentinel hub` list findings and incidents, acknowledge and run analyses through it, see [docs/CLI.md](docs/CLI.md#hub-login-logout-hub).
 
-It never replaces this engine. Every analysis spawns this binary as a subprocess, and every daemon is read over its own query API. Nothing of the Hub lives in Perf Sentinel, and a daemon does not know a Hub exists.
+It never replaces this engine. Every analysis, PDF and card runs this binary as a subprocess, and every daemon is read over its own query API. The Hub's records never live in Perf Sentinel, and a daemon knows a Hub exists only once `[daemon.hub_export]` points it there.
 
 <details>
-<summary>The five screens</summary>
+<summary>The Hub's screens</summary>
 
 Starting a run against a trace backend, which is the form that takes a service, a window and a trace cap. A daemon source takes no parameters at all:
 
@@ -267,6 +285,41 @@ The rendered dashboard, served from the Hub's own origin:
   <img alt="the engine's HTML dashboard embedded in the Hub" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-report.png">
 </picture>
 
+The incidents the daemons recorded, one row unfolded on the findings it froze:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-incidents-dark.png">
+  <img alt="the incidents screen, one row unfolded on its frozen findings" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-incidents.png">
+</picture>
+
+The recap of a week, the findings to fix first leading:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-recap-dark.png">
+  <img alt="the recap screen: the period, four tiles, then the findings to fix first with their trend and their action" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-recap.png">
+</picture>
+
+A share card made from a closed period, previewed before download:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-card-dark.png">
+  <img alt="the card section: what to tell, the closed period and what it holds, the card's language and format, then the preview with the attachment check" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-card.png">
+</picture>
+
+The periodic disclosures a scheduled job published, newest period first:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-disclosures-dark.png">
+  <img alt="the disclosures screen: the rail of quarters, then one card per disclosure, one of them withdrawn" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-disclosures.png">
+</picture>
+
+What a signed-in member reaches once access control is on:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-access-dark.png">
+  <img alt="the access page of a member of two team groups, with their terminal token" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/PerfSentinelHub/main/docs/img/hub/launcher-access.png">
+</picture>
+
 </details>
 
 ## Input and output formats
@@ -287,13 +340,14 @@ The rendered dashboard, served from the Hub's own origin:
 <details>
 <summary><b>Output formats</b></summary>
 
-- **`text`** (default): severity-grouped colored terminal output. Available on `analyze`, `tempo`, `jaeger-query`, `diff`, `pg-stat`, `mysql-stat`, `query`, `explain`, `ack`.
-- **`json`**: structured report. Available on `analyze`, `tempo`, `jaeger-query`, `diff`, `pg-stat`, `mysql-stat`, `query`, `explain`, `ack`. On `tempo` and `jaeger-query` the JSON also carries the findings' masked span trees, so a later `report --input` draws them. Full schema in [docs/SCHEMA.md](docs/SCHEMA.md), example fixtures in [docs/schemas/examples/](docs/schemas/examples/).
+- **`text`** (default): severity-grouped colored terminal output. Available on `analyze`, `tempo`, `jaeger-query`, `diff`, `pg-stat`, `mysql-stat`, `query`, `explain`, `ack`, `hub`.
+- **`json`**: structured report. Available on `analyze`, `tempo`, `jaeger-query`, `diff`, `pg-stat`, `mysql-stat`, `query`, `explain`, `ack`, `hub`. On `tempo` and `jaeger-query` the JSON also carries the findings' masked span trees, so a later `report --input` draws them. Full schema in [docs/SCHEMA.md](docs/SCHEMA.md), example fixtures in [docs/schemas/examples/](docs/schemas/examples/).
 - **`sarif`** (SARIF v2.1.0): GitHub/GitLab code scanning with inline PR annotations via `physicalLocation`. Available on `analyze`, `tempo`, `jaeger-query` and `diff`. See [docs/SARIF.md](docs/SARIF.md).
 - **HTML dashboard**: single-file offline report from `perf-sentinel report`, click-through trace trees, dark/light theme, CSV export from Findings / pg_stat / mysql_stat / Diff / Correlations tabs. See [docs/HTML-REPORT.md](docs/HTML-REPORT.md).
 - **Interactive TUI**: three keyboard-driven views in one drill-down (Analyze, Inspect, Explain) from `perf-sentinel analyze --tui`, `inspect`, or `explain --tui` (or `query inspect` for live daemon data). See [docs/INSPECT.md](docs/INSPECT.md).
 - **Live daemon**: NDJSON findings on stdout, Prometheus `/metrics` with Grafana Exemplars, `/health` probe, HTTP query API. See [docs/METRICS.md](docs/METRICS.md) and [docs/QUERY-API.md](docs/QUERY-API.md).
-- **Periodic disclosure (optional)**: hash-verifiable `perf-sentinel-report/v1.0` JSON from `perf-sentinel disclose`, signable via Sigstore. See [docs/REPORTING.md](docs/REPORTING.md).
+- **Periodic disclosure (optional)**: hash-verifiable `perf-sentinel-report` JSON from `perf-sentinel disclose`, signable via Sigstore, rendered by `disclose-pdf` as a PDF/A-3b that carries its source files, and checked by `verify-hash`. See [docs/REPORTING.md](docs/REPORTING.md).
+- **Share card (optional)**: a signed PNG, SVG, JPEG XL or PDF carousel from `perf-sentinel card render`, over the `card.json` the Hub builds, with a key from `card keygen`. `perf-sentinel verify-card` checks it. See [docs/SHARE-CARD.md](docs/SHARE-CARD.md).
 
 The JSON `io_intensity_band` / `io_waste_ratio_band` enum values (`healthy` / `moderate` / `high` / `critical`) are stable across versions. The numeric thresholds behind them may evolve. Reference table and rationale in [docs/LIMITATIONS.md#score-interpretation](docs/LIMITATIONS.md#score-interpretation).
 
@@ -415,7 +469,7 @@ So size the pod from `max_retained_findings`, not from the idle figure: a few hu
 
 Every finding carries an **I/O intensity score (IIS)**, total I/O ops for an endpoint divided by invocations, and an **I/O waste ratio** (avoidable ops / total ops). Reducing N+1 queries and redundant calls improves response times *and* energy use.
 
-`co2.total` is reported as the [Software Carbon Intensity v1.0 / ISO/IEC 21031:2024](https://github.com/Green-Software-Foundation/sci) numerator `(E × I) + M`, summed over analyzed traces. Multi-region scoring is automatic when OTel spans carry `cloud.region`. In daemon mode, energy can be refined via measured sources (Alumet or Scaphandre RAPL on x86, Kepler RAPL per container or process, Redfish BMC for chassis power on physical servers, or cloud-native CPU% + SPECpower), and grid intensity pulled live from Electricity Maps.
+`co2.total` is reported as the [Software Carbon Intensity v1.0 / ISO/IEC 21031:2024](https://github.com/Green-Software-Foundation/sci) numerator `(E × I) + M`, summed over analyzed traces. Multi-region scoring is automatic when OTel spans carry `cloud.region`. In daemon mode, energy can be refined via measured sources (Alumet or Scaphandre RAPL on x86, Kepler RAPL per container or process, Redfish BMC for chassis power on physical servers, or cloud-native CPU% + SPECpower), and grid intensity pulled live from Electricity Maps or from eight grid-operator feeds (RTE éCO2mix, NESO, Fingrid, Energinet, REE e·sios, Open Electricity, MAVIR, em6).
 
 No infrastructure prerequisite: the I/O proxy model and the embedded grid tables produce estimates from the first trace, measured sources refine them where the infrastructure allows.
 
@@ -467,7 +521,7 @@ The Datadog figure is the one Datadog publishes for its Agent 7.34 on a c5.xlarg
 - **Not a standalone regulatory carbon accounting platform.** Standalone CSRD or GHG Protocol Scope 2/3 reporting requires third-party verification and non-IT scopes it does not cover. Exact scope, pairings (Watershed, Sweep, Greenly, Persefoni) and the RGESN case: see [GreenOps](#greenops-io-intensity-score-directional).
 - **Not a replacement for measured energy.** The I/O-to-energy model is a directional estimate, not a measurement. For more accurate measured power, plug in Alumet (x86 RAPL, top of the precedence chain), Scaphandre (x86 RAPL), Kepler (RAPL, Kubernetes-native) or Redfish (chassis power from the BMC of a physical server), all four supported as inputs, or use cloud provider energy APIs. For what software-only attribution can and cannot cover on a typical server, see [docs/LIMITATIONS.md § What software-only attribution covers](docs/LIMITATIONS.md#what-software-only-attribution-covers).
 - **Not zero-config.** Protocol-level detection requires OTel instrumentation in your apps. If your stack does not emit traces, Perf Sentinel has nothing to analyze.
-- **Not an IDE plugin.** Perf Sentinel itself runs in CI and as a daemon, not inside the editor. A first-party JetBrains plugin is in development: it reads findings from a running daemon and navigates to the code they point at, and it will be announced here once published.
+- **Not an IDE plugin.** Perf Sentinel itself runs in CI and as a daemon, not inside the editor. A first-party JetBrains plugin is in development: it reads findings from a running daemon and navigates to the code they point at, and it will be announced here once published. From Claude Code, the plugin in [With Claude Code](#with-claude-code) drives the CLI.
 
 ## Acknowledging known findings
 
@@ -607,13 +661,16 @@ The [Quick look](#quick-look) section at the top shows live GIFs. The frozen fra
 | HTML dashboard                               | [docs/HTML-REPORT.md](docs/HTML-REPORT.md)                                             |
 | Interactive TUI                              | [docs/INSPECT.md](docs/INSPECT.md)                                                     |
 | Daemon HTTP query API                        | [docs/QUERY-API.md](docs/QUERY-API.md)                                                 |
+| Prometheus metrics                           | [docs/METRICS.md](docs/METRICS.md)                                                     |
 | Acknowledgments workflow                     | [docs/ACKNOWLEDGMENTS.md](docs/ACKNOWLEDGMENTS.md)                                     |
 | Energy and carbon, in plain language         | [docs/ENERGY.md](docs/ENERGY.md)                                                       |
 | GreenOps methodology and limitations         | [docs/METHODOLOGY.md](docs/METHODOLOGY.md), [docs/LIMITATIONS.md](docs/LIMITATIONS.md) |
 | Periodic efficiency disclosures (optional)   | [docs/REPORTING.md](docs/REPORTING.md)                                                 |
+| Share cards (signed, optional)               | [docs/SHARE-CARD.md](docs/SHARE-CARD.md)                                               |
 | Helm deployment                              | [docs/HELM-DEPLOYMENT.md](docs/HELM-DEPLOYMENT.md)                                     |
 | Operational runbook                          | [docs/RUNBOOK.md](docs/RUNBOOK.md)                                                     |
 | Supply-chain provenance (SLSA, Sigstore)     | [docs/SUPPLY-CHAIN.md](docs/SUPPLY-CHAIN.md)                                           |
+| Security review overview                     | [docs/SECURITY-OVERVIEW.md](docs/SECURITY-OVERVIEW.md)                                 |
 | Design notes (deep dive)                     | [docs/design/](docs/design/00-INDEX.md)                                                |
 
 ## Supply chain
@@ -622,7 +679,7 @@ Every GitHub Action is pinned to a 40-character commit SHA, the production image
 
 ## Releasing
 
-Releases follow a documented procedure. The companion repo [perf-sentinel-simulation-lab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/blob/main/docs/SCENARIOS.md) is the mandatory pre-tag release gate: 36 end-to-end scenarios on a local Kubernetes (k3d) cluster, covering nine deployment modes plus CI templates, failure modes and load limits. Each scenario ships a Mermaid diagram, the exact inputs/outputs, and the gotchas hit during validation. Step-by-step in [docs/RELEASE-PROCEDURE.md](docs/RELEASE-PROCEDURE.md).
+Releases follow a documented procedure. The companion repo [perf-sentinel-simulation-lab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/blob/main/docs/SCENARIOS.md) is the mandatory pre-tag release gate: end-to-end scenarios on a local Kubernetes (k3d) cluster, covering nine deployment modes plus CI templates, failure modes and load limits. Each scenario ships a Mermaid diagram, the exact inputs/outputs, and the gotchas hit during validation. Step-by-step in [docs/RELEASE-PROCEDURE.md](docs/RELEASE-PROCEDURE.md).
 
 ## Support
 
