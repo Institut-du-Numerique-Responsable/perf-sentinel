@@ -10,7 +10,7 @@ use crate::detect::FindingType;
 use crate::report::periodic::hasher::canonicalize;
 use crate::score::equivalence::{
     Equivalence, EquivalenceCountry, MAX_CHOSEN_EQUIVALENCE_COUNT, MIN_EQUIVALENCE_COUNT,
-    equivalence_count, find_equivalence, pick_equivalence, printed_co2_ug,
+    equivalence_count, find_equivalence_for, pick_equivalence, printed_co2_ug,
 };
 use crate::text_safety::is_bidi_or_invisible;
 use crate::time::{epoch_day_to_iso_date, parse_iso_date_to_epoch_day};
@@ -193,6 +193,9 @@ pub struct CardInput {
     pub before_fix_period: Option<DayRange>,
     #[serde(default)]
     pub equivalence: Option<String>,
+    /// Which table the equivalence comes from; absent means France.
+    #[serde(default)]
+    pub equivalence_country: EquivalenceCountry,
     pub free: Free,
     pub org: Org,
     pub generated_at_ms: u64,
@@ -345,10 +348,16 @@ struct SignedFull {
 ///
 /// `malformed_input` or one of the refusals of C2.
 pub fn parse_card_input(bytes: &[u8]) -> Result<CardInput, CardError> {
-    let input: CardInput = deserialize(json_value(bytes)?)?;
+    let value = json_value(bytes)?;
+    check_equivalence_country(&value)?;
+    let input: CardInput = deserialize(value)?;
     let figures = parse_figures(input.angle, &input.figures)?;
     check_card(&input.card(&figures))?;
-    resolve_equivalence(input.equivalence.as_deref(), figures.co2_low_ug())?;
+    resolve_equivalence(
+        input.equivalence_country,
+        input.equivalence.as_deref(),
+        figures.co2_low_ug(),
+    )?;
     Ok(input)
 }
 
@@ -411,7 +420,11 @@ pub fn build_payloads(
     fingerprint: &str,
 ) -> Result<(FullPayload, CompactPayload), CardError> {
     let figures = parse_figures(input.angle, &input.figures)?;
-    let equivalence = resolve_equivalence(input.equivalence.as_deref(), figures.co2_low_ug())?;
+    let equivalence = resolve_equivalence(
+        input.equivalence_country,
+        input.equivalence.as_deref(),
+        figures.co2_low_ug(),
+    )?;
     let full = FullPayload {
         v: CARD_FORMAT_VERSION,
         angle: input.angle,
@@ -476,6 +489,20 @@ fn safe_integers(value: &Value) -> bool {
 
 fn deserialize<T: DeserializeOwned>(value: Value) -> Result<T, CardError> {
     serde_json::from_value(value).map_err(|e| malformed(e.to_string()))
+}
+
+/// An unknown country is the one `malformed_input` that names its field.
+fn check_equivalence_country(value: &Value) -> Result<(), CardError> {
+    let Some(country) = value.get("equivalence_country") else {
+        return Ok(());
+    };
+    serde_json::from_value::<EquivalenceCountry>(country.clone())
+        .map(drop)
+        .map_err(|e| {
+            let mut error = malformed(format!("equivalence_country: {e}"));
+            error.field = Some("equivalence_country");
+            error
+        })
 }
 
 fn check_version(value: &Value) -> Result<(), CardError> {
@@ -881,15 +908,20 @@ fn check_domain(domain: &str) -> Result<(), CardError> {
 /// The equivalence of `card.json`: the named one when it gives a count in
 /// range on the printed CO2, else the picker's on that figure.
 fn resolve_equivalence(
+    country: EquivalenceCountry,
     id: Option<&str>,
     co2_low_ug: Option<u64>,
 ) -> Result<Option<&'static Equivalence>, CardError> {
     let printed = co2_low_ug.map(printed_co2_ug);
     let Some(id) = id else {
-        return Ok(printed.and_then(|co2| pick_equivalence(EquivalenceCountry::Fr, co2)));
+        return Ok(printed.and_then(|co2| pick_equivalence(country, co2)));
     };
-    let equivalence = find_equivalence(id)
-        .ok_or_else(|| refused("unknown_equivalence", format!("no equivalence {id:?}")))?;
+    let equivalence = find_equivalence_for(country, id).ok_or_else(|| {
+        refused(
+            "unknown_equivalence",
+            format!("no equivalence {id:?} for {}", country_code(country)),
+        )
+    })?;
     let count = printed.map_or(0, |co2| equivalence_count(equivalence, co2));
     if (MIN_EQUIVALENCE_COUNT..=MAX_CHOSEN_EQUIVALENCE_COUNT).contains(&count) {
         Ok(Some(equivalence))
@@ -898,6 +930,14 @@ fn resolve_equivalence(
             "equivalence_out_of_scale",
             format!("{count} {id} on the printed CO2"),
         ))
+    }
+}
+
+fn country_code(country: EquivalenceCountry) -> &'static str {
+    match country {
+        EquivalenceCountry::Fr => "fr",
+        EquivalenceCountry::Gb => "gb",
+        EquivalenceCountry::Us => "us",
     }
 }
 
@@ -1280,6 +1320,74 @@ mod tests {
 
         let no_co2 = without(story(), "/figures/co2_low_ug");
         assert!(as_json(&payloads(&no_co2).0).get("equivalence").is_none());
+    }
+
+    #[test]
+    fn a_card_without_a_country_uses_the_french_table() {
+        let e = payloads(&story()).0.equivalence.expect("picked");
+        assert_eq!(
+            (e.id.as_str(), e.source.as_str(), e.vintage.as_str()),
+            ("meal", "ADEME, Base Carbone", "V23.6 (2025-07-03)")
+        );
+    }
+
+    #[test]
+    fn the_country_picks_from_its_own_table() {
+        for (code, id, source) in [
+            ("gb", "gb_car_km", "DESNZ, GHG conversion factors"),
+            ("us", "us_car_mile", "US EPA, GHG Equivalencies Calculator"),
+            ("fr", "meal", "ADEME, Base Carbone"),
+        ] {
+            let mut input = story();
+            input["equivalence_country"] = json!(code);
+            let e = payloads(&input).0.equivalence.expect("picked");
+            assert_eq!((e.id.as_str(), e.source.as_str()), (id, source), "{code}");
+        }
+        let mut input = story();
+        input["equivalence_country"] = json!("uk");
+        let error = parse(&input).expect_err("refused");
+        assert_eq!(error.reason, "malformed_input");
+        assert_eq!(error.field, Some("equivalence_country"));
+    }
+
+    #[test]
+    fn a_chosen_row_must_belong_to_the_country() {
+        let mut input = story();
+        input["equivalence"] = json!("gb_car_km");
+        let error = parse(&input).expect_err("refused");
+        assert_eq!(error.reason, "unknown_equivalence");
+        assert!(error.detail.ends_with("for fr"), "{}", error.detail);
+        input["equivalence_country"] = json!("gb");
+        assert_eq!(
+            payloads(&input).0.equivalence.expect("chosen").id,
+            "gb_car_km"
+        );
+        input["equivalence"] = json!("smartphone");
+        assert_eq!(reason(&input), "equivalence_out_of_scale");
+    }
+
+    #[test]
+    fn the_tgv_is_chosen_only_by_id() {
+        let mut small = story();
+        small["figures"]["co2_low_ug"] = json!(500_000_000);
+        assert!(as_json(&payloads(&small).0).get("equivalence").is_none());
+        small["equivalence"] = json!("tgv_km");
+        assert_eq!(payloads(&small).0.equivalence.expect("chosen").id, "tgv_km");
+    }
+
+    #[test]
+    fn the_signed_equivalence_keeps_its_five_keys() {
+        for code in ["fr", "gb", "us"] {
+            let mut input = story();
+            input["equivalence_country"] = json!(code);
+            let full = as_json(&payloads(&input).0);
+            assert_eq!(
+                keys(&full["equivalence"]),
+                ["id", "per_unit_ug", "source", "unit", "vintage"],
+                "{code}"
+            );
+            assert!(full.get("equivalence_country").is_none(), "{code}");
+        }
     }
 
     #[test]
