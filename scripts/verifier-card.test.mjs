@@ -566,7 +566,7 @@ test('every signed key has a label in both languages', async () => {
   const listed = ['angle', 'lang', 'period', 'kind', 'from', 'to', 'scope', 'figures', 'story', 'before_fix_period',
     'equivalence', 'id', 'per_unit_ug', 'unit', 'source', 'vintage', 'free', 'title', 'team', 'label', 'org', 'name',
     'domain', 'key', 'public_key', 'generated_at_ms', 'generated_on', 'last_waste_permille', 'previous_waste_permille'];
-  const enums = { angle: 'angles', lang: 'langs', 'period.kind': 'kinds', 'story.finding_type': 'findingTypes', 'equivalence.unit': 'units' };
+  const enums = { angle: 'angles', lang: 'langs', 'period.kind': 'kinds', 'story.finding_type': 'findingTypes', 'equivalence.id': 'units' };
   for (const lang of ['en', 'fr']) {
     const { fields } = COPY[lang];
     for (const key of listed) assert.equal(typeof fields[key], 'string', `${lang} ${key}`);

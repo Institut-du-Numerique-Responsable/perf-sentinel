@@ -267,6 +267,21 @@ test('one changed character reads as tampered', async () => {
   await close();
 });
 
+test('a UK and a US card name their equivalence by its id, in both languages', async () => {
+  const cases = [
+    ['uk', '/verifier', 'at least 57 km driven by an average car in the UK, in July 2026', '1 km driven by an average car in the UK = 209.9 g CO₂e'],
+    ['us', '/verifier', 'at least 30 miles driven by an average US car, tailpipe only, in July 2026', '1 mile driven by an average US car, tailpipe only = 393 g CO₂e'],
+    ['us', '/fr/verifier', 'au moins 30 miles parcourus par une voiture moyenne aux États-Unis, à l’échappement seul, en juillet 2026', '1 mile parcouru par une voiture moyenne aux États-Unis, à l’échappement seul = 393 g CO₂e'],
+  ];
+  for (const [name, path, count, factor] of cases) {
+    const { page, close } = await openFile(`${name}.png`, fixture(`${name}.png`), { path });
+    await waitState(page, 'level1');
+    assert.equal(await value(page, 'equivalence.unit'), count, `${name} ${path}`);
+    assert.equal(await value(page, 'equivalence.per_unit_ug'), factor, `${name} ${path}`);
+    await close();
+  }
+});
+
 test('a cut link reads as damaged', async () => {
   const { page, close } = await open('/verifier#c=' + token('story').slice(0, -10));
   await waitState(page, 'invalid-link');
@@ -283,8 +298,8 @@ test('the original PNG verifies with its free fields as text', async () => {
   assert.equal(await page.locator('#verifier-result b').count(), 0);
   assert.equal(await page.locator('#verifier-compact-note').count(), 0);
   assert.ok((await value(page, 'org.name')).includes('Example Org'));
-  assert.equal(await value(page, 'equivalence.unit'), 'at least 5 average meals, in July 2026');
-  assert.equal(await value(page, 'equivalence.per_unit_ug'), '1 average meal = 2.04 kg CO₂e');
+  assert.equal(await value(page, 'equivalence.unit'), 'at least 5 average meals in France, in July 2026');
+  assert.equal(await value(page, 'equivalence.per_unit_ug'), '1 average meal in France = 2.04 kg CO₂e');
   assert.equal(await label(page, 'story.observed_at'), 'Seen on');
   assert.equal(await value(page, 'story.observed_at'), '20 August 2026');
   assert.equal(await text(page, '#verifier-org'), COPY.en.level1Org.replace('{org}', 'Example Org').replace('{domain}', 'cards.example.org'));

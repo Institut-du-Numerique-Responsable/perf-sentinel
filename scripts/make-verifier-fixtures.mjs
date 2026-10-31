@@ -1,7 +1,8 @@
 // Makes the share card fixtures the verifier tests read, with the engine itself:
-// one throwaway key, story in the four formats, slow/curve/collective/nodomain as
-// PNG, and swapped.<ext> (a twin card carrying the story's envelope) that
-// verify-card must read as modified. Writes scripts/fixtures/verifier/fixtures.json.
+// one throwaway key, story in the four formats, slow/curve/collective/nodomain and
+// the uk/us stories (0.40.0 equivalence_country) as PNG, and swapped.<ext> (a twin
+// card carrying the story's envelope) that verify-card must read as modified.
+// Writes scripts/fixtures/verifier/fixtures.json.
 // The private key stays in a temporary directory, deleted on exit.
 // Run: PERF_SENTINEL_BIN=/path/to/perf-sentinel node scripts/make-verifier-fixtures.mjs
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,7 +15,7 @@ import { crc32 } from 'node:zlib';
 const BIN = process.env.PERF_SENTINEL_BIN || '/Users/robintrassard/RustroverProjects/perf-sentinel/target/release/perf-sentinel';
 const DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'verifier');
 const FORMATS = ['png', 'pdf', 'svg', 'jxl'];
-const PNG_ONLY = ['slow', 'curve', 'collective', 'nodomain'];
+const PNG_ONLY = ['slow', 'curve', 'collective', 'nodomain', 'uk', 'us'];
 
 function fail(msg) {
   throw new Error(msg);

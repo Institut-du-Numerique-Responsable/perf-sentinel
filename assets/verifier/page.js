@@ -129,8 +129,9 @@ function labelOf(path, card, compact) {
 /** The period a CO2 figure was measured on: the one before the fix when the card has it. */
 const co2Period = (card) => fill(T.inPeriod, { period: formatValue('period', isObject(card.before_fix_period) ? card.before_fix_period : card.period, lang) });
 
+// The words come from the equivalence's id: a unit such as vehicle_km is shared by countries.
 function unitWord(card, n) {
-  const forms = T.units[card.equivalence.unit];
+  const forms = Object.hasOwn(T.units, card.equivalence.id) ? T.units[card.equivalence.id] : undefined;
   if (!Array.isArray(forms)) return String(card.equivalence.unit);
   return forms[(lang === 'fr' ? n < 2 : n === 1) ? 0 : 1];
 }

@@ -1,6 +1,6 @@
 {
-  "fingerprint": "ps1:GexfogO8I7_wzx9qdST-ng",
-  "public_key": "aAY0FrJzn7jv9P3-2XF5HFHpHuJHJQqg7BPoTiYivc0",
+  "fingerprint": "ps1:BJbBgVePlOCpZo-u4xjRvw",
+  "public_key": "ZRssz7YaZMhHX1svF0vPEybOKbud4N33ctp_AKb0e2o",
   "date": "2026-10-15",
   "domain": "cards.example.org",
   "cards": {
@@ -9,7 +9,7 @@
       "pdf": "story.pdf",
       "svg": "story.svg",
       "jxl": "story.jxl",
-      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsiYiI6MTkzNzAwMCwibyI6NDF9LCJnIjoyMDc0MSwiayI6ImFBWTBGckp6bjdqdjlQMy0yWEY1SEZIcEh1SkhKUXFnN0JQb1RpWWl2YzAiLCJwIjpbIm0iLDIwNjk3LDIwNzI2XSwiciI6WzIwNjM1LDIwNjY1XSwidiI6MX0.Ot0k3h21uk5tn7Ti6lTlPzIRj0fmPz-cyDJ-7FWeUgPCGYJ8lqzh8WAvTXA_8eUlwUiQESqaYDrNRqb8ca3IBw",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsiYiI6MTkzNzAwMCwibyI6NDF9LCJnIjoyMDc0MSwiayI6IlpSc3N6N1lhWk1oSFgxc3ZGMHZQRXliT0tidWQ0TjMzY3RwX0FLYjBlMm8iLCJwIjpbIm0iLDIwNjk3LDIwNzI2XSwiciI6WzIwNjM1LDIwNjY1XSwidiI6MX0.FRKikjqVqzvhUSw2n5m7XcI0nsFINvNzO-ChxRcFutg1Tw7eZUt5Rzct0ElC4zqDb8U2LNNY1SGp3sih8XNqAQ",
       "figures": {
         "angle": "story",
         "period": {
@@ -27,7 +27,7 @@
     },
     "slow": {
       "png": "slow.png",
-      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsibSI6MjM0OSwidSI6NTAwfSwiZyI6MjA3NDEsImsiOiJhQVkwRnJKem43anY5UDMtMlhGNUhGSHBIdUpISlFxZzdCUG9UaVlpdmMwIiwicCI6WyJtIiwyMDY5NywyMDcyNl0sInIiOlsyMDY2NiwyMDY5Nl0sInYiOjF9.Oe7kcFmFCIf7xjZKVMD2rKDt8bxDF5iZCr67sNDUaaOxG8SYaJdNZGjfqedsddL-N7w58R8wSu2oQ8Wept_3Cw",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsibSI6MjM0OSwidSI6NTAwfSwiZyI6MjA3NDEsImsiOiJaUnNzejdZYVpNaEhYMXN2RjB2UEV5Yk9LYnVkNE4zM2N0cF9BS2IwZTJvIiwicCI6WyJtIiwyMDY5NywyMDcyNl0sInIiOlsyMDY2NiwyMDY5Nl0sInYiOjF9.CZ-GeBKNUrIxS_VFs5fdy9G5u3XsHRPjSsDeELATUx5LZO5WpPiE1To4AKsmLsjhjRwYbs3jY0LRQmqYeb6HCQ",
       "figures": {
         "angle": "story",
         "period": {
@@ -45,7 +45,7 @@
     },
     "curve": {
       "png": "curve.png",
-      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoiYyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsidyI6MzEsIngiOjQ4fSwiZyI6MjA3NDEsImsiOiJhQVkwRnJKem43anY5UDMtMlhGNUhGSHBIdUpISlFxZzdCUG9UaVlpdmMwIiwicCI6WyJtIiwyMDY5NywyMDcyNl0sInYiOjF9.8C--zANUBYGEsCfW1CPFTJSqlPVKJWzCr444gZtTCGZVXdDKXOSPg7AXveTmKKFKBbw-ouv9INBMlrkgpCVdAw",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoiYyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsidyI6MzEsIngiOjQ4fSwiZyI6MjA3NDEsImsiOiJaUnNzejdZYVpNaEhYMXN2RjB2UEV5Yk9LYnVkNE4zM2N0cF9BS2IwZTJvIiwicCI6WyJtIiwyMDY5NywyMDcyNl0sInYiOjF9.Gh8oOSa5s5PF290wGp7i8QjHjJG4A45m3Z2Ujdr8uh5rJfYf4-a8Dc4pCG2mDwExIOWqWifY1cdZPeoSElxFDQ",
       "figures": {
         "angle": "curve",
         "period": {
@@ -59,7 +59,7 @@
     },
     "collective": {
       "png": "collective.png",
-      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoiayIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsiZSI6MywibiI6N30sImciOjIwNzQxLCJrIjoiYUFZMEZySnpuN2p2OVAzLTJYRjVIRkhwSHVKSEpRcWc3QlBvVGlZaXZjMCIsInAiOlsibSIsMjA2OTcsMjA3MjZdLCJyIjpbMjA2NjYsMjA2OTZdLCJ2IjoxfQ.Ni8Fc0zIyG-j4wqH50WXMNf8ziOl6han15gbJ0rG7hfTTC0tWWGqU2hip8Usn4tBlpnDVhsnbZxMfhGrRn5mCQ",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoiayIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsiZSI6MywibiI6N30sImciOjIwNzQxLCJrIjoiWlJzc3o3WWFaTWhIWDFzdkYwdlBFeWJPS2J1ZDROMzNjdHBfQUtiMGUybyIsInAiOlsibSIsMjA2OTcsMjA3MjZdLCJyIjpbMjA2NjYsMjA2OTZdLCJ2IjoxfQ.9ojPsCw91gvRf0dqEYMtNfLZ-Q7TAgfjDDQTO4eGYBDOoLsphhdZEDlgr8oiaPxiZsons4jvfnVbe_JxupizCw",
       "figures": {
         "angle": "collective",
         "period": {
@@ -77,7 +77,43 @@
     },
     "nodomain": {
       "png": "nodomain.png",
-      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImYiOnsiYiI6MTkzNzAwMCwibyI6NDF9LCJnIjoyMDc0MSwiayI6ImFBWTBGckp6bjdqdjlQMy0yWEY1SEZIcEh1SkhKUXFnN0JQb1RpWWl2YzAiLCJwIjpbIm0iLDIwNjk3LDIwNzI2XSwiciI6WzIwNjM1LDIwNjY1XSwidiI6MX0.6AK6-xuBqXdU8bkv3xZW0rPTG8d7_WcNiDyCUtm23QCQYSwHaCgVMqVC68S2hdNc998oJxYc8jvdU-4ZutTGCQ",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImYiOnsiYiI6MTkzNzAwMCwibyI6NDF9LCJnIjoyMDc0MSwiayI6IlpSc3N6N1lhWk1oSFgxc3ZGMHZQRXliT0tidWQ0TjMzY3RwX0FLYjBlMm8iLCJwIjpbIm0iLDIwNjk3LDIwNzI2XSwiciI6WzIwNjM1LDIwNjY1XSwidiI6MX0.AMIUbh1HhnED8IeMs_mL11P9zZTvp2wAyUWMJajpY3Q9MHD3tLBbcxWLuH1RnxjL0yiHuzqzovljEPcuLJcwBQ",
+      "figures": {
+        "angle": "story",
+        "period": {
+          "kind": "month",
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "before_fix_period": {
+          "from": "2026-07-01",
+          "to": "2026-07-31"
+        },
+        "before_fix_ops": 1937000,
+        "cited_ops": 41
+      }
+    },
+    "uk": {
+      "png": "uk.png",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsiYiI6MTkzNzAwMCwibyI6NDF9LCJnIjoyMDc0MSwiayI6IlpSc3N6N1lhWk1oSFgxc3ZGMHZQRXliT0tidWQ0TjMzY3RwX0FLYjBlMm8iLCJwIjpbIm0iLDIwNjk3LDIwNzI2XSwiciI6WzIwNjM1LDIwNjY1XSwidiI6MX0.FRKikjqVqzvhUSw2n5m7XcI0nsFINvNzO-ChxRcFutg1Tw7eZUt5Rzct0ElC4zqDb8U2LNNY1SGp3sih8XNqAQ",
+      "figures": {
+        "angle": "story",
+        "period": {
+          "kind": "month",
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "before_fix_period": {
+          "from": "2026-07-01",
+          "to": "2026-07-31"
+        },
+        "before_fix_ops": 1937000,
+        "cited_ops": 41
+      }
+    },
+    "us": {
+      "png": "us.png",
+      "compact_url": "https://perf-sentinel.dev/verifier#c=eyJhIjoicyIsImQiOiJjYXJkcy5leGFtcGxlLm9yZyIsImYiOnsiYiI6MTkzNzAwMCwibyI6NDF9LCJnIjoyMDc0MSwiayI6IlpSc3N6N1lhWk1oSFgxc3ZGMHZQRXliT0tidWQ0TjMzY3RwX0FLYjBlMm8iLCJwIjpbIm0iLDIwNjk3LDIwNzI2XSwiciI6WzIwNjM1LDIwNjY1XSwidiI6MX0.FRKikjqVqzvhUSw2n5m7XcI0nsFINvNzO-ChxRcFutg1Tw7eZUt5Rzct0ElC4zqDb8U2LNNY1SGp3sih8XNqAQ",
       "figures": {
         "angle": "story",
         "period": {

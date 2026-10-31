@@ -57,8 +57,16 @@ export const COPY = {
     unavailable: 'Could not check: no DNS service answered. This says nothing about the organisation.',
     inPeriod: ', in {period}',
     factor: '1 {unit} = {mass} CO₂e',
-    // [singular, plural]
-    units: { meal: ['average meal', 'average meals'] },
+    // [singular, plural] of each equivalence, by its id, as the engine's card prints them.
+    units: {
+      meal: ['average meal in France', 'average meals in France'],
+      tgv_km: ['km by high-speed train in France', 'km by high-speed train in France'],
+      car_km: ['km driven by an average car in France', 'km driven by an average car in France'],
+      gb_rail_km: ['km by train in the UK', 'km by train in the UK'],
+      gb_car_km: ['km driven by an average car in the UK', 'km driven by an average car in the UK'],
+      us_car_mile: ['mile driven by an average US car, tailpipe only', 'miles driven by an average US car, tailpipe only'],
+      smartphone: ['smartphone', 'smartphones'],
+    },
     // Label of a signed value, by the last segment of its path. {period} names the card's period,
     // or the one before it for `previous_*`.
     fields: {
@@ -212,7 +220,15 @@ export const COPY = {
     unavailable: 'Vérification impossible : aucun service DNS n’a répondu. Cela ne dit rien de l’organisation.',
     inPeriod: ', en {period}',
     factor: '1 {unit} = {mass} CO₂e',
-    units: { meal: ['repas moyen', 'repas moyens'] },
+    units: {
+      meal: ['repas moyen en France', 'repas moyens en France'],
+      tgv_km: ['km en TGV', 'km en TGV'],
+      car_km: ['km parcourus par une voiture moyenne en France', 'km parcourus par une voiture moyenne en France'],
+      gb_rail_km: ['km en train au Royaume-Uni', 'km en train au Royaume-Uni'],
+      gb_car_km: ['km parcourus par une voiture moyenne au Royaume-Uni', 'km parcourus par une voiture moyenne au Royaume-Uni'],
+      us_car_mile: ['mile parcouru par une voiture moyenne aux États-Unis, à l’échappement seul', 'miles parcourus par une voiture moyenne aux États-Unis, à l’échappement seul'],
+      smartphone: ['smartphone', 'smartphones'],
+    },
     fields: {
       v: 'Version du format de la carte',
       angle: 'Ce que montre la carte',
