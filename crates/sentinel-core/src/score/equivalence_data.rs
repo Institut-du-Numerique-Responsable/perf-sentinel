@@ -12,7 +12,7 @@
 //   Government Licence v3.0),
 //   https://www.gov.uk/government/collections/government-conversion-factors-for-company-reporting
 // - US EPA, GHG Equivalencies Calculator (US federal public domain),
-//   https://www.epa.gov/energy/greenhouse-gases-equivalencies-calculator-calculations-and-references
+//   https://www.epa.gov/energy/greenhouse-gas-equivalencies-calculator-calculations-and-references
 
 use super::equivalence::Equivalence;
 use super::equivalence::EquivalenceCountry::{Fr, Gb, Us};
