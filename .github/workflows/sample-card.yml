@@ -1,0 +1,93 @@
+name: Sample card
+
+# Renders the share card the website shows, in English and French, with a
+# released binary rather than a local build, so the card a reader scans on
+# perf-sentinel.dev is one a published Perf Sentinel signed. The company is
+# fictional and has no domain: the card reads "Signer not verified" on the
+# verifier, which is what an unattached card says. The signing key is made in
+# the run and never leaves it. Each card file gets a build provenance
+# attestation, so `gh attestation verify` ties it to this workflow and commit.
+#
+# The maintainer downloads the artifact and commits it under exemple/card/ on
+# the gh-pages branch. Runs only by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released perf-sentinel version that renders the card
+        required: true
+        default: '0.39.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sample-card
+  cancel-in-progress: false
+
+jobs:
+  render:
+    name: Render the sample card
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the released binary and check its provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must be X.Y.Z" >&2; exit 1; }
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern perf-sentinel-linux-amd64 --dir bin
+          gh attestation verify bin/perf-sentinel-linux-amd64 --repo "$GITHUB_REPOSITORY"
+          chmod +x bin/perf-sentinel-linux-amd64
+          bin/perf-sentinel-linux-amd64 --version | grep -qx "perf-sentinel $VERSION"
+
+      - name: Render and check the card in English and French
+        run: |
+          set -euo pipefail
+          bin=bin/perf-sentinel-linux-amd64
+          key_dir=$(mktemp -d)
+          trap 'rm -rf "$key_dir"' EXIT
+          "$bin" card keygen --out-dir "$key_dir" > /dev/null
+          key=$(ls "$key_dir"/*.pk8)
+          mkdir -p out
+          now_ms=$(( $(date +%s) * 1000 ))
+          for lang in en fr; do
+            if [ "$lang" = fr ]; then
+              free='{"title":"Des pages panier plus légères","team":"Équipe Boutique","label":"Afficher un panier"}'
+            else
+              free='{"title":"Lighter cart pages","team":"Shop team","label":"Showing a cart"}'
+            fi
+            jq --arg lang "$lang" --argjson free "$free" --argjson now "$now_ms" \
+              '.lang = $lang | .free = $free | .generated_at_ms = $now' \
+              examples/card/sample-story.json > "out/input-$lang.json"
+            mkdir -p "render-$lang"
+            for format in png pdf; do
+              "$bin" card render --input "out/input-$lang.json" --signing-key "$key" \
+                --out-dir "render-$lang" --format "$format" > /dev/null
+              cp "render-$lang/card.$format" "out/card-$lang.$format"
+              "$bin" verify-card "out/card-$lang.$format" | tee "out/verify-$lang-$format.json" \
+                | jq -e '.integrity == "ok" and .content == "intact"' > /dev/null
+            done
+          done
+          ls -l out
+
+      - name: Attest the card files
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: out/card-*
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sample-card
+          path: out/
+          retention-days: 30

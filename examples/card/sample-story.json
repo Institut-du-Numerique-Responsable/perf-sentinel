@@ -1,0 +1,28 @@
+{
+  "angle": "story",
+  "lang": "en",
+  "period": { "kind": "month", "from": "2026-09-01", "to": "2026-09-30" },
+  "scope": {
+    "environment": "production",
+    "sources": ["prod-eu"],
+    "covered_days": 30,
+    "restart_days": 0,
+    "sampled_permille": 1000
+  },
+  "figures": {
+    "cited_ops": 41,
+    "before_fix_ops": 1937000,
+    "co2_low_ug": 12400000000
+  },
+  "story": {
+    "finding_type": "n_plus_one_sql",
+    "service": "shop",
+    "endpoint": "GET /cart/{id}",
+    "observed_at": "2026-08-20",
+    "done_at": "2026-08-28"
+  },
+  "before_fix_period": { "from": "2026-07-01", "to": "2026-07-31" },
+  "free": { "title": "Lighter cart pages", "team": "Shop team", "label": "Showing a cart" },
+  "org": { "name": "Acme" },
+  "generated_at_ms": 1790856000000
+}
