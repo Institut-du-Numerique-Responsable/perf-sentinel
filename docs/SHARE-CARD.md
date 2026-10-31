@@ -366,7 +366,7 @@ These are the only network calls the engine makes for a card, and only when `--o
 
 The equivalences come from three official sources: the ADEME Base Carbone (France), the DESNZ greenhouse gas conversion factors (United Kingdom) and the US EPA Greenhouse Gas Equivalencies Calculator (United States). The table ships embedded in the binary, which never fetches it at runtime.
 
-The `equivalence_country` key of `card.json` (`fr`, `gb` or `us`, `fr` by default) selects the rows a card may use. Other countries: use `fr`, and every French row says "in France" in its label, so the card never passes a French factor off as a local one. The smartphone row, from the ADEME, is in all three tables: its 39.1 kg is almost all raw materials and has no use phase, so it does not depend on the French electricity grid.
+The `equivalence_country` key of `card.json` (`fr`, `gb` or `us`, `fr` by default) selects the rows a card may use. Other countries: use `fr`, and every row that holds only for France names France in its label, so the card never passes a French factor off as a local one. The smartphone row, from the ADEME, is in all three tables: its 39.1 kg is almost all raw materials and has no use phase, so it does not depend on the French electricity grid.
 
 The `tgv_km` row is never picked by the engine. A card prints it only when `card.json` names `"equivalence":"tgv_km"` and the country is `fr`. So the smallest saving that prints an equivalence is two units of the lightest row the engine picks, counted on the printed CO2 (two significant figures, rounded down): 520 g in France (two kilometres by average car), 80 g in the UK (two kilometres by train), 790 g in the US (two miles by average car). Under it the card prints no equivalence.
 
@@ -390,7 +390,7 @@ Base Carbone keeps a row `Valide générique` after its validity period has laps
 
 1. Each row comes from an official publication of its country (the ADEME for France and for the smartphone, the DESNZ for the UK, the US EPA for the US), under a licence that allows embedding it with attribution: Licence Ouverte 2.0, Open Government Licence v3.0, US federal public domain.
 2. The unit is one everyday countable thing: a passenger kilometre, a kilometre, a mile, a meal, a unit. Never per euro, per kg or per kWh.
-3. Sorted by factor, the auto rows of one country are at most 200 times apart, so a CO2 figure always has a row that gives a readable count. The longest automatic count is 399.
+3. Sorted by factor, the auto rows of one country are at most 200 times apart, so a CO2 figure always has a row that gives a readable count. An automatic count is therefore at most 399.
 4. Between variants, the highest factor wins, and always the widest scope the source publishes: exhaust plus upstream emissions in the UK, the EPA calculator (which counts SUVs) rather than the "Passenger Car" line of the GHG Emission Factors Hub. The smartphone row is the over 5.5 inch model (39.1 kg), not the "classique" one (16.5 kg).
 5. No flight, no comparison implying a cost the measurement does not show, no avoided emission and no sequestration (recycled bags, EPA trees).
 6. A scope narrower than the French row's says so in the label ("tailpipe only").
