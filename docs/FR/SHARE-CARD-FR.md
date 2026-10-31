@@ -112,7 +112,7 @@ jq -r .reason verdict.json
 
 ### Codes de sortie et raisons
 
-Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` sur `unsupported_characters` quand le texte vient de `free.title`, `free.team`, `free.label` ou `org.name`, et sur le `malformed_input` d'un `free.title` qui contient le marqueur de l'emplacement PDF (`"field":"free.title"`, voir C3). Tout autre texte que les polices ne savent pas dessiner (périmètre, service, endpoint) donne `unsupported_characters` sans `field`.
+Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` sur `unsupported_characters` quand le texte vient de `free.title`, `free.team`, `free.label` ou `org.name`, et sur le `malformed_input` d'un `free.title` qui contient le marqueur de l'emplacement PDF (`"field":"free.title"`, voir C3) ou d'un `equivalence_country` inconnu (`"field":"equivalence_country"`). Tout autre texte que les polices ne savent pas dessiner (périmètre, service, endpoint) donne `unsupported_characters` sans `field`.
 
 | Sortie | `result` | Raisons de `card keygen` et `card render` |
 |---|---|---|
@@ -146,7 +146,8 @@ Le Hub l'écrit, le moteur le lit. Les clés inconnues sont refusées, chaque no
 | `figures` | oui | Des entiers dont le nom porte l'unité, lus selon l'angle, voir plus bas. |
 | `story` | sur une histoire seulement | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` est facultatif. `service` et `endpoint` tiennent chacun en 200 caractères. `done_at` tombe dans la période ou avant, `observed_at` le jour de `done_at` ou avant. |
 | `before_fix_period` | quand la carte en imprime une | `{"from","to"}`, une période civile de type `period.kind`, voir [la période d'avant la correction](#la-période-davant-la-correction). |
-| `equivalence` | non | Un `id` de la table des équivalences. Absent, le moteur en choisit une. |
+| `equivalence_country` | non | `fr`, `gb` ou `us`, `fr` si absent. Il choisit la table des équivalences, voir [Équivalences](#équivalences). Toute autre valeur est `malformed_input`, avec `"field":"equivalence_country"`. |
+| `equivalence` | non | Un `id` de la table du pays de la carte. Absent, le moteur en choisit une dans cette table. Tout autre `id`, y compris celui d'un autre pays, est `unknown_equivalence`. |
 | `free` | oui, `{}` si vide | `{"title","team","label"}`, chacun facultatif : titre 48 caractères, équipe 48, libellé 80 (sur une histoire seulement). Un titre ne peut pas contenir `{"content_sig":"`, le marqueur de l'emplacement de signature du PDF : `{"result":"input_error","reason":"malformed_input","field":"free.title"}`, sortie 3, quel que soit le format. |
 | `org` | oui | `{"name","domain"}`. `name` tient en 60 caractères. `domain` est facultatif, un nom DNS public : ASCII minuscule, 253 au plus, au moins deux étiquettes de 1 à 63 `[a-z0-9-]` sans tiret en bord, la dernière pas entièrement numérique. |
 | `generated_at_ms` | oui | Le moment où le Hub a construit la carte, en millisecondes epoch. |
@@ -203,6 +204,8 @@ La charge utile complète est celle que portent le PNG et le PDF. Elle reprend `
 | `equivalence` | `{"id","per_unit_ug","unit","source","vintage"}`, absent quand la carte n'imprime pas d'équivalence. |
 | `key` | L'empreinte de la clé de signature. |
 | `public_key` | La clé publique Ed25519 brute de 32 octets, en base64url. |
+
+L'objet `equivalence` est le même pour tous les pays. Le pays n'est pas signé à part : il se lit dans l'`id`, unique dans toutes les tables, et dans `source`. `equivalence_country` ne sert qu'à choisir la ligne, un vérificateur n'en a donc jamais besoin.
 
 Le vérificateur applique aussi les règles de `card.json` à une charge utile signée, puisque n'importe qui peut fabriquer une clé. L'équivalence est vérifiée pour elle-même (chaînes non vides, facteur supérieur à 0, nombre d'au moins 2 sur le CO2 imprimé), jamais contre la table embarquée, pour qu'une carte reste vérifiable après une mise à jour de la Base Carbone.
 
@@ -361,7 +364,11 @@ Ce sont les seuls appels réseau que le moteur fait pour une carte, et seulement
 
 ## Équivalences
 
-Les équivalences viennent de la Base Carbone de l'ADEME. La table est embarquée dans le binaire, qui ne la télécharge jamais à l'exécution.
+Les équivalences viennent de trois sources officielles : la Base Carbone de l'ADEME (France), les facteurs de conversion des gaz à effet de serre du DESNZ (Royaume-Uni) et le Greenhouse Gas Equivalencies Calculator de l'EPA américaine (États-Unis). La table est embarquée dans le binaire, qui ne la télécharge jamais à l'exécution.
+
+La clé `equivalence_country` de `card.json` (`fr`, `gb` ou `us`, `fr` par défaut) choisit les lignes qu'une carte peut utiliser. Autres pays : utilisez `fr`, et chaque ligne française dit « en France » dans son libellé, si bien que la carte ne fait jamais passer un facteur français pour un facteur local. La ligne smartphone, de l'ADEME, figure dans les trois tables : ses 39,1 kg sont presque tous des matières premières, sans phase d'usage, elle ne dépend donc pas du réseau électrique français.
+
+La ligne `tgv_km` n'est jamais choisie par le moteur. Une carte ne l'imprime que si `card.json` nomme `"equivalence":"tgv_km"` et que le pays est `fr`. La plus petite économie qui imprime une équivalence vaut donc deux kilomètres de voiture moyenne, par pays : 512 g en France, 80 g au Royaume-Uni (deux kilomètres en train), 786 g aux États-Unis (deux miles). En dessous, la carte n'imprime pas d'équivalence.
 
 <!-- equivalences:begin -->
 Millésimes embarqués : Base Carbone `V23.6 (2025-07-03)`, DESNZ `2026, v1.2`, US EPA `2024-10`.
@@ -381,23 +388,28 @@ La Base Carbone garde une ligne `Valide générique` après la fin de sa périod
 
 ### Règles de sélection
 
-1. Chaque ligne est une ligne `Elément` de la Base Carbone, `Valide générique`, localisée en `France continentale`, avec l'unité que le script attend pour elle.
-2. L'unité est une chose du quotidien qui se compte : un kilomètre passager, un kilomètre, un repas, une unité. Jamais par euro, par kg ou par kWh.
-3. Triée par facteur, chaque ligne vaut au plus 100 fois la précédente, pour qu'un chiffre de CO2 trouve toujours une ligne qui donne un nombre lisible.
-4. Quand le libellé ne distingue pas les variantes, le facteur le plus haut l'emporte, pour que le nombre reste un « au moins ». La ligne smartphone est le modèle de plus de 5,5 pouces (39,1 kg), pas le « classique » (16,5 kg).
-5. Pas d'avion, et aucune comparaison qui suggère un coût que la mesure ne montre pas.
+1. Chaque ligne vient d'une publication officielle de son pays (l'ADEME pour la France et pour le smartphone, le DESNZ pour le Royaume-Uni, l'EPA pour les États-Unis), sous une licence qui permet de l'embarquer avec attribution : Licence Ouverte 2.0, Open Government Licence v3.0, domaine public fédéral américain.
+2. L'unité est une chose du quotidien qui se compte : un kilomètre passager, un kilomètre, un mile, un repas, une unité. Jamais par euro, par kg ou par kWh.
+3. Triées par facteur, les lignes automatiques d'un même pays se suivent à 200 fois au plus, pour qu'un chiffre de CO2 trouve toujours une ligne qui donne un nombre lisible. Le compte automatique le plus long est 399.
+4. Entre variantes, le facteur le plus haut l'emporte, et toujours le périmètre le plus large que publie la source : échappement plus amont au Royaume-Uni, le calculateur de l'EPA (qui compte les SUV) plutôt que la ligne « Passenger Car » du GHG Emission Factors Hub. La ligne smartphone est le modèle de plus de 5,5 pouces (39,1 kg), pas le « classique » (16,5 kg).
+5. Pas d'avion, aucune comparaison qui suggère un coût que la mesure ne montre pas, aucune émission évitée ni séquestration (sacs recyclés, arbres de l'EPA).
+6. Un périmètre plus étroit que celui de la ligne française se dit dans le libellé (« à l'échappement seul »).
 
-`scripts/refresh-equivalences.py` applique les règles 1 et 2 et sort en 1 quand une ligne y échoue. Les tests appliquent la règle 3.
+`scripts/refresh-equivalences.py` applique les règles 1 (les identifiants, le statut et le lieu que chaque ligne doit avoir dans sa source), 2 et 3, et sort en 1 quand une ligne y échoue. Les tests appliquent aussi la règle 3. Les règles 4 à 6 se jugent à la main quand une ligne est ajoutée aux `ROWS` du script.
 
 ### Calcul du nombre
 
 Le nombre part du CO2 tel que la carte l'imprime, jamais de la mesure brute. Le CO2 imprimé garde deux chiffres significatifs, arrondi vers le bas, et le nombre est la division entière de ce chiffre par le facteur. Une économie de 12,4 kg s'imprime « 12 kg » et 5 repas moyens (12 ÷ 2,04 = 5,88), là où les 12,4 kg bruts auraient donné 6. Les deux arrondis vont vers le bas, la carte n'annonce donc jamais plus que ce qui a été mesuré.
 
-Quand l'appelant ne choisit pas d'équivalence, la carte prend le plus grand facteur qui compte encore au moins 2. Une équivalence choisie doit compter entre 2 et 1000.
+Quand l'appelant ne choisit pas d'équivalence, la carte prend la plus grande ligne automatique du pays de la carte dont le facteur compte encore au moins 2. Une équivalence choisie doit appartenir à la table de ce pays et compter entre 2 et 1000.
 
 ### Attribution et licence
 
-Chaque carte imprime le facteur utilisé, la source « ADEME, Base Carbone » et le millésime embarqué. La Base Carbone est publiée sous Licence Ouverte 2.0 (Etalab), qui autorise la réutilisation avec attribution.
+Chaque carte imprime le facteur utilisé, sa source (« ADEME, Base Carbone », « DESNZ, GHG conversion factors » ou « US EPA, GHG Equivalencies Calculator ») et le millésime embarqué de cette source. La Base Carbone est publiée sous Licence Ouverte 2.0 (Etalab), qui autorise la réutilisation avec attribution.
+
+Contains public sector information licensed under the Open Government Licence v3.0. (Cette mention est celle que le DESNZ demande, elle reste en anglais.)
+
+Le calculateur de l'EPA américaine est dans le domaine public fédéral américain. La source est citée par courtoisie, comme sur chaque carte.
 
 ### Rafraîchissement
 
@@ -406,7 +418,9 @@ python3 scripts/refresh-equivalences.py
 cargo fmt -p perf-sentinel-core
 ```
 
-Le script lit le jeu de données par l'API data.ademe.fr, réécrit `crates/sentinel-core/src/score/equivalence_data.rs` et la table entre les marqueurs `equivalences:begin` et `equivalences:end` de cette page et de sa version anglaise. Ne modifiez qu'en dehors des marqueurs. Le workflow `refresh-datasets` le lance deux fois par an et ouvre une pull request, et l'étape 2.5 de la release audite `EQUIVALENCE_TABLE_VINTAGE` (voir [`RELEASE-PROCEDURE-FR.md`](./RELEASE-PROCEDURE-FR.md)).
+Le script lit les trois sources : le jeu de données par l'API data.ademe.fr, le fichier XLSX à plat du DESNZ et la page du calculateur de l'EPA. Il sort en 1 quand une ligne, un identifiant DESNZ ou le facteur de l'EPA manque, ou quand une règle de sélection tombe. Il réécrit `crates/sentinel-core/src/score/equivalence_data.rs` et la table entre les marqueurs `equivalences:begin` et `equivalences:end` de cette page et de sa version anglaise. Ne modifiez qu'en dehors des marqueurs. Le workflow `refresh-datasets` le lance deux fois par an et ouvre une pull request, et l'étape 2.5 de la release audite `BASE_CARBONE_VINTAGE`, `DESNZ_VINTAGE` et `EPA_VINTAGE` (voir [`RELEASE-PROCEDURE-FR.md`](./RELEASE-PROCEDURE-FR.md)).
+
+`DESNZ_URL`, `DESNZ_VINTAGE`, `EPA_URL` et `EPA_VINTAGE` sont des constantes du script, à changer à la main quand une nouvelle édition paraît : le DESNZ en publie une chaque juin, et l'URL de son fichier change avec elle. `bash scripts/test/refresh-equivalences.sh` vérifie les analyseurs hors ligne.
 
 ## Textes de la carte
 
@@ -449,7 +463,7 @@ Les autres lignes :
 
 Dans la ligne `Mesuré avec`, les deux noms Perf Sentinel et Institut du Numérique Responsable s'impriment en gras, soulignés, dans le vert de la marque `#107a56`, et chacun reste entier sur une ligne. Les mots sont ceux du tableau.
 
-En français, une espace insécable sépare un chiffre de son unité, les groupes de milliers, et précède `:` et `%`. Chaque chiffre est arrondi vers le bas : les nombres sont exacts sous 10 000, puis gardent deux chiffres significatifs (« 1,9 million »), les durées sont en millisecondes entières sous 100 ms, puis en secondes avec une décimale, et une part sous 0,1 % se lit « moins de 0,1 % ». Les unités que compte une équivalence sont `repas moyen(s)`, `km en TGV`, `km parcourus par une voiture moyenne` et `smartphone(s)`.
+En français, une espace insécable sépare un chiffre de son unité, les groupes de milliers, et précède `:` et `%`. Chaque chiffre est arrondi vers le bas : les nombres sont exacts sous 10 000, puis gardent deux chiffres significatifs (« 1,9 million »), les durées sont en millisecondes entières sous 100 ms, puis en secondes avec une décimale, et une part sous 0,1 % se lit « moins de 0,1 % ». Les unités que compte une équivalence sont `repas moyen(s) en France`, `km en TGV`, `km parcourus par une voiture moyenne en France`, `smartphone(s)`, `km en train au Royaume-Uni`, `km parcourus par une voiture moyenne au Royaume-Uni` et `mile(s) parcouru(s) par une voiture moyenne aux États-Unis, à l'échappement seul`.
 
 La ligne CO2 d'une histoire couvre la seule période d'avant la correction, celle d'une courbe la période de la carte, et celle d'un collectif la période d'avant la correction de ses seules corrections N+1 et redondantes. La ligne de périmètre d'une courbe compte les jours de toutes les périodes qu'elle montre, de la première barre à la dernière.
 
