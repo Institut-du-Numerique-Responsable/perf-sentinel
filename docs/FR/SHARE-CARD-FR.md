@@ -364,14 +364,17 @@ Ce sont les seuls appels réseau que le moteur fait pour une carte, et seulement
 Les équivalences viennent de la Base Carbone de l'ADEME. La table est embarquée dans le binaire, qui ne la télécharge jamais à l'exécution.
 
 <!-- equivalences:begin -->
-Millésime embarqué : Base Carbone `V23.6 (2025-07-03)`.
+Millésimes embarqués : Base Carbone `V23.6 (2025-07-03)`, DESNZ `2026, v1.2`, US EPA `2024-10`.
 
-| `id` | Identifiant Base Carbone | Élément Base Carbone | Facteur | `per_unit_ug` | `unit` | `label` | Validité |
-|---|---:|---|---|---:|---|---|---|
-| `tgv_km` | 43256 | TGV, 2022 | 0.00293 kgCO2e/passager.km | 2_930_000 | `passenger_km` | km by high-speed train | avr-24 |
-| `car_km` | 43791 | Voiture, Motorisation moyenne | 0.256 kgCO2e/km | 256_000_000 | `vehicle_km` | km driven by an average car | 2026 |
-| `meal` | 20682 | Repas | 2.04 kgCO2e/repas | 2_040_000_000 | `meal` | average meals | déc-21 |
-| `smartphone` | 27013 | Smartphone, de plus de 5,5 pouces | 39.1 kgCO2e/unité | 39_100_000_000 | `unit` | smartphones | 20/12/2021 |
+| `id` | Pays | Auto | Source | Référence de la source | Facteur | `per_unit_ug` | `unit` | `label` | Validité |
+|---|---|---|---|---|---|---:|---|---|---|
+| `tgv_km` | fr | non | ADEME, Base Carbone | 43256 | 0.00293 kgCO2e/passager.km | 2_930_000 | `passenger_km` | km by high-speed train in France | avr-24 |
+| `gb_rail_km` | gb | oui | DESNZ, GHG conversion factors | 25_315_3147_11_1 + 26_911_3147_11_1 | 0.03092 + 0.00897 kgCO2e/passenger.km | 39_890_000 | `passenger_km` | km by train in the UK | 2026 |
+| `gb_car_km` | gb | oui | DESNZ, GHG conversion factors | 4_301_3074_4_1 + 26_904_3074_4_1 | 0.16591 + 0.04399 kgCO2e/km | 209_900_000 | `vehicle_km` | km driven by an average car in the UK | 2026 |
+| `car_km` | fr | oui | ADEME, Base Carbone | 43791 | 0.256 kgCO2e/km | 256_000_000 | `vehicle_km` | km driven by an average car in France | 2026 |
+| `us_car_mile` | us | oui | US EPA, GHG Equivalencies Calculator | Miles driven by the average gasoline-powered passenger vehicle | 3.93 x 10-4 metric tons CO2e/mile | 393_000_000 | `vehicle_mile` | miles driven by an average US car, tailpipe only | 2024-10 |
+| `meal` | fr | oui | ADEME, Base Carbone | 20682 | 2.04 kgCO2e/repas | 2_040_000_000 | `meal` | average meals in France | déc-21 |
+| `smartphone` | fr, gb, us | oui | ADEME, Base Carbone | 27013 | 39.1 kgCO2e/unité | 39_100_000_000 | `unit` | smartphones | 20/12/2021 |
 <!-- equivalences:end -->
 
 La Base Carbone garde une ligne `Valide générique` après la fin de sa période de validité, la dernière colonne montre donc l'âge de chaque facteur.

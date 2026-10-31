@@ -1,30 +1,44 @@
-//! Everyday CO2 equivalences for share cards, from the ADEME Base
-//! Carbone. Rows and vintage are generated into `equivalence_data.rs` by
-//! `scripts/refresh-equivalences.py`, selection rules in
-//! `docs/SHARE-CARD.md`.
+//! Everyday CO2 equivalences for share cards, one table per country. Rows
+//! come from three sources: the ADEME Base Carbone (France), the DESNZ
+//! GHG conversion factors (UK) and the US EPA GHG Equivalencies
+//! Calculator (US). Rows and vintages are generated into
+//! `equivalence_data.rs` by `scripts/refresh-equivalences.py`, selection
+//! rules in `docs/SHARE-CARD.md`.
 
-use super::equivalence_data::{EQUIVALENCE_TABLE_VINTAGE, GENERATED_EQUIVALENCES};
+use serde::{Deserialize, Serialize};
 
-/// One Base Carbone factor, in µg of CO2 equivalent per `unit`.
+use super::equivalence_data::GENERATED_EQUIVALENCES;
+
+/// The country whose everyday equivalences a card picks from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EquivalenceCountry {
+    #[default]
+    Fr,
+    Gb,
+    Us,
+}
+
+/// One emission factor, in µg of CO2 equivalent per `unit`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Equivalence {
     pub id: &'static str,
-    pub base_carbone_id: u32,
+    pub countries: &'static [EquivalenceCountry],
+    /// Whether `pick_equivalence` may choose this row. A row that is not
+    /// auto is reachable by id only.
+    pub auto: bool,
+    pub source: &'static str,
+    pub source_ref: &'static str,
+    pub vintage: &'static str,
     pub per_unit_ug: u64,
     pub unit: &'static str,
     pub label: &'static str,
 }
 
-pub const EQUIVALENCE_SOURCE: &str = "ADEME, Base Carbone";
 /// Below two, "1 meal" reads as a rounding artefact rather than a figure.
 pub const MIN_EQUIVALENCE_COUNT: u64 = 2;
 /// Upper bound on the count of an equivalence the caller chooses by id.
 pub const MAX_CHOSEN_EQUIVALENCE_COUNT: u64 = 1000;
-
-#[must_use]
-pub fn embedded_equivalence_vintage() -> &'static str {
-    EQUIVALENCE_TABLE_VINTAGE
-}
 
 /// Every row, by ascending `per_unit_ug`.
 #[must_use]
@@ -32,9 +46,21 @@ pub fn equivalences() -> &'static [Equivalence] {
     GENERATED_EQUIVALENCES
 }
 
+/// The rows listing `country`, by ascending `per_unit_ug`.
+pub fn equivalences_for(country: EquivalenceCountry) -> impl Iterator<Item = &'static Equivalence> {
+    GENERATED_EQUIVALENCES
+        .iter()
+        .filter(move |e| e.countries.contains(&country))
+}
+
 #[must_use]
 pub fn find_equivalence(id: &str) -> Option<&'static Equivalence> {
     GENERATED_EQUIVALENCES.iter().find(|e| e.id == id)
+}
+
+#[must_use]
+pub fn find_equivalence_for(country: EquivalenceCountry, id: &str) -> Option<&'static Equivalence> {
+    equivalences_for(country).find(|e| e.id == id)
 }
 
 /// The CO2 a card prints: `co2_ug` rounded down to two significant
@@ -55,19 +81,23 @@ pub fn equivalence_count(e: &Equivalence, printed_co2_ug: u64) -> u64 {
     printed_co2_ug / e.per_unit_ug
 }
 
-/// The largest factor whose count is at least `MIN_EQUIVALENCE_COUNT`,
-/// `None` below twice the smallest factor.
+/// The largest auto row of `country` whose count is at least
+/// `MIN_EQUIVALENCE_COUNT`, `None` below twice its smallest auto factor.
 #[must_use]
-pub fn pick_equivalence(printed_co2_ug: u64) -> Option<&'static Equivalence> {
-    GENERATED_EQUIVALENCES
-        .iter()
-        .rev()
-        .find(|e| equivalence_count(e, printed_co2_ug) >= MIN_EQUIVALENCE_COUNT)
+pub fn pick_equivalence(
+    country: EquivalenceCountry,
+    printed_co2_ug: u64,
+) -> Option<&'static Equivalence> {
+    // Rows ascend, so the last match is the largest.
+    equivalences_for(country)
+        .filter(|e| e.auto && equivalence_count(e, printed_co2_ug) >= MIN_EQUIVALENCE_COUNT)
+        .last()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::score::equivalence_data::{BASE_CARBONE_VINTAGE, DESNZ_VINTAGE, EPA_VINTAGE};
 
     // Relation-based: a Base Carbone refresh may move every factor, these
     // must still hold.
@@ -90,23 +120,121 @@ mod tests {
                 pair[0].id,
                 pair[1].id
             );
-            assert!(
-                pair[1].per_unit_ug <= 100 * pair[0].per_unit_ug,
-                "{} then {}",
-                pair[0].id,
-                pair[1].id
-            );
         }
     }
 
     #[test]
-    fn the_pick_is_the_largest_factor_counting_at_least_two() {
-        let table = equivalences();
-        for e in table {
-            assert_eq!(pick_equivalence(2 * e.per_unit_ug), Some(e), "{}", e.id);
+    fn each_country_has_a_readable_ladder_of_auto_rows() {
+        for country in [
+            EquivalenceCountry::Fr,
+            EquivalenceCountry::Gb,
+            EquivalenceCountry::Us,
+        ] {
+            let auto: Vec<_> = equivalences_for(country).filter(|e| e.auto).collect();
+            assert!(!auto.is_empty(), "{country:?}");
+            for pair in auto.windows(2) {
+                assert!(pair[0].per_unit_ug < pair[1].per_unit_ug, "{country:?}");
+                assert!(
+                    pair[1].per_unit_ug <= 200 * pair[0].per_unit_ug,
+                    "{} then {}",
+                    pair[0].id,
+                    pair[1].id
+                );
+            }
         }
-        assert_eq!(pick_equivalence(2 * table[0].per_unit_ug - 1), None);
-        assert_eq!(pick_equivalence(u64::MAX / 2), table.last());
+    }
+
+    #[test]
+    fn the_pick_is_the_largest_auto_row_of_the_country() {
+        for country in [
+            EquivalenceCountry::Fr,
+            EquivalenceCountry::Gb,
+            EquivalenceCountry::Us,
+        ] {
+            for e in equivalences_for(country).filter(|e| e.auto) {
+                assert_eq!(
+                    pick_equivalence(country, 2 * e.per_unit_ug),
+                    Some(e),
+                    "{}",
+                    e.id
+                );
+            }
+        }
+        let printed = printed_co2_ug(12_400_000_000);
+        assert_eq!(
+            pick_equivalence(EquivalenceCountry::Fr, printed).map(|e| e.id),
+            Some("meal")
+        );
+        assert_eq!(
+            pick_equivalence(EquivalenceCountry::Gb, printed).map(|e| e.id),
+            Some("gb_car_km")
+        );
+        assert_eq!(
+            pick_equivalence(EquivalenceCountry::Us, printed).map(|e| e.id),
+            Some("us_car_mile")
+        );
+        assert_eq!(pick_equivalence(EquivalenceCountry::Fr, 500_000_000), None);
+    }
+
+    #[test]
+    fn the_tgv_is_never_picked() {
+        let tgv = find_equivalence("tgv_km").expect("tgv row");
+        assert!(!tgv.auto);
+        let mut co2 = 1u64;
+        while co2 < 1_000_000_000_000_000 {
+            assert_ne!(
+                pick_equivalence(EquivalenceCountry::Fr, co2).map(|e| e.id),
+                Some("tgv_km")
+            );
+            co2 *= 3;
+        }
+    }
+
+    #[test]
+    fn a_row_belongs_only_to_its_countries() {
+        assert!(find_equivalence_for(EquivalenceCountry::Fr, "gb_car_km").is_none());
+        assert!(find_equivalence_for(EquivalenceCountry::Us, "meal").is_none());
+        for country in [
+            EquivalenceCountry::Fr,
+            EquivalenceCountry::Gb,
+            EquivalenceCountry::Us,
+        ] {
+            assert!(find_equivalence_for(country, "smartphone").is_some());
+        }
+    }
+
+    #[test]
+    fn every_row_names_its_source_and_vintage() {
+        for e in equivalences() {
+            assert!(
+                !e.source.is_empty() && !e.source_ref.is_empty() && !e.vintage.is_empty(),
+                "{}",
+                e.id
+            );
+            assert!(!e.countries.is_empty(), "{}", e.id);
+        }
+        assert_eq!(
+            find_equivalence("meal").map(|e| e.vintage),
+            Some(BASE_CARBONE_VINTAGE)
+        );
+        assert_eq!(
+            find_equivalence("gb_car_km").map(|e| e.vintage),
+            Some(DESNZ_VINTAGE)
+        );
+        assert_eq!(
+            find_equivalence("us_car_mile").map(|e| e.vintage),
+            Some(EPA_VINTAGE)
+        );
+    }
+
+    #[test]
+    fn the_country_reads_as_its_lowercase_code() {
+        assert_eq!(
+            serde_json::to_value(EquivalenceCountry::Gb).expect("serializes"),
+            serde_json::json!("gb")
+        );
+        assert_eq!(EquivalenceCountry::default(), EquivalenceCountry::Fr);
+        assert!(serde_json::from_value::<EquivalenceCountry>(serde_json::json!("uk")).is_err());
     }
 
     #[test]
@@ -168,20 +296,6 @@ mod tests {
         assert_eq!(find_equivalence("flight"), None);
     }
 
-    #[test]
-    fn the_vintage_accessor_is_the_generated_constant() {
-        let vintage = embedded_equivalence_vintage();
-        assert_eq!(vintage, EQUIVALENCE_TABLE_VINTAGE);
-        assert!(vintage.contains('V'), "{vintage}");
-        let has_date = vintage.as_bytes().windows(10).any(|w| {
-            w.iter().enumerate().all(|(i, b)| match i {
-                4 | 7 => *b == b'-',
-                _ => b.is_ascii_digit(),
-            })
-        });
-        assert!(has_date, "{vintage}");
-    }
-
     /// `scripts/refresh-equivalences.py` rewrites the docs table with the
     /// generated rows, so a refresh keeps this green and a hand edit to
     /// the data alone breaks it.
@@ -190,17 +304,12 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
         for relative in ["SHARE-CARD.md", "FR/SHARE-CARD-FR.md"] {
             let doc = std::fs::read_to_string(root.join(relative)).expect("read share card docs");
-            assert!(
-                doc.contains(embedded_equivalence_vintage()),
-                "{relative}: vintage"
-            );
+            for vintage in [BASE_CARBONE_VINTAGE, DESNZ_VINTAGE, EPA_VINTAGE] {
+                assert!(doc.contains(vintage), "{relative}: {vintage}");
+            }
             for e in equivalences() {
                 assert!(doc.contains(&format!("`{}`", e.id)), "{relative}: {}", e.id);
-                assert!(
-                    doc.contains(&e.base_carbone_id.to_string()),
-                    "{relative}: {}",
-                    e.base_carbone_id
-                );
+                assert!(doc.contains(e.source_ref), "{relative}: {}", e.source_ref);
             }
         }
     }

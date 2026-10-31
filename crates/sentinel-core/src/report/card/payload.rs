@@ -9,9 +9,8 @@ use super::{CardError, CardResult};
 use crate::detect::FindingType;
 use crate::report::periodic::hasher::canonicalize;
 use crate::score::equivalence::{
-    EQUIVALENCE_SOURCE, Equivalence, MAX_CHOSEN_EQUIVALENCE_COUNT, MIN_EQUIVALENCE_COUNT,
-    embedded_equivalence_vintage, equivalence_count, find_equivalence, pick_equivalence,
-    printed_co2_ug,
+    Equivalence, EquivalenceCountry, MAX_CHOSEN_EQUIVALENCE_COUNT, MIN_EQUIVALENCE_COUNT,
+    equivalence_count, find_equivalence, pick_equivalence, printed_co2_ug,
 };
 use crate::text_safety::is_bidi_or_invisible;
 use crate::time::{epoch_day_to_iso_date, parse_iso_date_to_epoch_day};
@@ -887,7 +886,7 @@ fn resolve_equivalence(
 ) -> Result<Option<&'static Equivalence>, CardError> {
     let printed = co2_low_ug.map(printed_co2_ug);
     let Some(id) = id else {
-        return Ok(printed.and_then(pick_equivalence));
+        return Ok(printed.and_then(|co2| pick_equivalence(EquivalenceCountry::Fr, co2)));
     };
     let equivalence = find_equivalence(id)
         .ok_or_else(|| refused("unknown_equivalence", format!("no equivalence {id:?}")))?;
@@ -907,8 +906,8 @@ fn equivalence_ref(equivalence: &Equivalence) -> EquivalenceRef {
         id: equivalence.id.to_owned(),
         per_unit_ug: equivalence.per_unit_ug,
         unit: equivalence.unit.to_owned(),
-        source: EQUIVALENCE_SOURCE.to_owned(),
-        vintage: embedded_equivalence_vintage().to_owned(),
+        source: equivalence.source.to_owned(),
+        vintage: equivalence.vintage.to_owned(),
     }
 }
 
@@ -1045,7 +1044,6 @@ mod tests {
     use crate::report::card::test_fixtures::{
         collective_input, curve_input, story_input, story_input_with_threshold,
     };
-    use crate::score::equivalence::embedded_equivalence_vintage;
     use serde_json::{Value, json};
 
     const FINGERPRINT: &str = "ps1:AAAAAAAAAAAAAAAAAAAAAA";
@@ -1272,7 +1270,7 @@ mod tests {
         assert_eq!(equivalence.id, "meal");
         assert_eq!(equivalence.per_unit_ug, 2_040_000_000);
         assert_eq!(equivalence.source, "ADEME, Base Carbone");
-        assert_eq!(equivalence.vintage, embedded_equivalence_vintage());
+        assert_eq!(equivalence.vintage, "V23.6 (2025-07-03)");
 
         let mut chosen = story();
         chosen["equivalence"] = json!("tgv_km");
