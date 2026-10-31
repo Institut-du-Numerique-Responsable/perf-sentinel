@@ -132,6 +132,8 @@
         recapReports: null,
         recapGenerating: false,
         recapGenerateError: null,
+        // The share card form, made on first use (cardState).
+        card: null,
         // GET /api/disclosures, null while it loads.
         disclosures: null,
         disclosuresError: false,
@@ -643,6 +645,52 @@
         else if (tabBox.right > rowBox.right) row.scrollLeft += tabBox.right - rowBox.right;
     }
 
+    /**
+     * Swaps in a fresh screen but leaves the shown PDF preview's iframe in the page: an iframe taken out
+     * reloads its file and loses the reader's page. Its ancestors stay too, given the fresh ones' attributes
+     * and siblings; none of them carries a listener. Any other shape is a plain swap.
+     */
+    function replaceKeepingPdf(main, fresh) {
+        const kept = main.querySelector('iframe.card-preview-pdf');
+        const slot = fresh.querySelector('iframe.card-preview-pdf');
+        let old = kept;
+        let now = slot;
+        while (old && now && now !== fresh && old.parentNode !== main) {
+            old = old.parentNode;
+            now = now.parentNode;
+        }
+        if (!kept || !slot || kept.getAttribute('src') !== slot.getAttribute('src') || now !== fresh
+            || old.parentNode !== main) {
+            main.replaceChildren(fresh);
+            return;
+        }
+        for (old = kept, now = slot; now !== fresh; old = old.parentNode, now = now.parentNode) {
+            adoptAround(old.parentNode, now.parentNode, old, now);
+        }
+        Array.from(main.childNodes).forEach(function (child) {
+            if (child !== old) child.remove();
+        });
+    }
+
+    /** Gives `into` the attributes and children of `model`, with `keep` standing where `place` stands. */
+    function adoptAround(into, model, keep, place) {
+        Array.from(into.attributes).forEach(function (attribute) {
+            into.removeAttribute(attribute.name);
+        });
+        Array.from(model.attributes).forEach(function (attribute) {
+            into.setAttribute(attribute.name, attribute.value);
+        });
+        Array.from(into.childNodes).forEach(function (child) {
+            if (child !== keep) child.remove();
+        });
+        let before = true;
+        Array.from(model.childNodes).forEach(function (child) {
+            if (child === place) before = false;
+            else if (before) into.insertBefore(child, keep);
+            else into.appendChild(child);
+        });
+    }
+
     function render() {
         // A tip whose anchor is about to be replaced would never see its mouseleave.
         closeTip();
@@ -682,7 +730,7 @@
         else if (state.screen === 'sources') main.replaceChildren(renderSourcesScreen());
         else if (state.screen === 'incidents') main.replaceChildren(renderIncidentsScreen());
         else if (state.screen === 'correlations') main.replaceChildren(renderCorrelationsScreen());
-        else if (state.screen === 'recap') main.replaceChildren(renderRecapScreen());
+        else if (state.screen === 'recap') replaceKeepingPdf(main, renderRecapScreen());
         else if (state.screen === 'disclosures') main.replaceChildren(renderDisclosuresScreen());
         else if (state.screen === 'disclosure') main.replaceChildren(renderDisclosureScreen());
         else if (state.screen === 'ack') main.replaceChildren(renderAckScreen());
@@ -6101,7 +6149,7 @@
         const snapshot = state.recap;
         const labels = PSL.RECAP_LABELS[snapshot.view === 'pilotage' ? 'pilotage' : 'tech'];
         [recapPeriodBlock(snapshot), recapTiles(snapshot, labels), recapPriorities(snapshot, labels, route),
-            recapMoved(snapshot, labels), recapReportsPanel(route)].forEach(function (part) {
+            recapMoved(snapshot, labels), recapReportsPanel(route), recapCardPanel(route)].forEach(function (part) {
             if (part) section.appendChild(part);
         });
         return section;
@@ -6838,6 +6886,9 @@
                 class: 'sources-note', text: PSL.recapSourcesNote(snapshot.sources_without_volume, snapshot.view)
             }));
         }
+        if (snapshot.late_sources && snapshot.late_sources.length) {
+            section.appendChild(el('p', {class: 'sources-note', text: PSL.recapLateNote(snapshot.late_sources)}));
+        }
         return section;
     }
 
@@ -6947,6 +6998,1043 @@
                 });
             })))
         ]);
+    }
+
+    // ---- the share card
+
+    const CARD_LANG_KEY = 'perf-sentinel:card-lang';
+    const CARD_FIX_PAGE = 5;
+    const CARD_FREE = [
+        ['title', 'Title', 48, 'Our checkout, lighter every month'],
+        ['team', 'Team', 48, 'Checkout team']
+    ];
+    const CARD_KEY_STATES = {current: 'Signs new cards', retired: 'Retired', revoked: 'Revoked'};
+
+    /** The card form and its answers. It outlives a recap read: the filters above only move its scope. */
+    function cardState() {
+        if (!state.card) {
+            let lang = 'en';
+            try {
+                if (localStorage.getItem(CARD_LANG_KEY) === 'fr') lang = 'fr';
+            } catch (error) {
+                // A comfort only: English it is.
+            }
+            state.card = {
+                open: false, angle: 'curve', kind: 'month', from: null, signature: null, label: null,
+                remember: false, rememberError: null, title: '', team: '', lang: lang, format: 'png',
+                options: null, optionsPath: null, curveRefusal: null, showAllFixes: false,
+                preview: null, stale: false, busy: null, renderError: null, fieldErrors: {},
+                attach: null, attachBusy: false, busyNote: null, attachNote: null,
+                keys: undefined, keysError: null, keysBusy: false, revoking: null, revokeDate: ''
+            };
+        }
+        return state.card;
+    }
+
+    function cardToday() {
+        return new Date().toISOString().slice(0, 10);
+    }
+
+    /** The picked period, or the recap filter's when it is closed for this kind, else the last closed one. */
+    function cardPeriodFrom(card, route) {
+        if (card.from) return card.from;
+        const last = PSL.lastClosedPeriod(card.kind, cardToday());
+        const filtered = route.at ? PSL.cardPeriodStart(card.kind, route.at) : null;
+        return filtered && filtered <= last ? filtered : last;
+    }
+
+    function cardOptionsReady(card) {
+        return card.options && card.options !== 'loading' && !card.options.error ? card.options : null;
+    }
+
+    /** The fix a story tells: the one picked when the period still lists it, else the default. */
+    function cardFix(card) {
+        const options = cardOptionsReady(card);
+        if (!options) return null;
+        return options.fixes.find(function (fix) {
+            return fix.signature === card.signature;
+        }) || options.fixes.find(function (fix) {
+            return fix.signature === options.default_signature;
+        }) || options.fixes[0] || null;
+    }
+
+    function cardLabel(card) {
+        const fix = cardFix(card);
+        return card.label !== null ? card.label : (fix && fix.label) || '';
+    }
+
+    function cardForm(card, route) {
+        const fix = cardFix(card);
+        return {
+            angle: card.angle, period: card.kind, at: cardPeriodFrom(card, route), environment: route.environment,
+            signature: fix ? fix.signature : null, label: cardLabel(card), title: card.title, team: card.team,
+            lang: card.lang, format: card.format
+        };
+    }
+
+    function cardFileName(card, route) {
+        return 'perf-sentinel-card-' + card.kind + '-' + cardPeriodFrom(card, route) + '.' + card.format;
+    }
+
+    /** The curve's own refusal, from its last render: the period before is not whole. */
+    function cardCurveRefusal(card) {
+        return card.angle === 'curve' && card.curveRefusal && card.curveRefusal.path === card.optionsPath
+            ? card.curveRefusal.text : null;
+    }
+
+    /** Why no card can be made with these choices, before any field: null when one can. */
+    function cardBlocked(card) {
+        const options = cardOptionsReady(card);
+        if (!options) return 'options';
+        if (options.refusal) return 'refused';
+        // A story tells one printable fix, a collective counts every confirmed one: both need one.
+        if (card.angle === 'story' && options.fixes.length === 0) return 'no_fix';
+        if (card.angle === 'collective' && !options.confirmed_fixes_count) return 'no_fix';
+        return cardCurveRefusal(card) ? 'previous' : null;
+    }
+
+    /** The free fields this angle shows, by their card.json name. */
+    function cardFields(card) {
+        return card.angle === 'story' && cardFix(card) && !cardBlocked(card) ? ['label', 'title', 'team'] : ['title', 'team'];
+    }
+
+    function cardFieldValue(card, field) {
+        return field === 'label' ? cardLabel(card) : card[field];
+    }
+
+    /** The error under a free field: the browser's own check first, then the engine's 422. */
+    function cardFieldError(card, field) {
+        return PSL.cardFieldProblem(cardFieldValue(card, field)) || card.fieldErrors[field] || null;
+    }
+
+    function cardInvalid(card) {
+        return cardFields(card).some(function (field) {
+            return cardFieldError(card, field) !== null;
+        });
+    }
+
+    function cardPlace(card, management) {
+        const fix = cardFix(card);
+        return management || !fix ? 'this action' : fix.endpoint;
+    }
+
+    /** A render that keeps the focus, and the caret, on the control that had them. */
+    function cardRender() {
+        const active = document.activeElement;
+        const id = active && active.id;
+        const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
+        render();
+        const again = id ? document.getElementById(id) : null;
+        if (!again) return;
+        again.focus({preventScroll: true});
+        if (caret) again.setSelectionRange(caret[0], caret[1]);
+    }
+
+    /** A choice that changes the card: a shown preview no longer matches it. */
+    function cardMarkStale(card) {
+        if (card.preview) card.stale = true;
+        card.renderError = null;
+    }
+
+    function cardPick(change) {
+        const card = cardState();
+        Object.assign(card, change);
+        cardMarkStale(card);
+        cardRender();
+    }
+
+    /** A format whose preview renders the same file, PNG and JPEG XL, leaves the preview current. */
+    function cardPickFormat(format) {
+        const card = cardState();
+        const same = PSL.previewFormat(card.format) === PSL.previewFormat(format);
+        card.format = format;
+        if (same) card.renderError = null;
+        else cardMarkStale(card);
+        cardRender();
+    }
+
+    function loadCardOptions(card, path) {
+        card.optionsPath = path;
+        card.options = 'loading';
+        getJson(path).then(function (options) {
+            if (card.optionsPath === path) card.options = options;
+        }).catch(function (error) {
+            if (card.optionsPath === path) card.options = {error: error.status || 0};
+        }).finally(function () {
+            if (card.optionsPath === path && currentScreen() === 'recap') cardRender();
+        });
+    }
+
+    function loadCardKeys(card) {
+        card.keys = 'loading';
+        getJson('/api/cards/keys').then(function (keys) {
+            card.keys = keys;
+        }).catch(function (error) {
+            // Not an administrator after all, or cards off: the server decides, the panel goes.
+            card.keys = error.status === 403 || error.status === 404 ? null : 'error';
+        }).finally(function () {
+            if (currentScreen() === 'recap') cardRender();
+        });
+    }
+
+    /** The section under the reports: shown when this Hub signs cards, a banner when its engine cannot. */
+    function recapCardPanel(route) {
+        const cards = state.status && state.status.cards;
+        if (cards !== true && cards !== false) return null;
+        const card = cardState();
+        const management = route.view === 'pilotage';
+        const section = el('section', {class: 'recap-section share', 'aria-labelledby': 'recap-h-share'}, [
+            ruledOverline('// share'),
+            recapHeading('recap-h-share', PSL.CARD_COPY.title, PSL.CARD_COPY.hint, PSL.CARD_COPY.help, 'share cards')
+        ]);
+        if (cards === false) {
+            section.appendChild(el('div', {class: 'banner share-off', 'data-tone': 'muted', role: 'status'},
+                [infoGlyph(16), el('div', {text: PSL.CARD_COPY.engineOff})]));
+            return section;
+        }
+        const admin = state.access === null || state.access.admin;
+        if (admin && card.keys === undefined) loadCardKeys(card);
+        if (!card.open) {
+            const create = el('button', {
+                class: 'pill-button pill-primary', type: 'button', id: 'card-create', 'aria-expanded': 'false'
+            }, [cardImageGlyph(), el('span', {text: PSL.CARD_COPY.create})]);
+            create.addEventListener('click', function () {
+                card.open = true;
+                renderFocus('#card-angle-' + card.angle);
+            });
+            section.appendChild(el('div', {class: 'share-closed'}, [el('p', {text: PSL.CARD_COPY.closed}), create]));
+        } else {
+            const path = PSL.cardOptionsPath(cardForm(card, route));
+            if (card.optionsPath !== path) loadCardOptions(card, path);
+            const form = el('form', {class: 'share-form', 'aria-label': 'Card', novalidate: ''}, [
+                cardAngleGroup(card),
+                cardPeriodGroup(card, route, management),
+                card.angle === 'story' ? cardFixGroup(card, management) : null,
+                cardWordsGroup(card, management),
+                cardFormatGroup(card),
+                cardActions(card, route)
+            ]);
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+            });
+            section.appendChild(el('p', {class: 'share-intro', text: PSL.CARD_COPY.intro}));
+            section.appendChild(el('div', {class: 'share-grid'}, [form, cardPreviewAside(card, route, management, admin)]));
+        }
+        if (admin && card.keys !== null && card.keys !== undefined) section.appendChild(cardKeysPanel(card));
+        return section;
+    }
+
+    function cardImageGlyph() {
+        return svg([
+            ['rect', {x: '4', y: '3.5', width: '16', height: '17', rx: '2'}],
+            ['path', {d: 'M4 16l4.5-4.5 4 4 2.5-2.5L20 18'}],
+            ['circle', {cx: '15', cy: '8.5', r: '1.5'}]
+        ], 14);
+    }
+
+    function cardSegmented(label, name, choices, current, onPick) {
+        const group = el('div', {class: 'segmented segmented-sm', role: 'radiogroup', 'aria-label': label},
+            choices.map(function (choice) {
+                const button = el('button', {
+                    type: 'button', role: 'radio', id: 'card-' + name + '-' + choice[0],
+                    'aria-checked': choice[0] === current ? 'true' : 'false', text: choice[1]
+                });
+                button.addEventListener('click', function () {
+                    if (choice[0] !== current) onPick(choice[0]);
+                });
+                return button;
+            }));
+        return radioKeys(group, 'card-' + name);
+    }
+
+    function cardLegend(text, small) {
+        return el('legend', {class: 'share-legend'}, [document.createTextNode(text),
+            small ? el('small', {text: small}) : null]);
+    }
+
+    function cardAngleGroup(card) {
+        return el('fieldset', {class: 'share-group'}, [
+            cardLegend('What to tell'),
+            el('div', {class: 'choice-list'}, PSL.CARD_ANGLES.map(function (angle) {
+                const input = el('input', {
+                    type: 'radio', name: 'card-angle', id: 'card-angle-' + angle, value: angle,
+                    'aria-describedby': 'card-angle-line-' + angle
+                });
+                input.checked = card.angle === angle;
+                input.addEventListener('change', function () {
+                    cardPick({angle: angle});
+                });
+                return el('label', {class: 'choice'}, [input,
+                    el('span', {class: 'choice-name', text: PSL.CARD_ANGLE_NAMES[angle]}),
+                    el('span', {class: 'choice-line', id: 'card-angle-line-' + angle, text: PSL.CARD_ANGLE_LINES[angle]})]);
+            }))
+        ]);
+    }
+
+    function cardStepButton(card, from, delta, enabled) {
+        const unit = PSL.CARD_PERIOD_LABELS[card.kind].toLowerCase();
+        const button = el('button', {
+            type: 'button', id: delta < 0 ? 'card-period-back' : 'card-period-next',
+            'aria-label': (delta < 0 ? 'Previous ' : 'Next ') + unit,
+            disabled: enabled ? null : 'disabled'
+        }, [svg([['path', {d: delta < 0 ? 'M15 6l-6 6 6 6' : 'M9 6l6 6-6 6'}]], 13)]);
+        button.addEventListener('click', function () {
+            cardPick({from: PSL.stepPeriod(card.kind, from, delta)});
+        });
+        return button;
+    }
+
+    function cardPeriodGroup(card, route, management) {
+        const from = cardPeriodFrom(card, route);
+        const name = PSL.cardPeriodName(card.kind, from);
+        const last = !PSL.canStepForward(card.kind, from, cardToday());
+        const group = el('fieldset', {class: 'share-group'}, [
+            cardLegend('Which period', 'closed, from the list only'),
+            el('div', {class: 'period-row'}, [
+                cardSegmented('Length', 'kind', PSL.CARD_PERIODS.map(function (kind) {
+                    return [kind, PSL.CARD_PERIOD_LABELS[kind]];
+                }), card.kind, function (kind) {
+                    cardPick({kind: kind, from: null});
+                }),
+                el('div', {class: 'period-step', role: 'group', 'aria-label': 'Period'}, [
+                    cardStepButton(card, from, -1, true),
+                    el('output', {'aria-live': 'polite', text: name.charAt(0).toUpperCase() + name.slice(1)}),
+                    cardStepButton(card, from, 1, !last)
+                ]),
+                last ? el('span', {
+                    class: 'period-hint', text: 'the last closed ' + PSL.CARD_PERIOD_LABELS[card.kind].toLowerCase()
+                }) : null
+            ])
+        ]);
+        const options = card.options;
+        if (options === 'loading' || options === null) {
+            group.appendChild(el('p', {class: 'period-main', role: 'status', text: 'Reading what this period holds\u2026'}));
+            return group;
+        }
+        if (options.error) {
+            group.appendChild(el('div', {class: 'banner', 'data-tone': 'crit', role: 'alert'},
+                [critGlyph(16), el('div', {text: PSL.CARD_COPY.optionsFailed})]));
+            return group;
+        }
+        const previous = PSL.cardPeriodName(card.kind, PSL.stepPeriod(card.kind, from, -1));
+        group.appendChild(el('p', {
+            class: 'period-main',
+            text: PSL.cardRangeText(options.period.from, options.period.to)
+                + (card.angle === 'story' ? '' : ', compared with ' + previous)
+        }));
+        group.appendChild(cardEnvironmentLine(options.environment, management));
+        if (options.refusal) {
+            group.appendChild(cardWarn([el('b', {text: 'No card for ' + options.period_name + '. '}),
+                document.createTextNode(options.refusal_text)]));
+            return group;
+        }
+        const curve = cardCurveRefusal(card);
+        if (curve) {
+            const story = el('button', {class: 'pill-button pill-sm', type: 'button', text: 'Make a story card'});
+            story.addEventListener('click', function () {
+                cardPick({angle: 'story'});
+            });
+            const collective = el('button', {class: 'pill-button pill-sm', type: 'button', text: 'Make a collective card'});
+            collective.addEventListener('click', function () {
+                cardPick({angle: 'collective'});
+            });
+            group.appendChild(cardWarn([document.createTextNode(curve),
+                el('div', {class: 'banner-actions'}, [story, collective])]));
+            return group;
+        }
+        group.appendChild(cardPeriodFacts(card, options, previous));
+        if (card.angle === 'collective' && !options.confirmed_fixes_count) group.appendChild(cardNoFix());
+        return group;
+    }
+
+    function cardWarn(children) {
+        return el('div', {class: 'banner', 'data-tone': 'warn', role: 'alert'}, [warningGlyph(16), el('div', {}, children)]);
+    }
+
+    /** The environment in mono, as the recap filter names it. */
+    function cardEnvironmentLine(environment, management) {
+        const text = PSL.cardEnvironmentLine(environment, management ? 'pilotage' : 'tech');
+        if (!environment) return el('p', {class: 'period-env', text: text});
+        const at = text.indexOf(environment);
+        return el('p', {class: 'period-env'}, [document.createTextNode(text.slice(0, at)),
+            el('b', {text: environment}), document.createTextNode(text.slice(at + environment.length))]);
+    }
+
+    function cardPeriodFacts(card, options, previous) {
+        const days = Math.round((Date.parse(options.period.to) - Date.parse(options.period.from)) / 86400000) + 1;
+        const where = options.sources.length > 1
+            ? options.sources.slice(0, -1).join(', ') + ' and ' + options.sources[options.sources.length - 1]
+            : options.sources[0];
+        const facts = [['ok', 'All ' + days + ' days recorded' + (where ? ', at ' + where : '') + '.']];
+        const before = previous.charAt(0).toUpperCase() + previous.slice(1) + ', the period before, ';
+        if (card.angle === 'collective' && !options.previous_whole) {
+            facts.push(['info', before + 'is not whole, so the card leaves out the comparison and the operations '
+                + 'before the fixes.']);
+        } else if (card.angle === 'collective' && !options.previous_complete) {
+            facts.push(['info', before + 'is whole, but some of its fixes were marked done before this Hub kept '
+                + 'their details, so the card leaves out the comparison.']);
+        } else if (card.angle !== 'story' && options.previous_complete) {
+            facts.push(['ok', before + 'is whole too.']);
+        }
+        if (options.restart_days > 0) {
+            facts.push(['info', options.restart_days + (options.restart_days === 1 ? ' day' : ' days')
+                + ' with a restart. The card prints it in its scope.']);
+        }
+        if (options.sampled_permille < 1000) {
+            facts.push(['info', 'Figures cover ' + options.sampled_permille / 10 + '% of traffic. The card says so in '
+                + 'its scope, under the figures.']);
+        }
+        return el('ul', {class: 'period-facts', 'aria-label': 'What the period holds'}, facts.map(function (fact) {
+            return el('li', {'data-tone': fact[0]}, [
+                fact[0] === 'ok' ? svg(RECAP_STATE_GLYPH.confirmed, 14) : infoGlyph(14),
+                el('span', {text: fact[1]})
+            ]);
+        }));
+    }
+
+    function cardFixGroup(card, management) {
+        const options = cardOptionsReady(card);
+        const group = el('fieldset', {class: 'share-group'}, [cardLegend('Which fix',
+            options ? 'confirmed by the measure in ' + options.period_name : null)]);
+        if (!options || options.refusal) {
+            group.appendChild(el('p', {class: 'preview-note', text: PSL.CARD_COPY.fixesWait}));
+            return group;
+        }
+        if (options.fixes.length === 0) {
+            group.appendChild(cardNoFix());
+            return group;
+        }
+        const chosen = cardFix(card);
+        const at = options.fixes.indexOf(chosen);
+        const shown = card.showAllFixes || at >= CARD_FIX_PAGE ? options.fixes : options.fixes.slice(0, CARD_FIX_PAGE);
+        group.appendChild(el('ul', {class: 'fix-list'}, shown.map(function (fix, index) {
+            return el('li', {}, [cardFixRow(card, fix, index, fix === chosen, options, management)]);
+        })));
+        if (shown.length < options.fixes.length) {
+            const more = el('button', {
+                class: 'pill-button pill-sm fix-more', type: 'button', text: 'Show all ' + options.fixes.length
+            });
+            more.addEventListener('click', function () {
+                card.showAllFixes = true;
+                renderFocus('#card-fix-' + CARD_FIX_PAGE);
+            });
+            group.appendChild(more);
+        }
+        return group;
+    }
+
+    function cardNoFix() {
+        return el('div', {class: 'banner', 'data-tone': 'muted', role: 'status'},
+            [infoGlyph(16), el('div', {text: PSL.CARD_COPY.noFix})]);
+    }
+
+    function cardFixRow(card, fix, index, checked, options, management) {
+        const input = el('input', {type: 'radio', name: 'card-fix', id: 'card-fix-' + index, value: fix.signature});
+        input.checked = checked;
+        input.addEventListener('change', function () {
+            cardPick({signature: fix.signature, label: null, remember: false, rememberError: null});
+        });
+        const line = PSL.cardFixLine(fix);
+        const pill = fix.signature === options.default_signature && fix.before_fix_ops !== null;
+        const meta = [
+            management ? el('span', {text: 'in ' + fix.service}) : null,
+            el('span', {text: 'fixed on ' + PSL.cardDayText(new Date(fix.done_at_ms).toISOString().slice(0, 10), true)}),
+            el('span', {}, [line.figure ? el('b', {text: line.figure}) : null, document.createTextNode(line.text)])
+        ];
+        return el('label', {class: 'fix'}, [
+            input,
+            el('span', {class: 'fix-plain'}, [document.createTextNode(fix.plain + ' '),
+                pill ? el('span', {class: 'fix-badge', text: PSL.CARD_COPY.defaultPill}) : null]),
+            management ? null : el('span', {class: 'fix-head'}, [
+                el('span', {
+                    class: 'chip', 'data-type': fix.finding_type,
+                    text: PSL.FINDING_TYPE_LABEL[fix.finding_type] || fix.finding_type
+                }),
+                el('span', {class: 'table-strong', text: fix.service}),
+                el('span', {class: 'recap-endpoint', text: fix.endpoint})
+            ]),
+            el('span', {class: 'fix-meta'}, meta)
+        ]);
+    }
+
+    /** Typing redraws only when what the screen says changes: an error, the stale state, the remember box. */
+    function cardTyped(card, field, value, count, max) {
+        const view = function () {
+            const fix = cardFix(card);
+            return JSON.stringify([card.stale, card.renderError, cardFields(card).map(function (name) {
+                return cardFieldError(card, name);
+            }), PSL.rememberState(cardLabel(card), fix && fix.label, '')]);
+        };
+        const before = view();
+        if (field === 'label') card.label = value;
+        else card[field] = value;
+        delete card.fieldErrors[field];
+        cardMarkStale(card);
+        if (view() !== before) cardRender();
+        else count.textContent = value.length + ' / ' + max;
+    }
+
+    function cardTextField(card, field, label, max, placeholder, notes, wide) {
+        const id = 'card-' + field;
+        const value = cardFieldValue(card, field);
+        const error = cardFieldError(card, field);
+        const count = el('span', {class: 'tfield-count', 'aria-hidden': 'true', text: value.length + ' / ' + max});
+        const described = [error ? id + '-error' : null].concat(notes.map(function (note) {
+            return note.id;
+        })).filter(Boolean).join(' ');
+        const input = el('input', {
+            class: 'tinput', id: id, type: 'text', maxlength: String(max), placeholder: placeholder,
+            spellcheck: 'false', 'aria-invalid': error ? 'true' : null, 'aria-describedby': described || null
+        });
+        input.value = value;
+        input.addEventListener('input', function () {
+            cardTyped(card, field, input.value, count, max);
+        });
+        return el('div', {class: 'tfield' + (wide ? ' wide' : '')}, [
+            el('label', {class: 'tfield-label', for: id}, [el('span', {text: label}), count]),
+            input,
+            error ? el('p', {class: 'tfield-error', id: id + '-error', text: error}) : null
+        ].concat(notes));
+    }
+
+    function cardWordsGroup(card, management) {
+        const grid = el('div', {class: 'free-grid'});
+        if (cardFields(card).indexOf('label') >= 0) grid.appendChild(cardLabelField(card, management));
+        CARD_FREE.forEach(function (free) {
+            grid.appendChild(cardTextField(card, free[0], free[1], free[2], free[3], [], false));
+        });
+        return el('fieldset', {class: 'share-group'}, [
+            cardLegend('Your words', 'optional'),
+            grid,
+            el('p', {class: 'free-note', text: PSL.CARD_COPY.freeNote})
+        ]);
+    }
+
+    function cardLabelField(card, management) {
+        const fix = cardFix(card);
+        const place = cardPlace(card, management);
+        const note = el('p', {class: 'tfield-note', id: 'card-label-note'}, fix.label
+            ? (management
+                ? [document.createTextNode('Pre-filled from the name remembered for this action.')]
+                : [document.createTextNode('Pre-filled from the name remembered for '),
+                    el('code', {text: place}), document.createTextNode('.')])
+            : [document.createTextNode(PSL.CARD_COPY.labelHint)]);
+        const field = cardTextField(card, 'label', 'Everyday name for this action', 80, 'Showing a cart', [note], true);
+        const allowed = PSL.canRememberLabel(state.sources);
+        const remember = PSL.rememberState(cardLabel(card), fix.label, place);
+        const box = el('input', {
+            type: 'checkbox', id: 'card-remember',
+            disabled: allowed && remember.enabled ? null : 'disabled',
+            'aria-describedby': allowed ? null : 'card-remember-why'
+        });
+        box.checked = allowed && remember.enabled && card.remember;
+        box.addEventListener('change', function () {
+            card.remember = box.checked;
+        });
+        field.appendChild(el('label', {class: 'checkbox'}, [box, el('span', {text: remember.text})]));
+        if (!allowed) {
+            field.appendChild(el('p', {class: 'tfield-note', id: 'card-remember-why', text: PSL.CARD_COPY.rememberDenied}));
+        }
+        if (card.rememberError) {
+            field.appendChild(el('p', {class: 'tfield-error', role: 'alert', text: card.rememberError}));
+        }
+        return field;
+    }
+
+    function cardFormatGroup(card) {
+        return el('fieldset', {class: 'share-group'}, [
+            cardLegend('Card'),
+            el('div', {class: 'card-opts'}, [
+                el('div', {class: 'card-opt'}, [el('span', {class: 'card-opt-label', text: 'Language of the card'}),
+                    cardSegmented('Language of the card', 'lang', [['en', 'English'], ['fr', 'Fran\u00e7ais']],
+                        card.lang, function (lang) {
+                            store('localStorage', CARD_LANG_KEY, lang);
+                            cardPick({lang: lang});
+                        })]),
+                el('div', {class: 'card-opt card-opt-format'}, [el('span', {class: 'card-opt-label', text: 'Format'}),
+                    cardSegmented('Format', 'format', PSL.CARD_FORMATS.map(function (format) {
+                        return [format, PSL.CARD_FORMAT_LABELS[format]];
+                    }), card.format, cardPickFormat)])
+            ]),
+            card.format === 'pdf' ? el('p', {class: 'free-note', text: PSL.CARD_COPY.carouselNote}) : null,
+            PSL.CARD_FORMAT_NOTES[card.format] ? el('p', {class: 'free-note', text: PSL.CARD_FORMAT_NOTES[card.format]})
+                : null
+        ]);
+    }
+
+    function cardActions(card, route) {
+        const invalid = cardInvalid(card);
+        const off = cardBlocked(card) || invalid || card.busy ? 'disabled' : null;
+        const preview = el('button', {class: 'pill-button pill-primary', type: 'button', id: 'card-preview', disabled: off},
+            [svg([['path', {d: 'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z'}],
+                ['circle', {cx: '12', cy: '12', r: '2.8'}]], 14),
+            el('span', {
+                text: card.busy === 'preview' ? 'Rendering\u2026' : card.stale && !cardBlocked(card) ? 'Preview again' : 'Preview'
+            })]);
+        preview.addEventListener('click', function () {
+            cardPreview(route);
+        });
+        const download = el('button', {class: 'pill-button', type: 'button', id: 'card-download', disabled: off},
+            [downloadGlyph(), el('span', {
+                text: card.busy === 'download' ? 'Downloading\u2026'
+                    : card.format === 'pdf' ? 'Download PDF' : 'Download image'
+            })]);
+        download.addEventListener('click', function () {
+            cardDownload(route);
+        });
+        return el('div', {class: 'share-actions'}, [
+            preview, download,
+            el('span', {class: 'share-file', text: cardFileName(card, route)}),
+            cardBusyNote(card.busyNote),
+            invalid ? el('p', {class: 'share-why', text: PSL.CARD_COPY.fieldWhy}) : null,
+            card.renderError ? el('p', {class: 'recap-alert', role: 'alert', text: card.renderError}) : null
+        ]);
+    }
+
+    function cardPreviewAside(card, route, management, admin) {
+        const blocked = cardBlocked(card);
+        const format = card.preview ? card.preview.format : card.format;
+        const pdf = format === 'pdf';
+        const shown = cardPreviewShown(card, blocked);
+        const aside = el('aside', {class: 'share-preview', 'aria-label': 'Preview', tabindex: '-1'}, [
+            el('div', {class: 'preview-head'}, [document.createTextNode('Preview'),
+                el('span', {text: pdf ? 'the PDF, in your browser\'s viewer' : 'as shared, light on every theme'})])
+        ]);
+        if (shown && card.stale) {
+            aside.appendChild(el('div', {class: 'banner', 'data-tone': 'info', role: 'status'},
+                [infoGlyph(16), el('div', {text: PSL.CARD_COPY.stale})]));
+        }
+        aside.appendChild(cardPreviewFrame(card, blocked, pdf));
+        const options = cardOptionsReady(card);
+        const domain = options && options.org.domain;
+        if (shown) cardPreviewProof(card, format, domain).forEach(function (line) {
+            aside.appendChild(line);
+        });
+        if (options) aside.appendChild(cardAttachBlock(card, route, domain, management, admin));
+        return aside;
+    }
+
+    function cardPreviewShown(card, blocked) {
+        return !!card.preview && !blocked && card.busy !== 'preview';
+    }
+
+    /** The frame holds one of three things: the render in progress, the card, or why there is none yet. */
+    function cardPreviewFrame(card, blocked, pdf) {
+        const frame = el('div', {class: 'preview-frame'});
+        if (card.busy === 'preview') {
+            frame.appendChild(el('div', {class: 'preview-loading', role: 'status', text: PSL.CARD_COPY.rendering}));
+        } else if (cardPreviewShown(card, blocked)) {
+            if (card.stale) frame.setAttribute('data-stale', '');
+            frame.appendChild(cardPreviewCard(card, pdf));
+        } else {
+            frame.appendChild(cardPreviewEmpty(blocked));
+        }
+        return frame;
+    }
+
+    function cardPreviewCard(card, pdf) {
+        return pdf
+            ? el('iframe', {class: 'card-preview-pdf', src: card.preview.url, title: 'The card, as a PDF'})
+            : el('img', {class: 'card-preview', src: card.preview.url, alt: 'The card, as an image'});
+    }
+
+    function cardPreviewEmpty(blocked) {
+        const slim = blocked && blocked !== 'options';
+        return el('div', {class: 'preview-empty' + (slim ? ' slim' : '')}, [
+            cardImageGlyph(),
+            el('span', {text: slim ? PSL.CARD_COPY.previewBlocked : PSL.CARD_COPY.previewEmpty})
+        ]);
+    }
+
+    /** What the shown card carries: the note on the file, and the level its proof reaches. */
+    function cardPreviewProof(card, format, domain) {
+        const attached = !!(card.attach && card.attach.result && card.attach.result.integrity === 'ok'
+            && card.attach.result.content !== 'modified' && card.attach.result.level === 2);
+        const level = PSL.levelLine(attached, domain);
+        const at = level.indexOf(': ') + 2;
+        return [
+            el('p', {class: 'preview-note', text: PSL.CARD_COPY[format + 'Note']}),
+            el('p', {class: 'proof-line'}, [document.createTextNode(level.slice(0, at)), el('b', {text: level.slice(at)})])
+        ];
+    }
+
+    function cardAttachBlock(card, route, domain, management, admin) {
+        if (!domain) return el('div', {class: 'attach'}, [el('p', {class: 'muted', text: PSL.CARD_COPY.noDomain})]);
+        const button = el('button', {
+            class: 'pill-button pill-sm', type: 'button', id: 'card-attach',
+            disabled: card.attachBusy || cardBlocked(card) || cardInvalid(card) ? 'disabled' : null,
+            text: card.attachBusy ? 'Checking\u2026' : 'Verify attachment'
+        });
+        button.addEventListener('click', function () {
+            cardCheckAttachment(route);
+        });
+        const box = el('div', {class: 'attach'}, [
+            el('div', {class: 'attach-head'}, [el('p', {class: 'attach-title', text: 'Attached to ' + domain + '?'}), button]),
+            el('p', {class: 'attach-contact', text: PSL.cardContactText(domain, management ? 'pilotage' : 'tech')}),
+            cardBusyNote(card.attachNote)
+        ]);
+        const answer = card.attach;
+        if (answer && answer.error) {
+            box.appendChild(el('div', {class: 'banner', 'data-tone': 'crit', role: 'alert'},
+                [critGlyph(16), el('div', {text: answer.error})]));
+        } else if (answer) {
+            const result = answer.result;
+            const said = PSL.attachmentText(result, admin);
+            let tone = 'info';
+            if (result.integrity !== 'ok' || result.content === 'modified') tone = 'crit';
+            else if (result.level === 2) tone = 'ok';
+            else if (said.title) tone = 'warn';
+            const glyph = {crit: critGlyph(16), ok: svg(RECAP_STATE_GLYPH.confirmed, 16), warn: warningGlyph(16)}[tone];
+            box.appendChild(el('div', {class: 'banner', 'data-tone': tone, role: 'status', title: said.title},
+                [glyph || infoGlyph(16), el('div', {text: said.text})]));
+            const intact = PSL.contentLine(result);
+            if (intact) box.appendChild(el('p', {class: 'attach-content', text: intact}));
+            const figures = PSL.signedFigureLines(result.figures);
+            if (figures.length) box.appendChild(cardSignedFigures(figures));
+        }
+        return box;
+    }
+
+    /** The figures as signed, exact, for the person to hold against the preview before sharing. */
+    function cardSignedFigures(figures) {
+        return el('section', {class: 'card-signed', 'aria-labelledby': 'card-signed-title'}, [
+            el('p', {class: 'card-signed-title', id: 'card-signed-title', text: 'The signed figures'}),
+            el('p', {class: 'card-signed-note',
+                text: 'Exact values as signed. The card rounds them down: compare them with the preview.'}),
+            el('dl', {class: 'card-signed-figures'}, figures.flatMap(function (figure) {
+                return [el('dt', {text: figure.label}), el('dd', {text: figure.value})];
+            }))
+        ]);
+    }
+
+    /** Under the button that waits: another card holds the engine, the Hub asks again by itself. */
+    function cardBusyNote(text) {
+        return text ? el('div', {class: 'banner card-busy', 'data-tone': 'info', role: 'status'},
+            [infoGlyph(16), el('div', {text: text})]) : null;
+    }
+
+    /**
+     * A POST of the card form; a file comes back as a Blob, a refusal as the Hub's own detail. A busy render
+     * gate is told through onWait and asked once more after its Retry-After; that second answer stands.
+     */
+    function cardPost(path, body, read, onWait) {
+        const send = function () {
+            return fetch(path, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    accept: 'application/json, image/png, image/svg+xml, image/jxl, application/pdf'
+                },
+                body: JSON.stringify(body)
+            }).then(signInOn401);
+        };
+        return send().then(function (response) {
+            const busy = onWait ? PSL.cardBusy(response.status, response.headers.get('Retry-After')) : null;
+            if (!busy) return response;
+            onWait(busy.text);
+            return new Promise(function (resolve) {
+                setTimeout(resolve, busy.delayMs);
+            }).then(send);
+        }).then(function (response) {
+            if (response.ok) {
+                return read === 'blob' ? response.blob().then(function (blob) {
+                    return {blob: blob};
+                }) : response.json().then(function (result) {
+                    return {result: result};
+                });
+            }
+            return response.json().catch(function () {
+                return null;
+            }).then(function (payload) {
+                return {
+                    status: response.status,
+                    field: payload && typeof payload.field === 'string' ? payload.field : null,
+                    detail: payload && payload.detail ? String(payload.detail)
+                        : 'The Hub refused the card (' + response.status + ').'
+                };
+            });
+        }).catch(function () {
+            return {status: 0, field: null, detail: 'The Hub did not answer.'};
+        });
+    }
+
+    /** A refusal lands where it belongs: under its field, on the curve's period, or under the buttons. */
+    function cardFailure(card, failure) {
+        if (failure.field) card.fieldErrors[failure.field] = failure.detail;
+        else if (failure.status === 422 && card.angle === 'curve' && PSL.isPreviousRefusal(failure.detail)) {
+            card.curveRefusal = {path: card.optionsPath, text: failure.detail};
+        } else card.renderError = failure.detail;
+    }
+
+    /** Remembers the typed name for the fix's endpoint first, when the box asks for it. */
+    function cardRememberLabel(card) {
+        const fix = cardFix(card);
+        const label = cardLabel(card).trim();
+        if (card.angle !== 'story' || !card.remember || !fix || !PSL.rememberState(label, fix.label, '').enabled) {
+            return Promise.resolve();
+        }
+        return recapSend('PUT', '/api/labels', {service: fix.service, endpoint: fix.endpoint, label: label})
+            .then(function (failure) {
+                card.rememberError = failure;
+                if (failure) return;
+                fix.label = label;
+                card.label = null;
+                card.remember = false;
+            });
+    }
+
+    function cardMake(route, busy, then) {
+        const card = cardState();
+        if (card.busy) return;
+        const body = PSL.cardBody(cardForm(card, route));
+        if (busy === 'preview' && body.format) body.format = PSL.previewFormat(body.format);
+        card.busy = busy;
+        card.renderError = null;
+        cardRender();
+        cardRememberLabel(card).then(function () {
+            return cardPost('/api/cards/render', body, 'blob', function (text) {
+                card.busyNote = text;
+                if (currentScreen() === 'recap') cardRender();
+            });
+        }).then(function (answer) {
+            card.busy = null;
+            card.busyNote = null;
+            if (answer.blob) then(card, answer.blob, body);
+            else cardFailure(card, answer);
+            if (currentScreen() === 'recap') cardRender();
+        });
+    }
+
+    /** Preview renders the form as it is, a JPEG XL as its PNG; a phone then scrolls to the card. */
+    function cardPreview(route) {
+        cardMake(route, 'preview', function (card, blob, body) {
+            if (card.preview) URL.revokeObjectURL(card.preview.url);
+            card.preview = {url: URL.createObjectURL(blob), format: body.format};
+            card.stale = false;
+            setTimeout(function () {
+                const aside = document.querySelector('.share-preview');
+                if (!aside || !matchMedia('(max-width: 900px)').matches) return;
+                const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+                aside.scrollIntoView({behavior: still ? 'auto' : 'smooth', block: 'start'});
+                aside.focus({preventScroll: true});
+            }, 0);
+        });
+    }
+
+    /** Download renders the card again from the form, never from the preview on screen. */
+    function cardDownload(route) {
+        const name = cardFileName(cardState(), route);
+        cardMake(route, 'download', function (card, blob) {
+            PSL.saveBlob(blob, name);
+        });
+    }
+
+    function cardCheckAttachment(route) {
+        const card = cardState();
+        if (card.attachBusy) return;
+        card.attachBusy = true;
+        card.attach = null;
+        cardRender();
+        cardPost('/api/cards/attachment', PSL.cardBody(cardForm(card, route)), 'json', function (text) {
+            card.attachNote = text;
+            if (currentScreen() === 'recap') cardRender();
+        }).then(function (answer) {
+            card.attachBusy = false;
+            card.attachNote = null;
+            card.attach = answer.result ? {result: answer.result} : {error: answer.detail};
+            if (currentScreen() === 'recap') cardRender();
+        });
+    }
+
+    // ---- the signing key, for administrators
+
+    function cardKeysPanel(card) {
+        const panel = el('details', {class: 'key-panel'}, [
+            el('summary', {}, [svg([['path', {d: 'M9 6l6 6-6 6'}]], 12),
+                document.createTextNode(PSL.CARD_COPY.keysTitle), el('small', {text: 'administrators'})])
+        ]);
+        if (state.panelOpen['card-keys']) panel.open = true;
+        panel.addEventListener('toggle', function () {
+            state.panelOpen['card-keys'] = panel.open;
+        });
+        const body = el('div', {class: 'key-body'});
+        panel.appendChild(body);
+        cardKeysFill(card, body);
+        return panel;
+    }
+
+    function cardKeysFill(card, body) {
+        if (card.keys === 'loading') {
+            body.appendChild(el('p', {class: 'key-p', role: 'status', text: 'Reading the keys\u2026'}));
+            return;
+        }
+        if (card.keys === 'error') {
+            body.appendChild(el('p', {class: 'recap-alert', role: 'alert', text: 'The Hub did not return the keys.'}));
+            return;
+        }
+        const options = cardOptionsReady(card);
+        const domain = card.keys.record_name ? card.keys.record_name.replace(/^_perf-sentinel\./, '') : null;
+        body.appendChild(el('div', {}, [
+            el('dl', {class: 'recap-kv'}, [
+                options ? el('dt', {text: 'Organisation'}) : null,
+                options ? el('dd', {class: 'ui', text: options.org.name}) : null,
+                el('dt', {text: 'Domain'}),
+                el('dd', {text: domain || 'not set'})
+            ]),
+            el('p', {class: 'key-p', style: 'margin-top:8px', text: PSL.CARD_COPY.keysOrigin})
+        ]));
+        if (card.keysError) body.appendChild(el('p', {class: 'recap-alert', role: 'alert', text: card.keysError}));
+        if (card.keys.keys.length === 0) {
+            body.appendChild(el('p', {class: 'key-p', text: PSL.CARD_COPY.keysNone}));
+            return;
+        }
+        if (domain) {
+            body.appendChild(el('div', {}, [
+                el('p', {class: 'key-h', text: 'Attach the cards to ' + domain}),
+                el('p', {class: 'key-p', text: PSL.CARD_COPY.keysPublish}),
+                cardCopyLine(card.keys.record_name, card.keys.record_name, 'Copy the record name')
+            ]));
+        }
+        body.appendChild(el('ul', {class: 'key-list'}, card.keys.keys.map(function (key) {
+            return cardKeyRow(card, key, domain);
+        })));
+        if (domain) body.appendChild(cardKeysFile(card, domain));
+        body.appendChild(cardKeyRotate(card));
+    }
+
+    function cardKeyRotate(card) {
+        const rotate = el('button', {
+            class: 'pill-button pill-sm', type: 'button', id: 'card-rotate',
+            disabled: card.keysBusy ? 'disabled' : null, text: card.keysBusy ? 'Working\u2026' : 'Rotate key'
+        });
+        rotate.addEventListener('click', function () {
+            cardKeyWrite('/api/cards/keys/rotate', {});
+        });
+        return el('div', {class: 'key-rotate'}, [rotate, el('p', {text: PSL.CARD_COPY.rotate})]);
+    }
+
+    /** The .well-known file, indented on screen when it parses and copied as served. */
+    function cardKeysFile(card, domain) {
+        let shown = card.keys.well_known;
+        try {
+            shown = JSON.stringify(JSON.parse(card.keys.well_known), null, 2);
+        } catch (error) {
+            // Shown as served.
+        }
+        return el('div', {}, [
+            el('p', {class: 'key-h', text: 'Or serve this file'}),
+            el('p', {class: 'key-p'}, [document.createTextNode('At '),
+                el('code', {text: 'https://' + domain + '/.well-known/perf-sentinel-key'}),
+                document.createTextNode('. ' + PSL.CARD_COPY.keysFile)]),
+            cardCopyLine(shown, card.keys.well_known, 'Copy the file')
+        ]);
+    }
+
+    /** A line to paste: shown as `text`, copied as `raw`, the .well-known file indented only on screen. */
+    function cardCopyLine(text, raw, label) {
+        const code = el('pre', {class: 'terminal-code', tabindex: '0', text: text});
+        const word = el('span', {text: 'Copy'});
+        const button = el('button', {class: 'pill-button', type: 'button', 'aria-label': label}, [copyGlyph(), word]);
+        button.addEventListener('click', function () {
+            const copy = globalThis.isSecureContext && navigator.clipboard
+                ? navigator.clipboard.writeText(raw).then(function () {
+                    return true;
+                }, function () {
+                    return false;
+                })
+                : writeClipboard(code);
+            copy.then(function (copied) {
+                word.textContent = copied ? 'Copied' : 'Select and copy';
+                if (copied) button.setAttribute('data-copied', 'true');
+                setTimeout(function () {
+                    word.textContent = 'Copy';
+                    button.removeAttribute('data-copied');
+                }, 2000);
+            });
+        });
+        return el('div', {class: 'copy-line'}, [code, button]);
+    }
+
+    function cardKeyRow(card, key, domain) {
+        let stateName = 'retired';
+        if (key.revoked) stateName = 'revoked';
+        else if (key.current) stateName = 'current';
+        const row = el('li', {class: 'key-row'}, [
+            el('div', {class: 'key-row-head'}, [
+                el('span', {class: 'key-fp', text: key.fingerprint}),
+                el('span', {class: 'key-state', 'data-state': stateName, text: CARD_KEY_STATES[stateName]}),
+                el('span', {
+                    class: 'key-dates',
+                    text: 'from ' + key.from + (key.to ? ' to ' + key.to : '')
+                        + (key.revoked ? ', possibly exposed since ' + key.revoked : '')
+                })
+            ]),
+            domain ? cardCopyLine(key.dns, key.dns, 'Copy the DNS line of ' + key.fingerprint) : null
+        ]);
+        if (!key.revoked) row.appendChild(card.revoking === key.fingerprint ? cardRevokeConfirm(card, key, domain)
+            : cardRevokeOpen(card, key));
+        return row;
+    }
+
+    function cardRevokeOpen(card, key) {
+        const open = el('button', {
+            class: 'pill-button pill-sm pill-crit', type: 'button', id: 'card-revoke-' + key.fingerprint, text: 'Revoke'
+        });
+        open.addEventListener('click', function () {
+            card.revoking = key.fingerprint;
+            card.revokeDate = '';
+            renderFocus('#card-leak-date');
+        });
+        return el('div', {class: 'key-revoke'}, [el('span', {text: 'Leaked?'}), open]);
+    }
+
+    /** No default date: it is published as the first day the key may have leaked. */
+    function cardRevokeConfirm(card, key, domain) {
+        const date = el('input', {
+            class: 'recap-input', id: 'card-leak-date', type: 'date', required: '', min: key.from, max: cardToday()
+        });
+        date.value = card.revokeDate;
+        const revoke = el('button', {
+            class: 'pill-button pill-sm pill-crit', type: 'button', id: 'card-revoke-confirm',
+            disabled: card.revokeDate && !card.keysBusy ? null : 'disabled', text: 'Revoke'
+        });
+        const cancel = el('button', {class: 'recap-link', type: 'button', text: 'Cancel'});
+        date.addEventListener('change', function () {
+            card.revokeDate = date.value;
+            cardRender();
+        });
+        revoke.addEventListener('click', function () {
+            cardKeyWrite('/api/cards/keys/revoke', {fingerprint: key.fingerprint, revoked: card.revokeDate});
+        });
+        cancel.addEventListener('click', function () {
+            card.revoking = null;
+            renderFocus('#card-revoke-' + key.fingerprint);
+        });
+        const said = card.revokeDate ? PSL.revokeText(card.revokeDate, key.current, domain) : null;
+        return el('div', {class: 'key-confirm'}, [
+            el('div', {}, [el('label', {for: 'card-leak-date', text: PSL.CARD_COPY.leaked}), date]),
+            said ? el('p', {role: 'alert', style: 'margin:0', text: said.alert}) : null,
+            said ? el('p', {class: 'key-confirm-step', text: said.step}) : null,
+            el('div', {}, [revoke, cancel])
+        ]);
+    }
+
+    function cardKeyWrite(path, body) {
+        const card = cardState();
+        if (card.keysBusy) return;
+        card.keysBusy = true;
+        card.keysError = null;
+        cardRender();
+        recapSend('POST', path, body).then(function (failure) {
+            card.keysBusy = false;
+            card.keysError = failure;
+            if (!failure) {
+                card.revoking = null;
+                // A new or revoked key changes what the check page reads: check the attachment again.
+                card.attach = null;
+            }
+            loadCardKeys(card);
+        });
     }
 
     // ---------------------------------------------------- screen: disclosures

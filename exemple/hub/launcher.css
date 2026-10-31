@@ -5573,3 +5573,969 @@ a.chip {
         transition: none;
     }
 }
+
+/* ---- #/recap: the share card section. Tokens only, except the preview's light frame and the PDF viewer's grey. */
+.share-closed {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.share-closed p {
+    margin: 0;
+    max-width: 70ch;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-2);
+}
+
+.share-intro {
+    max-width: 74ch;
+    margin: -6px 0 18px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-2);
+}
+
+.share-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 372px);
+    gap: 20px 32px;
+    align-items: start;
+}
+
+.share-form {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    min-width: 0;
+    /* Queried by the format choice, which has to know the column it was given, not the window. */
+    container-type: inline-size;
+    container-name: share-form;
+}
+
+.share-group {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.share-legend {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    margin: 0 0 10px;
+    padding: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.share-legend small {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+/* A choice is a row you click anywhere on: the radio, its name, its one plain line. */
+.choice-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 8px;
+}
+
+.choice,
+.fix {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 3px 10px;
+    align-items: start;
+    padding: 11px 14px 12px;
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    background: var(--surface-2);
+    cursor: pointer;
+    transition: border-color .15s, background-color .15s;
+}
+
+.choice:hover,
+.fix:hover {
+    border-color: var(--brand);
+}
+
+.choice:has(input:checked),
+.fix:has(input:checked) {
+    border-color: var(--btn-bd);
+    background: var(--accent-bg);
+}
+
+.choice:has(input:focus-visible),
+.fix:has(input:focus-visible) {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+}
+
+.choice input,
+.fix input {
+    width: 15px;
+    height: 15px;
+    margin: 2px 0 0;
+    accent-color: var(--brand);
+}
+
+.choice-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.choice-line {
+    grid-column: 2;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--text-2);
+}
+
+.period-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px;
+}
+
+/* The period is picked with arrows that stop at the last closed one, so an open period cannot be chosen. */
+.period-step {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 2px;
+    border: 1px solid var(--border-2);
+    border-radius: 999px;
+    background: var(--surface);
+}
+
+.period-step button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--btn-fg);
+    cursor: pointer;
+}
+
+.period-step button svg {
+    width: 13px;
+    height: 13px;
+}
+
+.period-step button:hover:not(:disabled) {
+    background: var(--accent-bg);
+}
+
+.period-step button:disabled {
+    color: var(--text-3);
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.period-step output {
+    min-width: 168px;
+    padding: 0 4px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.period-hint {
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.period-main {
+    margin: 12px 0 0;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.period-env {
+    margin: 6px 0 0;
+    max-width: 74ch;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+.period-env b {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.period-facts {
+    display: grid;
+    gap: 5px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+.period-facts li {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.period-facts svg {
+    flex: none;
+    margin-top: 3px;
+}
+
+.period-facts [data-tone="ok"] svg {
+    color: var(--ok-fg);
+}
+
+.period-facts [data-tone="info"] svg {
+    color: var(--info-fg);
+}
+
+.share-group .banner {
+    margin-top: 12px;
+}
+
+.banner-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.fix-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fix {
+    gap: 4px 10px;
+}
+
+.fix input {
+    margin-top: 3px;
+}
+
+.fix-plain {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.5;
+    color: var(--text);
+    max-width: 72ch;
+}
+
+.fix-head {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+}
+
+.fix-meta {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 14px;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.fix-meta b {
+    font-weight: 600;
+    color: var(--text-2);
+}
+
+.fix-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 6px;
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.fix-more {
+    margin-top: 10px;
+}
+
+.free-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
+}
+
+.free-grid .wide {
+    grid-column: 1 / -1;
+}
+
+.tfield-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-2);
+}
+
+.tfield-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3);
+}
+
+/* Free text is prose a person writes, so the UI face, not the mono of keys and paths. */
+.tinput {
+    width: 100%;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text);
+    font: 14px var(--font-ui);
+}
+
+.tinput::placeholder {
+    color: var(--text-3);
+}
+
+.tinput:hover {
+    border-color: var(--brand);
+}
+
+.tinput[aria-invalid="true"] {
+    border-color: var(--crit-fg);
+}
+
+.tfield-note {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-3);
+}
+
+.tfield-note code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-2);
+}
+
+.tfield-error {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--crit-fg);
+}
+
+.free-note {
+    margin: 12px 0 0;
+    max-width: 74ch;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-3);
+}
+
+.card-opts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 28px;
+}
+
+.card-opt {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.card-opt-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-2);
+}
+
+.card-opt-format .segmented button {
+    white-space: nowrap;
+}
+
+/* The four formats need about 705px in a row; in a narrower column, they stack in the same frame. */
+@container share-form (max-width: 720px) {
+    .card-opt-format .segmented {
+        flex-direction: column;
+        height: auto;
+        border-radius: 16px;
+    }
+
+    .card-opt-format .segmented button {
+        height: 30px;
+        text-align: left;
+    }
+}
+
+.share-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.share-file {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-3);
+    overflow-wrap: anywhere;
+}
+
+.share-why {
+    flex: 1 0 100%;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--crit-fg);
+}
+
+.share-actions .recap-alert {
+    flex: 1 0 100%;
+    margin: 0;
+}
+
+/* The wait for a busy render gate, on its own row under the buttons, as small as the attachment's answers. */
+.share-actions .card-busy {
+    flex: 1 0 100%;
+}
+
+.card-busy {
+    padding: 10px 12px;
+    font-size: 12.5px;
+}
+
+.share-preview {
+    position: sticky;
+    top: 76px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+/* Focus lands here after Preview on a phone, for screen readers; the scroll already shows where. */
+.share-preview:focus {
+    outline: none;
+}
+
+.preview-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 4px 10px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.preview-head span {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+/* The card is the light object people share, whatever this Hub's theme: the frame pins the light theme's own
+   --surface-3, --border-2 and --text-2 (#eef1ef, #dcdcdc, #556b5c) rather than the tokens, which flip with it. */
+.preview-frame {
+    padding: 14px;
+    border: 1px solid #dcdcdc;
+    border-radius: 12px;
+    background: #eef1ef;
+}
+
+.preview-frame img.card-preview {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1080 / 1350;
+    border-radius: 3px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(20, 26, 23, .10), 0 8px 22px rgba(20, 26, 23, .12);
+}
+
+/* The carousel preview is the browser's own PDF viewer; this grey only shows where the Hub ends meanwhile. */
+.preview-frame iframe.card-preview-pdf {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1080 / 1350;
+    border: 0;
+    border-radius: 3px;
+    background: #525659;
+}
+
+.preview-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    aspect-ratio: 1080 / 1350;
+    padding: 24px;
+    border: 1px dashed #808080;
+    border-radius: 3px;
+    text-align: center;
+    color: #556b5c;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.preview-empty svg {
+    width: 28px;
+    height: 28px;
+}
+
+.preview-empty.slim {
+    aspect-ratio: auto;
+    min-height: 150px;
+}
+
+.preview-loading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    aspect-ratio: 1080 / 1350;
+    padding-bottom: 18px;
+    border-radius: 3px;
+    background: linear-gradient(100deg, #fff 30%, #f7f7f7 50%, #fff 70%);
+    background-size: 300% 100%;
+    color: #556b5c;
+    font-size: 12.5px;
+    animation: preview-pulse 1.4s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+
+@keyframes preview-pulse {
+    from {
+        background-position: 100% 0;
+    }
+
+    to {
+        background-position: 0 0;
+    }
+}
+
+/* A preview older than the form: dimmed, so nobody takes it for the file Download makes. */
+.preview-frame[data-stale] > * {
+    opacity: .35;
+    filter: grayscale(1);
+}
+
+.preview-note {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-3);
+}
+
+.proof-line {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+.proof-line b {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.attach {
+    display: grid;
+    gap: 8px;
+    padding: 13px 14px;
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.attach-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+}
+
+.attach-title {
+    /* Wraps inside its own column, so the button stays on the title's line on a phone. */
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.attach-head .pill-button {
+    flex: none;
+}
+
+.attach-contact {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-3);
+}
+
+.attach .banner {
+    padding: 10px 12px;
+    font-size: 12.5px;
+}
+
+.attach-content {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+.card-signed {
+    display: grid;
+    gap: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.card-signed-title {
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.card-signed-note {
+    margin: 0 0 4px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-3);
+}
+
+/* Long labels wrap on a phone; the exact value keeps its line, right-aligned in tabular figures. */
+.card-signed-figures {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 16px;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.card-signed-figures dt {
+    color: var(--text-2);
+}
+
+.card-signed-figures dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+.attach p.muted {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+.share-off {
+    margin-top: 4px;
+}
+
+/* The administrators' part: closed by default, it is set up once and read rarely. */
+.key-panel {
+    margin-top: 28px;
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+.key-panel > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 14px 18px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.key-panel > summary::-webkit-details-marker {
+    display: none;
+}
+
+.key-panel > summary svg {
+    width: 12px;
+    height: 12px;
+    color: var(--btn-fg);
+    transition: transform .18s cubic-bezier(.2, .8, .2, 1);
+}
+
+.key-panel[open] > summary svg {
+    transform: rotate(90deg);
+}
+
+.key-panel > summary small {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+.key-body {
+    display: grid;
+    gap: 18px;
+    padding: 0 18px 18px;
+}
+
+.key-h {
+    margin: 0 0 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.key-p {
+    max-width: 78ch;
+    margin: 0 0 8px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-2);
+}
+
+.key-p code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text);
+}
+
+.key-body .recap-kv dd.ui {
+    font-family: var(--font-ui);
+}
+
+.key-list {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.key-row {
+    display: grid;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+}
+
+.key-row-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+}
+
+.key-fp {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.key-state {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border-radius: 8px;
+    background: var(--surface-3);
+    color: var(--text-2);
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.key-state[data-state="current"] {
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+}
+
+.key-state[data-state="revoked"] {
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+}
+
+.key-dates {
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.copy-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+}
+
+.copy-line .terminal-code {
+    min-width: 0;
+}
+
+.copy-line .pill-button {
+    height: 30px;
+    padding: 0 12px;
+    font-size: 12px;
+}
+
+.key-revoke {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.key-revoke label {
+    color: var(--text-2);
+}
+
+.pill-crit {
+    border-color: var(--crit-bd);
+    color: var(--crit-fg);
+}
+
+.pill-crit:hover {
+    border-color: var(--crit-fg);
+    background: var(--crit-bg);
+}
+
+.key-confirm {
+    display: grid;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+/* What to do next, in plain text under the red consequence. */
+.key-confirm .key-confirm-step {
+    margin: 0;
+    color: var(--text);
+}
+
+.key-confirm div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.key-rotate {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+}
+
+.key-rotate p {
+    flex: 1 1 320px;
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+@media (max-width: 900px) {
+    .share-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .share-preview {
+        position: static;
+        max-width: 420px;
+    }
+}
+
+@media (max-width: 560px) {
+    .free-grid,
+    .choice-list,
+    .copy-line {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .copy-line .pill-button {
+        justify-self: start;
+    }
+
+    .key-body {
+        padding: 0 14px 14px;
+    }
+
+    .key-panel > summary {
+        padding: 13px 14px;
+    }
+
+    .share-preview {
+        max-width: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .preview-loading {
+        animation: none;
+    }
+
+    .key-panel > summary svg,
+    .choice,
+    .fix {
+        transition: none;
+    }
+}
