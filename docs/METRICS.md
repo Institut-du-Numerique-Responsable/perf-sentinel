@@ -87,7 +87,15 @@ sibling Pod cannot read the daemon's process state freely.
 - `unsupported_media_type` (HTTP only): `Content-Type` is not
   `application/x-protobuf`. Perf Sentinel does not implement the
   JSON-encoded OTLP variant.
-- `parse_error` (HTTP only): protobuf decode failed.
+- `parse_error` (HTTP, and gRPC when the element count walk finds broken framing): protobuf decode failed.
+- `too_many_spans` (HTTP and gRPC): the decompressed request holds more
+  than 100,000 spans, or more length-delimited fields at any depth
+  (messages, strings, bytes) than a quarter of `[daemon]
+  max_payload_size`, counted on the wire before decoding. An empty span
+  or attribute costs two bytes there and a full struct once decoded, so
+  the byte cap alone does not bound the memory of a decode. HTTP answers
+  `413`, gRPC `OUT_OF_RANGE`, neither retryable: split the batch. A
+  request nesting deeper than 32 levels is counted as `parse_error`.
 - `channel_full` (HTTP and gRPC): the event channel is saturated or
   closed and the daemon could not enqueue the batch. The enqueue waits
   up to 2 seconds before rejecting, so short bursts absorb without a

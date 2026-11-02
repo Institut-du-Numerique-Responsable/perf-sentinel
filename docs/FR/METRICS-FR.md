@@ -89,7 +89,16 @@ Valeurs du label `reason` :
 - `unsupported_media_type` (HTTP uniquement) : `Content-Type` n'est pas
   `application/x-protobuf`. Perf Sentinel n'implémente pas la variante
   OTLP encodée en JSON.
-- `parse_error` (HTTP uniquement) : décodage protobuf raté.
+- `parse_error` (HTTP, et gRPC quand le comptage des éléments trouve un cadrage cassé) : décodage protobuf raté.
+- `too_many_spans` (HTTP et gRPC) : la requête décompressée contient plus
+  de 100 000 spans, ou plus de champs délimités par longueur à toute
+  profondeur (messages, chaînes, octets) que le quart de `[daemon]
+  max_payload_size`, comptés sur le fil avant décodage. Un span ou un
+  attribut vide y coûte deux octets et une structure entière une fois
+  décodé, la limite en octets seule ne borne donc pas la mémoire d'un
+  décodage. HTTP répond `413`, gRPC `OUT_OF_RANGE`, ni l'un ni l'autre
+  rejouable : découpez le batch. Une requête imbriquée sur plus de 32
+  niveaux compte comme `parse_error`.
 - `channel_full` (HTTP et gRPC) : le canal d'événements est saturé ou
   fermé et le daemon n'a pas pu mettre le batch en file. La mise en file
   attend jusqu'à 2 secondes avant de rejeter, les rafales courtes sont

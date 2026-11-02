@@ -1859,6 +1859,11 @@ impl crate::ingest::otlp::MetricsSink for MetricsState {
             OtlpRejectReason::ParseError => self.otlp_rejected_parse_error.inc(),
             OtlpRejectReason::ChannelFull => self.otlp_rejected_channel_full.inc(),
             OtlpRejectReason::MemoryPressure => self.otlp_rejected_memory_pressure.inc(),
+            // Rare enough that the label lookup costs nothing worth a cached handle.
+            OtlpRejectReason::TooManySpans => self
+                .otlp_rejected_total
+                .with_label_values(&[reason.as_str()])
+                .inc(),
         }
     }
 

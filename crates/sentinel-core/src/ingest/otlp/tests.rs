@@ -3858,6 +3858,41 @@ mod http_handler {
     }
 
     #[tokio::test]
+    async fn http_handler_refuses_a_flood_of_empty_spans_before_decoding() {
+        use crate::ingest::otlp::span_budget::{MAX_SPANS_PER_REQUEST, tests};
+        let (tx, mut rx) = mpsc::channel::<Vec<SpanEvent>>(8);
+        let (metrics, sink) = fresh_metrics_sink();
+        let router = otlp_http_router(tx, 16 * 1024 * 1024, Some(sink));
+        let post = |body: Vec<u8>| {
+            Request::builder()
+                .method("POST")
+                .uri("/v1/traces")
+                .header(header::CONTENT_TYPE, "application/x-protobuf")
+                .body(Body::from(body))
+                .expect("build request")
+        };
+
+        // Two bytes per span on the wire, a few hundred once decoded.
+        let flood = tests::empty_spans_payload(MAX_SPANS_PER_REQUEST + 1);
+        let response = router.clone().oneshot(post(flood)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            metrics
+                .otlp_rejected_total
+                .with_label_values(&["too_many_spans"])
+                .get(),
+            1
+        );
+
+        let response = router
+            .oneshot(post(build_minimal_request_bytes()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(rx.try_recv().is_ok(), "a normal export still goes through");
+    }
+
+    #[tokio::test]
     async fn http_handler_records_channel_full() {
         // Drop the receiver so any send fails immediately. The
         // handler must reject with 503 and bump the channel_full

@@ -1196,6 +1196,36 @@ mod grpc_compression_tests {
         );
         server.abort();
     }
+
+    /// Empty spans cost two bytes each on the wire and a full struct once
+    /// decoded: the element budget refuses the flood before prost runs,
+    /// after decompression, while a normal export still goes through.
+    #[tokio::test]
+    async fn grpc_listener_refuses_a_flood_of_empty_spans_before_decoding() {
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+        let (mut client, mut rx, server) =
+            client_and_ingest(CompressionEncoding::Gzip, 4 * 1024 * 1024).await;
+        let flood = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                scope_spans: vec![ScopeSpans {
+                    spans: vec![Span::default(); 100_001],
+                    ..ScopeSpans::default()
+                }],
+                ..ResourceSpans::default()
+            }],
+        };
+        let status = within("export", client.export(flood))
+            .await
+            .expect_err("an export over the element budget must be refused");
+        assert_eq!(status.code(), tonic::Code::OutOfRange, "{status:?}");
+
+        let request: ExportTraceServiceRequest = serde_json::from_str(SAMPLE_EXPORT_JSON).unwrap();
+        within("export", client.export(request))
+            .await
+            .expect("a normal export must still be accepted");
+        assert_eq!(within("ingest", rx.recv()).await.unwrap().events.len(), 1);
+        server.abort();
+    }
 }
 
 #[cfg(test)]

@@ -16,24 +16,30 @@
 pub enum OtlpRejectReason {
     /// HTTP only: Content-Type is not `application/x-protobuf`.
     UnsupportedMediaType,
-    /// HTTP only: protobuf decode failed.
+    /// HTTP: protobuf decode failed. gRPC: the element count walk found
+    /// broken framing.
     ParseError,
     /// HTTP and gRPC: the event channel is saturated or closed.
     ChannelFull,
     /// HTTP and gRPC: cgroup memory crossed the configured high-water
     /// mark, so ingest is rejected to bound RSS (memory admission control).
     MemoryPressure,
+    /// HTTP and gRPC: the encoded request holds more spans, or more
+    /// length-delimited fields at any depth, than one request may carry,
+    /// refused before decoding.
+    TooManySpans,
 }
 
 impl OtlpRejectReason {
     /// Every variant in declaration order. Fixed-size array so adding a
     /// variant without bumping the count is a compile-time error,
     /// keeping the pre-warm loop in `MetricsState::new` exhaustive.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::UnsupportedMediaType,
         Self::ParseError,
         Self::ChannelFull,
         Self::MemoryPressure,
+        Self::TooManySpans,
     ];
 
     #[must_use]
@@ -43,6 +49,7 @@ impl OtlpRejectReason {
             Self::ParseError => "parse_error",
             Self::ChannelFull => "channel_full",
             Self::MemoryPressure => "memory_pressure",
+            Self::TooManySpans => "too_many_spans",
         }
     }
 }

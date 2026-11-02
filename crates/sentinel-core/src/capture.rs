@@ -139,7 +139,9 @@ impl crate::ingest::otlp::MetricsSink for CaptureMetrics {
         use crate::report::metrics::OtlpRejectReason as Reason;
         let counter = match reason {
             Reason::ChannelFull | Reason::MemoryPressure => &self.backpressure,
-            Reason::UnsupportedMediaType | Reason::ParseError => &self.unusable,
+            Reason::UnsupportedMediaType | Reason::ParseError | Reason::TooManySpans => {
+                &self.unusable
+            }
         };
         counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
