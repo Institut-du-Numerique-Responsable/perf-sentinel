@@ -33,7 +33,7 @@ use super::DaemonError;
 use super::ack::{self, AckStore};
 use super::findings_store;
 use super::query_api;
-use super::tls::{build_tls_acceptor, load_tls_pem, serve_https, tls_tcp_incoming};
+use super::tls::{ConnLimits, build_tls_acceptor, load_tls_pem, serve_https, tls_tcp_incoming};
 
 /// HTTP/2 stream multiplexing cap for the OTLP gRPC listener. Tonic's
 /// defaults are generous (thousands of concurrent streams). On a non-loopback
@@ -662,7 +662,7 @@ fn spawn_http_listener(
     if let Some(acceptor) = tls_acceptor {
         tokio::spawn(async move {
             tracing::info!("OTLP HTTPS listening on {addr}");
-            serve_https(listener, router, acceptor).await;
+            serve_https(listener, router, acceptor, ConnLimits::DEFAULT).await;
         })
     } else {
         tokio::spawn(async move {
