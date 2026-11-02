@@ -84,9 +84,10 @@ rapport officiel aux architectes ou au DevOps, voir
   reconnectent d'eux-mêmes.
 - `/api/findings`, `/api/detections`, `/api/correlations` et
   `/api/export/report` partagent un pool de 8 réponses en cours. Une
-  réponse compte tant que le client n'a pas lu son corps, 30 s au plus,
-  et un neuvième appelant reçoit `503` jusqu'à ce que l'une d'elles se
-  termine.
+  réponse compte tant que le client n'a pas lu son corps, et un
+  neuvième appelant reçoit `503` jusqu'à ce que l'une d'elles se
+  termine. Un corps encore non lu au bout de 30 s est coupé et sa
+  connexion fermée.
 - La taille du **ring buffer** (un buffer circulaire à taille fixe qui
   évince les plus anciennes entrées une fois plein) des findings est bornée par
   `[daemon] max_retained_findings` (défaut `10000`). Les findings plus

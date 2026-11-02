@@ -78,8 +78,9 @@ writes (acks) and the official report export to architects or DevOps, see
   in-flight request, with a 10 s grace). Exporters reconnect on their own.
 - `/api/findings`, `/api/detections`, `/api/correlations` and
   `/api/export/report` share a pool of 8 responses in flight. A
-  response counts until the client has read its body, for 30 s at most,
-  and a ninth caller gets `503` until one is done.
+  response counts until the client has read its body, and a ninth
+  caller gets `503` until one is done. A body still unread after 30 s
+  is cut and its connection closed.
 - The findings **ring buffer** (a fixed-size circular store that evicts oldest entries when full) is bounded by
   `[daemon] max_retained_findings` (default `10000`). Older findings are
   evicted FIFO.

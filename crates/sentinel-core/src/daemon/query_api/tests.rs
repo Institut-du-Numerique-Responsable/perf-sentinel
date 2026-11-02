@@ -1543,7 +1543,8 @@ async fn large_reads_hold_their_permit_until_the_body_is_dropped() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn large_read_permit_is_released_at_the_drain_deadline_even_unread() {
+async fn large_read_body_is_cut_at_the_drain_deadline_releasing_its_permit() {
+    use http_body_util::BodyExt;
     let app = query_api_router(make_state());
     let get = || {
         let app = app.clone();
@@ -1560,11 +1561,19 @@ async fn large_read_permit_is_released_at_the_drain_deadline_even_unread() {
     };
     let mut unread = Vec::new();
     for _ in 0..MAX_LARGE_READS_IN_FLIGHT {
-        unread.push(get().await);
+        unread.push(get().await.into_body());
     }
     assert_eq!(get().await.status(), StatusCode::SERVICE_UNAVAILABLE);
-    // A slow reader past the deadline no longer starves other callers.
     tokio::time::sleep(LARGE_READ_DRAIN_DEADLINE + std::time::Duration::from_secs(1)).await;
+    // The first poll past the deadline cuts the body instead of sending it.
+    let mut body = unread.pop().unwrap();
+    let frame = body
+        .frame()
+        .await
+        .expect("a cut body yields an error frame");
+    assert!(frame.is_err(), "past the deadline the body must error");
+    // hyper drops a body that errored: permit and buffer go together.
+    drop(body);
     assert_eq!(get().await.status(), StatusCode::OK);
     drop(unread);
 }
