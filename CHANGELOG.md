@@ -23,6 +23,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 - `tempo` refuses a service name containing whitespace, control characters, `=`, `"` or `\`, which Tempo would read as extra logfmt filter terms.
 - The dataset refresh sends its GitHub token to `api.github.com` only, refuses unsafe remote names before generating Rust, and no longer dispatches CI on the generated branch. The Helm release and Helm CI workflows verify pinned SHA-256 checksums of kubeconform, crane, oras and kind.
 
+### Fixed
+
+- The daemon no longer hangs at startup when its window archive or incident archive is a FIFO or a device, such as `/dev/stdout` in a container. It used to read the path back to resume the hash chain and the incident ring, a read that never returns on a pipe, so nothing was ingested. A non-regular file now starts from the chain seed and an empty ring.
+
 ## [0.40.0] - 2026-10-31
 
 ### Added
