@@ -389,7 +389,7 @@ function injectDemoCorrelations(htmlPath: string) {
     emission_factor_type: "direct",
     temporal_granularity: "5_minutes"
   };
-  const newEscaped = JSON.stringify(payload).replace(/<\//g, "<\\/");
+  const newEscaped = JSON.stringify(payload).replace(/</g, "\\u003c");
   writeFileSync(htmlPath, html.slice(0, jsonStart) + newEscaped + html.slice(endIdx));
 }
 

@@ -504,7 +504,7 @@ fn escapes_closing_script_tag_in_embedded_json() {
     );
     // And the escaped form must appear (proof that the hostile
     // string stayed data, not markup).
-    assert!(html.contains("<\\/script>"));
+    assert!(html.contains("\\u003c/script>"));
 
     // The JSON payload must still round-trip cleanly.
     let start = html.find("<script id=\"report-data\"").expect("script tag");
@@ -1236,6 +1236,22 @@ fn sessionstorage_access_is_guarded_by_try_catch() {
         hits >= 2,
         "expected at least one sessionGet and one sessionSet access, found {hits}"
     );
+}
+
+#[test]
+fn an_html_comment_opener_in_a_service_name_cannot_swallow_the_app_script() {
+    let hostile = "order-svc<!--<script>";
+    let f = finding("t1", hostile, "/ep", "SELECT 1");
+    let report = minimal_report(vec![f]);
+    let trace = Trace {
+        trace_id: "t1".into(),
+        spans: vec![span("t1", "s1", None, hostile, "/ep", "SELECT 1")],
+    };
+    let (html, _) = render(&report, &[trace], &opts("-", None));
+    let blob = extract_payload_json(&html);
+    assert!(!blob.contains('<'), "raw `<` left in the report-data block");
+    let value: serde_json::Value = serde_json::from_str(&blob).expect("payload parses");
+    assert_eq!(value["report"]["findings"][0]["service"], hostile);
 }
 
 /// Extract the raw JSON text from the `<script id="report-data">`
