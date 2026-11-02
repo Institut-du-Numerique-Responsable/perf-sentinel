@@ -10,81 +10,86 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc;
 
-/// Run the JSON socket listener on Unix platforms.
+/// Bind the JSON socket at `path`, owner-only.
+///
+/// `Ok(None)` when the parent directory does not exist, the expected case
+/// in minimal container images. Every other failure is returned so the
+/// daemon refuses to start: producers would otherwise write to a path
+/// whoever squatted it controls.
+///
+/// # Errors
+///
+/// The path holds an entry this user did not create, or the bind or the
+/// `chmod` failed.
+pub(super) fn bind_json_socket(path: &str) -> std::io::Result<Option<tokio::net::UnixListener>> {
+    use std::os::unix::fs::PermissionsExt as _;
+    clear_stale_socket(std::path::Path::new(path))?;
+    let listener = match tokio::net::UnixListener::bind(path) {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!(
+                "JSON socket listener disabled: parent directory of \
+                 {path} does not exist. Expected in minimal container \
+                 images (FROM scratch, distroless static); mount a \
+                 writable directory and set `[daemon] json_socket` to \
+                 a path inside it to enable local NDJSON ingestion."
+            );
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    };
+    // Setting the umask before bind() needs unsafe code, so the socket is
+    // tightened right after: other local users must not inject events.
+    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+        let _ = std::fs::remove_file(path);
+        return Err(e);
+    }
+    tracing::info!("JSON socket listening on {path}");
+    Ok(Some(listener))
+}
+
+/// Remove a socket an earlier run of this user left at `path`, and refuse
+/// anything else: a symlink (whose unlink could be redirected), a regular
+/// file, or another user's socket squatting a shared directory such as
+/// `/tmp`.
+fn clear_stale_socket(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if !meta.file_type().is_socket() || meta.uid() != current_euid()? {
+        return Err(std::io::Error::other(
+            "the path holds an entry this user did not create (a symlink, a \
+             file or another user's socket), remove it after checking it is safe",
+        ));
+    }
+    std::fs::remove_file(path)
+}
+
+/// The effective uid, read without unsafe code: a socket the process just
+/// created is owned by it, and `fstat` on it reports that owner.
+fn current_euid() -> std::io::Result<u32> {
+    use std::os::unix::fs::MetadataExt as _;
+    let (socket, _peer) = std::os::unix::net::UnixStream::pair()?;
+    let file = std::fs::File::from(std::os::fd::OwnedFd::from(socket));
+    Ok(file.metadata()?.uid())
+}
+
+/// Serve the JSON socket bound by [`bind_json_socket`].
 ///
 /// Reads newline-delimited JSON (NDJSON): each line is a JSON array of `SpanEvent`s.
 pub(super) async fn run_json_socket(
-    path: &str,
+    listener: tokio::net::UnixListener,
     tx: mpsc::Sender<super::IngestBatch>,
     max_payload_size: usize,
     grouping_attributes: Vec<Arc<str>>,
     over_memory: Arc<AtomicBool>,
 ) {
-    use tokio::net::UnixListener;
-
     // Interned once: the accept loop hands every connection a pointer bump
     // instead of re-allocating the key list per connection.
     let grouping_attributes: Arc<[Arc<str>]> = grouping_attributes.into();
-
-    // Symlink-TOCTOU defense: refuse to unlink anything at `path` that
-    // is a symlink. A local attacker who controls the parent directory
-    // could otherwise point `path` at `/etc/passwd` (or any other file
-    // the daemon user owns) and the `remove_file` on the next line
-    // would follow the symlink and delete the target. `symlink_metadata`
-    // does NOT follow symlinks, so we can detect and refuse safely.
-    match tokio::fs::symlink_metadata(path).await {
-        Ok(meta) if meta.file_type().is_symlink() => {
-            tracing::error!(
-                "Refusing to bind Unix socket at {path}: path is a \
-                 symlink, remove it manually after verifying the \
-                 target is safe"
-            );
-            return;
-        }
-        _ => {}
-    }
-
-    // Clean up stale socket file (now verified to be a regular file or
-    // absent).
-    let _ = tokio::fs::remove_file(path).await;
-
-    let listener = match UnixListener::bind(path) {
-        Ok(l) => l,
-        Err(e) => {
-            // ENOENT = parent directory missing (expected in scratch-based
-            // container images where NDJSON is not the canonical ingestion
-            // route). Treat as "feature disabled", not as a triage-worthy
-            // error. All other bind failures keep their error level.
-            if e.kind() == std::io::ErrorKind::NotFound {
-                tracing::info!(
-                    "JSON socket listener disabled: parent directory of \
-                     {path} does not exist. Expected in minimal container \
-                     images (FROM scratch, distroless static); mount a \
-                     writable directory and set `[daemon] json_socket` to \
-                     a path inside it to enable local NDJSON ingestion."
-                );
-            } else {
-                tracing::error!("Failed to bind Unix socket {path}: {e}");
-            }
-            return;
-        }
-    };
-
-    // Restrict socket permissions to owner-only (prevent other local users from injecting events)
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(e) =
-            tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await
-        {
-            tracing::error!(
-                "Failed to set socket permissions on {path}: {e}, refusing to listen on insecure socket"
-            );
-            let _ = tokio::fs::remove_file(path).await;
-            return;
-        }
-    }
-
-    tracing::info!("JSON socket listening on {path}");
 
     // Limit concurrent connections to prevent local DoS via connection flooding
     let semaphore = Arc::new(tokio::sync::Semaphore::new(128));
@@ -200,6 +205,59 @@ pub(super) fn unique_socket_dir_and_path(name: &str) -> (tempfile::TempDir, std:
 mod tests {
     use super::*;
     use tokio::time::Duration;
+
+    #[test]
+    fn current_euid_is_the_owner_of_a_file_this_process_creates() {
+        use std::os::unix::fs::MetadataExt as _;
+        let file = tempfile::NamedTempFile::new().unwrap();
+        assert_eq!(
+            current_euid().unwrap(),
+            file.as_file().metadata().unwrap().uid()
+        );
+    }
+
+    #[test]
+    fn a_file_or_a_symlink_at_the_socket_path_is_refused_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plain");
+        std::fs::write(&file, b"keep").unwrap();
+        assert!(clear_stale_socket(&file).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), b"keep");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        assert!(clear_stale_socket(&link).is_err());
+        assert!(link.symlink_metadata().is_ok());
+        assert!(clear_stale_socket(&dir.path().join("absent")).is_ok());
+    }
+
+    #[tokio::test]
+    async fn bind_is_owner_only_replaces_its_own_stale_socket_and_skips_a_missing_dir() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.sock");
+        let path = path.to_str().unwrap();
+        drop(bind_json_socket(path).unwrap().expect("bound"));
+        let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert!(
+            bind_json_socket(path).unwrap().is_some(),
+            "own stale socket replaced"
+        );
+        let missing = dir.path().join("missing").join("s.sock");
+        assert!(
+            bind_json_socket(missing.to_str().unwrap())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_at_the_socket_path_stops_daemon_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("squatted");
+        std::fs::write(&path, b"x").unwrap();
+        assert!(bind_json_socket(path.to_str().unwrap()).is_err());
+    }
 
     /// Spawn the connection handler on the server half, with no grouping
     /// attributes and the memory guard clear. `max_payload` is the only
@@ -337,10 +395,12 @@ mod tests {
         // the socket and the parent tempdir. `path` is a PathBuf owned by us.
         let (_dir, path) = unique_socket_dir_and_path("accept");
         let (tx, mut rx) = mpsc::channel::<super::super::IngestBatch>(16);
-        let path_for_server = path.to_string_lossy().into_owned();
+        let listener = bind_json_socket(&path.to_string_lossy())
+            .unwrap()
+            .expect("bound");
         let server = tokio::spawn(async move {
             run_json_socket(
-                &path_for_server,
+                listener,
                 tx,
                 1024 * 1024,
                 Vec::new(),
@@ -372,33 +432,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_json_socket_fails_to_bind_on_invalid_path() {
-        // With a path inside a non-existent directory, bind returns Err and
-        // the function logs at info (listener disabled), then returns
-        // without panicking.
-        let path = "/nonexistent-directory-for-test/perf-sentinel.sock".to_string();
-        let (tx, _rx) = mpsc::channel::<super::super::IngestBatch>(16);
-        // Should return near-immediately (bind fails).
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            run_json_socket(
-                &path,
-                tx,
-                1024,
-                Vec::new(),
-                Arc::new(AtomicBool::new(false)),
-            ),
-        )
-        .await
-        .expect("bind failure must return immediately, not hang");
+    async fn bind_json_socket_disables_the_listener_when_the_dir_is_missing() {
+        // A FROM scratch image has no /tmp: the daemon starts without the door.
+        let path = "/nonexistent-directory-for-test/perf-sentinel.sock";
+        assert!(bind_json_socket(path).unwrap().is_none());
     }
 
     #[tokio::test]
-    async fn run_json_socket_refuses_to_clobber_symlink() {
-        // Symlink-TOCTOU regression guard: create a symlink at `path`
-        // pointing at a sentinel victim file, call run_json_socket, and
-        // verify the victim is NOT deleted (i.e., the symlink-aware
-        // pre-check fired and the function returned early).
+    async fn bind_json_socket_refuses_to_clobber_symlink() {
+        // Symlink-TOCTOU regression guard: a symlink at `path` pointing at a
+        // victim file must stop startup and leave the victim untouched.
         use std::os::unix::fs::symlink;
 
         let (dir, sock_path) = unique_socket_dir_and_path("symlink-guard");
@@ -406,24 +449,10 @@ mod tests {
         std::fs::write(&victim, "important").unwrap();
         symlink(&victim, &sock_path).expect("symlink creation");
 
-        let (tx, _rx) = mpsc::channel::<super::super::IngestBatch>(16);
-        let sock_str = sock_path.to_string_lossy().into_owned();
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            run_json_socket(
-                &sock_str,
-                tx,
-                1024,
-                Vec::new(),
-                Arc::new(AtomicBool::new(false)),
-            ),
-        )
-        .await
-        .expect("symlink refusal must return immediately, not hang");
-
-        // Victim must still exist and still contain its original data.
+        assert!(bind_json_socket(&sock_path.to_string_lossy()).is_err());
         let content = std::fs::read_to_string(&victim)
             .expect("victim file must still exist after symlink refusal");
         assert_eq!(content, "important");
+        assert!(sock_path.symlink_metadata().is_ok(), "symlink kept");
     }
 }

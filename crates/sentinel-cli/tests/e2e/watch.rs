@@ -2,6 +2,19 @@
 
 use std::process::{Command, Stdio};
 
+/// A config putting the JSON socket in a private temp dir, so parallel
+/// tests and a daemon already running on the host never share
+/// `/tmp/perf-sentinel.sock`.
+fn private_socket_config(dir: &std::path::Path, socket: &std::path::Path) -> String {
+    let config = dir.join("perf-sentinel.toml");
+    std::fs::write(
+        &config,
+        format!("[daemon]\njson_socket = {:?}\n", socket.to_str().unwrap()),
+    )
+    .unwrap();
+    config.to_str().unwrap().to_string()
+}
+
 #[test]
 fn cli_watch_starts_and_responds_to_sigterm() {
     use std::time::Duration;
@@ -10,9 +23,13 @@ fn cli_watch_starts_and_responds_to_sigterm() {
     // distinct from `cli_watch_listen_address_override_starts_cleanly`
     // (24318 / 24317) so the two e2e watch tests can run in parallel
     // without colliding.
+    let dir = tempfile::tempdir().unwrap();
+    let config = private_socket_config(dir.path(), &dir.path().join("s.sock"));
     let mut child = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
         .args([
             "watch",
+            "--config",
+            &config,
             "--listen-address",
             "127.0.0.1",
             "--listen-port-http",
@@ -105,9 +122,13 @@ fn cli_watch_listen_address_override_starts_cleanly() {
     // and the +10000 dogfooding pattern (14318 / 14317) to avoid
     // colliding with a local daemon on a dev machine. The +20000 offset
     // is arbitrary but well outside production deployment territory.
+    let dir = tempfile::tempdir().unwrap();
+    let config = private_socket_config(dir.path(), &dir.path().join("s.sock"));
     let mut child = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
         .args([
             "watch",
+            "--config",
+            &config,
             "--listen-address",
             "127.0.0.1",
             "--listen-port-http",
@@ -134,4 +155,33 @@ fn cli_watch_listen_address_override_starts_cleanly() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_watch_refuses_to_start_when_a_file_squats_the_json_socket() {
+    // An entry the daemon did not create at the socket path must stop
+    // startup: producers would otherwise reach whoever planted it.
+    let dir = tempfile::tempdir().unwrap();
+    let squatted = dir.path().join("s.sock");
+    std::fs::write(&squatted, b"keep").unwrap();
+    let config = private_socket_config(dir.path(), &squatted);
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "watch",
+            "--config",
+            &config,
+            "--listen-address",
+            "127.0.0.1",
+            "--listen-port-http",
+            "24322",
+            "--listen-port-grpc",
+            "24321",
+        ])
+        .output()
+        .expect("failed to execute perf-sentinel");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("JSON socket"), "{stderr}");
+    assert_eq!(std::fs::read(&squatted).unwrap(), b"keep");
 }

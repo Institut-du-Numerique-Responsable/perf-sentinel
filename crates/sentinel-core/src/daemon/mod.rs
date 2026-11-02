@@ -146,6 +146,16 @@ pub enum DaemonError {
         /// All validation failures detected at startup.
         errors: Vec<String>,
     },
+    /// The JSON socket path holds an entry this user did not create, or
+    /// binding or tightening the socket failed.
+    #[error("failed to bind JSON socket at '{path}'")]
+    JsonSocketBind {
+        /// Operator-configured `[daemon] json_socket` path.
+        path: String,
+        /// Underlying error.
+        #[source]
+        source: std::io::Error,
+    },
     /// Opening the per-window report archive file failed at startup.
     #[error("failed to open report archive at '{path}'")]
     ArchiveOpen {

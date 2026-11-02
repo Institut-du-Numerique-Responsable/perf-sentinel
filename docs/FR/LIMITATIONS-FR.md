@@ -402,12 +402,13 @@ N'exposez jamais Perf Sentinel directement sur des réseaux non fiables sans au 
 
 ### Durcissement du socket JSON
 
-Le socket unix JSON (`[daemon] json_socket`) se défend contre les attaques locales sur un hôte multi-utilisateurs avec deux mécanismes :
+Le socket unix JSON (`[daemon] json_socket`) se défend contre les attaques locales sur un hôte multi-utilisateurs avec trois mécanismes :
 
-- **Permissions `0o600`** appliquées juste après `bind()`. Les autres utilisateurs locaux ne peuvent pas se connecter pour injecter des événements.
-- **Pré-vérification des symlinks** : avant que le daemon ne supprime un éventuel fichier socket résiduel au chemin configuré, il appelle `symlink_metadata()` et refuse de continuer si le chemin est un lien symbolique. Cela empêche un attaquant local ayant un accès en écriture au répertoire parent du socket de faire pointer `json_socket` vers un fichier victime (par exemple `/etc/passwd`) et de laisser le `remove_file()` de démarrage du daemon le supprimer.
+- **Permissions `0o600`** appliquées juste après `bind()`. Les autres utilisateurs locaux ne peuvent pas se connecter pour injecter des événements. Fixer l'umask avant `bind()` demanderait du code unsafe, le socket porte donc le mode par défaut pendant l'instant qui sépare les deux appels.
+- **Pré-vérification du propriétaire** : avant que le daemon ne supprime un socket résiduel au chemin configuré, il appelle `symlink_metadata()` et ne retire l'entrée que si c'est un socket appartenant à l'utilisateur du daemon. Un lien symbolique, un fichier ordinaire ou le socket d'un autre utilisateur arrête le démarrage. Cela empêche un attaquant local ayant un accès en écriture au répertoire parent du socket de faire pointer `json_socket` vers un fichier victime (par exemple `/etc/passwd`) et de laisser le `remove_file()` de démarrage du daemon le supprimer, ou d'y poser son propre socket avant que le daemon démarre.
+- **Échec fermé** : une entrée refusée par la pré-vérification, un `bind()` ou un `chmod` en échec arrête le daemon au démarrage avec `failed to bind JSON socket`, au lieu de le laisser tourner sans socket pendant que les producteurs continuent d'écrire vers qui détient le chemin. Un répertoire parent absent est la seule exception : le listener est désactivé et le daemon démarre, le cas attendu dans une image `FROM scratch` sans `/tmp`.
 
-Ces deux défenses ne comptent que si `json_socket` se trouve dans un répertoire accessible en écriture par d'autres utilisateurs locaux. Si vous placez le socket dans un répertoire appartenant au daemon (`/var/run/perf-sentinel/` avec `0o700`), la surface est déjà fermée au niveau du système de fichiers.
+Ces défenses ne comptent que si `json_socket` se trouve dans un répertoire accessible en écriture par d'autres utilisateurs locaux. Si vous placez le socket dans un répertoire appartenant au daemon (`/var/run/perf-sentinel/` avec `0o700`), la surface est déjà fermée au niveau du système de fichiers.
 
 ### Budget payload par connexion sur le socket JSON
 

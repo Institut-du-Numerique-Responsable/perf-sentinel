@@ -134,7 +134,7 @@ pub(super) async fn spawn_listeners(
         detection_ledger,
     );
     let http_handle = spawn_http_listener(http_listener, http_addr, tls_acceptor, http_router);
-    let json_socket_handle = spawn_json_socket_listener(config, tx, over_memory);
+    let json_socket_handle = spawn_json_socket_listener(config, tx, over_memory)?;
 
     Ok((grpc_handle, http_handle, json_socket_handle))
 }
@@ -674,43 +674,51 @@ fn spawn_http_listener(
     }
 }
 
-/// Spawn the Unix JSON socket listener when the target is Unix. On other
-/// platforms logs a warning and returns `None`.
-// `#[cfg(not(unix))]` branch returns `None`, so the `Option` is required.
-#[allow(clippy::unnecessary_wraps)]
+/// Bind and spawn the Unix JSON socket listener when the target is Unix.
+/// On other platforms logs a warning and returns `None`.
+///
+/// # Errors
+///
+/// The socket could not be bound safely, see `json_socket::bind_json_socket`.
+// `#[cfg(not(unix))]` branch always returns `Ok(None)`.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 // `over_memory` is moved into the spawned task on unix only.
 #[cfg_attr(not(unix), allow(clippy::needless_pass_by_value))]
 fn spawn_json_socket_listener(
     config: &Config,
     tx: mpsc::Sender<super::IngestBatch>,
     over_memory: Arc<std::sync::atomic::AtomicBool>,
-) -> Option<tokio::task::JoinHandle<()>> {
+) -> Result<Option<tokio::task::JoinHandle<()>>, DaemonError> {
     #[cfg(not(unix))]
     let _ = over_memory;
     #[cfg(unix)]
     {
-        let socket_path = config.daemon.json_socket.clone();
+        let socket_path = &config.daemon.json_socket;
+        let Some(listener) =
+            super::json_socket::bind_json_socket(socket_path).map_err(|source| {
+                DaemonError::JsonSocketBind {
+                    path: socket_path.clone(),
+                    source,
+                }
+            })?
+        else {
+            return Ok(None);
+        };
         let max_payload = config.daemon.max_payload_size;
         // Same operator config as the OTLP doors: a span reaching this one
         // must land under the same identity, else the two doors report the
         // same problem twice and never correlate.
         let grouping = grouping_attributes(config);
-        Some(tokio::spawn(async move {
-            super::json_socket::run_json_socket(
-                &socket_path,
-                tx,
-                max_payload,
-                grouping,
-                over_memory,
-            )
-            .await;
-        }))
+        Ok(Some(tokio::spawn(async move {
+            super::json_socket::run_json_socket(listener, tx, max_payload, grouping, over_memory)
+                .await;
+        })))
     }
     #[cfg(not(unix))]
     {
         let _ = (config, tx);
         tracing::warn!("JSON socket ingestion not available on this platform; use OTLP HTTP/gRPC");
-        None
+        Ok(None)
     }
 }
 
