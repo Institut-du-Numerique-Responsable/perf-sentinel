@@ -83,8 +83,10 @@ jobs:
       # is not a Rust crate. Same pattern as crane below.
       - name: Install kubeconform
         run: |
+          # Pinned SHA-256: a version bump must update the hash too.
           curl -fsSL -o /tmp/kubeconform.tgz \
             https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  /tmp/kubeconform.tgz" | sha256sum --check
           tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
           sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
           kubeconform -v
@@ -109,7 +111,11 @@ jobs:
       tarball_digest: ${{ steps.package.outputs.tarball_digest }}
       oci_digest: ${{ steps.push.outputs.oci_digest }}
     steps:
+      # Nothing here runs git after checkout, so the packages:write token
+      # is not left in .git/config for the downloaded tools to read.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
@@ -138,8 +144,10 @@ jobs:
       # stdout which is a UX feature that can drift on a minor bump.
       - name: Install crane
         run: |
+          # Pinned SHA-256: a version bump must update the hash too.
           curl -fsSL -o /tmp/gcr.tgz \
             https://github.com/google/go-containerregistry/releases/download/v0.21.7/go-containerregistry_Linux_x86_64.tar.gz
+          echo "1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230  /tmp/gcr.tgz" | sha256sum --check
           tar -xzf /tmp/gcr.tgz -C /tmp crane
           sudo install -m 0755 /tmp/crane /usr/local/bin/crane
           crane version
@@ -184,8 +192,10 @@ jobs:
       # directly from upstream for the same reliability reasons.
       - name: Install oras
         run: |
+          # Pinned SHA-256: a version bump must update the hash too.
           curl -fsSL -o /tmp/oras.tgz \
             https://github.com/oras-project/oras/releases/download/v1.3.3/oras_1.3.3_linux_amd64.tar.gz
+          echo "9ce999f8d2de03fc03968b29d743077a58783e545e5eaa53917ca177352d0e59  /tmp/oras.tgz" | sha256sum --check
           tar -xzf /tmp/oras.tgz -C /tmp oras
           sudo install -m 0755 /tmp/oras /usr/local/bin/oras
           oras version
