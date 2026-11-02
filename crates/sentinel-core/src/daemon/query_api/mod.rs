@@ -190,16 +190,22 @@ impl EnergyBackendsConfigured {
 
 /// Build the query API router.
 pub fn query_api_router(state: Arc<QueryApiState>) -> Router {
-    let mut router = Router::new()
+    let large_reads = Router::new()
         .route("/api/findings", get(handle_findings))
-        .route("/api/findings/{trace_id}", get(handle_findings_by_trace))
         .route("/api/detections", get(handle_detections))
-        .route("/api/explain/{trace_id}", get(handle_explain))
         .route("/api/correlations", get(handle_correlations))
+        .route("/api/export/report", get(handle_export_report))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::new(tokio::sync::Semaphore::new(MAX_LARGE_READS_IN_FLIGHT)),
+            limit_large_read,
+        ));
+    let mut router = Router::new()
+        .merge(large_reads)
+        .route("/api/findings/{trace_id}", get(handle_findings_by_trace))
+        .route("/api/explain/{trace_id}", get(handle_explain))
         .route("/api/status", get(handle_status))
         .route("/api/config", get(handle_config))
         .route("/api/energy", get(handle_energy))
-        .route("/api/export/report", get(handle_export_report))
         .route(
             "/api/findings/{signature}/ack",
             post(handle_ack).delete(handle_unack),
@@ -261,6 +267,53 @@ async fn require_read_key(
         )
         .into_response()
     }
+}
+
+/// Snapshot responses (findings, detections, correlations, the exported
+/// report) alive at once. Each can weigh several MiB, so the count runs
+/// until the peer has read the body, not until the handler returns.
+pub const MAX_LARGE_READS_IN_FLIGHT: usize = 8;
+
+/// Slice size of a large read body. hyper pulls the next slice only once
+/// the socket drained the previous ones.
+const LARGE_READ_CHUNK: usize = 64 * 1024;
+
+/// Hold one of `MAX_LARGE_READS_IN_FLIGHT` permits for the whole life of
+/// the response body, answering 503 when none is free.
+///
+/// A permit dropped when the handler returns would not bound bodies a
+/// peer never reads: they stay buffered in hyper. Moved into a body
+/// stream, it is released once the last slice is sent or the connection
+/// is dropped, which the listener's lifetime deadline bounds.
+async fn limit_large_read(
+    State(permits): State<Arc<tokio::sync::Semaphore>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Ok(permit) = permits.try_acquire_owned() else {
+        return ErrorResponse::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "too many large reads in flight, retry shortly",
+        )
+        .into_response();
+    };
+    let (mut parts, body) = next.run(req).await.into_parts();
+    // The handlers answer with a buffered JSON body, so this never waits.
+    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let len = bytes.len();
+    parts
+        .headers
+        .insert(axum::http::header::CONTENT_LENGTH, len.into());
+    let slices = (0..len).step_by(LARGE_READ_CHUNK).map(move |start| {
+        let _held = &permit;
+        Ok::<_, std::convert::Infallible>(bytes.slice(start..len.min(start + LARGE_READ_CHUNK)))
+    });
+    Response::from_parts(
+        parts,
+        axum::body::Body::from_stream(tokio_stream::iter(slices)),
+    )
 }
 
 // ── Query parameters ──────────────────────────────────────────────

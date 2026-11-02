@@ -33,7 +33,7 @@ use super::DaemonError;
 use super::ack::{self, AckStore};
 use super::findings_store;
 use super::query_api;
-use super::tls::{ConnLimits, build_tls_acceptor, load_tls_pem, serve_https, tls_tcp_incoming};
+use super::tls::{ConnLimits, build_tls_acceptor, load_tls_pem, serve_http, tls_tcp_incoming};
 
 /// HTTP/2 stream multiplexing cap for the OTLP gRPC listener. Tonic's
 /// defaults are generous (thousands of concurrent streams). On a non-loopback
@@ -659,19 +659,14 @@ fn spawn_http_listener(
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     router: axum::Router,
 ) -> tokio::task::JoinHandle<()> {
-    if let Some(acceptor) = tls_acceptor {
-        tokio::spawn(async move {
+    tokio::spawn(async move {
+        if tls_acceptor.is_some() {
             tracing::info!("OTLP HTTPS listening on {addr}");
-            serve_https(listener, router, acceptor, ConnLimits::DEFAULT).await;
-        })
-    } else {
-        tokio::spawn(async move {
+        } else {
             tracing::info!("OTLP HTTP listening on {addr}");
-            if let Err(e) = axum::serve(listener, router).await {
-                tracing::error!("HTTP server error: {e}");
-            }
-        })
-    }
+        }
+        serve_http(listener, router, tls_acceptor, ConnLimits::DEFAULT).await;
+    })
 }
 
 /// Bind and spawn the Unix JSON socket listener when the target is Unix.

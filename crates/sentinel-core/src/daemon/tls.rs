@@ -1,5 +1,5 @@
 //! TLS helpers for the daemon: stream wrapping, accept-loop incoming
-//! stream, PEM loading, and an HTTPS serve loop for axum routers.
+//! stream, PEM loading, and the HTTP(S) serve loop for axum routers.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -21,6 +21,11 @@ const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// where many peers complete TCP then stall on `ClientHello`. Same
 /// budget as the Unix JSON socket listener.
 const TLS_MAX_INFLIGHT: usize = 128;
+
+/// Cap on live connections of the OTLP HTTP and API listener, plain or
+/// TLS. Higher than `TLS_MAX_INFLIGHT` because under the Helm chart every
+/// exporting pod keeps one keep-alive connection open.
+const HTTP_MAX_CONNECTIONS: usize = 512;
 
 /// A stream that is either a plain TCP connection or a TLS-wrapped one.
 /// Implements `AsyncRead + AsyncWrite` so tonic and hyper can use it
@@ -209,15 +214,19 @@ pub(super) struct ConnLimits {
     pub header_read_timeout: Duration,
     /// Total lifetime of a connection. Past it, the connection is asked to
     /// close after its in-flight request, then dropped after
-    /// `CONN_SHUTDOWN_GRACE`, with any response body the peer never read.
+    /// `shutdown_grace`, with any response body the peer never read.
     pub max_lifetime: Duration,
+    /// Time a connection past its lifetime gets to finish its in-flight
+    /// request before it is dropped.
+    pub shutdown_grace: Duration,
 }
 
 impl ConnLimits {
     pub(super) const DEFAULT: Self = Self {
-        max_connections: TLS_MAX_INFLIGHT,
+        max_connections: HTTP_MAX_CONNECTIONS,
         header_read_timeout: Duration::from_secs(30),
         max_lifetime: Duration::from_mins(2),
+        shutdown_grace: Duration::from_secs(10),
     };
 }
 
@@ -226,25 +235,22 @@ impl ConnLimits {
 const H2_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const H2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Time a connection past its lifetime gets to finish its in-flight
-/// request before it is dropped.
-const CONN_SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
-
-/// Serve an axum `Router` over TLS using a manual accept loop.
+/// Serve an axum `Router` over plain HTTP or, with an acceptor, over TLS,
+/// using one manual accept loop so both share the same limits.
 ///
-/// Each accepted TCP connection is upgraded to TLS via the acceptor,
+/// With TLS, each accepted TCP connection is upgraded via the acceptor,
 /// then served with hyper. Failed TLS handshakes are logged at debug
 /// level and silently dropped (not fatal to the server).
-pub(super) async fn serve_https(
+pub(super) async fn serve_http(
     listener: tokio::net::TcpListener,
     app: axum::Router,
-    tls_acceptor: tokio_rustls::TlsAcceptor,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     limits: ConnLimits,
 ) {
-    // Bound concurrent handshakes + live HTTPS connections. Without
-    // this cap, a handshake-stall flood pins TLS_HANDSHAKE_TIMEOUT
-    // worth of tasks/fds per attacker. Same budget as the Unix JSON
-    // socket listener.
+    // Bound concurrent handshakes + live connections. Without this cap,
+    // a handshake-stall flood pins TLS_HANDSHAKE_TIMEOUT worth of
+    // tasks/fds per attacker, and plain connections pile up to the fd
+    // limit.
     let semaphore = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
 
     loop {
@@ -263,26 +269,18 @@ pub(super) async fn serve_https(
         let app = app.clone();
 
         tokio::spawn(async move {
-            let tls_stream = match tokio::time::timeout(
-                TLS_HANDSHAKE_TIMEOUT,
-                acceptor.accept(tcp_stream),
-            )
-            .await
-            {
-                Ok(Ok(s)) => s,
-                Ok(Err(e)) => {
-                    tracing::debug!("TLS handshake failed from {remote_addr}: {e}");
-                    drop(permit);
-                    return;
-                }
-                Err(_) => {
-                    tracing::debug!("TLS handshake timed out from {remote_addr}");
-                    drop(permit);
-                    return;
-                }
+            let _permit = permit;
+            let Some(acceptor) = acceptor else {
+                serve_connection(tcp_stream, app, limits, remote_addr).await;
+                return;
             };
-            serve_connection(tls_stream, app, limits, remote_addr).await;
-            drop(permit);
+            match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(tcp_stream)).await {
+                Ok(Ok(tls_stream)) => {
+                    serve_connection(tls_stream, app, limits, remote_addr).await;
+                }
+                Ok(Err(e)) => tracing::debug!("TLS handshake failed from {remote_addr}: {e}"),
+                Err(_) => tracing::debug!("TLS handshake timed out from {remote_addr}"),
+            }
         });
     }
 }
@@ -351,7 +349,7 @@ async fn serve_connection<I>(
     } else {
         tracing::debug!("HTTP connection from {remote_addr} reached its lifetime");
         conn.as_mut().graceful_shutdown();
-        let _ = tokio::time::timeout(CONN_SHUTDOWN_GRACE, conn).await;
+        let _ = tokio::time::timeout(limits.shutdown_grace, conn).await;
     }
 }
 
@@ -465,8 +463,9 @@ mod tests {
             max_connections: 2,
             header_read_timeout: Duration::from_millis(300),
             max_lifetime: Duration::from_mins(1),
+            shutdown_grace: Duration::from_secs(1),
         };
-        tokio::spawn(serve_https(listener, app, acceptor, limits));
+        tokio::spawn(serve_http(listener, app, Some(acceptor), limits));
 
         // Every slot taken by peers that finish the handshake, then send nothing.
         let mut silent = Vec::new();
@@ -479,6 +478,40 @@ mod tests {
                 .expect("a silent peer must lose its slot after the header-read timeout");
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         drop(silent);
+    }
+
+    #[tokio::test]
+    async fn plain_connection_holding_an_unread_body_is_dropped_at_its_lifetime() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        const BODY: usize = 16 * 1024 * 1024;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app =
+            axum::Router::new().route("/big", axum::routing::get(|| async { vec![b'x'; BODY] }));
+        let limits = ConnLimits {
+            max_connections: 4,
+            header_read_timeout: Duration::from_secs(5),
+            max_lifetime: Duration::from_millis(300),
+            shutdown_grace: Duration::from_millis(200),
+        };
+        tokio::spawn(serve_http(listener, app, None, limits));
+
+        let mut peer = tokio::net::TcpStream::connect(addr).await.unwrap();
+        peer.write_all(b"GET /big HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        // Read nothing past the lifetime, so the body stays stuck server side.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let mut received = Vec::new();
+        // EOF or a reset both mean the server let go of the connection.
+        let _ = tokio::time::timeout(Duration::from_secs(5), peer.read_to_end(&mut received))
+            .await
+            .expect("the server must close a connection past its lifetime");
+        assert!(
+            received.len() < BODY,
+            "the unread body must be dropped, got {} bytes",
+            received.len()
+        );
     }
 
     #[test]

@@ -71,6 +71,15 @@ writes (acks) and the official report export to architects or DevOps, see
 - For Kubernetes or load-balancer probes, prefer `GET /health` over
   `GET /api/status`: `/health` is always on, holds no locks and stays
   responsive under any ingestion load.
+- The HTTP port serves at most 512 connections at once, plain or TLS.
+  A connection that sends no request within 30 s is closed, so is an
+  HTTP/1 connection idle for 30 s between requests, and every
+  connection is closed after 2 minutes (after its in-flight request,
+  with a 10 s grace). Exporters reconnect on their own.
+- `/api/findings`, `/api/detections`, `/api/correlations` and
+  `/api/export/report` share a pool of 8 responses in flight. A
+  response counts until the client has read its body, and a ninth
+  caller gets `503` until one is done.
 - The findings **ring buffer** (a fixed-size circular store that evicts oldest entries when full) is bounded by
   `[daemon] max_retained_findings` (default `10000`). Older findings are
   evicted FIFO.
@@ -1543,12 +1552,13 @@ path.
 | `limit` of 0 or above 5000 on `/api/detections`  | 400    | `{"error": "limit must be between 1 and 5000"}`                                                      |
 | `after` not `<day>:<signature>` on `/api/detections` | 400 | `{"error": "after must be <day>:<signature>"}`                                                     |
 | `/api/detections` with `[daemon.detections] enabled = false` | 503 | `{"error": "detection ledger disabled"}`                                                   |
+| 8 responses of `/api/findings`, `/api/detections`, `/api/correlations` or `/api/export/report` still being read | 503 | `{"error": "too many large reads in flight, retry shortly"}` |
 | Unknown path (e.g. `/api/does-not-exist`)        | 404    | empty body                                                                                           |
 | Missing or wrong key on a gated route            | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                 |
 | Method other than GET                            | 405    | axum-generated plain-text error                                                                      |
 
-Apart from that `503` on a disabled detection ledger, the API does not
-emit 5xx on normal operation. A process crash returns
+Apart from the `503` on a disabled detection ledger or a full pool of
+large reads, the API does not emit 5xx on normal operation. A process crash returns
 whatever the TCP stack emits (connection reset).
 
 ## Use cases

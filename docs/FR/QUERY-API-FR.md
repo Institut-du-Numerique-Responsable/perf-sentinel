@@ -76,6 +76,15 @@ rapport officiel aux architectes ou au DevOps, voir
 - Pour les sondes Kubernetes ou load-balancer, préférer `GET /health` à
   `GET /api/status` : `/health` est toujours actif, ne prend aucun verrou
   et reste réactif sous toute charge d'ingestion.
+- Le port HTTP sert au plus 512 connexions à la fois, en clair ou en
+  TLS. Une connexion qui n'envoie aucune requête en 30 s est fermée,
+  de même qu'une connexion HTTP/1 inactive 30 s entre deux requêtes, et
+  toute connexion est fermée au bout de 2 minutes (après sa requête en
+  cours, avec 10 s de grâce). Les exporteurs se reconnectent d'eux-mêmes.
+- `/api/findings`, `/api/detections`, `/api/correlations` et
+  `/api/export/report` partagent un pool de 8 réponses en cours. Une
+  réponse compte tant que le client n'a pas lu son corps, et un
+  neuvième appelant reçoit `503` jusqu'à ce que l'une d'elles se termine.
 - La taille du **ring buffer** (un buffer circulaire à taille fixe qui
   évince les plus anciennes entrées une fois plein) des findings est bornée par
   `[daemon] max_retained_findings` (défaut `10000`). Les findings plus
@@ -1601,12 +1610,13 @@ findings acquittés même dans le chemin par défaut.
 | `limit` à 0 ou au-delà de 5000 sur `/api/detections` | 400 | `{"error": "limit must be between 1 and 5000"}`                                                      |
 | `after` autre que `<jour>:<signature>` sur `/api/detections` | 400 | `{"error": "after must be <day>:<signature>"}`                                               |
 | `/api/detections` avec `[daemon.detections] enabled = false` | 503 | `{"error": "detection ledger disabled"}`                                                     |
+| 8 réponses de `/api/findings`, `/api/detections`, `/api/correlations` ou `/api/export/report` encore en lecture | 503 | `{"error": "too many large reads in flight, retry shortly"}` |
 | Chemin inconnu (ex. `/api/does-not-exist`)        | 404    | corps vide                                                                                              |
 | Clé absente ou fausse sur une route gardée         | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                    |
 | Méthode autre que GET                             | 405    | erreur en texte brut générée par axum                                                                   |
 
-Hors ce `503` sur un registre de détections désactivé, l'API n'émet pas
-de 5xx en fonctionnement normal. Un crash du processus
+Hors le `503` sur un registre de détections désactivé ou sur un pool de
+lectures lourdes plein, l'API n'émet pas de 5xx en fonctionnement normal. Un crash du processus
 retourne ce que la pile TCP émet (connection reset).
 
 ## Cas d'usage

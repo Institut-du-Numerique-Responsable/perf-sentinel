@@ -1501,6 +1501,48 @@ async fn handle_export_report_returns_200_with_empty_envelope_on_cold_start() {
 }
 
 #[tokio::test]
+async fn large_reads_hold_their_permit_until_the_body_is_dropped() {
+    let app = query_api_router(make_state());
+    let get = |uri: &'static str| {
+        let app = app.clone();
+        async move {
+            app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        }
+    };
+    // Responses whose body nobody reads, as from a peer that never drains.
+    let mut unread = Vec::new();
+    for _ in 0..MAX_LARGE_READS_IN_FLIGHT {
+        let resp = get("/api/export/report").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        unread.push(resp);
+    }
+    // The pool is shared across the heavy routes and answers rather than queues.
+    for uri in [
+        "/api/export/report",
+        "/api/findings",
+        "/api/correlations",
+        "/api/detections",
+    ] {
+        assert_eq!(
+            get(uri).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{uri}"
+        );
+    }
+    assert_eq!(get("/api/status").await.status(), StatusCode::OK);
+
+    drop(unread.pop());
+    let resp = get("/api/export/report").await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    serde_json::from_slice::<Report>(&body).expect("a sliced body must still parse");
+}
+
+#[tokio::test]
 async fn handle_export_report_carries_the_retained_span_trees() {
     // The correlation window has long dropped these spans: without the
     // traces store the exported report would carry findings the
