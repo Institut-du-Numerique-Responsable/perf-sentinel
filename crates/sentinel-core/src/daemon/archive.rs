@@ -129,6 +129,13 @@ fn refuse_symlink(path: &Path) -> Result<(), ArchiveError> {
     Ok(())
 }
 
+/// Whether `path` is a regular file, without following it. A FIFO, a
+/// socket or a device (`/dev/stdout` in a container) is not, and reading
+/// one back at startup would block.
+pub(super) fn is_regular_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file())
+}
+
 /// Whether `path` is a symlink, without following it. Shared with the
 /// incident appender, which refuses the same thing under its own error.
 pub(super) fn is_symlink(path: &Path) -> bool {
@@ -420,9 +427,13 @@ fn serialize_envelope(
 
 /// Chain head already on disk as `(prev, next_seq)`, so a restarted
 /// daemon continues instead of opening a break at every restart. Falls
-/// back to the seed on an empty, unreadable or pre-chain file.
+/// back to the seed on an empty, unreadable or pre-chain file, and on a
+/// FIFO or device, whose read would block startup forever.
 fn resume_chain(path: &Path) -> (String, u64) {
     let seed = || (ARCHIVE_CHAIN_SEED.to_string(), 0);
+    if !is_regular_file(path) {
+        return seed();
+    }
     let Ok(file) = File::open(path) else {
         return seed();
     };
@@ -671,6 +682,27 @@ mod tests {
             lines[0]["hash"].as_str().unwrap(),
             "the line written after the restart must reference the last one on disk"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_archive_starts_from_the_seed_instead_of_blocking() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("archive.fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        let probe = path.clone();
+        std::thread::spawn(move || tx.send(resume_chain(&probe)).unwrap());
+        let resumed = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("resume_chain blocked on a FIFO");
+        assert_eq!(resumed, (ARCHIVE_CHAIN_SEED.to_string(), 0));
     }
 
     #[test]
