@@ -698,7 +698,12 @@ not skip that block silently: without `--verify-binary <path>` the
 attestation stays unverified and the result caps at PARTIAL rather than
 TRUSTED. Pass `--verify-binary <path>` to run `gh attestation verify`
 against the producing binary (needs the `gh` CLI and network) so the
-provenance is checked and exit `0` reflects it.
+provenance is checked and exit `0` reflects it. The file must first hash
+to the report's `integrity.binary_hash`, which the content hash covers:
+a mismatch, or a report without that field, fails the check before `gh`
+runs, so the provenance of some other attested release cannot be credited
+to this report. The `binary_attestation` block sits outside the content
+hash, so its `git_commit` is only a second check on top.
 
 ### Verifying a PDF
 

@@ -720,7 +720,13 @@ Quand un rapport porte des métadonnées d'attestation binaire,
 résultat plafonne à PARTIAL au lieu de TRUSTED. Passez
 `--verify-binary <path>` pour lancer `gh attestation verify` sur le
 binaire producteur (nécessite le CLI `gh` et le réseau), afin que la
-provenance soit contrôlée et que le code `0` le reflète.
+provenance soit contrôlée et que le code `0` le reflète. Le fichier doit
+d'abord avoir pour empreinte le `integrity.binary_hash` du rapport, que
+couvre le hash de contenu : une différence, ou un rapport sans ce champ,
+fait échouer le contrôle avant que `gh` ne tourne, pour que la provenance
+d'une autre release attestée ne soit pas créditée à ce rapport. Le bloc
+`binary_attestation` est hors du hash de contenu, son `git_commit` n'est
+donc qu'un second contrôle par-dessus.
 
 ### Vérifier un PDF
 
