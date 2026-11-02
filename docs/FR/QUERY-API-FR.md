@@ -565,7 +565,7 @@ peut donc pas monopoliser la page.
 | `until_ms`      | integer | aucun   | Borne haute sur `stored_at_ms`, en millisecondes epoch Unix, incluse                                                        |
 | `offset`        | integer | `0`     | Lignes repliées à sauter avant que `limit` s'applique, les pages qui précèdent celle-ci                                     |
 | `limit`         | integer | `100`   | Nombre maximum d'entrées retournées, plafonné côté serveur à `1000` (les valeurs supérieures sont silencieusement ramenées) |
-| `include_acked` | boolean | `false` | Retourne aussi les findings acquittés, chacun annoté d'un `acknowledged_by`                                                 |
+| `include_acked` | boolean | `false` | Retourne aussi les findings acquittés, chacun annoté d'un `acknowledged_by`. Avec `[daemon.ack] api_key` défini, `true` exige cette clé ou `[daemon] read_api_key`, comme `GET /api/acks`, et répond `401` sans elle |
 
 Les paramètres inconnus sont ignorés. Les valeurs malformées (ex.
 `limit=abc`) retournent un HTTP 400 avec un corps d'erreur généré par

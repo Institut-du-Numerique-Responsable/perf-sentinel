@@ -533,11 +533,21 @@ fn disclosure_archive_status(metrics: &MetricsState) -> Option<DisclosureArchive
 
 async fn handle_findings(
     State(state): State<Arc<QueryApiState>>,
+    headers: HeaderMap,
     Query(params): Query<FindingsParams>,
-) -> Json<Vec<FindingResponse>> {
+) -> Result<Json<Vec<FindingResponse>>, ErrorResponse> {
+    let include_acked = params.include_acked;
+    if include_acked {
+        // The annotation is the ack audit trail (reviewer, reason, expiry):
+        // same gate as `GET /api/acks`, a no-op without an ack key.
+        check_read_auth(
+            &headers,
+            state.ack_api_key.as_deref(),
+            state.daemon_config.read_api_key.as_deref(),
+        )?;
+    }
     // Cap the limit to protect the daemon from expensive responses
     // (large JSON serialization under an unauthenticated loopback API).
-    let include_acked = params.include_acked;
     let filter = FindingsFilter {
         service: non_empty(params.service),
         finding_type: non_empty(params.finding_type),
@@ -593,7 +603,7 @@ async fn handle_findings(
             }
         })
         .collect();
-    Json(result)
+    Ok(Json(result))
 }
 
 /// An empty or blank filter value is an absent one. A Grafana variable

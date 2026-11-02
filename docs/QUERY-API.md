@@ -549,7 +549,7 @@ cannot consume the page.
 | `until_ms`      | integer | none    | Upper bound on `stored_at_ms`, in Unix epoch milliseconds, inclusive                                   |
 | `offset`        | integer | `0`     | Folded rows to skip before `limit` applies, the pages before this one                                  |
 | `limit`         | integer | `100`   | Maximum number of entries to return, capped server-side at `1000` (higher values are silently clamped) |
-| `include_acked` | boolean | `false` | Return acknowledged findings too, each annotated with `acknowledged_by`                                |
+| `include_acked` | boolean | `false` | Return acknowledged findings too, each annotated with `acknowledged_by`. With `[daemon.ack] api_key` set, `true` needs that key or `[daemon] read_api_key`, as `GET /api/acks` does, and answers `401` without one |
 
 Unknown parameters are ignored. Malformed values (e.g. `limit=abc`) return
 HTTP 400 with an axum-generated error body. An empty or blank value is
