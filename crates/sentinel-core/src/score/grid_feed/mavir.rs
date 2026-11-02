@@ -73,7 +73,10 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
         };
         let end = DateTime::parse_from_str(label, "%Y.%m.%d %H:%M:%S %z")
             .map_err(|e| FeedError::Parse(format!("{TIME}: {e}")))?;
-        let at = end.with_timezone(&Utc) - TimeDelta::seconds(QUARTER_SECS);
+        let at = end
+            .with_timezone(&Utc)
+            .checked_sub_signed(TimeDelta::seconds(QUARTER_SECS))
+            .ok_or_else(|| FeedError::Parse(format!("{TIME}: {label:?} out of range")))?;
         let ratio: f64 = raw
             .parse()
             .map_err(|e| FeedError::Parse(format!("ratio {raw:?}: {e}")))?;
@@ -304,6 +307,17 @@ mod tests {
     fn no_measured_quarter_is_empty() {
         let sheet = format!("<worksheet><sheetData>{}</sheetData></worksheet>", header());
         assert!(matches!(parse(&xlsx(&sheet)), Err(FeedError::Empty)));
+    }
+
+    #[test]
+    fn a_label_at_the_minimum_date_is_a_parse_error_not_a_panic() {
+        let oldest =
+            sheet(&header()).replace("2026.10.20 15:30:00 +0200", "-262143.01.01 00:00:00 +0000");
+        let err = parse(&xlsx(&oldest)).unwrap_err();
+        assert!(
+            matches!(err, FeedError::Parse(ref m) if m.contains("out of range")),
+            "{err:?}"
+        );
     }
 
     #[test]
