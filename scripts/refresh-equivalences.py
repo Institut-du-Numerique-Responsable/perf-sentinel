@@ -35,6 +35,7 @@ import io
 import json
 import re
 import sys
+import unicodedata
 import urllib.parse
 import urllib.request
 import zipfile
@@ -176,6 +177,14 @@ def get_json(url: str) -> dict:
     return json.loads(fetch(url))
 
 
+def comment_text(rid: str, text: str) -> str:
+    """`text` ends up in a `//` comment of the generated Rust, which a
+    line break would end, so control characters and separators fail."""
+    if any(unicodedata.category(c) == "Cc" or c in "\u2028\u2029" for c in text):
+        raise RefreshError(f"{rid}: source name {text!r} holds a control character or line separator")
+    return text
+
+
 def whole_ug(rid: str, value: Decimal) -> int:
     """`value` is already in µg. Must be a positive whole number."""
     if value <= 0 or value != value.to_integral_value():
@@ -228,7 +237,7 @@ def accept_ademe(row: tuple, line: "dict | None") -> dict:
     return {
         "ug": whole_ug(rid, total * 10**9), "source": SRC_ADEME, "ref": str(bc_id),
         "factor": f"{total} {unit_fr}", "validity": str(line.get(FIELDS["validity"], "")),
-        "comment": element,
+        "comment": comment_text(rid, element),
     }
 
 
@@ -303,7 +312,7 @@ def accept_desnz(row: tuple, year: str, found: dict) -> dict:
     return {
         "ug": whole_ug(rid, sum(factors) * 10**9), "source": SRC_DESNZ, "ref": " + ".join(ids),
         "factor": " + ".join(format(f, "f") for f in factors) + f" kgCO2e/{uom}",
-        "validity": year, "comment": f"{names[0]}, tailpipe + WTT",
+        "validity": year, "comment": comment_text(rid, f"{names[0]}, tailpipe + WTT"),
     }
 
 
@@ -473,6 +482,17 @@ def self_test() -> None:
     assert accept_epa(("us_car_mile",), section.format(factor))["ug"] == 393_000_000
     expect_error(lambda: epa_factor(section.format(factor + " and " + factor)))
     expect_error(lambda: epa_factor(section.format("no factor")))
+
+    for bad in ["Car\n#[test] fn x() {}", "Car\rx", "Car\u2028x", "Car\u2029x", "Car\x7fx", "Car\x85x"]:
+        dirty = {**found, "25_315_3147_11_1": [(*found["25_315_3147_11_1"][0][:3], bad)]}
+        expect_error(lambda: accept_desnz(desnz[0], year, dirty))
+    ademe = next(r for r in ROWS if r[5][0] == "ademe")
+    line = {FIELDS["type"]: "Elément", FIELDS["status"]: "Valide générique",
+            FIELDS["location"]: "France continentale", FIELDS["unit"]: ademe[5][2],
+            FIELDS["total"]: "0.5", FIELDS["name"]: "Name", FIELDS["attribute"]: "attr"}
+    assert accept_ademe(ademe, line)["comment"] == "Name, attr"
+    expect_error(lambda: accept_ademe(ademe, {**line, FIELDS["name"]: "Name\npub fn x() {}"}))
+    expect_error(lambda: accept_ademe(ademe, {**line, FIELDS["attribute"]: "attr\u2028x"}))
 
     check_ladders({"gb": [39_890_000, 209_900_000, 39_100_000_000]})
     expect_error(lambda: check_ladders({"gb": [1, 201]}))
