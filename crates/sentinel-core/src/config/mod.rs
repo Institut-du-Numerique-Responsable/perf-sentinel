@@ -369,6 +369,11 @@ pub struct DaemonConfig {
     /// write key the route's own handler accepts). `false` (default)
     /// leaves the API as before. Needs `read_api_key`.
     pub require_read_key: bool,
+    /// Extra `Host` names the HTTP listener answers, against DNS
+    /// rebinding. On a loopback bind, `localhost` and IP literals are
+    /// always accepted and any other name answers `421`. On another bind
+    /// the check runs only when this list is non-empty.
+    pub allowed_hosts: Vec<String>,
     /// TLS material for the OTLP listeners. When `cert_path` and
     /// `key_path` are both `Some`, both gRPC and HTTP listen TLS. When
     /// both are `None`, plain TCP (default).
@@ -684,6 +689,7 @@ impl Default for DaemonConfig {
             api_enabled: true,
             read_api_key: None,
             require_read_key: false,
+            allowed_hosts: Vec::new(),
             tls: DaemonTlsConfig::default(),
             ack: DaemonAckConfig::default(),
             incidents: DaemonIncidentsConfig::default(),

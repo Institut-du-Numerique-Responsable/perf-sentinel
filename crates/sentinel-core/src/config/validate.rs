@@ -237,6 +237,7 @@ impl Config {
         self.validate_daemon_ack()?;
         self.validate_daemon_incidents()?;
         self.validate_daemon_read_key()?;
+        self.validate_daemon_allowed_hosts()?;
         self.validate_daemon_cors()?;
         self.validate_daemon_archive()?;
         self.validate_daemon_hub_export()?;

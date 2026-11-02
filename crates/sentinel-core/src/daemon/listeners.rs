@@ -398,7 +398,7 @@ fn parse_expires_at_end_of_day(value: Option<&str>) -> Option<chrono::DateTime<U
 }
 
 /// Assemble the OTLP HTTP + metrics + optional query API router, with the
-/// request-timeout layer.
+/// request-timeout layer and the `Host` check.
 #[allow(clippy::too_many_arguments)]
 fn build_http_router(
     config: &Config,
@@ -494,14 +494,16 @@ fn build_http_router(
         // never sees a non-empty CORS list at runtime.
         tracing::info!("Daemon query API disabled by config");
     }
-    http_router.layer(
+    let http_router = http_router.layer(
         tower::ServiceBuilder::new()
             .layer(axum::error_handling::HandleErrorLayer::new(|_| async {
                 tracing::debug!("HTTP request timed out");
                 axum::http::StatusCode::REQUEST_TIMEOUT
             }))
             .layer(tower::timeout::TimeoutLayer::new(Duration::from_mins(1))),
-    )
+    );
+    // Outermost, so OTLP, /metrics, /health and the API all sit behind it.
+    super::host_check::guard(http_router, &config.daemon)
 }
 
 /// Build the CORS layer when the operator configured at least one

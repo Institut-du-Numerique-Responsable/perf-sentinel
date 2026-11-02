@@ -16,6 +16,7 @@ pub mod traces_store;
 
 mod detection_ledger;
 mod event_loop;
+mod host_check;
 mod hub_correlation_export;
 mod hub_detection_export;
 mod hub_export;

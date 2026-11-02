@@ -88,6 +88,11 @@ rapport officiel aux architectes ou au DevOps, voir
   neuvième appelant reçoit `503` jusqu'à ce que l'une d'elles se
   termine. Un corps encore non lu au bout de 30 s est coupé et sa
   connexion fermée.
+- Sur une adresse de loopback, le port HTTP ne répond qu'aux noms
+  `Host` qu'il connaît, contre le DNS rebinding : `localhost`, les IP
+  littérales et `[daemon] allowed_hosts`. Tout autre nom reçoit `421`.
+  Sur une autre adresse, la vérification s'applique une fois
+  `allowed_hosts` renseigné. Voir [CONFIGURATION-FR.md](CONFIGURATION-FR.md).
 - La taille du **ring buffer** (un buffer circulaire à taille fixe qui
   évince les plus anciennes entrées une fois plein) des findings est bornée par
   `[daemon] max_retained_findings` (défaut `10000`). Les findings plus
@@ -1615,6 +1620,7 @@ findings acquittés même dans le chemin par défaut.
 | `/api/detections` avec `[daemon.detections] enabled = false` | 503 | `{"error": "detection ledger disabled"}`                                                     |
 | 8 réponses de `/api/findings`, `/api/detections`, `/api/correlations` ou `/api/export/report` encore en lecture | 503 | `{"error": "too many large reads in flight, retry shortly"}` |
 | Chemin inconnu (ex. `/api/does-not-exist`)        | 404    | corps vide                                                                                              |
+| `Host` hors de la liste autorisée (toute route)   | 421    | `{"error": "unknown Host, add it to [daemon] allowed_hosts"}`                                           |
 | Clé absente ou fausse sur une route gardée         | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                    |
 | Méthode autre que GET                             | 405    | erreur en texte brut générée par axum                                                                   |
 

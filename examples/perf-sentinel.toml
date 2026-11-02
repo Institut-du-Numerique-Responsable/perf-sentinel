@@ -266,6 +266,10 @@ api_enabled = true                 # default true
 #                                                  # needs it too, the JetBrains plugin included: leave it
 #                                                  # off while IDEs read this daemon with a plugin that
 #                                                  # sends no per-endpoint credential
+# allowed_hosts = ["perf-sentinel.monitoring.svc"] # default []. Host names the HTTP port answers, against
+#                                                  # DNS rebinding. On a loopback bind, localhost and IP
+#                                                  # literals always pass and any other name gets 421.
+#                                                  # On any other bind the check runs only once this is set
 
 # -------------------------------------------------------------------------- #
 #        /!\ Change these only if you know what you are doing /!\            #

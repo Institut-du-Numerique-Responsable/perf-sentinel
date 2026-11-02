@@ -81,6 +81,11 @@ writes (acks) and the official report export to architects or DevOps, see
   response counts until the client has read its body, and a ninth
   caller gets `503` until one is done. A body still unread after 30 s
   is cut and its connection closed.
+- On a loopback bind, the HTTP port answers only `Host` names it knows,
+  against DNS rebinding: `localhost`, IP literals and
+  `[daemon] allowed_hosts`. Any other name gets `421`. On another bind
+  the check runs once `allowed_hosts` is set. See
+  [CONFIGURATION.md](CONFIGURATION.md).
 - The findings **ring buffer** (a fixed-size circular store that evicts oldest entries when full) is bounded by
   `[daemon] max_retained_findings` (default `10000`). Older findings are
   evicted FIFO.
@@ -1555,6 +1560,7 @@ path.
 | `/api/detections` with `[daemon.detections] enabled = false` | 503 | `{"error": "detection ledger disabled"}`                                                   |
 | 8 responses of `/api/findings`, `/api/detections`, `/api/correlations` or `/api/export/report` still being read | 503 | `{"error": "too many large reads in flight, retry shortly"}` |
 | Unknown path (e.g. `/api/does-not-exist`)        | 404    | empty body                                                                                           |
+| `Host` outside the allow-list (any route)        | 421    | `{"error": "unknown Host, add it to [daemon] allowed_hosts"}`                                        |
 | Missing or wrong key on a gated route            | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                 |
 | Method other than GET                            | 405    | axum-generated plain-text error                                                                      |
 

@@ -163,6 +163,24 @@ impl Config {
         Ok(())
     }
 
+    /// Each `[daemon] allowed_hosts` entry is a bare host name, optionally
+    /// with a port, never a URL.
+    pub(super) fn validate_daemon_allowed_hosts(&self) -> Result<(), String> {
+        for host in &self.daemon.allowed_hosts {
+            if host.trim().is_empty()
+                || has_control_char(host)
+                || host.contains(['/', '@', ' ', '*'])
+            {
+                return Err(format!(
+                    "[daemon] allowed_hosts entry '{}' must be a host name such as \
+                     perf-sentinel.monitoring.svc, without scheme, path or wildcard",
+                    host.escape_debug()
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(in crate::config) fn validate_daemon_cors(&self) -> Result<(), String> {
         let has_wildcard = self.daemon.cors.allowed_origins.iter().any(|o| o == "*");
         validate_cors_wildcard_mode(
