@@ -9,6 +9,7 @@ CSVs stay in MANUAL_INSTANCE_ROWS (table.rs) and are not touched.
 
 Usage:
     python3 scripts/refresh-instance-power.py [git-ref]
+    python3 scripts/refresh-instance-power.py --self-test   # offline checks
 
 git-ref defaults to main. Pass a commit SHA for a reproducible run.
 Prints changed rows on stdout and warnings on stderr. Exits 0 even when
@@ -23,6 +24,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -273,9 +275,11 @@ pub(super) static GENERATED_INSTANCE_ROWS: &[(&str, f64, f64)] = &[
 def request(url: str) -> urllib.request.Request:
     headers = {"User-Agent": "perf-sentinel-refresh"}
     # Unauthenticated api.github.com calls from CI runner IPs hit the
-    # shared 60/hr rate limit. Use the workflow token when present.
+    # shared 60/hr rate limit. Use the workflow token when present, on
+    # that host only: it is a repository write token, and the other hosts
+    # (raw.githubusercontent.com, api.scaleway.com) are read anonymously.
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if token:
+    if token and urllib.parse.urlsplit(url).hostname == "api.github.com":
         headers["Authorization"] = f"Bearer {token}"
     return urllib.request.Request(url, headers=headers)
 
@@ -462,5 +466,18 @@ def main() -> None:
     print(f"wrote {TARGET.relative_to(REPO_ROOT)}")
 
 
+def self_test() -> None:
+    os.environ["GH_TOKEN"] = "self-test-token"
+    assert request(SCALEWAY_CATALOG).get_header("Authorization") is None
+    assert request(f"https://raw.githubusercontent.com/{CCF_REPO}/x/output/a.csv").get_header("Authorization") is None
+    # A look-alike host must not match either.
+    assert request("https://api.github.com.example.net/repos").get_header("Authorization") is None
+    assert request(f"https://api.github.com/repos/{CCF_REPO}/commits").get_header("Authorization") == "Bearer self-test-token"
+    print("self-test ok")
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--self-test"]:
+        self_test()
+        sys.exit(0)
     main()
