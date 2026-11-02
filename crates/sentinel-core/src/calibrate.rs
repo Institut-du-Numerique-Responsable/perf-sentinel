@@ -319,7 +319,7 @@ pub fn calibrate(
         let total_ops = ops_per_service.get(service.as_str()).copied().unwrap_or(0);
         if total_ops == 0 {
             tracing::warn!(
-                service = %service,
+                service = %crate::text_safety::sanitize_for_terminal(service),
                 "no I/O ops found for service in the observation window, skipping"
             );
             continue;

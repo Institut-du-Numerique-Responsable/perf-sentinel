@@ -190,3 +190,45 @@ fn cli_explain_reads_a_snapshot_report_with_embedded_traces() {
         "the masked template must be the tree's operation text"
     );
 }
+
+/// Run `explain` on `input` and return its stderr bytes.
+fn explain_stderr(input: &[u8], trace_id: &str) -> Vec<u8> {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let file_path = dir.path().join("traces.json");
+    fs::write(&file_path, input).expect("failed to write fixture");
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "explain",
+            "--input",
+            file_path.to_str().unwrap(),
+            "--trace-id",
+            trace_id,
+        ])
+        // Keep the colored tracing lines out of the byte check.
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("failed to execute perf-sentinel");
+    assert!(!output.status.success());
+    output.stderr
+}
+
+#[test]
+fn cli_explain_diagnostics_strip_escape_sequences_from_input() {
+    // Trace ids listed in the not-found hint come from the trace file.
+    let trace = br#"[{"timestamp":"2025-07-10T14:32:01.123Z","trace_id":"t\u001b]0;pwned\u0007","span_id":"s1","service":"svc","type":"sql","operation":"SELECT","target":"SELECT 1","duration_us":100,"source":{"endpoint":"GET /test","method":"m"}}]"#;
+    let stderr = explain_stderr(trace, "nope\u{1b}[2J");
+    assert!(stderr.contains(&b'n'), "expected a diagnostic");
+    assert!(
+        !stderr.contains(&0x1b),
+        "{}",
+        String::from_utf8_lossy(&stderr)
+    );
+    // serde echoes an unknown variant in its parse error.
+    let bad_type = br#"[{"timestamp":"2025-07-10T14:32:01.123Z","trace_id":"t1","span_id":"s1","service":"svc","type":"x\u001b[2J","operation":"SELECT","target":"SELECT 1","duration_us":100,"source":{"endpoint":"GET /test","method":"m"}}]"#;
+    let stderr = explain_stderr(bad_type, "t1");
+    assert!(
+        !stderr.contains(&0x1b),
+        "{}",
+        String::from_utf8_lossy(&stderr)
+    );
+}
