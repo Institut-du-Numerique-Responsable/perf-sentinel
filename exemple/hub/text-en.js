@@ -1659,6 +1659,7 @@
         'recap.freeze.filters': ', with the filters above',
         'recap.error.forbidden.pilotage': 'The Hub did not let you read the recap: your access does not include it.',
         'recap.error.forbidden.tech': 'The Hub did not let you read the recap: your access holds no findings.read.',
+        'recap.loading': 'The recap is computed from every finding of the period: on a large database this can take several minutes. Stay on this page, it shows as soon as it is ready. Leaving and coming back starts the computation over.',
         'recap.error.invalid': 'The Hub could not read a recap for this period or these filters.',
         'recap.error.other.pilotage': 'The Hub did not return the recap.',
         'recap.error.other.tech': 'The Hub did not return the recap. This is the Hub itself, not any daemon.',

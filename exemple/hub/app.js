@@ -332,9 +332,12 @@
     }
 
     function fetchJson(path, method) {
+        const headers = {accept: 'application/json'};
+        // A write carries the JSON content type the server's same-origin guard requires.
+        if (method !== 'GET') headers['content-type'] = 'application/json';
         return fetch(path, {
             method: method,
-            headers: {accept: 'application/json'}
+            headers: headers
         }).then(signInOn401).then(function (response) {
             if (!response.ok) {
                 // The parsed problem rides on the error, so a screen can say it in the shown language.
@@ -5974,6 +5977,9 @@
             return section;
         }
         if (state.recap === null) {
+            // Built from every finding of the period, so a large database takes minutes: said, lest
+            // the reader leave, and come back to start the same work again.
+            section.appendChild(el('p', {class: 'recap-loading', role: 'status', text: t('recap.loading')}));
             section.appendChild(el('div', {class: 'card skeleton', style: 'height:220px'}));
             return section;
         }
