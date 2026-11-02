@@ -529,7 +529,7 @@ pub mod grpc_budget {
     }
 
     impl tonic::server::NamedService for TraceServer {
-        const NAME: &'static str = SERVICE_NAME;
+        const NAME: &str = SERVICE_NAME;
     }
 
     impl<B> tonic::codegen::Service<http::Request<B>> for TraceServer
