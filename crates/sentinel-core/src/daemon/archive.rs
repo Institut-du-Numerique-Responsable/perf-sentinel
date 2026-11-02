@@ -158,7 +158,7 @@ pub(super) fn no_follow(options: &mut OpenOptions) {
 /// placeholder, a `compact /exe` file or a dedup stub, all refused: a
 /// handle opened past the owning filter must not be written through.
 /// Always false off Windows, where the open already failed.
-pub(super) fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
+pub(crate) fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt as _;
@@ -215,7 +215,7 @@ fn probe_rollup_dir(archive_path: &Path) -> Result<(), ArchiveError> {
 
 /// Owner-only, no-follow, truncating open for the rollup snapshot's
 /// temporary file.
-pub(super) fn open_truncate(path: &Path) -> std::io::Result<File> {
+pub(crate) fn open_truncate(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(true);
     #[cfg(unix)]
@@ -244,7 +244,7 @@ pub(super) fn open_truncate(path: &Path) -> std::io::Result<File> {
 ///
 /// The mode could not be read, or the file is not ours to tighten.
 #[cfg(unix)]
-pub(super) fn tighten_to_owner_only(file: &File, what: &str) -> std::io::Result<()> {
+pub(crate) fn tighten_to_owner_only(file: &File, what: &str) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     let mode = file.metadata()?.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
