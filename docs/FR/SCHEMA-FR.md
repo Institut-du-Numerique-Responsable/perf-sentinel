@@ -89,7 +89,7 @@ L'agrégat porte quatre champs optionnels qui décrivent la qualité des archive
 
 ## Applications
 
-Deux granularités, homogènes par rapport. Le validateur refuse un rapport qui mélangerait les deux.
+Deux granularités, homogènes par rapport. Le validateur refuse un rapport qui mélangerait les deux. Dans les deux, `endpoints_observed` compte les endpoints distincts qu'un service a servis sur la période, suivis jusqu'à 1024 par service. Un service qui atteint ce plafond affiche 1024, une borne basse de son nombre réel.
 
 ### G1 (intent `internal`)
 

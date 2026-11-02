@@ -2745,3 +2745,19 @@ fn a_hashless_rollup_line_ahead_of_the_chain_does_not_reach_back_for_it() {
     let agg = aggregate_from_paths(&paths, &q1_2026(), false).unwrap();
     assert_eq!(agg.earliest_archived_window, Some(day(20, 9)));
 }
+
+/// A window where `svc-a` served `count` distinct endpoints named after `tag`.
+fn endpoint_flood(tag: &str, count: usize) -> Report {
+    let names: Vec<String> = (0..count).map(|i| format!("/{tag}/{i}")).collect();
+    let rows: Vec<(&str, &str, usize)> = names.iter().map(|n| ("svc-a", n.as_str(), 1)).collect();
+    make_report(1, count, 0, &rows, vec![])
+}
+
+#[test]
+fn endpoints_seen_stays_at_the_cap_when_folding_and_merging() {
+    let cap = MAX_ENDPOINTS_PER_SERVICE;
+    let mut state = folded(&[(day(10, 9), endpoint_flood("a", cap + 50))]);
+    assert_eq!(state.per_service["svc-a"].endpoints_seen.len(), cap);
+    state.merge(folded(&[(day(11, 9), endpoint_flood("b", cap))]));
+    assert_eq!(state.per_service["svc-a"].endpoints_seen.len(), cap);
+}

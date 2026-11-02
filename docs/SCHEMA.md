@@ -89,7 +89,7 @@ Read it as a lower bound on activity, not as daemon uptime. Daemon archiving is 
 
 ## Applications
 
-Two granularities, homogeneous per disclosure. The validator rejects a disclosure that mixes the two.
+Two granularities, homogeneous per disclosure. The validator rejects a disclosure that mixes the two. In both, `endpoints_observed` counts the distinct endpoints a service served over the period, tracked up to 1024 per service. A service that reaches that cap reports 1024, a lower bound on its real count.
 
 ### G1 (intent `internal`)
 
