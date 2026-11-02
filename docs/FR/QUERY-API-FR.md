@@ -77,14 +77,16 @@ rapport officiel aux architectes ou au DevOps, voir
   `GET /api/status` : `/health` est toujours actif, ne prend aucun verrou
   et reste réactif sous toute charge d'ingestion.
 - Le port HTTP sert au plus 512 connexions à la fois, en clair ou en
-  TLS. Une connexion qui n'envoie aucune requête en 30 s est fermée,
-  de même qu'une connexion HTTP/1 inactive 30 s entre deux requêtes, et
-  toute connexion est fermée au bout de 2 minutes (après sa requête en
-  cours, avec 10 s de grâce). Les exporteurs se reconnectent d'eux-mêmes.
+  TLS, et ferme aussitôt une connexion au-delà. Une connexion sans
+  requête en cours pendant 15 s (avant sa première requête ou entre deux)
+  est fermée, et toute connexion est fermée au bout de 2 minutes (après
+  sa requête en cours, avec 10 s de grâce). Les exporteurs se
+  reconnectent d'eux-mêmes.
 - `/api/findings`, `/api/detections`, `/api/correlations` et
   `/api/export/report` partagent un pool de 8 réponses en cours. Une
-  réponse compte tant que le client n'a pas lu son corps, et un
-  neuvième appelant reçoit `503` jusqu'à ce que l'une d'elles se termine.
+  réponse compte tant que le client n'a pas lu son corps, 30 s au plus,
+  et un neuvième appelant reçoit `503` jusqu'à ce que l'une d'elles se
+  termine.
 - La taille du **ring buffer** (un buffer circulaire à taille fixe qui
   évince les plus anciennes entrées une fois plein) des findings est bornée par
   `[daemon] max_retained_findings` (défaut `10000`). Les findings plus

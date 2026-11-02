@@ -1542,6 +1542,33 @@ async fn large_reads_hold_their_permit_until_the_body_is_dropped() {
     serde_json::from_slice::<Report>(&body).expect("a sliced body must still parse");
 }
 
+#[tokio::test(start_paused = true)]
+async fn large_read_permit_is_released_at_the_drain_deadline_even_unread() {
+    let app = query_api_router(make_state());
+    let get = || {
+        let app = app.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/api/export/report")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let mut unread = Vec::new();
+    for _ in 0..MAX_LARGE_READS_IN_FLIGHT {
+        unread.push(get().await);
+    }
+    assert_eq!(get().await.status(), StatusCode::SERVICE_UNAVAILABLE);
+    // A slow reader past the deadline no longer starves other callers.
+    tokio::time::sleep(LARGE_READ_DRAIN_DEADLINE + std::time::Duration::from_secs(1)).await;
+    assert_eq!(get().await.status(), StatusCode::OK);
+    drop(unread);
+}
+
 #[tokio::test]
 async fn handle_export_report_carries_the_retained_span_trees() {
     // The correlation window has long dropped these spans: without the

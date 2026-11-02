@@ -278,13 +278,18 @@ pub const MAX_LARGE_READS_IN_FLIGHT: usize = 8;
 /// the socket drained the previous ones.
 const LARGE_READ_CHUNK: usize = 64 * 1024;
 
-/// Hold one of `MAX_LARGE_READS_IN_FLIGHT` permits for the whole life of
-/// the response body, answering 503 when none is free.
+/// Longest a large read keeps its permit. A body still unread by then
+/// stays with its connection, which the listener's idle and lifetime
+/// deadlines drop, but no longer blocks other callers.
+const LARGE_READ_DRAIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Hold one of `MAX_LARGE_READS_IN_FLIGHT` permits while the response
+/// body is sent, answering 503 when none is free.
 ///
 /// A permit dropped when the handler returns would not bound bodies a
-/// peer never reads: they stay buffered in hyper. Moved into a body
-/// stream, it is released once the last slice is sent or the connection
-/// is dropped, which the listener's lifetime deadline bounds.
+/// peer never reads: they stay buffered in hyper. Tied to the body
+/// stream, it is released once the last slice is sent, the connection is
+/// dropped, or `LARGE_READ_DRAIN_DEADLINE` passes.
 async fn limit_large_read(
     State(permits): State<Arc<tokio::sync::Semaphore>>,
     req: axum::extract::Request,
@@ -306,6 +311,14 @@ async fn limit_large_read(
     parts
         .headers
         .insert(axum::http::header::CONTENT_LENGTH, len.into());
+    // Released by whichever comes first, the body drop or the drain
+    // deadline, so a slow reader cannot hold it for the connection lifetime.
+    let permit = ReleaseOnDrop(Arc::new(std::sync::Mutex::new(Some(permit))));
+    let expiring = Arc::clone(&permit.0);
+    tokio::spawn(async move {
+        tokio::time::sleep(LARGE_READ_DRAIN_DEADLINE).await;
+        drop(ReleaseOnDrop(expiring));
+    });
     let slices = (0..len).step_by(LARGE_READ_CHUNK).map(move |start| {
         let _held = &permit;
         Ok::<_, std::convert::Infallible>(bytes.slice(start..len.min(start + LARGE_READ_CHUNK)))
@@ -314,6 +327,21 @@ async fn limit_large_read(
         parts,
         axum::body::Body::from_stream(tokio_stream::iter(slices)),
     )
+}
+
+/// Shared slot of a large read permit: the first of its holders dropped
+/// releases it.
+struct ReleaseOnDrop(Arc<std::sync::Mutex<Option<tokio::sync::OwnedSemaphorePermit>>>);
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        // A poisoned lock still holds the permit: release it all the same.
+        let mut slot = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        slot.take();
+    }
 }
 
 // ── Query parameters ──────────────────────────────────────────────

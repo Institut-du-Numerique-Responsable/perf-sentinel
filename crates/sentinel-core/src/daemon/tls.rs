@@ -3,6 +3,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -126,9 +127,12 @@ pub(super) fn tls_tcp_incoming(
             };
             // TLS path: run each handshake in its own task so a single
             // stalled peer does not block accept(). A semaphore permit
-            // bounds the total in-flight count.
-            let Ok(permit) = semaphore.clone().acquire_owned().await else {
-                break; // semaphore closed
+            // bounds the total in-flight count, and a handshake past it
+            // is refused rather than awaited, so stalled peers cannot
+            // stall accept() either.
+            let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                tracing::debug!("TLS handshake from {addr} refused, too many in flight");
+                continue;
             };
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -206,17 +210,18 @@ pub(super) fn build_tls_acceptor(
 /// peer that connects and sends nothing would keep its slot forever.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ConnLimits {
-    /// Live connections served at once. The accept loop waits for a free
-    /// slot past it.
+    /// Live connections served at once. A connection accepted past it is
+    /// closed at once, so a full pool never stalls the accept loop.
     pub max_connections: usize,
-    /// Time allowed for the first request to arrive, and for each later
-    /// HTTP/1 request header to be read.
-    pub header_read_timeout: Duration,
+    /// Time a connection may spend with no request in flight: before its
+    /// first request, between two requests, or reading one HTTP/1 header.
+    /// Past it, the connection is asked to close.
+    pub idle_timeout: Duration,
     /// Total lifetime of a connection. Past it, the connection is asked to
     /// close after its in-flight request, then dropped after
     /// `shutdown_grace`, with any response body the peer never read.
     pub max_lifetime: Duration,
-    /// Time a connection past its lifetime gets to finish its in-flight
+    /// Time a connection asked to close gets to finish its in-flight
     /// request before it is dropped.
     pub shutdown_grace: Duration,
 }
@@ -224,7 +229,9 @@ pub(super) struct ConnLimits {
 impl ConnLimits {
     pub(super) const DEFAULT: Self = Self {
         max_connections: HTTP_MAX_CONNECTIONS,
-        header_read_timeout: Duration::from_secs(30),
+        // Above the 5 s export interval of the OpenTelemetry batch span
+        // processor, so a steady exporter keeps its connection.
+        idle_timeout: Duration::from_secs(15),
         max_lifetime: Duration::from_mins(2),
         shutdown_grace: Duration::from_secs(10),
     };
@@ -262,8 +269,11 @@ pub(super) async fn serve_http(
             }
         };
 
-        let Ok(permit) = semaphore.clone().acquire_owned().await else {
-            break; // semaphore closed
+        // Refuse rather than wait: a peer holding every slot must not
+        // stall the accept of the next connection.
+        let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+            tracing::debug!("HTTP connection from {remote_addr} refused, pool full");
+            continue;
         };
         let acceptor = tls_acceptor.clone();
         let app = app.clone();
@@ -296,16 +306,15 @@ async fn serve_connection<I>(
 {
     use tower::ServiceExt;
 
-    // Signalled on every request, so the first-request deadline below
-    // knows the peer spoke. `notify_one` stores a permit, so no race.
-    let request_seen = Arc::new(tokio::sync::Notify::new());
-    let seen = Arc::clone(&request_seen);
+    let activity = Arc::new(Activity::default());
+    let seen = Arc::clone(&activity);
     // Bridge axum (tower) router to hyper service: convert
     // Incoming body to axum::body::Body, then oneshot the router.
     let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-        seen.notify_one();
+        let in_flight = InFlight::start(&seen);
         let app = app.clone();
         async move {
+            let _in_flight = in_flight;
             let (parts, body) = req.into_parts();
             let req = hyper::Request::from_parts(parts, axum::body::Body::new(body));
             Ok::<_, std::convert::Infallible>(
@@ -321,7 +330,7 @@ async fn serve_connection<I>(
     builder
         .http1()
         .timer(hyper_util::rt::TokioTimer::new())
-        .header_read_timeout(limits.header_read_timeout);
+        .header_read_timeout(limits.idle_timeout);
     builder
         .http2()
         .timer(hyper_util::rt::TokioTimer::new())
@@ -331,25 +340,55 @@ async fn serve_connection<I>(
     let mut conn = std::pin::pin!(conn);
     let deadline = tokio::time::Instant::now() + limits.max_lifetime;
 
-    // The protocol sniffing before the first request has no timer of its
-    // own: a silent peer is dropped here.
-    tokio::select! {
-        res = conn.as_mut() => {
-            log_conn_result(res, remote_addr);
-            return;
-        }
-        () = request_seen.notified() => {}
-        () = tokio::time::sleep(limits.header_read_timeout) => {
-            tracing::debug!("HTTP connection from {remote_addr} sent no request in time");
-            return;
+    // The protocol sniffing before the first request and an idle HTTP/2
+    // connection answering pings have no timer in hyper: both end here.
+    loop {
+        tokio::select! {
+            res = conn.as_mut() => {
+                log_conn_result(res, remote_addr);
+                return;
+            }
+            () = activity.request_seen.notified() => {}
+            () = tokio::time::sleep(limits.idle_timeout) => {
+                if activity.in_flight.load(Ordering::Acquire) == 0 {
+                    tracing::debug!("HTTP connection from {remote_addr} idle, closing");
+                    break;
+                }
+            }
+            () = tokio::time::sleep_until(deadline) => {
+                tracing::debug!("HTTP connection from {remote_addr} reached its lifetime");
+                break;
+            }
         }
     }
-    if let Ok(res) = tokio::time::timeout_at(deadline, conn.as_mut()).await {
-        log_conn_result(res, remote_addr);
-    } else {
-        tracing::debug!("HTTP connection from {remote_addr} reached its lifetime");
-        conn.as_mut().graceful_shutdown();
-        let _ = tokio::time::timeout(limits.shutdown_grace, conn).await;
+    conn.as_mut().graceful_shutdown();
+    let _ = tokio::time::timeout(limits.shutdown_grace, conn).await;
+}
+
+/// Request activity of one connection, read by its idle deadline.
+#[derive(Default)]
+struct Activity {
+    /// Signalled on every request. `notify_one` stores a permit, so a
+    /// request that lands between two waits is not missed.
+    request_seen: tokio::sync::Notify,
+    /// Requests whose handler is still running.
+    in_flight: AtomicUsize,
+}
+
+/// Counts one request in flight until its handler returns.
+struct InFlight(Arc<Activity>);
+
+impl InFlight {
+    fn start(activity: &Arc<Activity>) -> Self {
+        activity.in_flight.fetch_add(1, Ordering::AcqRel);
+        activity.request_seen.notify_one();
+        Self(Arc::clone(activity))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -461,7 +500,7 @@ mod tests {
         let app = axum::Router::new().route("/health", axum::routing::get(|| async { "ok" }));
         let limits = ConnLimits {
             max_connections: 2,
-            header_read_timeout: Duration::from_millis(300),
+            idle_timeout: Duration::from_millis(300),
             max_lifetime: Duration::from_mins(1),
             shutdown_grace: Duration::from_secs(1),
         };
@@ -472,12 +511,86 @@ mod tests {
         for _ in 0..limits.max_connections {
             silent.push(tls_connect(&connector, addr).await);
         }
+        tokio::time::sleep(Duration::from_millis(800)).await;
         let response =
             tokio::time::timeout(Duration::from_secs(5), https_get_health(&connector, addr))
                 .await
-                .expect("a silent peer must lose its slot after the header-read timeout");
+                .expect("a silent peer must lose its slot after the idle timeout");
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         drop(silent);
+    }
+
+    async fn plain_get_health(addr: std::net::SocketAddr) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let _ = tcp
+            .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await;
+        let mut out = Vec::new();
+        let _ = tcp.read_to_end(&mut out).await;
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    #[tokio::test]
+    async fn full_pool_refuses_at_once_and_serves_again_once_a_slot_frees() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = axum::Router::new().route("/health", axum::routing::get(|| async { "ok" }));
+        let limits = ConnLimits {
+            max_connections: 1,
+            idle_timeout: Duration::from_mins(1),
+            max_lifetime: Duration::from_mins(1),
+            shutdown_grace: Duration::from_secs(1),
+        };
+        tokio::spawn(serve_http(listener, app, None, limits));
+
+        let holder = tokio::net::TcpStream::connect(addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Refused, not queued: the answer comes back at once, empty.
+        let refused = tokio::time::timeout(Duration::from_secs(2), plain_get_health(addr))
+            .await
+            .expect("a connection past the cap must be closed at once");
+        assert!(refused.is_empty(), "{refused}");
+
+        drop(holder);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let served = tokio::time::timeout(Duration::from_secs(2), plain_get_health(addr))
+            .await
+            .expect("a freed slot must serve the next connection");
+        assert!(served.starts_with("HTTP/1.1 200"), "{served}");
+    }
+
+    #[tokio::test]
+    async fn idle_http2_connection_answering_pings_is_closed() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = axum::Router::new().route("/health", axum::routing::get(|| async { "ok" }));
+        let limits = ConnLimits {
+            max_connections: 4,
+            idle_timeout: Duration::from_millis(300),
+            max_lifetime: Duration::from_mins(1),
+            shutdown_grace: Duration::from_millis(200),
+        };
+        tokio::spawn(serve_http(listener, app, None, limits));
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut sender, conn) = hyper::client::conn::http2::handshake(
+            hyper_util::rt::TokioExecutor::new(),
+            hyper_util::rt::TokioIo::new(tcp),
+        )
+        .await
+        .unwrap();
+        let conn = tokio::spawn(conn);
+        let req = hyper::Request::get(format!("http://{addr}/health"))
+            .body(http_body_util::Empty::<bytes::Bytes>::new())
+            .unwrap();
+        assert_eq!(sender.send_request(req).await.unwrap().status(), 200);
+        // Idle after one request: the server must end the connection.
+        tokio::time::timeout(Duration::from_secs(5), conn)
+            .await
+            .expect("an idle HTTP/2 connection must be closed by the server")
+            .unwrap()
+            .ok();
     }
 
     #[tokio::test]
@@ -490,7 +603,7 @@ mod tests {
             axum::Router::new().route("/big", axum::routing::get(|| async { vec![b'x'; BODY] }));
         let limits = ConnLimits {
             max_connections: 4,
-            header_read_timeout: Duration::from_secs(5),
+            idle_timeout: Duration::from_secs(5),
             max_lifetime: Duration::from_millis(300),
             shutdown_grace: Duration::from_millis(200),
         };

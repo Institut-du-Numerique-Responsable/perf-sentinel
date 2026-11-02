@@ -71,15 +71,15 @@ writes (acks) and the official report export to architects or DevOps, see
 - For Kubernetes or load-balancer probes, prefer `GET /health` over
   `GET /api/status`: `/health` is always on, holds no locks and stays
   responsive under any ingestion load.
-- The HTTP port serves at most 512 connections at once, plain or TLS.
-  A connection that sends no request within 30 s is closed, so is an
-  HTTP/1 connection idle for 30 s between requests, and every
-  connection is closed after 2 minutes (after its in-flight request,
-  with a 10 s grace). Exporters reconnect on their own.
+- The HTTP port serves at most 512 connections at once, plain or TLS,
+  and closes a connection past that cap at once. A connection with no
+  request in flight for 15 s (before its first request or between two)
+  is closed, and every connection is closed after 2 minutes (after its
+  in-flight request, with a 10 s grace). Exporters reconnect on their own.
 - `/api/findings`, `/api/detections`, `/api/correlations` and
   `/api/export/report` share a pool of 8 responses in flight. A
-  response counts until the client has read its body, and a ninth
-  caller gets `503` until one is done.
+  response counts until the client has read its body, for 30 s at most,
+  and a ninth caller gets `503` until one is done.
 - The findings **ring buffer** (a fixed-size circular store that evicts oldest entries when full) is bounded by
   `[daemon] max_retained_findings` (default `10000`). Older findings are
   evicted FIFO.
