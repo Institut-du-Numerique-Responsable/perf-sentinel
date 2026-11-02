@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-02
+
 ### Security
 
 - The daemon's HTTP listener, plain or TLS, now runs one accept loop with hyper timers: a 15 s header read and idle deadline, HTTP/2 keep-alive pings, a 2 min maximum connection lifetime and a cap of 512 connections, with a connection over the cap closed at once. 128 silent TLS peers could previously lock every client out of the HTTPS listener.
