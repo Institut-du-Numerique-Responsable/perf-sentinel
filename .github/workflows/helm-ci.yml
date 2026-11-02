@@ -80,8 +80,10 @@ jobs:
       # kubeconform is not a Rust crate.
       - name: Install kubeconform
         run: |
+          # Pinned SHA-256: a version bump must update the hash too.
           curl -fsSL -o /tmp/kubeconform.tgz \
             https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  /tmp/kubeconform.tgz" | sha256sum --check
           tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
           sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
           kubeconform -v
@@ -110,8 +112,10 @@ jobs:
 
       - name: Install kubeconform
         run: |
+          # Pinned SHA-256: a version bump must update the hash too.
           curl -fsSL -o /tmp/kubeconform.tgz \
             https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  /tmp/kubeconform.tgz" | sha256sum --check
           tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
           sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
           kubeconform -v
@@ -298,8 +302,10 @@ jobs:
       # kind as a direct binary download, same rationale as kubeconform above.
       - name: Install kind
         run: |
+          # Pinned SHA-256: a version bump must update the hash too.
           curl -fsSL -o /tmp/kind \
             https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64
+          echo "50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54  /tmp/kind" | sha256sum --check
           sudo install -m 0755 /tmp/kind /usr/local/bin/kind
           kind version
 

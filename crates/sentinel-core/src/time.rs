@@ -325,7 +325,11 @@ fn parse_fractional_seconds(time_part: &str) -> Result<(&str, u64), String> {
     let frac = &time_part[dot_pos + 1..];
     // 1 digit is tenths, 2 hundredths, 3 ms. Digits past the third are truncated.
     let digits = frac.len().min(3);
-    let ms: u64 = frac[..digits]
+    // get() + ASCII check: frac is untrusted and a byte cut may land inside a multibyte char.
+    let ms: u64 = frac
+        .get(..digits)
+        .filter(|head| head.bytes().all(|b| b.is_ascii_digit()))
+        .ok_or_else(|| "invalid fractional seconds".to_string())?
         .parse::<u64>()
         .map_err(|_| "invalid fractional seconds".to_string())?;
     let normalized = ms * 10u64.pow(3 - digits as u32);
@@ -546,6 +550,13 @@ mod tests {
     fn parse_iso8601_without_fractional_seconds() {
         let ms = parse_iso8601_utc_to_ms("2025-07-10T14:32:01Z").unwrap();
         assert_eq!(ms % 1000, 0);
+    }
+
+    #[test]
+    fn parse_iso8601_rejects_non_ascii_fraction() {
+        assert!(parse_iso8601_utc_to_ms("2025-07-10T14:32:09.1\u{20ac}Z").is_err());
+        assert!(parse_iso8601_utc_to_ms("2025-07-10T14:32:09.\u{20ac}Z").is_err());
+        assert!(parse_iso8601_utc_to_ms("2025-07-10T14:32:09.+5Z").is_err());
     }
 
     #[test]

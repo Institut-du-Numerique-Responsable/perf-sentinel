@@ -4,6 +4,29 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-02
+
+### Security
+
+- The daemon's HTTP listener, plain or TLS, now runs one accept loop with hyper timers: a 15 s header read and idle deadline, HTTP/2 keep-alive pings, a 2 min maximum connection lifetime and a cap of 512 connections, with a connection over the cap closed at once. 128 silent TLS peers could previously lock every client out of the HTTPS listener.
+- `GET /api/findings`, `/api/detections`, `/api/correlations` and `/api/export/report` share a pool of 8 large-read permits held until the body is sent, and a body not drained within 30 s is cut. A caller over the pool gets 503. Clients that never read a response could previously pin the serialized report in memory.
+- New `[daemon] allowed_hosts` list. On a loopback bind the daemon answers 421 to a Host outside `localhost`, IP literals and that list, which closes DNS rebinding from a web page. On another bind the check applies once the list is set.
+- `GET /api/findings?include_acked=true` now requires the ack key or `read_api_key` when an ack key is set, like `GET /api/acks`.
+- OTLP exports are counted before decoding: at most 100,000 spans and `max(max_payload_size / 4, 100,000)` nested elements per request, depth 32. An oversized export gets 413 over HTTP and `OUT_OF_RANGE` over gRPC, counted as `perf_sentinel_otlp_rejected_total{reason="too_many_spans"}`.
+- The daemon refuses to start when the JSON socket path is occupied by something other than its own stale socket, or cannot be bound, instead of running without it.
+- `capture` opens its output owner-only (0600) and refuses a symlink or a file owned by another user.
+- `verify-hash --verify-binary` requires the file's SHA-256 to equal the report's signed `integrity.binary_hash` before it credits `gh attestation verify`. A missing `binary_hash` now fails.
+- A non-ASCII fractional second in a native JSON timestamp, or an out-of-range MAVIR date label, returns an error instead of aborting the process.
+- The daily disclosure rollup keeps at most 1024 endpoints per service, so `endpoints_observed` becomes a lower bound past that.
+- The HTML report escapes every `<` in its embedded JSON, so a span string such as `<!--<script>` can no longer stop the dashboard script.
+- CLI diagnostics (`explain`, ingest and report parse errors, `calibrate`) strip terminal control sequences from echoed input.
+- `tempo` refuses a service name containing whitespace, control characters, `=`, `"` or `\`, which Tempo would read as extra logfmt filter terms.
+- The dataset refresh sends its GitHub token to `api.github.com` only, refuses unsafe remote names before generating Rust, and no longer dispatches CI on the generated branch. The Helm release and Helm CI workflows verify pinned SHA-256 checksums of kubeconform, crane, oras and kind.
+
+### Fixed
+
+- The daemon no longer hangs at startup when its window archive or incident archive is a FIFO or a device, such as `/dev/stdout` in a container. It used to read the path back to resume the hash chain and the incident ring, a read that never returns on a pipe, so nothing was ingested. A non-regular file now starts from the chain seed and an empty ring.
+
 ## [0.40.0] - 2026-10-31
 
 ### Added

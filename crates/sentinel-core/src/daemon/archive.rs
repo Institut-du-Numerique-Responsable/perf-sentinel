@@ -129,6 +129,13 @@ fn refuse_symlink(path: &Path) -> Result<(), ArchiveError> {
     Ok(())
 }
 
+/// Whether `path` is a regular file, without following it. A FIFO, a
+/// socket or a device (`/dev/stdout` in a container) is not, and reading
+/// one back at startup would block.
+pub(super) fn is_regular_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file())
+}
+
 /// Whether `path` is a symlink, without following it. Shared with the
 /// incident appender, which refuses the same thing under its own error.
 pub(super) fn is_symlink(path: &Path) -> bool {
@@ -158,7 +165,7 @@ pub(super) fn no_follow(options: &mut OpenOptions) {
 /// placeholder, a `compact /exe` file or a dedup stub, all refused: a
 /// handle opened past the owning filter must not be written through.
 /// Always false off Windows, where the open already failed.
-pub(super) fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
+pub(crate) fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt as _;
@@ -215,7 +222,7 @@ fn probe_rollup_dir(archive_path: &Path) -> Result<(), ArchiveError> {
 
 /// Owner-only, no-follow, truncating open for the rollup snapshot's
 /// temporary file.
-pub(super) fn open_truncate(path: &Path) -> std::io::Result<File> {
+pub(crate) fn open_truncate(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(true);
     #[cfg(unix)]
@@ -244,7 +251,7 @@ pub(super) fn open_truncate(path: &Path) -> std::io::Result<File> {
 ///
 /// The mode could not be read, or the file is not ours to tighten.
 #[cfg(unix)]
-pub(super) fn tighten_to_owner_only(file: &File, what: &str) -> std::io::Result<()> {
+pub(crate) fn tighten_to_owner_only(file: &File, what: &str) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     let mode = file.metadata()?.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
@@ -420,9 +427,13 @@ fn serialize_envelope(
 
 /// Chain head already on disk as `(prev, next_seq)`, so a restarted
 /// daemon continues instead of opening a break at every restart. Falls
-/// back to the seed on an empty, unreadable or pre-chain file.
+/// back to the seed on an empty, unreadable or pre-chain file, and on a
+/// FIFO or device, whose read would block startup forever.
 fn resume_chain(path: &Path) -> (String, u64) {
     let seed = || (ARCHIVE_CHAIN_SEED.to_string(), 0);
+    if !is_regular_file(path) {
+        return seed();
+    }
     let Ok(file) = File::open(path) else {
         return seed();
     };
@@ -671,6 +682,27 @@ mod tests {
             lines[0]["hash"].as_str().unwrap(),
             "the line written after the restart must reference the last one on disk"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_archive_starts_from_the_seed_instead_of_blocking() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("archive.fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        let probe = path.clone();
+        std::thread::spawn(move || tx.send(resume_chain(&probe)).unwrap());
+        let resumed = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("resume_chain blocked on a FIFO");
+        assert_eq!(resumed, (ARCHIVE_CHAIN_SEED.to_string(), 0));
     }
 
     #[test]

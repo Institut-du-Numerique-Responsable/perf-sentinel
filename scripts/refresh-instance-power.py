@@ -9,6 +9,7 @@ CSVs stay in MANUAL_INSTANCE_ROWS (table.rs) and are not touched.
 
 Usage:
     python3 scripts/refresh-instance-power.py [git-ref]
+    python3 scripts/refresh-instance-power.py --self-test   # offline checks
 
 git-ref defaults to main. Pass a commit SHA for a reproducible run.
 Prints changed rows on stdout and warnings on stderr. Exits 0 even when
@@ -23,6 +24,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -220,6 +222,10 @@ SCALEWAY_CPU_ARCH = {
 # Scaleway mixes ratios inside one range (POP2 spans 2, 4 and 8 GiB/vCPU).
 SCALEWAY_DRAM_GIB_PER_VCPU = 8.0
 
+# offer_id lands inside a Rust string literal in the generated file, so
+# anything beyond this shape (a quote, a newline) fails the run.
+SCALEWAY_OFFER_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
 PROVIDER_BANNERS = {
     "t3 (Nitro, Cascade Lake, burstable)":
         "AWS instances (vCPU * per_vCPU_coefficient from CCF {date}\n"
@@ -273,9 +279,11 @@ pub(super) static GENERATED_INSTANCE_ROWS: &[(&str, f64, f64)] = &[
 def request(url: str) -> urllib.request.Request:
     headers = {"User-Agent": "perf-sentinel-refresh"}
     # Unauthenticated api.github.com calls from CI runner IPs hit the
-    # shared 60/hr rate limit. Use the workflow token when present.
+    # shared 60/hr rate limit. Use the workflow token when present, on
+    # that host only: it is a repository write token, and the other hosts
+    # (raw.githubusercontent.com, api.scaleway.com) are read anonymously.
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if token:
+    if token and urllib.parse.urlsplit(url).hostname == "api.github.com":
         headers["Authorization"] = f"Bearer {token}"
     return urllib.request.Request(url, headers=headers)
 
@@ -347,6 +355,8 @@ def fetch_scaleway() -> "list[tuple[str, int, tuple[str, str], bool]]":
             vcpu = (cpu.get("virtual") or {}).get("count")
             if not arch or not vcpu:
                 continue
+            if not SCALEWAY_OFFER_ID.fullmatch(offer_id):
+                raise ValueError(f"Scaleway offer_id {offer_id!r} is not a plain identifier")
             gib_per_vcpu = ((hardware.get("ram") or {}).get("size") or 0) / 1024**3 / vcpu
             offers[offer_id] = (
                 offer_id, vcpu, arch, gib_per_vcpu >= SCALEWAY_DRAM_GIB_PER_VCPU
@@ -462,5 +472,43 @@ def main() -> None:
     print(f"wrote {TARGET.relative_to(REPO_ROOT)}")
 
 
+def fake_catalog(offer_id: str) -> dict:
+    """One eligible offer, in the shape of the Product Catalog."""
+    return {"total_count": 1, "products": [{
+        "product_category": "Instance", "status": "general_availability",
+        "properties": {
+            "instance": {"offer_id": offer_id},
+            "hardware": {"cpu": {"type": "AMD EPYC 7281", "virtual": {"count": 2}},
+                         "ram": {"size": 4 * 1024**3}},
+        },
+    }]}
+
+
+def self_test() -> None:
+    global http_json
+    real_http_json = http_json
+    http_json = lambda url: fake_catalog("DEV1-S")
+    assert fetch_scaleway() == [("DEV1-S", 2, ("aws", "EPYC 1st Gen"), False)]
+    for bad in ['X", 0.0, 0.0), ]; fn f() {} //', "DEV1-S\n#[test]", "-S"]:
+        http_json = lambda url, bad=bad: fake_catalog(bad)
+        try:
+            fetch_scaleway()
+        except ValueError:
+            continue
+        raise AssertionError(f"offer_id {bad!r} was accepted")
+    http_json = real_http_json
+
+    os.environ["GH_TOKEN"] = "self-test-token"
+    assert request(SCALEWAY_CATALOG).get_header("Authorization") is None
+    assert request(f"https://raw.githubusercontent.com/{CCF_REPO}/x/output/a.csv").get_header("Authorization") is None
+    # A look-alike host must not match either.
+    assert request("https://api.github.com.example.net/repos").get_header("Authorization") is None
+    assert request(f"https://api.github.com/repos/{CCF_REPO}/commits").get_header("Authorization") == "Bearer self-test-token"
+    print("self-test ok")
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--self-test"]:
+        self_test()
+        sys.exit(0)
     main()

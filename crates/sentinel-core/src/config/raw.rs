@@ -349,6 +349,7 @@ pub(super) struct DaemonSection {
     api_enabled: Option<bool>,
     read_api_key: Option<String>,
     require_read_key: Option<bool>,
+    allowed_hosts: Option<Vec<String>>,
     correlation: CorrelationSection,
     ack: DaemonAckSection,
     incidents: DaemonIncidentsSection,
@@ -726,6 +727,7 @@ impl From<RawConfig> for Config {
                     .daemon
                     .require_read_key
                     .unwrap_or(daemon_defaults.require_read_key),
+                allowed_hosts: raw.daemon.allowed_hosts.unwrap_or_default(),
                 tls: DaemonTlsConfig {
                     cert_path: raw.daemon.tls_cert_path,
                     key_path: raw.daemon.tls_key_path,

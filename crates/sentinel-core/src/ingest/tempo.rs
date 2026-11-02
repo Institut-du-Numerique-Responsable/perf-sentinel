@@ -37,6 +37,13 @@ pub enum TempoError {
     #[error("invalid search window: {0}")]
     InvalidWindow(#[from] WindowError),
 
+    /// Tempo parses the `tags` value as logfmt, so whitespace, `=`, quotes or
+    /// backslashes in a service name would add filter terms of their own.
+    #[error(
+        "invalid service name {0:?}: whitespace, control characters, '=', '\"' and '\\' are not allowed"
+    )]
+    InvalidServiceName(String),
+
     #[error("invalid auth header: {0}")]
     InvalidAuthHeader(String),
 
@@ -265,12 +272,23 @@ async fn fetch_json(
 // Core API functions
 // ---------------------------------------------------------------
 
+/// Refuses a service name that would add logfmt terms to Tempo's `tags` filter.
+fn check_logfmt_service(service: &str) -> Result<(), TempoError> {
+    let unsafe_char =
+        |c: char| c.is_whitespace() || c.is_control() || matches!(c, '=' | '"' | '\\');
+    if service.chars().any(unsafe_char) {
+        return Err(TempoError::InvalidServiceName(service.to_string()));
+    }
+    Ok(())
+}
+
 /// Search Tempo for trace IDs matching a service name within a search window.
 ///
 /// # Errors
 ///
-/// Returns `TempoError::InvalidWindow` before any request is issued when
-/// the window is empty or inverted, then `TempoError` on HTTP errors,
+/// Returns `TempoError::InvalidServiceName` or `TempoError::InvalidWindow`
+/// before any request is issued when the service name carries logfmt
+/// syntax or the window is empty or inverted, then `TempoError` on HTTP errors,
 /// timeouts, or JSON parse failures.
 pub async fn search_traces(
     client: &HttpClient,
@@ -288,6 +306,7 @@ pub async fn search_traces(
     let start = start_ms / 1000;
     let end = end_ms.div_ceil(1000);
 
+    check_logfmt_service(service)?;
     let encoded_service = percent_encode_query_value(service);
     let uri_str = format!(
         "{endpoint}/api/search?tags=service.name%3D{encoded_service}&start={start}&end={end}&limit={limit}"

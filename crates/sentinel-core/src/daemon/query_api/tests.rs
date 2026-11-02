@@ -1501,6 +1501,84 @@ async fn handle_export_report_returns_200_with_empty_envelope_on_cold_start() {
 }
 
 #[tokio::test]
+async fn large_reads_hold_their_permit_until_the_body_is_dropped() {
+    let app = query_api_router(make_state());
+    let get = |uri: &'static str| {
+        let app = app.clone();
+        async move {
+            app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        }
+    };
+    // Responses whose body nobody reads, as from a peer that never drains.
+    let mut unread = Vec::new();
+    for _ in 0..MAX_LARGE_READS_IN_FLIGHT {
+        let resp = get("/api/export/report").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        unread.push(resp);
+    }
+    // The pool is shared across the heavy routes and answers rather than queues.
+    for uri in [
+        "/api/export/report",
+        "/api/findings",
+        "/api/correlations",
+        "/api/detections",
+    ] {
+        assert_eq!(
+            get(uri).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{uri}"
+        );
+    }
+    assert_eq!(get("/api/status").await.status(), StatusCode::OK);
+
+    drop(unread.pop());
+    let resp = get("/api/export/report").await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    serde_json::from_slice::<Report>(&body).expect("a sliced body must still parse");
+}
+
+#[tokio::test(start_paused = true)]
+async fn large_read_body_is_cut_at_the_drain_deadline_releasing_its_permit() {
+    use http_body_util::BodyExt;
+    let app = query_api_router(make_state());
+    let get = || {
+        let app = app.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/api/export/report")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let mut unread = Vec::new();
+    for _ in 0..MAX_LARGE_READS_IN_FLIGHT {
+        unread.push(get().await.into_body());
+    }
+    assert_eq!(get().await.status(), StatusCode::SERVICE_UNAVAILABLE);
+    tokio::time::sleep(LARGE_READ_DRAIN_DEADLINE + std::time::Duration::from_secs(1)).await;
+    // The first poll past the deadline cuts the body instead of sending it.
+    let mut body = unread.pop().unwrap();
+    let frame = body
+        .frame()
+        .await
+        .expect("a cut body yields an error frame");
+    assert!(frame.is_err(), "past the deadline the body must error");
+    // hyper drops a body that errored: permit and buffer go together.
+    drop(body);
+    assert_eq!(get().await.status(), StatusCode::OK);
+    drop(unread);
+}
+
+#[tokio::test]
 async fn handle_export_report_carries_the_retained_span_trees() {
     // The correlation window has long dropped these spans: without the
     // traces store the exported report would carry findings the
@@ -2697,6 +2775,52 @@ async fn findings_with_include_acked_annotates_daemon_source() {
     let ack = &list[0]["acknowledged_by"];
     assert_eq!(ack["source"], "daemon");
     assert_eq!(ack["by"], "alice");
+}
+
+#[tokio::test]
+async fn include_acked_follows_the_ack_read_gate() {
+    const KEY: &str = "a-long-enough-secret";
+    let (_dir, store) = fresh_ack_store().await;
+    let state = make_state_with_acks(Some(store), HashMap::new(), Some(KEY.to_string())).await;
+    let sig = seed_finding(&state, "order-svc").await;
+    let app = query_api_router(Arc::clone(&state));
+    let ack = keyed(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/findings/{sig}/ack"))
+            .header("Content-Type", "application/json")
+            .header("X-User-Id", "bob")
+            .body(Body::from(r#"{"reason":"private reason"}"#))
+            .unwrap(),
+        Some(KEY),
+    );
+    assert_eq!(status_of(&app, ack).await, StatusCode::CREATED);
+
+    // Without the key, the audit trail stays as closed as GET /api/acks.
+    let annotated = "/api/findings?include_acked=true";
+    assert_eq!(
+        status_of(&app, get_request(annotated)).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        status_of(&app, get_request("/api/acks")).await,
+        StatusCode::UNAUTHORIZED
+    );
+    // The default listing hides acked findings and stays open.
+    assert_eq!(
+        status_of(&app, get_request("/api/findings")).await,
+        StatusCode::OK
+    );
+    let resp = app
+        .oneshot(keyed(get_request(annotated), Some(KEY)))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let list: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(list[0]["acknowledged_by"]["by"], "bob");
 }
 
 #[tokio::test]

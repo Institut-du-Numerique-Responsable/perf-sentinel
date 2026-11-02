@@ -2035,6 +2035,7 @@ fn resolve_source_method(span: &Span, span_index: &HashMap<SpanKey<'_>, &Span>) 
 }
 
 mod receiver;
+mod span_budget;
 
 #[cfg(feature = "daemon")]
 pub use receiver::trace_service;

@@ -139,7 +139,9 @@ impl crate::ingest::otlp::MetricsSink for CaptureMetrics {
         use crate::report::metrics::OtlpRejectReason as Reason;
         let counter = match reason {
             Reason::ChannelFull | Reason::MemoryPressure => &self.backpressure,
-            Reason::UnsupportedMediaType | Reason::ParseError => &self.unusable,
+            Reason::UnsupportedMediaType | Reason::ParseError | Reason::TooManySpans => {
+                &self.unusable
+            }
         };
         counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
@@ -345,6 +347,18 @@ fn output_identity(metadata: &std::fs::Metadata) -> OutputIdentity {
 #[cfg(not(any(unix, windows)))]
 fn output_identity(_metadata: &std::fs::Metadata) -> OutputIdentity {}
 
+/// The file holds raw telemetry: owner-only, no symlink followed, and an
+/// existing file another user owns is refused rather than written into.
+fn open_output(path: &std::path::Path) -> std::io::Result<tokio::fs::File> {
+    let file = crate::daemon::archive::open_truncate(path)?;
+    if crate::daemon::archive::is_reparse_point(&file.metadata()?) {
+        return Err(std::io::Error::other("capture output is a symlink"));
+    }
+    #[cfg(unix)]
+    crate::daemon::archive::tighten_to_owner_only(&file, "capture output")?;
+    Ok(tokio::fs::File::from_std(file))
+}
+
 /// Bind both OTLP ports, create the output directory if it is missing, open
 /// the trace file, and start serving. Everything that can fail up front fails
 /// here, before the caller starts the traffic.
@@ -372,12 +386,10 @@ pub async fn start(cfg: &CaptureConfig) -> Result<Capture, CaptureError> {
                 source,
             })?;
     }
-    let file = tokio::fs::File::create(&cfg.output)
-        .await
-        .map_err(|source| CaptureError::Output {
-            path: cfg.output.clone(),
-            source,
-        })?;
+    let file = open_output(&cfg.output).map_err(|source| CaptureError::Output {
+        path: cfg.output.clone(),
+        source,
+    })?;
     let output_identity =
         output_identity(
             &file
@@ -821,6 +833,36 @@ mod tests {
         let err = start(&cfg).await.unwrap_err();
         assert!(matches!(err, CaptureError::Output { .. }));
         assert!(err.to_string().contains("traces.json"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlinked_output_is_refused_and_a_fresh_one_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, b"keep").unwrap();
+        let link = dir.path().join("link.json");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+        let cfg = |output| CaptureConfig {
+            listen_addr: "127.0.0.1".to_string(),
+            port_grpc: free_port(),
+            port_http: free_port(),
+            output,
+            max_file_bytes: u64::MAX,
+            grace: Duration::from_millis(10),
+        };
+        let Err(err) = start(&cfg(link)).await else {
+            panic!("symlink must be refused");
+        };
+        assert!(matches!(err, CaptureError::Output { .. }), "{err}");
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
+
+        let fresh = dir.path().join("fresh.json");
+        let capture = start(&cfg(fresh.clone())).await.unwrap();
+        let mode = std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        capture.finish().await.unwrap();
     }
 
     #[tokio::test]

@@ -9,6 +9,7 @@ use tonic::{Request, Response, Status, async_trait};
 
 #[cfg(feature = "daemon")]
 use super::source_endpoint_updates;
+use super::span_budget::{self, BudgetError};
 use super::{MetricsSink, convert_otlp_request_counted_with_grouping};
 use crate::event::SpanEvent;
 use crate::report::metrics::OtlpRejectReason;
@@ -231,6 +232,27 @@ impl opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::Tra
 
 // ── HTTP handler (axum) ─────────────────────────────────────────────
 
+/// Decode an OTLP/HTTP body, checking its element budget before prost
+/// materializes a struct per element.
+fn decode_export(
+    body: &[u8],
+    budget: span_budget::Budget,
+) -> Result<ExportTraceServiceRequest, (axum::http::StatusCode, OtlpRejectReason)> {
+    use axum::http::StatusCode;
+    let parse_error = (StatusCode::BAD_REQUEST, OtlpRejectReason::ParseError);
+    match span_budget::check(body, budget) {
+        Ok(()) => {}
+        Err(BudgetError::Exceeded) => {
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                OtlpRejectReason::TooManySpans,
+            ));
+        }
+        Err(BudgetError::Malformed) => return Err(parse_error),
+    }
+    <ExportTraceServiceRequest as prost::Message>::decode(body).map_err(|_| parse_error)
+}
+
 /// State shared by the OTLP HTTP handler.
 ///
 /// Cloned on every request by axum's `State` extractor. The sender and
@@ -241,6 +263,7 @@ struct OtlpHttpState {
     sink: ReceiverSink,
     metrics: Option<Arc<dyn MetricsSink>>,
     grouping_attributes: Option<Arc<[Arc<str>]>>,
+    budget: span_budget::Budget,
 }
 
 /// Build an axum router for OTLP HTTP ingestion.
@@ -368,10 +391,12 @@ fn otlp_http_router_with_sink_and_grouping(
             reject(OtlpRejectReason::UnsupportedMediaType);
             return StatusCode::UNSUPPORTED_MEDIA_TYPE;
         }
-        let Ok(request) = <ExportTraceServiceRequest as prost::Message>::decode(body.as_ref())
-        else {
-            reject(OtlpRejectReason::ParseError);
-            return StatusCode::BAD_REQUEST;
+        let request = match decode_export(body.as_ref(), state.budget) {
+            Ok(request) => request,
+            Err((status, reason)) => {
+                reject(reason);
+                return status;
+            }
         };
         if state
             .sink
@@ -424,6 +449,7 @@ fn otlp_http_router_with_sink_and_grouping(
         sink,
         metrics,
         grouping_attributes,
+        budget: span_budget::Budget::for_payload(max_payload_size),
     };
     let guard_state = state.clone();
     let router = Router::new()
@@ -460,20 +486,160 @@ fn otlp_http_router_with_sink_and_grouping(
 /// Mount an [`OtlpGrpcService`] with the encodings and the decode cap every
 /// gRPC listener shares. Divergence here breaks one transport silently: a
 /// listener without gzip drops every batch from a default Collector. The cap
-/// applies to the decompressed message.
+/// applies to the decompressed message, and the element budget of
+/// [`span_budget`] to it before prost decodes it.
 #[cfg(feature = "daemon")]
 #[must_use]
-pub fn trace_service(
-    service: OtlpGrpcService,
-    max_payload: usize,
-) -> opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer<
-    OtlpGrpcService,
-> {
-    use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
-    TraceServiceServer::new(service)
-        .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
-        .accept_compressed(tonic::codec::CompressionEncoding::Deflate)
-        .max_decoding_message_size(max_payload)
+pub fn trace_service(service: OtlpGrpcService, max_payload: usize) -> grpc_budget::TraceServer {
+    grpc_budget::TraceServer {
+        inner: Arc::new(service),
+        max_payload,
+    }
+}
+
+/// The generated `TraceServiceServer` decodes with a fixed prost codec, so
+/// the element budget cannot run before it. This is the same unary route
+/// with a codec that checks the budget on the decompressed bytes first.
+#[cfg(feature = "daemon")]
+pub mod grpc_budget {
+    use std::sync::Arc;
+
+    use bytes::Buf;
+    use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
+        SERVICE_NAME, TraceService,
+    };
+    use opentelemetry_proto::tonic::collector::trace::v1::{
+        ExportTraceServiceRequest, ExportTraceServiceResponse,
+    };
+    use tonic::codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder};
+    use tonic::codegen::{BoxFuture, StdError, http};
+    use tonic::{Status, codec::CompressionEncoding};
+
+    use super::super::MetricsSink;
+    use super::super::span_budget::{self, BudgetError};
+    use super::{OtlpGrpcService, OtlpRejectReason};
+
+    const EXPORT_PATH: &str = "/opentelemetry.proto.collector.trace.v1.TraceService/Export";
+
+    /// OTLP gRPC `TraceService` route with the element budget.
+    #[derive(Clone)]
+    pub struct TraceServer {
+        pub(super) inner: Arc<OtlpGrpcService>,
+        pub(super) max_payload: usize,
+    }
+
+    impl tonic::server::NamedService for TraceServer {
+        const NAME: &str = SERVICE_NAME;
+    }
+
+    impl<B> tonic::codegen::Service<http::Request<B>> for TraceServer
+    where
+        B: tonic::codegen::Body + Send + 'static,
+        B::Error: Into<StdError> + Send + 'static,
+    {
+        type Response = http::Response<tonic::body::Body>;
+        type Error = std::convert::Infallible;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<B>) -> Self::Future {
+            if req.uri().path() != EXPORT_PATH {
+                return Box::pin(async { Ok(Status::unimplemented("").into_http()) });
+            }
+            let inner = Arc::clone(&self.inner);
+            let max_payload = self.max_payload;
+            Box::pin(async move {
+                let budget = span_budget::Budget::for_payload(max_payload);
+                let codec = BudgetCodec(inner.metrics.clone(), budget);
+                let mut grpc = tonic::server::Grpc::new(codec)
+                    .accept_compressed(CompressionEncoding::Gzip)
+                    .accept_compressed(CompressionEncoding::Deflate)
+                    .max_decoding_message_size(max_payload);
+                Ok(grpc.unary(ExportSvc(inner), req).await)
+            })
+        }
+    }
+
+    struct ExportSvc(Arc<OtlpGrpcService>);
+
+    impl tonic::server::UnaryService<ExportTraceServiceRequest> for ExportSvc {
+        type Response = ExportTraceServiceResponse;
+        type Future = BoxFuture<tonic::Response<Self::Response>, Status>;
+
+        fn call(&mut self, request: tonic::Request<ExportTraceServiceRequest>) -> Self::Future {
+            let inner = Arc::clone(&self.0);
+            Box::pin(async move { inner.export(request).await })
+        }
+    }
+
+    struct BudgetCodec(Option<Arc<dyn MetricsSink>>, span_budget::Budget);
+
+    impl Codec for BudgetCodec {
+        type Encode = ExportTraceServiceResponse;
+        type Decode = ExportTraceServiceRequest;
+        type Encoder = ResponseEncoder;
+        type Decoder = BudgetDecoder;
+
+        fn encoder(&mut self) -> Self::Encoder {
+            ResponseEncoder
+        }
+
+        fn decoder(&mut self) -> Self::Decoder {
+            BudgetDecoder(self.0.clone(), self.1)
+        }
+    }
+
+    struct ResponseEncoder;
+
+    impl Encoder for ResponseEncoder {
+        type Item = ExportTraceServiceResponse;
+        type Error = Status;
+
+        fn encode(&mut self, item: Self::Item, buf: &mut EncodeBuf<'_>) -> Result<(), Status> {
+            prost::Message::encode(&item, buf).map_err(|e| Status::internal(e.to_string()))
+        }
+    }
+
+    struct BudgetDecoder(Option<Arc<dyn MetricsSink>>, span_budget::Budget);
+
+    impl Decoder for BudgetDecoder {
+        type Item = ExportTraceServiceRequest;
+        type Error = Status;
+
+        fn decode(&mut self, buf: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Status> {
+            // Zero-copy: the decode buffer is one contiguous `BytesMut`.
+            let bytes = buf.copy_to_bytes(buf.remaining());
+            let refused = match span_budget::check(&bytes, self.1) {
+                Ok(()) => None,
+                // OUT_OF_RANGE, not tonic's RESOURCE_EXHAUSTED: OTLP
+                // exporters retry the latter, and this request would fail
+                // again every time.
+                Err(BudgetError::Exceeded) => Some((
+                    OtlpRejectReason::TooManySpans,
+                    Status::out_of_range("too many spans or elements in one export request"),
+                )),
+                Err(BudgetError::Malformed) => Some((
+                    OtlpRejectReason::ParseError,
+                    Status::invalid_argument("malformed export request"),
+                )),
+            };
+            if let Some((reason, status)) = refused {
+                if let Some(m) = self.0.as_ref() {
+                    m.record_otlp_reject(reason);
+                }
+                return Err(status);
+            }
+            prost::Message::decode(bytes)
+                .map(Some)
+                .map_err(|e| Status::internal(e.to_string()))
+        }
+    }
 }
 
 /// A tonic server with the resource caps every gRPC listener shares: a

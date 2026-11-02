@@ -10,6 +10,20 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.41.0]
+
+### Changed
+
+- **`appVersion` moves to `0.41.0`.** The daemon image hardens its HTTP
+  listener: a cap of 512 connections, a 15 s idle and header deadline, a
+  2 min connection lifetime and a pool of 8 large reads. It adds a
+  `[daemon] allowed_hosts` list checked on loopback binds, bounds OTLP
+  exports before decoding, and refuses to start when its JSON socket path is
+  squatted. The chart binds `0.0.0.0` without `allowed_hosts`, so the Host
+  check stays off under the chart. See the application `CHANGELOG.md`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.40.0]
 
 ### Changed

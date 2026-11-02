@@ -393,12 +393,13 @@ Never expose Perf Sentinel directly to untrusted networks without at minimum TLS
 
 ### JSON socket hardening
 
-The Unix-domain JSON socket (`[daemon] json_socket`) defends against local-user attacks on a multi-tenant host with two mechanisms:
+The Unix-domain JSON socket (`[daemon] json_socket`) defends against local-user attacks on a multi-tenant host with three mechanisms:
 
-- **Permissions `0o600`** are applied right after `bind()`. Other local users cannot connect to inject events.
-- **Symlink pre-check**: before the daemon unlinks any stale socket file at the configured path, it calls `symlink_metadata()` and refuses to proceed if the path is a symlink. This prevents a local attacker with write access to the socket's parent directory from pointing `json_socket` at a victim file (e.g., `/etc/passwd`) and having the daemon's startup `remove_file()` delete it.
+- **Permissions `0o600`** are applied right after `bind()`. Other local users cannot connect to inject events. Setting the umask before `bind()` would need unsafe code, so the socket carries the default mode for the instant between the two calls.
+- **Ownership pre-check**: before the daemon unlinks a stale socket at the configured path, it calls `symlink_metadata()` and removes the entry only if it is a socket the daemon's own user owns. A symlink, a regular file or another user's socket stops startup. This prevents a local attacker with write access to the socket's parent directory from pointing `json_socket` at a victim file (e.g., `/etc/passwd`) and having the daemon's startup `remove_file()` delete it, or from planting their own socket at the path before the daemon starts.
+- **Fail closed**: an entry the pre-check refuses, a failed `bind()` or a failed `chmod` stops the daemon at startup with `failed to bind JSON socket`, instead of leaving it running without the socket while producers keep writing to whoever holds the path. A missing parent directory is the one exception: the listener is disabled and the daemon starts, the expected case in a `FROM scratch` image with no `/tmp`.
 
-Both defenses only matter when `json_socket` lives in a directory writeable by other local users. If you put the socket in a daemon-owned directory (`/var/run/perf-sentinel/` with `0o700`), the surface is already closed at the filesystem level.
+These defenses only matter when `json_socket` lives in a directory writeable by other local users. If you put the socket in a daemon-owned directory (`/var/run/perf-sentinel/` with `0o700`), the surface is already closed at the filesystem level.
 
 ### JSON socket per-connection payload budget
 

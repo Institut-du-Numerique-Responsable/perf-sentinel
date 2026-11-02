@@ -769,3 +769,4 @@ v0.39.0	5c1d26a	2026-10-30	PASS
 # 3. card-signal (S1-S7) PASS as a regression check. Not run: the cluster
 # scenarios, verify-all-scenarios and validate-findings.
 v0.40.0	46fa190	2026-10-31	PASS
+v0.41.0	ebbfdf8	2026-11-02	PASS

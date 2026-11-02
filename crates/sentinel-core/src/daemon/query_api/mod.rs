@@ -190,16 +190,22 @@ impl EnergyBackendsConfigured {
 
 /// Build the query API router.
 pub fn query_api_router(state: Arc<QueryApiState>) -> Router {
-    let mut router = Router::new()
+    let large_reads = Router::new()
         .route("/api/findings", get(handle_findings))
-        .route("/api/findings/{trace_id}", get(handle_findings_by_trace))
         .route("/api/detections", get(handle_detections))
-        .route("/api/explain/{trace_id}", get(handle_explain))
         .route("/api/correlations", get(handle_correlations))
+        .route("/api/export/report", get(handle_export_report))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::new(tokio::sync::Semaphore::new(MAX_LARGE_READS_IN_FLIGHT)),
+            limit_large_read,
+        ));
+    let mut router = Router::new()
+        .merge(large_reads)
+        .route("/api/findings/{trace_id}", get(handle_findings_by_trace))
+        .route("/api/explain/{trace_id}", get(handle_explain))
         .route("/api/status", get(handle_status))
         .route("/api/config", get(handle_config))
         .route("/api/energy", get(handle_energy))
-        .route("/api/export/report", get(handle_export_report))
         .route(
             "/api/findings/{signature}/ack",
             post(handle_ack).delete(handle_unack),
@@ -261,6 +267,68 @@ async fn require_read_key(
         )
         .into_response()
     }
+}
+
+/// Snapshot responses (findings, detections, correlations, the exported
+/// report) alive at once. Each can weigh several MiB, so the count runs
+/// until the peer has read the body, not until the handler returns.
+pub const MAX_LARGE_READS_IN_FLIGHT: usize = 8;
+
+/// Slice size of a large read body. hyper pulls the next slice only once
+/// the socket drained the previous ones.
+const LARGE_READ_CHUNK: usize = 64 * 1024;
+
+/// Longest a large read may take to drain. Past it the body is cut, which
+/// releases its permit and its buffer together.
+const LARGE_READ_DRAIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Hold one of `MAX_LARGE_READS_IN_FLIGHT` permits while the response
+/// body is sent, answering 503 when none is free.
+///
+/// A permit dropped when the handler returns would not bound bodies a
+/// peer never reads: they stay buffered in hyper. Tied to the body
+/// stream, it is released once the last slice is sent, the connection is
+/// dropped, or the body is cut at `LARGE_READ_DRAIN_DEADLINE`.
+async fn limit_large_read(
+    State(permits): State<Arc<tokio::sync::Semaphore>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Ok(permit) = permits.try_acquire_owned() else {
+        return ErrorResponse::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "too many large reads in flight, retry shortly",
+        )
+        .into_response();
+    };
+    let (mut parts, body) = next.run(req).await.into_parts();
+    // The handlers answer with a buffered JSON body, so this never waits.
+    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let len = bytes.len();
+    parts
+        .headers
+        .insert(axum::http::header::CONTENT_LENGTH, len.into());
+    // The permit and the buffer live in the stream, which errors on the
+    // first poll past the drain deadline: hyper then drops the body, and
+    // both go together. A peer that stops reading altogether is dropped
+    // with its connection by the listener's idle deadline.
+    let deadline = tokio::time::Instant::now() + LARGE_READ_DRAIN_DEADLINE;
+    let slices = (0..len).step_by(LARGE_READ_CHUNK).map(move |start| {
+        let _held = &permit;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "large read not drained in time",
+            ));
+        }
+        Ok(bytes.slice(start..len.min(start + LARGE_READ_CHUNK)))
+    });
+    Response::from_parts(
+        parts,
+        axum::body::Body::from_stream(tokio_stream::iter(slices)),
+    )
 }
 
 // ── Query parameters ──────────────────────────────────────────────
@@ -465,11 +533,21 @@ fn disclosure_archive_status(metrics: &MetricsState) -> Option<DisclosureArchive
 
 async fn handle_findings(
     State(state): State<Arc<QueryApiState>>,
+    headers: HeaderMap,
     Query(params): Query<FindingsParams>,
-) -> Json<Vec<FindingResponse>> {
+) -> Result<Json<Vec<FindingResponse>>, ErrorResponse> {
+    let include_acked = params.include_acked;
+    if include_acked {
+        // The annotation is the ack audit trail (reviewer, reason, expiry):
+        // same gate as `GET /api/acks`, a no-op without an ack key.
+        check_read_auth(
+            &headers,
+            state.ack_api_key.as_deref(),
+            state.daemon_config.read_api_key.as_deref(),
+        )?;
+    }
     // Cap the limit to protect the daemon from expensive responses
     // (large JSON serialization under an unauthenticated loopback API).
-    let include_acked = params.include_acked;
     let filter = FindingsFilter {
         service: non_empty(params.service),
         finding_type: non_empty(params.finding_type),
@@ -525,7 +603,7 @@ async fn handle_findings(
             }
         })
         .collect();
-    Json(result)
+    Ok(Json(result))
 }
 
 /// An empty or blank filter value is an absent one. A Grafana variable

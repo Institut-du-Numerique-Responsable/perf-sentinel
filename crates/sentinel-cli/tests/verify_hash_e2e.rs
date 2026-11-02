@@ -428,3 +428,66 @@ fn the_printed_verify_command_parses() {
     );
     assert!(!stderr.contains("Usage:"), "{stderr}");
 }
+
+/// Run `verify-hash --verify-binary` with a `gh` stub on PATH that accepts
+/// every binary, and return the `binary_attestation` verdict.
+#[cfg(unix)]
+fn verify_binary_with_accepting_gh(binary_hash: Option<String>) -> serde_json::Value {
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir(&bin_dir).unwrap();
+    let gh = bin_dir.join("gh");
+    fs::write(&gh, "#!/bin/sh\necho '[]'\nexit 0\n").unwrap();
+    fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+    let binary = tmp.path().join("perf-sentinel");
+    fs::write(&binary, b"some attested release").unwrap();
+
+    let example = workspace_doc("docs/schemas/examples/example-official-public-G2.json");
+    let mut report: PeriodicReport = serde_json::from_slice(&fs::read(&example).unwrap()).unwrap();
+    report.integrity.binary_hash =
+        binary_hash.map(|h| h.replace("{actual}", &sha256_hex_of(&binary)));
+    report.integrity.content_hash = compute_content_hash(&report).unwrap();
+    let path = tmp.path().join("report.json");
+    fs::write(&path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["verify-hash", "--format", "json", "--report"])
+        .arg(&path)
+        .arg("--verify-binary")
+        .arg(&binary)
+        .env("PATH", &bin_dir)
+        .output()
+        .expect("spawn perf-sentinel verify-hash");
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid JSON output");
+    parsed["verifications"]["binary_attestation"].clone()
+}
+
+#[cfg(unix)]
+fn sha256_hex_of(path: &std::path::Path) -> String {
+    sentinel_core::report::periodic::compute_file_sha256_hex(path).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn verify_binary_refuses_a_file_other_than_the_signed_binary_hash() {
+    let other = format!("sha256:{}", "ab".repeat(32));
+    let verdict = verify_binary_with_accepting_gh(Some(other));
+    assert_eq!(verdict["status"], "fail", "{verdict}");
+    assert!(
+        verdict["detail"]
+            .as_str()
+            .unwrap()
+            .contains("integrity.binary_hash"),
+        "{verdict}"
+    );
+    let verdict = verify_binary_with_accepting_gh(None);
+    assert_eq!(verdict["status"], "fail", "{verdict}");
+}
+
+#[cfg(unix)]
+#[test]
+fn verify_binary_credits_gh_once_the_file_is_the_signed_binary() {
+    let verdict = verify_binary_with_accepting_gh(Some("sha256:{actual}".to_string()));
+    assert_eq!(verdict["status"], "ok", "{verdict}");
+}

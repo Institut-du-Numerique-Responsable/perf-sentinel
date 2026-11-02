@@ -33,7 +33,7 @@ use super::DaemonError;
 use super::ack::{self, AckStore};
 use super::findings_store;
 use super::query_api;
-use super::tls::{build_tls_acceptor, load_tls_pem, serve_https, tls_tcp_incoming};
+use super::tls::{ConnLimits, build_tls_acceptor, load_tls_pem, serve_http, tls_tcp_incoming};
 
 /// HTTP/2 stream multiplexing cap for the OTLP gRPC listener. Tonic's
 /// defaults are generous (thousands of concurrent streams). On a non-loopback
@@ -134,7 +134,7 @@ pub(super) async fn spawn_listeners(
         detection_ledger,
     );
     let http_handle = spawn_http_listener(http_listener, http_addr, tls_acceptor, http_router);
-    let json_socket_handle = spawn_json_socket_listener(config, tx, over_memory);
+    let json_socket_handle = spawn_json_socket_listener(config, tx, over_memory)?;
 
     Ok((grpc_handle, http_handle, json_socket_handle))
 }
@@ -398,7 +398,7 @@ fn parse_expires_at_end_of_day(value: Option<&str>) -> Option<chrono::DateTime<U
 }
 
 /// Assemble the OTLP HTTP + metrics + optional query API router, with the
-/// request-timeout layer.
+/// request-timeout layer and the `Host` check.
 #[allow(clippy::too_many_arguments)]
 fn build_http_router(
     config: &Config,
@@ -494,14 +494,16 @@ fn build_http_router(
         // never sees a non-empty CORS list at runtime.
         tracing::info!("Daemon query API disabled by config");
     }
-    http_router.layer(
+    let http_router = http_router.layer(
         tower::ServiceBuilder::new()
             .layer(axum::error_handling::HandleErrorLayer::new(|_| async {
                 tracing::debug!("HTTP request timed out");
                 axum::http::StatusCode::REQUEST_TIMEOUT
             }))
             .layer(tower::timeout::TimeoutLayer::new(Duration::from_mins(1))),
-    )
+    );
+    // Outermost, so OTLP, /metrics, /health and the API all sit behind it.
+    super::host_check::guard(http_router, &config.daemon)
 }
 
 /// Build the CORS layer when the operator configured at least one
@@ -659,58 +661,61 @@ fn spawn_http_listener(
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     router: axum::Router,
 ) -> tokio::task::JoinHandle<()> {
-    if let Some(acceptor) = tls_acceptor {
-        tokio::spawn(async move {
+    tokio::spawn(async move {
+        if tls_acceptor.is_some() {
             tracing::info!("OTLP HTTPS listening on {addr}");
-            serve_https(listener, router, acceptor).await;
-        })
-    } else {
-        tokio::spawn(async move {
+        } else {
             tracing::info!("OTLP HTTP listening on {addr}");
-            if let Err(e) = axum::serve(listener, router).await {
-                tracing::error!("HTTP server error: {e}");
-            }
-        })
-    }
+        }
+        serve_http(listener, router, tls_acceptor, ConnLimits::DEFAULT).await;
+    })
 }
 
-/// Spawn the Unix JSON socket listener when the target is Unix. On other
-/// platforms logs a warning and returns `None`.
-// `#[cfg(not(unix))]` branch returns `None`, so the `Option` is required.
-#[allow(clippy::unnecessary_wraps)]
+/// Bind and spawn the Unix JSON socket listener when the target is Unix.
+/// On other platforms logs a warning and returns `None`.
+///
+/// # Errors
+///
+/// The socket could not be bound safely, see `json_socket::bind_json_socket`.
+// `#[cfg(not(unix))]` branch always returns `Ok(None)`.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 // `over_memory` is moved into the spawned task on unix only.
 #[cfg_attr(not(unix), allow(clippy::needless_pass_by_value))]
 fn spawn_json_socket_listener(
     config: &Config,
     tx: mpsc::Sender<super::IngestBatch>,
     over_memory: Arc<std::sync::atomic::AtomicBool>,
-) -> Option<tokio::task::JoinHandle<()>> {
+) -> Result<Option<tokio::task::JoinHandle<()>>, DaemonError> {
     #[cfg(not(unix))]
     let _ = over_memory;
     #[cfg(unix)]
     {
-        let socket_path = config.daemon.json_socket.clone();
+        let socket_path = &config.daemon.json_socket;
+        let Some(listener) =
+            super::json_socket::bind_json_socket(socket_path).map_err(|source| {
+                DaemonError::JsonSocketBind {
+                    path: socket_path.clone(),
+                    source,
+                }
+            })?
+        else {
+            return Ok(None);
+        };
         let max_payload = config.daemon.max_payload_size;
         // Same operator config as the OTLP doors: a span reaching this one
         // must land under the same identity, else the two doors report the
         // same problem twice and never correlate.
         let grouping = grouping_attributes(config);
-        Some(tokio::spawn(async move {
-            super::json_socket::run_json_socket(
-                &socket_path,
-                tx,
-                max_payload,
-                grouping,
-                over_memory,
-            )
-            .await;
-        }))
+        Ok(Some(tokio::spawn(async move {
+            super::json_socket::run_json_socket(listener, tx, max_payload, grouping, over_memory)
+                .await;
+        })))
     }
     #[cfg(not(unix))]
     {
         let _ = (config, tx);
         tracing::warn!("JSON socket ingestion not available on this platform; use OTLP HTTP/gRPC");
-        None
+        Ok(None)
     }
 }
 
@@ -1189,6 +1194,36 @@ mod grpc_compression_tests {
             tonic::Code::ResourceExhausted,
             "expected the decode size limit, got: {status:?}"
         );
+        server.abort();
+    }
+
+    /// Empty spans cost two bytes each on the wire and a full struct once
+    /// decoded: the element budget refuses the flood before prost runs,
+    /// after decompression, while a normal export still goes through.
+    #[tokio::test]
+    async fn grpc_listener_refuses_a_flood_of_empty_spans_before_decoding() {
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+        let (mut client, mut rx, server) =
+            client_and_ingest(CompressionEncoding::Gzip, 4 * 1024 * 1024).await;
+        let flood = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                scope_spans: vec![ScopeSpans {
+                    spans: vec![Span::default(); 100_001],
+                    ..ScopeSpans::default()
+                }],
+                ..ResourceSpans::default()
+            }],
+        };
+        let status = within("export", client.export(flood))
+            .await
+            .expect_err("an export over the element budget must be refused");
+        assert_eq!(status.code(), tonic::Code::OutOfRange, "{status:?}");
+
+        let request: ExportTraceServiceRequest = serde_json::from_str(SAMPLE_EXPORT_JSON).unwrap();
+        within("export", client.export(request))
+            .await
+            .expect("a normal export must still be accepted");
+        assert_eq!(within("ingest", rx.recv()).await.unwrap().events.len(), 1);
         server.abort();
     }
 }

@@ -71,6 +71,21 @@ writes (acks) and the official report export to architects or DevOps, see
 - For Kubernetes or load-balancer probes, prefer `GET /health` over
   `GET /api/status`: `/health` is always on, holds no locks and stays
   responsive under any ingestion load.
+- The HTTP port serves at most 512 connections at once, plain or TLS,
+  and closes a connection past that cap at once. A connection with no
+  request in flight for 15 s (before its first request or between two)
+  is closed, and every connection is closed after 2 minutes (after its
+  in-flight request, with a 10 s grace). Exporters reconnect on their own.
+- `/api/findings`, `/api/detections`, `/api/correlations` and
+  `/api/export/report` share a pool of 8 responses in flight. A
+  response counts until the client has read its body, and a ninth
+  caller gets `503` until one is done. A body still unread after 30 s
+  is cut and its connection closed.
+- On a loopback bind, the HTTP port answers only `Host` names it knows,
+  against DNS rebinding: `localhost`, IP literals and
+  `[daemon] allowed_hosts`. Any other name gets `421`. On another bind
+  the check runs once `allowed_hosts` is set. See
+  [CONFIGURATION.md](CONFIGURATION.md).
 - The findings **ring buffer** (a fixed-size circular store that evicts oldest entries when full) is bounded by
   `[daemon] max_retained_findings` (default `10000`). Older findings are
   evicted FIFO.
@@ -534,7 +549,7 @@ cannot consume the page.
 | `until_ms`      | integer | none    | Upper bound on `stored_at_ms`, in Unix epoch milliseconds, inclusive                                   |
 | `offset`        | integer | `0`     | Folded rows to skip before `limit` applies, the pages before this one                                  |
 | `limit`         | integer | `100`   | Maximum number of entries to return, capped server-side at `1000` (higher values are silently clamped) |
-| `include_acked` | boolean | `false` | Return acknowledged findings too, each annotated with `acknowledged_by`                                |
+| `include_acked` | boolean | `false` | Return acknowledged findings too, each annotated with `acknowledged_by`. With `[daemon.ack] api_key` set, `true` needs that key or `[daemon] read_api_key`, as `GET /api/acks` does, and answers `401` without one |
 
 Unknown parameters are ignored. Malformed values (e.g. `limit=abc`) return
 HTTP 400 with an axum-generated error body. An empty or blank value is
@@ -1543,12 +1558,14 @@ path.
 | `limit` of 0 or above 5000 on `/api/detections`  | 400    | `{"error": "limit must be between 1 and 5000"}`                                                      |
 | `after` not `<day>:<signature>` on `/api/detections` | 400 | `{"error": "after must be <day>:<signature>"}`                                                     |
 | `/api/detections` with `[daemon.detections] enabled = false` | 503 | `{"error": "detection ledger disabled"}`                                                   |
+| 8 responses of `/api/findings`, `/api/detections`, `/api/correlations` or `/api/export/report` still being read | 503 | `{"error": "too many large reads in flight, retry shortly"}` |
 | Unknown path (e.g. `/api/does-not-exist`)        | 404    | empty body                                                                                           |
+| `Host` outside the allow-list (any route)        | 421    | `{"error": "unknown Host, add it to [daemon] allowed_hosts"}`                                        |
 | Missing or wrong key on a gated route            | 401    | `{"error": "missing or invalid X-API-Key or Authorization: Bearer"}`                                 |
 | Method other than GET                            | 405    | axum-generated plain-text error                                                                      |
 
-Apart from that `503` on a disabled detection ledger, the API does not
-emit 5xx on normal operation. A process crash returns
+Apart from the `503` on a disabled detection ledger or a full pool of
+large reads, the API does not emit 5xx on normal operation. A process crash returns
 whatever the TCP stack emits (connection reset).
 
 ## Use cases

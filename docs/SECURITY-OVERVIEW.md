@@ -25,7 +25,7 @@ Perf Sentinel is a single self-hosted binary that analyzes OpenTelemetry traces,
 
 ### Inbound
 
-The engine daemon listens on OTLP gRPC `4317` and OTLP HTTP `4318`. The query API (`/api/*`), `/metrics` and `/health` are served on the same `4318` listener, so a firewall rule or a NetworkPolicy cannot let traces in while keeping the query API closed. A local JSON socket (`/tmp/perf-sentinel.sock` by default) is created with mode `0600`. The `capture` command receives OTLP the same way, on `127.0.0.1` by default. The other commands listen on nothing.
+The engine daemon listens on OTLP gRPC `4317` and OTLP HTTP `4318`. The query API (`/api/*`), `/metrics` and `/health` are served on the same `4318` listener, so a firewall rule or a NetworkPolicy cannot let traces in while keeping the query API closed. A local JSON socket (`/tmp/perf-sentinel.sock` by default) is created with mode `0600`, and the daemon refuses to start when another user's entry already sits at that path. The `capture` command receives OTLP the same way, on `127.0.0.1` by default. The other commands listen on nothing.
 
 The binary binds to `127.0.0.1` by default and logs a warning on any other address. The Helm chart sets `0.0.0.0`, which a pod needs behind its Service, and moves access control to the Service and to the chart's NetworkPolicy, which is off by default.
 

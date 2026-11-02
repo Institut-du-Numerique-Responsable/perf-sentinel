@@ -325,10 +325,12 @@ struct TrimSummary {
 
 /// Inject the CSP, page title and JSON payload into the template.
 ///
-/// Escapes `</` to `<\/` in the JSON payload so a user-controlled
-/// string cannot close the `<script>` block early. `\/` is a permitted
-/// JSON string escape, so round-tripping through `JSON.parse` recovers
-/// the original value. The title is already HTML-escaped by
+/// Escapes every `<` to `\u003c` in the JSON payload, so a user-controlled
+/// string can neither close the `<script>` block early (`</script`) nor
+/// move the tokenizer into the script-data escape states (`<!--<script`)
+/// that keep the real closing tag from ending it. `<` only occurs inside
+/// JSON string values, where `\u003c` is a valid escape, so `JSON.parse`
+/// recovers the original value. The title is already HTML-escaped by
 /// [`derive_page_title`]. The CSP string is built by [`build_csp`] from
 /// a static prefix and the validated daemon URL, so no untrusted bytes
 /// reach the meta tag.
@@ -355,7 +357,7 @@ fn inject(json: &str, title: &str, csp: &str) -> String {
         !csp.contains("{{"),
         "CSP must not contain `{{{{` placeholder bytes, got: {csp}"
     );
-    let safe = json.replace("</", "<\\/");
+    let safe = json.replace('<', "\\u003c");
     // Brand wordmark as raw inline SVG (light + dark variants), substituted
     // into the static <span> in the topbar. Server-side substitution, not a
     // runtime `innerHTML`, so the template keeps its textContent-only XSS

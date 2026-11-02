@@ -691,11 +691,15 @@ fn run_cosign_verify(
 }
 
 fn verify_binary_attestation(report: &PeriodicReport, verify_binary: Option<&Path>) -> Status {
-    // An explicit --verify-binary always runs the check: gh verifies the
-    // binary's own GitHub provenance. When the report records a commit, it is
-    // cross-checked so a validly attested build of another commit cannot pass
-    // as this report's.
+    // An explicit --verify-binary always runs the check. The file must first
+    // be the binary the signed `integrity.binary_hash` names, else gh would
+    // vouch for any attested release. gh then verifies its GitHub provenance,
+    // and a recorded commit is cross-checked on top: `binary_attestation`
+    // sits outside the content hash, so it binds nothing on its own.
     if let Some(binary) = verify_binary {
+        if let Err(status) = check_binary_hash(report, binary) {
+            return status;
+        }
         let expected_commit = report
             .integrity
             .binary_attestation
@@ -714,6 +718,26 @@ fn verify_binary_attestation(report: &PeriodicReport, verify_binary: Option<&Pat
             sanitise_for_terminal(&att.builder_id),
             sanitise_for_terminal(&att.attestation_url),
         )),
+    }
+}
+
+/// Whether `binary` hashes to the report's signed `integrity.binary_hash`.
+fn check_binary_hash(report: &PeriodicReport, binary: &Path) -> Result<(), Status> {
+    let Some(signed) = report.integrity.binary_hash.as_deref() else {
+        return Err(Status::Fail(
+            "report records no integrity.binary_hash to bind --verify-binary to".to_string(),
+        ));
+    };
+    let actual = sentinel_core::report::periodic::compute_file_sha256_hex(binary)
+        .map_err(|e| Status::Fail(format!("cannot hash --verify-binary: {e}")))?;
+    let expected = signed.strip_prefix("sha256:").unwrap_or(signed);
+    if expected.eq_ignore_ascii_case(&actual) {
+        Ok(())
+    } else {
+        Err(Status::Fail(format!(
+            "--verify-binary is sha256:{actual}, but the report's integrity.binary_hash is {}",
+            sanitise_for_terminal(signed)
+        )))
     }
 }
 

@@ -27,6 +27,12 @@ pub const UNATTRIBUTED_SERVICE: &str = "_unattributed";
 /// Overflow is folded into `UNATTRIBUTED_SERVICE`.
 const MAX_SERVICES: usize = 4096;
 
+/// Cardinality cap on distinct endpoints tracked per service in
+/// `ServiceAccumulator.endpoints_seen`. Span senders choose the endpoint,
+/// so the set must not grow with them. Overflow entries are dropped, which
+/// makes the published `endpoints_observed` a lower bound once reached.
+const MAX_ENDPOINTS_PER_SERVICE: usize = 1024;
+
 /// Cardinality cap on distinct `energy_model` strings tracked in
 /// `Builder.energy_source_models`. Overflow entries are silently dropped.
 const MAX_ENERGY_MODELS: usize = 64;
@@ -1367,7 +1373,13 @@ impl PeriodState {
             bucket.total_io_ops = bucket.total_io_ops.saturating_add(acc.total_io_ops);
             bucket.energy_kwh += sanitize_f64(acc.energy_kwh);
             bucket.carbon_kgco2eq += sanitize_f64(acc.carbon_kgco2eq);
-            bucket.endpoints_seen.extend(acc.endpoints_seen);
+            for endpoint in acc.endpoints_seen {
+                insert_capped(
+                    &mut bucket.endpoints_seen,
+                    endpoint,
+                    MAX_ENDPOINTS_PER_SERVICE,
+                );
+            }
             for (pattern, ap) in acc.anti_patterns {
                 if !is_known_pattern(&pattern) {
                     continue;
@@ -2140,7 +2152,11 @@ fn collect_endpoints_seen(
 ) {
     for entry in entries {
         if let Some(bucket) = per_service.get_mut(&entry.service) {
-            bucket.endpoints_seen.insert(entry.endpoint.clone());
+            insert_capped(
+                &mut bucket.endpoints_seen,
+                entry.endpoint.clone(),
+                MAX_ENDPOINTS_PER_SERVICE,
+            );
         }
     }
 }

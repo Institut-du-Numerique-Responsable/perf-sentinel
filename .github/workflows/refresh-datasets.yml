@@ -4,9 +4,11 @@
 # factors and the US EPA calculator. Human in the loop: the
 # scripts regenerate the *_data.rs files and this workflow opens a
 # PR for review. It never pushes to main. PRs created with GITHUB_TOKEN
-# do not trigger `on: pull_request` workflows, so CI is dispatched on
-# the branch explicitly. Plain git + gh (preinstalled) instead of a
-# third-party PR action keeps the supply-chain surface unchanged.
+# do not trigger `on: pull_request` workflows, and this workflow does not
+# dispatch CI either: the generated code comes from remote data and CI
+# runs with secrets, so a maintainer dispatches it after reading the diff.
+# Plain git + gh (preinstalled) instead of a third-party PR action keeps
+# the supply-chain surface unchanged.
 name: refresh-datasets
 
 on:
@@ -27,15 +29,17 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      # gh workflow run (CI dispatch on the PR branch) needs this.
-      actions: write
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
+      # The push step authenticates explicitly, so the write token is not
+      # left in .git/config for the scripts and cargo steps to read.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Skip if a refresh PR is already open
         id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           open_pr="$(gh pr list --state open --search 'refresh embedded datasets in:title' --json number --jq '.[].number')"
           if [ -n "$open_pr" ]; then
@@ -46,6 +50,10 @@ jobs:
       - name: Regenerate datasets
         if: steps.guard.outputs.skip != 'true'
         shell: bash
+        env:
+          # For the api.github.com rate limit only: refresh-instance-power.py
+          # attaches it to that host and no other.
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/refresh-carbon-data.py 2>&1 | tee "$RUNNER_TEMP/diff.md"
           python3 scripts/refresh-instance-power.py 2>&1 | tee -a "$RUNNER_TEMP/diff.md"
@@ -86,6 +94,8 @@ jobs:
 
       - name: Open the refresh PR
         if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Run id makes same-day reruns collision-free (a closed PR
           # leaves its branch behind and a plain push would reject).
@@ -95,12 +105,20 @@ jobs:
           git checkout -b "$branch"
           git add crates/ docs/INSTANCE-TYPES.md docs/FR/INSTANCE-TYPES-FR.md docs/SHARE-CARD.md docs/FR/SHARE-CARD-FR.md
           git commit -m "chore(data): refresh embedded datasets from upstream sources"
-          git push origin "$branch"
+          # The header actions/checkout would have persisted, for this push only.
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ${auth}" push origin "$branch"
           {
             echo "Automated dataset refresh (Ember + CCF coefficients + Base Carbone)."
             echo
             echo '```'
             cat "$RUNNER_TEMP/diff.md"
+            echo '```'
+            echo
+            echo "CI does not start on its own. After reviewing the diff, dispatch it with:"
+            echo
+            echo '```'
+            echo "gh workflow run ci.yml --ref ${branch}"
             echo '```'
             echo
             echo "Review checklist:"
@@ -111,4 +129,3 @@ jobs:
             echo "- [ ] Equivalences: ADEME rows still Valide générique, DESNZ and EPA constants still the latest edition, labels still true, vintages updated in docs/SHARE-CARD.md and FR"
           } > "$RUNNER_TEMP/body.md"
           gh pr create --title "chore(data): refresh embedded datasets" --body-file "$RUNNER_TEMP/body.md" --base main --head "$branch"
-          gh workflow run ci.yml --ref "$branch"

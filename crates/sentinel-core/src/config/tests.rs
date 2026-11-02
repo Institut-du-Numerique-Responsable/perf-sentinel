@@ -5628,6 +5628,26 @@ fn require_read_key_defaults_off_and_needs_a_read_key() {
 }
 
 #[test]
+fn allowed_hosts_defaults_empty_and_takes_bare_host_names() {
+    assert_eq!(Config::default().daemon.allowed_hosts, Vec::<String>::new());
+    let cfg = load_from_str(
+        "[daemon]\nallowed_hosts = [\"perf-sentinel.monitoring.svc\", \"dev.local:4318\"]",
+    )
+    .unwrap();
+    assert_eq!(
+        cfg.daemon.allowed_hosts,
+        ["perf-sentinel.monitoring.svc", "dev.local:4318"]
+    );
+    for bad in ["\"\"", "\"http://dev.local\"", "\"*.svc\"", "\"a b\""] {
+        let msg = format!(
+            "{}",
+            load_from_str(&format!("[daemon]\nallowed_hosts = [{bad}]")).unwrap_err()
+        );
+        assert!(msg.contains("[daemon] allowed_hosts entry"), "{bad}: {msg}");
+    }
+}
+
+#[test]
 #[allow(clippy::field_reassign_with_default)]
 fn require_read_key_makes_the_read_key_a_cors_replay_target() {
     // A lone read key is never compared, so wildcard CORS stays allowed

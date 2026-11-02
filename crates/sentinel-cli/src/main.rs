@@ -65,6 +65,7 @@ use sentinel_core::config::Config;
 use sentinel_core::ingest::IngestSource;
 use sentinel_core::ingest::json::JsonIngest;
 use sentinel_core::pipeline;
+use sentinel_core::text_safety::sanitize_for_terminal;
 use std::io::Read;
 use std::path::PathBuf;
 use tracing::info;
@@ -944,7 +945,10 @@ fn ingest_json_or_exit(
     match ingest.ingest_with_stats(raw) {
         Ok(events_and_stats) => events_and_stats,
         Err(e) => {
-            eprintln!("Error ingesting events: {e}");
+            eprintln!(
+                "Error ingesting events: {}",
+                sanitize_for_terminal(&e.to_string())
+            );
             std::process::exit(EXIT_TOOLING_ERROR);
         }
     }
@@ -1127,7 +1131,10 @@ fn parse_report_json_or_exit(raw: &[u8], source_label: &str) -> sentinel_core::r
     }
     let mut report =
         serde_json::from_slice::<sentinel_core::report::Report>(raw).unwrap_or_else(|e| {
-            eprintln!("Error parsing {source_label} as Report JSON: {e}");
+            eprintln!(
+                "Error parsing {source_label} as Report JSON: {}",
+                sanitize_for_terminal(&e.to_string())
+            );
             std::process::exit(EXIT_TOOLING_ERROR);
         });
     // Pre-0.5.17 baselines have no signature. Fill them in so ack
@@ -1542,7 +1549,10 @@ fn cmd_calibrate(
     let readings = match sentinel_core::calibrate::parse_energy_csv(&energy_content) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error parsing energy CSV: {e}");
+            eprintln!(
+                "Error parsing energy CSV: {}",
+                sanitize_for_terminal(&e.to_string())
+            );
             std::process::exit(EXIT_TOOLING_ERROR);
         }
     };
@@ -1550,7 +1560,10 @@ fn cmd_calibrate(
     let results = match sentinel_core::calibrate::calibrate(&events, &readings) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error during calibration: {e}");
+            eprintln!(
+                "Error during calibration: {}",
+                sanitize_for_terminal(&e.to_string())
+            );
             std::process::exit(EXIT_TOOLING_ERROR);
         }
     };
@@ -1559,7 +1572,7 @@ fn cmd_calibrate(
         .into_iter()
         .chain(sentinel_core::calibrate::shared_series_warnings(&readings))
     {
-        eprintln!("Warning: {warning}");
+        eprintln!("Warning: {}", sanitize_for_terminal(&warning));
     }
 
     let window_secs = {
@@ -1584,7 +1597,10 @@ fn cmd_calibrate(
         let default_uwh = r.default_energy_per_op_kwh * 1e9;
         eprintln!(
             "  {}: {:.1}x default (measured {:.2} \u{00b5}Wh/op vs default {:.2} \u{00b5}Wh/op)",
-            r.service, r.factor, per_op_uwh, default_uwh
+            sanitize_for_terminal(&r.service),
+            r.factor,
+            per_op_uwh,
+            default_uwh
         );
     }
 
@@ -1610,10 +1626,18 @@ fn cmd_calibrate(
 /// recovery hint. `explain` has no quality gate, so a missing trace is a
 /// tooling error, never a threshold breach.
 fn trace_not_found_exit<'a>(trace_id: &str, available: impl Iterator<Item = &'a str>) -> ! {
-    eprintln!("Error: trace ID '{trace_id}' not found");
+    eprintln!(
+        "Error: trace ID '{}' not found",
+        sanitize_for_terminal(trace_id)
+    );
     let ids: Vec<&str> = available.collect();
     let total = ids.len();
-    let shown = ids.iter().take(20).copied().collect::<Vec<_>>().join(", ");
+    let shown = ids
+        .iter()
+        .take(20)
+        .map(|id| sanitize_for_terminal(id))
+        .collect::<Vec<_>>()
+        .join(", ");
     if total > 20 {
         eprintln!("Available trace IDs: {shown} ... and {} more", total - 20);
     } else {
@@ -1647,9 +1671,10 @@ fn cmd_explain(
             Ok(report) => report,
             Err(e) => {
                 eprintln!(
-                    "Error: this looks like a Report JSON but could not be read: {e}\n\
+                    "Error: this looks like a Report JSON but could not be read: {}\n\
                      A report written by a newer perf-sentinel can carry values this \
-                     binary does not know."
+                     binary does not know.",
+                    sanitize_for_terminal(&e.to_string())
                 );
                 std::process::exit(EXIT_TOOLING_ERROR);
             }

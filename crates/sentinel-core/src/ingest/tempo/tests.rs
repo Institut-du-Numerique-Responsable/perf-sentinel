@@ -860,3 +860,25 @@ async fn an_absolute_window_rounds_outwards_to_whole_seconds() {
     assert!(request.contains("&end=1787839201&"), "got: {request}");
     server.await.expect("server join");
 }
+
+#[test]
+fn a_service_name_with_logfmt_syntax_is_refused_before_any_request() {
+    for bad in [
+        "orders-x service.name=payments",
+        "orders\nservice.name=payments",
+        "a=b",
+        "quote\"d",
+        "back\\slash",
+    ] {
+        assert!(
+            matches!(
+                check_logfmt_service(bad),
+                Err(TempoError::InvalidServiceName(_))
+            ),
+            "{bad:?} must be refused"
+        );
+    }
+    for good in ["orders", "order-service.v2", "svc_é"] {
+        assert!(check_logfmt_service(good).is_ok(), "{good:?} must pass");
+    }
+}

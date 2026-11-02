@@ -555,6 +555,10 @@ fn load_archive_tail(
     if super::archive::is_symlink(path) {
         return Err(std::io::Error::other("incident archive path is a symlink"));
     }
+    // A FIFO or a device has nothing to replay, and opening one would block.
+    if path.exists() && !super::archive::is_regular_file(path) {
+        return Ok(Vec::new());
+    }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     super::archive::no_follow(&mut options);
@@ -788,6 +792,29 @@ fn parse_rfc3339_ms(raw: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_incident_archive_loads_nothing_instead_of_blocking() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("incidents.fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            tx.send(load_archive_tail(&path, 10, 1024).unwrap())
+                .unwrap();
+        });
+        let loaded = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the incident load blocked on a FIFO");
+        assert!(loaded.is_empty());
+    }
     use crate::acknowledgments::enrich_with_signatures;
     use crate::detect::{FindingType, Severity};
 
