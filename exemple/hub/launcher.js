@@ -2303,6 +2303,31 @@
     }
 
     /**
+     * The pieces of a long name between its break points: after `.`, `/` or `-`, and between a
+     * lower and an upper case letter, never inside a `{parameter}`, which a line would split.
+     * Joined back they are the name as given.
+     * @param {string} text
+     * @returns {string[]}
+     */
+    function breakParts(text) {
+        const parts = [];
+        let depth = 0;
+        let start = 0;
+        for (let index = 0; index < text.length - 1; index++) {
+            const char = text[index];
+            if (char === '{') depth += 1;
+            else if (char === '}') depth = Math.max(0, depth - 1);
+            const camel = /[a-z]/.test(char) && /[A-Z]/.test(text[index + 1]);
+            if (depth === 0 && ('./-'.indexOf(char) >= 0 || camel)) {
+                parts.push(text.slice(start, index + 1));
+                start = index + 1;
+            }
+        }
+        parts.push(text.slice(start));
+        return parts;
+    }
+
+    /**
      * The API read for a route: the period and the view always, the filters when set.
      * @param {ReturnType<typeof readRecapRoute>} route
      * @returns {string}
@@ -3529,6 +3554,7 @@
         namesService,
         readRecapRoute,
         recapHash,
+        breakParts,
         recapPath,
         recapReportLabel,
         RECAP_REPORTS_COPY,

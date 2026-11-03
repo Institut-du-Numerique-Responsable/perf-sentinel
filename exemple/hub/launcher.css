@@ -416,13 +416,14 @@ a.shell-identity[aria-current="page"] {
 }
 
 /* Only on click. A re-resolution caused by the OS must not animate, or the
-   theme spins by itself at sunset. */
+   theme spins by itself at sunset. It settles on the language pill's ease-out
+   rather than overshooting past the glyph's rest and bouncing back. */
 .shell-theme[data-spin="a"] .shell-theme-glyph svg {
-    animation: psSpinA .44s cubic-bezier(.34, 1.5, .5, 1);
+    animation: psSpinA .44s cubic-bezier(.22, 1, .36, 1);
 }
 
 .shell-theme[data-spin="b"] .shell-theme-glyph svg {
-    animation: psSpinB .44s cubic-bezier(.34, 1.5, .5, 1);
+    animation: psSpinB .44s cubic-bezier(.22, 1, .36, 1);
 }
 
 @keyframes psSpinA {
@@ -982,9 +983,20 @@ a.shell-identity[aria-current="page"] {
     min-width: 820px;
 }
 
+/* Wide enough that four lines show a query's shape, not its first two columns. */
 .findings-template {
     display: block;
+    min-width: 220px;
     max-width: 300px;
+    max-height: calc(4lh + 2px);
+    overflow-y: auto;
+}
+
+/* The last visible line fades while more lies below, and comes back whole at the end. Not under
+   the keyboard focus: the mask would clip the focus ring, and that reader is already scrolling. */
+.findings-template[data-more]:not(:focus-visible) {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.25lh), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 1.25lh), transparent);
 }
 
 /* Underlined, unlike the rest of the product's links: a lone word in a table
@@ -1368,6 +1380,15 @@ a.shell-identity[aria-current="page"] {
 .pill-button:disabled {
     opacity: .55;
     cursor: not-allowed;
+}
+
+/* Busy, not disabled: it keeps the focus while it reads, and does not answer the hover. */
+.pill-button[aria-busy="true"],
+.pill-button[aria-busy="true"]:hover {
+    border-color: var(--btn-bd);
+    background: var(--surface-2);
+    opacity: .55;
+    cursor: progress;
 }
 
 .pill-primary {
@@ -5144,11 +5165,13 @@ a.chip {
     color: var(--text-2);
 }
 
-/* The endpoint stays whole on a phone and breaks inside itself only when it must. */
-.recap-where .code-inline,
-.recap-move li .code-inline {
+/* An endpoint or a signature moves whole to the next line and breaks inside itself only when it is
+   wider than the line: the base rule's nowrap would push it out of its column. */
+.recap-section .code-inline,
+.empty-state .code-inline {
     display: inline-block;
     max-width: 100%;
+    white-space: normal;
     overflow-wrap: anywhere;
 }
 
@@ -5569,9 +5592,18 @@ a.chip {
     margin-top: 12px;
 }
 
+/* start: a grid or column parent would stretch the pill to its whole width. */
+.recap-moves-more,
+.incident-episodes-more {
+    justify-self: start;
+    align-self: start;
+    margin-top: 10px;
+}
+
+/* auto-fit: a lone group takes the width instead of a 300px column beside empty tracks. */
 .recap-moves {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 10px;
 }
 
@@ -5583,17 +5615,49 @@ a.chip {
 
 .recap-move h3 {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
-    margin: 0 0 8px;
+    margin: 0 0 10px;
     font-size: 13px;
     font-weight: 600;
 }
 
-.recap-move h3 .n {
+/* The group's title as a pill, in the colours of .recap-trend for the same move. */
+.recap-move-tag {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    color: var(--text);
+}
+
+.recap-move-tag .n {
     font-family: var(--font-mono);
     font-size: 12px;
-    color: var(--text-3);
+    font-weight: 500;
+    opacity: .8;
+}
+
+.recap-move-tag[data-tone="info"] {
+    background: var(--info-bg);
+    color: var(--info-fg);
+}
+
+.recap-move-tag[data-tone="ok"] {
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+}
+
+.recap-move-tag[data-tone="warn"] {
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+}
+
+.recap-move-tag[data-tone="crit"] {
+    background: var(--crit-bg);
+    color: var(--crit-fg);
 }
 
 .recap-move h3 .sub {
@@ -5603,9 +5667,10 @@ a.chip {
     color: var(--ok-fg);
 }
 
+/* A rule between moves, as between table rows: each reads as one line with its chip. */
 .recap-move ul {
     display: grid;
-    gap: 8px;
+    gap: 0;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -5615,10 +5680,23 @@ a.chip {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 2px 10px;
+    padding: 9px 0;
     align-items: start;
     font-size: 12.5px;
     line-height: 1.45;
     color: var(--text-2);
+}
+
+.recap-move li + li {
+    border-top: 1px solid var(--border);
+}
+
+.recap-move li:first-child {
+    padding-top: 0;
+}
+
+.recap-move li:last-child {
+    padding-bottom: 0;
 }
 
 .recap-move li .who {
@@ -5638,16 +5716,10 @@ a.chip {
     margin-top: 0;
 }
 
+/* The measure of .recap-plain above it, now that a lone group runs the whole width. */
 .recap-move li .plain {
+    max-width: 68ch;
     color: var(--text);
-}
-
-.recap-move[data-tone="crit"] h3 {
-    color: var(--crit-fg);
-}
-
-.recap-move[data-tone="warn"] h3 {
-    color: var(--warn-fg);
 }
 
 @media (max-width: 560px) {

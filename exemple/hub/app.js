@@ -120,6 +120,13 @@
         recap: null,
         recapError: null,
         recapShowAll: false,
+        // The What moved groups shown whole, by their key; the others stop at RECAP_MOVES_FIRST.
+        recapMovesOpen: {},
+        // The group whose whole list is being read with moves=all, and the group whose read failed.
+        recapMovesLoading: null,
+        recapMovesFailed: null,
+        // True for the one render that follows a failed whole read: the alert speaks once.
+        recapMovesAnnounce: false,
         recapRowError: {},
         recapBusy: {},
         recapNaming: null,
@@ -147,6 +154,8 @@
         disclosureBusy: false,
         withdrawOpen: false,
         incidentCorrelations: {},
+        // The incident panels whose episodes list is shown whole, by their cache key.
+        incidentCorrelationsAll: {},
         // A trace an episode handed to New analysis, with the pair's other one.
         traceHandoff: null,
         // The ack page: the finding its link names, the form, and what the last
@@ -755,6 +764,9 @@
         // Same for the daemon tickers: they write into nodes this render replaces.
         stopAllTickers();
         stopDurationTicker();
+        // And the template boxes: one never laid out (a row the filter hid) never reaches the
+        // observer's callback, so it would hold that box and its old screen for good.
+        if (TEMPLATE_FIT) TEMPLATE_FIT.disconnect();
         state.screen = currentScreen();
         Array.prototype.forEach.call(document.querySelectorAll('.shell-tab'), function (tab) {
             // A disclosure's own screen sits under the Disclosures tab.
@@ -4508,8 +4520,9 @@
      */
     function loadIncidents() {
         state.incidents = null;
-        // A re-read may bring episodes pushed since: an unfolded incident asks again.
+        // A re-read may bring episodes pushed since: an unfolded incident asks again, cut again.
         state.incidentCorrelations = {};
+        state.incidentCorrelationsAll = {};
         state.incidentsError = false;
         state.incidentsDone = false;
         state.incidentsReading = true;
@@ -5026,9 +5039,10 @@
                     text: severityLabel(finding.severity)
                 })]),
                 el('td', {'data-align': 'right', text: impact == null ? '—' : PSL.num(impact)}),
-                el('td', {class: 'table-mono', text: finding.source_endpoint || '?'}),
+                el('td', {class: 'table-mono'}, [breakable(finding.source_endpoint || '?')]),
                 // Whole, wrapped: the template is what tells two rows apart.
-                el('td', {class: 'table-mono'}, [el('span', {class: 'findings-template', text: template || '—'})]),
+                // Four lines at most, scrolled inside the cell: a long SQL made each row a screen tall.
+                el('td', {class: 'table-mono'}, [templateBox(template)]),
                 el('td', {'data-align': 'right', text: String(row.seen_count == null ? '?' : row.seen_count)}),
                 el('td', {
                     title: PSL.dateTime(row.first_seen_ms),
@@ -5047,6 +5061,38 @@
             class: 'field-note',
             text: t('incidents.findings.no_credential')
         })]);
+    }
+
+    // Measured, not guessed from the length: a box that scrolls becomes a tab stop, so the
+    // keyboard reaches the whole template too. A panel unfolded later is measured when it shows.
+    const TEMPLATE_FIT = typeof ResizeObserver === 'function' ? new ResizeObserver(function (entries) {
+        entries.forEach(function (entry) {
+            const box = entry.target;
+            // A redrawn table drops its boxes: let them go instead of holding every one ever drawn.
+            if (!box.isConnected) return TEMPLATE_FIT.unobserve(box);
+            // A tab stop and nothing more: a region per row made one landmark per template, all
+            // named alike; read as it is, the box speaks its own query.
+            if (box.scrollHeight > box.clientHeight) box.setAttribute('tabindex', '0');
+            else box.removeAttribute('tabindex');
+            templateMore(box);
+        });
+    }) : null;
+
+    // data-more while text lies below the box's last line: a browser that hides its scrollbar
+    // until a scroll (Firefox on macOS) otherwise shows a cut query as a whole one.
+    function templateMore(box) {
+        box.toggleAttribute('data-more', box.scrollTop + box.clientHeight < box.scrollHeight - 1);
+    }
+
+    function templateBox(template) {
+        const box = el('span', {class: 'findings-template', text: template || '—'});
+        if (template && TEMPLATE_FIT) {
+            TEMPLATE_FIT.observe(box);
+            box.addEventListener('scroll', function () {
+                templateMore(box);
+            }, {passive: true});
+        }
+        return box;
     }
 
     /** The columns a click sorts on, each under the sort key of its name. The ack column does not sort. */
@@ -5445,7 +5491,7 @@
         const cacheKey = PSL.correlationWindowKey(key, incident.window_from_ms, incidentEnd(incident));
         state.incidentCorrelations[cacheKey] = 'loading';
         const scope = '/api/correlations?source_id=' + encodeURIComponent(incident.source_id);
-        getJson(scope + '&from=' + incident.window_from_ms + '&to=' + incidentEnd(incident))
+        readAllEpisodes(scope + '&from=' + incident.window_from_ms + '&to=' + incidentEnd(incident), 0)
             .then(function (rows) {
                 if (rows.length > 0) return {rows: rows, pushes: true};
                 return getJson(scope + '&limit=1').then(function (any) {
@@ -5462,6 +5508,19 @@
                 const cell = document.getElementById('incident-detail-' + key);
                 if (cell) cell.replaceChildren(incidentPanel(incident));
             });
+    }
+
+    // Every episode of the window, a page at a time: one read stopped at the route's default 200,
+    // and the panel's "Show all" then counted the cut as the whole.
+    const EPISODE_PAGE = 1000;
+
+    function readAllEpisodes(path, offset) {
+        return getJson(path + '&limit=' + EPISODE_PAGE + '&offset=' + offset).then(function (rows) {
+            if (rows.length < EPISODE_PAGE) return rows;
+            return readAllEpisodes(path, offset + EPISODE_PAGE).then(function (rest) {
+                return rows.concat(rest);
+            });
+        });
     }
 
     function incidentCorrelationsBlock(incident) {
@@ -5487,7 +5546,11 @@
                 text: t('correlations.incident.error')
             }));
         } else if (held.rows.length > 0) {
-            block.appendChild(el('div', {class: 'sources-wrap'}, [incidentEpisodesTable(held.rows)]));
+            const whole = state.incidentCorrelationsAll[cacheKey] || held.rows.length <= INCIDENT_EPISODES_FIRST;
+            block.appendChild(el('div', {class: 'sources-wrap'}, [
+                incidentEpisodesTable(whole ? held.rows : held.rows.slice(0, INCIDENT_EPISODES_FIRST))
+            ]));
+            if (!whole) block.appendChild(incidentEpisodesMore(incident, cacheKey, held.rows.length));
         } else {
             block.appendChild(el('p', {
                 class: 'empty-state',
@@ -5497,6 +5560,28 @@
             }));
         }
         return block;
+    }
+
+    const INCIDENT_EPISODES_FIRST = 5;
+
+    /** Opens the whole list in place: the panel is drawn again, not the screen. */
+    function incidentEpisodesMore(incident, cacheKey, count) {
+        const more = el('button', {
+            class: 'pill-button pill-sm incident-episodes-more',
+            type: 'button',
+            text: t('correlations.incident.show_all', {count: count})
+        });
+        more.addEventListener('click', function () {
+            state.incidentCorrelationsAll[cacheKey] = true;
+            const cell = document.getElementById('incident-detail-' + incidentKey(incident));
+            if (!cell) return;
+            cell.replaceChildren(incidentPanel(incident));
+            // On the first row the button had hidden, where the reader was headed.
+            const next = cell.querySelectorAll('.incident-correlations tbody tr')[INCIDENT_EPISODES_FIRST];
+            const link = next && next.querySelector('a');
+            if (link) link.focus();
+        });
+        return more;
     }
 
     function incidentEpisodesTable(episodes) {
@@ -5903,6 +5988,7 @@
     // -------------------------------------------------------- screen: recap
 
     const RECAP_FIRST_PAGE = 10;
+    const RECAP_MOVES_FIRST = 5;
     const RECAP_PERIOD_CHOICES = ['day', 'week', 'month'];
     const RECAP_STATE_GLYPH = {
         confirmed: [['path', {d: 'M5 12.5l4.5 4.5L19 7.5'}]],
@@ -5932,28 +6018,51 @@
      */
     function loadRecap(keep) {
         const sequence = ++state.recapSeq;
+        // Every move when the screen already held them all or a group is being opened whole: a write
+        // that lands meanwhile takes over that read instead of racing it, so the click is kept.
+        const opening = keep ? state.recapMovesLoading : null;
+        const all = Boolean(opening) || (keep && state.recap && !state.recap.movements.counts);
         if (!keep) {
+            state.recapMovesLoading = null;
             state.recap = null;
             state.recapError = null;
             state.recapRowError = {};
             state.recapNaming = null;
             state.recapNameDraft = null;
             state.recapShowAll = false;
+            state.recapMovesOpen = {};
+            state.recapMovesFailed = null;
             state.recapReports = null;
             state.recapGenerateError = null;
             render();
         }
-        Promise.all([getJson(PSL.recapPath(recapRoute())), readRecapReports()]).then(function (results) {
+        const path = PSL.recapPath(recapRoute()) + (all ? '&moves=all' : '');
+        Promise.all([getJson(path), readRecapReports()]).then(function (results) {
             if (sequence !== state.recapSeq) return;
             state.recap = results[0];
             state.recapReports = results[1];
             state.recapError = null;
+            if (opening) {
+                state.recapMovesOpen[opening] = true;
+                state.recapMovesFailed = null;
+            }
         }).catch(function (error) {
             if (sequence !== state.recapSeq) return;
+            if (opening && state.recap) {
+                // The cut already on screen is shown whole, so the rest line counts what is missing.
+                state.recapMovesFailed = opening;
+                state.recapMovesAnnounce = true;
+                state.recapMovesOpen[opening] = true;
+                return;
+            }
             state.recap = null;
             state.recapError = error.status || 0;
         }).finally(function () {
-            if (sequence === state.recapSeq && currentScreen() === 'recap') render();
+            if (sequence !== state.recapSeq) return;
+            state.recapMovesLoading = null;
+            if (currentScreen() !== 'recap') return;
+            render();
+            if (opening) focusFirstNewMove(opening);
         });
     }
 
@@ -6305,7 +6414,7 @@
             el('div', {class: 'recap-where'}, item.label || !item.endpoint
                 ? [document.createTextNode(t('recap.where', {service: service}))]
                 : [document.createTextNode(t('recap.where', {service: service}) + ' · '),
-                    el('code', {class: 'code-inline', text: item.endpoint})])
+                    codeChip(item.endpoint)])
         ]);
     }
 
@@ -6314,7 +6423,7 @@
         const parts = PSL.serviceParts(priority.service, priority.service_label);
         return el('span', {class: 'recap-service'}, [
             el('span', {class: 'table-strong', text: parts.name}),
-            parts.code ? el('code', {class: 'code-inline', text: parts.code}) : null
+            parts.code ? codeChip(parts.code) : null
         ]);
     }
 
@@ -6668,6 +6777,27 @@
             });
     }
 
+    /**
+     * An endpoint or a class path as a chip that breaks at its separators and word boundaries
+     * (see PSL.breakParts), so a line ends at `repository.` or `{id}/` rather than mid-word;
+     * overflow-wrap still breaks what is left. A <wbr> carries no text, so a copy reads the
+     * name whole.
+     */
+    function codeChip(text) {
+        const chip = el('code', {class: 'code-inline'});
+        chip.appendChild(breakable(text));
+        return chip;
+    }
+
+    function breakable(text) {
+        const fragment = document.createDocumentFragment();
+        PSL.breakParts(text).forEach(function (part, index) {
+            if (index > 0) fragment.appendChild(document.createElement('wbr'));
+            fragment.appendChild(document.createTextNode(part));
+        });
+        return fragment;
+    }
+
     // ---- what moved
 
     /** The sentence in a line, led by the label when the endpoint has one. */
@@ -6675,11 +6805,8 @@
         const service = PSL.serviceParts(item.service, item.service_label).name;
         const where = item.label || !item.endpoint
             ? [document.createTextNode(t('recap.where.move', {service: service}))]
-            : [document.createTextNode(t('recap.where.move.at', {service: service})), el('code', {
-                class: 'code-inline',
-                text: item.endpoint
-            }),
-                document.createTextNode('.')];
+            // No closing period: a chip that takes the whole line would leave it alone on the next.
+            : [document.createTextNode(t('recap.where.move.at', {service: service})), codeChip(item.endpoint)];
         return el('span', {class: 'who'}, [
             el('span', {class: 'plain'}, [
                 item.label ? el('b', {class: 'recap-label', text: item.label + '. '}) : null,
@@ -6689,7 +6816,9 @@
         ]);
     }
 
-    function recapMoveItem(item, management) {
+    // A line keeps its own trend pill only when it says more than the group's title pill: a change
+    // figure, or a trend other than the group's, as under Came back.
+    function recapMoveItem(item, management, group) {
         const who = management
             ? recapMoveWho(item)
             : el('span', {class: 'who'}, [
@@ -6700,7 +6829,8 @@
                 el('span', {class: 'table-strong', text: item.service}),
                 el('span', {class: 'recap-endpoint', text: item.endpoint})
             ]);
-        return el('li', {}, [who, recapTrend(item)]);
+        const repeats = item.trend === group && item.change == null;
+        return el('li', {}, [who, repeats ? null : recapTrend(item)]);
     }
 
     function recapMoved(snapshot, labels) {
@@ -6708,18 +6838,18 @@
         const moves = snapshot.movements;
         const confirmed = moves.gone_with_confirmed_action;
         const groups = [
-            [t('recap.moves.new'), moves.new, '', ''],
+            [t('recap.moves.new'), moves.new, '', 'info', 'new'],
             [t('recap.moves.gone'), moves.gone,
-                confirmed > 0 ? t('recap.moves.confirmed.' + PSL.plural(confirmed), {count: confirmed}) : '', ''],
-            [t('recap.moves.up'), moves.up, '', 'crit'],
-            [t('recap.moves.down'), moves.down, '', ''],
-            [t('recap.moves.came_back'), moves.came_back, '', 'warn'],
-            [t('recap.moves.done_still'), moves.done_still_detected, '', 'crit']
+                confirmed > 0 ? t('recap.moves.confirmed.' + PSL.plural(confirmed), {count: confirmed}) : '', 'ok', 'gone'],
+            [t('recap.moves.up'), moves.up, '', 'crit', 'up'],
+            [t('recap.moves.down'), moves.down, '', 'ok', 'down'],
+            [t('recap.moves.came_back'), moves.came_back, '', 'warn', 'came_back'],
+            [t('recap.moves.done_still'), moves.done_still_detected, '', 'crit', 'done_still_detected']
         ].filter(function (group) {
             return group[1].length > 0;
         });
         const section = el('section', {class: 'recap-section', 'aria-labelledby': 'recap-h-moved'}, [
-            ruledOverline('// ' + labels.moved.toLowerCase()),
+            ruledOverline(t('recap.moves.overline')),
             recapHeading('recap-h-moved', labels.moved, recapAgainst('recap.moves.since.', snapshot.previous),
                 recapHelp(snapshot, 'moved'), labels.moved)
         ]);
@@ -6727,15 +6857,21 @@
         if (note) section.appendChild(el('p', {class: 'recap-more', text: note}));
         if (groups.length) {
             section.appendChild(el('div', {class: 'recap-moves'}, groups.map(function (group) {
-                return el('div', {class: 'recap-move', 'data-tone': group[3] || null}, [
+                return el('div', {class: 'recap-move', 'data-moves-group': group[4]}, [
+                    // The group's title as a pill in its rows' colour: said once, and seen.
                     el('h3', {}, [
-                        document.createTextNode(group[0]),
-                        el('span', {class: 'n', text: String(group[1].length)}),
+                        el('span', {class: 'recap-move-tag', 'data-tone': group[3]}, [
+                            document.createTextNode(group[0]),
+                            el('span', {class: 'n', text: String(recapMovesTotal(moves, group[1], group[4]))})
+                        ]),
                         group[2] ? el('span', {class: 'sub', text: group[2]}) : null
                     ]),
-                    el('ul', {}, group[1].map(function (item) {
-                        return recapMoveItem(item, management);
-                    }))
+                    el('ul', {}, recapMovesShown(group[1], group[4]).map(function (item) {
+                        return recapMoveItem(item, management, group[4]);
+                    })),
+                    // The failure line right under the list it explains, the retry button after it.
+                    recapMovesRest(moves, group[1], group[4]),
+                    recapMovesMore(moves, group[1], group[4])
                 ]);
             })));
         }
@@ -6748,6 +6884,71 @@
             section.appendChild(el('p', {class: 'sources-note', text: PSL.recapLateNote(snapshot.late_sources)}));
         }
         return section;
+    }
+
+    /** A list's whole length: the Hub cuts each list and counts it in `counts`, absent before it did. */
+    function recapMovesTotal(moves, items, key) {
+        return moves.counts ? moves.counts[key] : items.length;
+    }
+
+    /** A whole list that could not be read says so, and how much the Hub did not send. */
+    function recapMovesRest(moves, items, key) {
+        const rest = recapMovesTotal(moves, items, key) - items.length;
+        if (rest <= 0 || state.recapMovesFailed !== key) return null;
+        const announce = state.recapMovesAnnounce;
+        state.recapMovesAnnounce = false;
+        return el('p', {
+            class: 'recap-more', role: announce ? 'alert' : null,
+            text: t('recap.moves.failed') + ' ' + t('recap.moves.rest.' + PSL.plural(rest), {count: rest})
+        });
+    }
+
+    function recapMovesShown(items, key) {
+        return state.recapMovesOpen[key] ? items : items.slice(0, RECAP_MOVES_FIRST);
+    }
+
+    /**
+     * A long group stops at its first few lines: the whole list made the section run for screens.
+     * The button opens all of it, reading it again with moves=all when the Hub cut it, so nothing a
+     * reader wants to dig into stays out of reach.
+     */
+    function recapMovesMore(moves, items, key) {
+        const total = recapMovesTotal(moves, items, key);
+        const cut = total > items.length;
+        if ((state.recapMovesOpen[key] && !cut) || total <= RECAP_MOVES_FIRST) return null;
+        const loading = state.recapMovesLoading === key;
+        const more = el('button', {
+            class: 'pill-button pill-sm recap-moves-more',
+            type: 'button',
+            'data-moves': key,
+            // aria-disabled, not disabled: the focus stays on the button while the list is read.
+            'aria-disabled': loading ? 'true' : null,
+            'aria-busy': loading ? 'true' : null,
+            text: loading ? t('recap.moves.loading') : t('recap.prio.show_all', {count: total})
+        });
+        more.addEventListener('click', function () {
+            if (state.recapMovesLoading) return;
+            if (!cut) {
+                state.recapMovesOpen[key] = true;
+                render();
+                focusFirstNewMove(key);
+                return;
+            }
+            // The whole snapshot again with every move: the screen then reads one snapshot, not two.
+            state.recapMovesLoading = key;
+            state.recapMovesFailed = null;
+            renderFocus('[data-moves="' + key + '"]');
+            loadRecap(true);
+        });
+        return more;
+    }
+
+    /** On the first move the button had hidden, where the reader was headed, as an incident does. */
+    function focusFirstNewMove(key) {
+        const move = document.querySelectorAll('[data-moves-group="' + key + '"] li')[RECAP_MOVES_FIRST];
+        if (!move) return;
+        move.setAttribute('tabindex', '-1');
+        move.focus();
     }
 
     /**
