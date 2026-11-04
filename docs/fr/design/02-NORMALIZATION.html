@@ -181,7 +181,6 @@ template.push_str(&amp;query[normal_start..len]);</code></pre></div>
 } <span style="color:var(--code-cmd);font-weight:600">else</span> {
     template                              <span style="color:var(--term-comment)">// pas de regex du tout</span>
 };</code></pre></div>
-<p class="ps-p">Cette approche à trois niveaux garantit zéro allocation inutile.</p>
 <h3 id="lazylock-pour-la-regex" class="ps-h3"><code class="ps-ic">LazyLock</code> pour la regex</h3>
 <p class="ps-p">La regex <code class="ps-ic">IN_LIST_RE</code> est compilée une seule fois via <a href="https://doc.rust-lang.org/std/sync/struct.LazyLock.html" target="_blank" rel="noopener" class="ps-ext"><code class="ps-ic">std::sync::LazyLock</code></a> (stable depuis Rust 1.80) :</p>
 <div class="ps-code"><div class="ps-code-lang">rust</div><pre><code><span style="color:var(--code-cmd);font-weight:600">static</span> <span style="color:var(--code-sub)">IN_LIST_RE</span>: <span style="color:var(--code-sub)">LazyLock</span>&lt;<span style="color:var(--code-sub)">Regex</span>&gt; = <span style="color:var(--code-sub)">LazyLock</span>::new(|| {

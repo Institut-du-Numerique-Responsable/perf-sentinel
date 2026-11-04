@@ -176,10 +176,10 @@
 <p class="ps-p">For Kubernetes probes, use the dedicated <code class="ps-ic">GET /health</code> endpoint (always exposed, independent of <code class="ps-ic">[daemon] api_enabled</code>), which returns <code class="ps-ic">200 OK</code> with <code class="ps-ic">{"status":"ok","version":"..."}</code>. Lighter than <code class="ps-ic">/metrics</code> and guaranteed lock-free. There is no separate <code class="ps-ic">/ready</code> endpoint: the daemon accepts ingestion from the first tick, so liveness and readiness collapse into one probe.</p>
 <hr class="ps-hr">
 <h2 id="analyzing-a-trace-older-than-the-live-window" class="ps-h2">Analyzing a trace older than the live window</h2>
-<p class="ps-p"><strong>Why you need this.</strong> The daemon keeps traces in memory for <strong>30 seconds</strong> (<code class="ps-ic">trace_ttl_ms</code>, default). Once evicted:</p>
+<p class="ps-p"><strong>Why you need this.</strong> The daemon keeps traces in memory for 30 seconds (<code class="ps-ic">trace_ttl_ms</code>, default). Once evicted:</p>
 <ul>
 <li><code class="ps-ic">GET /api/explain/{trace_id}</code> returns <code class="ps-ic">{"error": "trace not found in daemon memory"}</code></li>
-<li><code class="ps-ic">GET /api/findings/{trace_id}</code> still returns findings (retained in the ring buffer up to <code class="ps-ic">max_retained_findings = 10000</code>), but <strong>the spans themselves are gone</strong>, so no explain tree can be rebuilt from the daemon alone.</li>
+<li><code class="ps-ic">GET /api/findings/{trace_id}</code> still returns findings (retained in the ring buffer up to <code class="ps-ic">max_retained_findings = 10000</code>), but the spans themselves are gone, so no explain tree can be rebuilt from the daemon alone.</li>
 </ul>
 <p class="ps-p">For anything older, the source of truth is your trace backend (typically Grafana Tempo).</p>
 <h3 id="what-survives-the-window" class="ps-h3">What survives the window</h3>

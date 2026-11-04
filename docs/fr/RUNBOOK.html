@@ -176,10 +176,10 @@
 <p class="ps-p">Pour les probes Kubernetes, utilisez l'endpoint dédié <code class="ps-ic">GET /health</code> (toujours exposé, indépendamment de <code class="ps-ic">[daemon] api_enabled</code>), qui retourne <code class="ps-ic">200 OK</code> avec <code class="ps-ic">{"status":"ok","version":"..."}</code>. Plus léger que <code class="ps-ic">/metrics</code> et garanti sans lock interne. Il n'y a pas d'endpoint <code class="ps-ic">/ready</code> séparé : le daemon accepte l'ingestion dès le premier tick, donc liveness et readiness se confondent en une seule probe.</p>
 <hr class="ps-hr">
 <h2 id="analyser-une-trace-plus-ancienne-que-la-fenêtre-live" class="ps-h2">Analyser une trace plus ancienne que la fenêtre live</h2>
-<p class="ps-p"><strong>Pourquoi vous en avez besoin.</strong> Le daemon garde les traces en mémoire pendant <strong>30 secondes</strong> (<code class="ps-ic">trace_ttl_ms</code>, défaut). Une fois évincée :</p>
+<p class="ps-p"><strong>Pourquoi vous en avez besoin.</strong> Le daemon garde les traces en mémoire pendant 30 secondes (<code class="ps-ic">trace_ttl_ms</code>, défaut). Une fois évincée :</p>
 <ul>
 <li><code class="ps-ic">GET /api/explain/{trace_id}</code> renvoie <code class="ps-ic">{"error": "trace not found in daemon memory"}</code></li>
-<li><code class="ps-ic">GET /api/findings/{trace_id}</code> renvoie toujours les findings (conservés dans le ring buffer jusqu'à <code class="ps-ic">max_retained_findings = 10000</code>), mais <strong>les spans eux-mêmes ont disparu</strong>, donc aucun explain tree ne peut être reconstruit depuis le daemon seul.</li>
+<li><code class="ps-ic">GET /api/findings/{trace_id}</code> renvoie toujours les findings (conservés dans le ring buffer jusqu'à <code class="ps-ic">max_retained_findings = 10000</code>), mais les spans eux-mêmes ont disparu, donc aucun explain tree ne peut être reconstruit depuis le daemon seul.</li>
 </ul>
 <p class="ps-p">Pour tout ce qui est plus ancien, la source de vérité est votre backend de traces (typiquement Grafana Tempo).</p>
 <h3 id="ce-qui-survit-à-la-fenêtre" class="ps-h3">Ce qui survit à la fenêtre</h3>
