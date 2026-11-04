@@ -10,6 +10,20 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.42.0]
+
+### Changed
+
+- **`appVersion` moves to `0.42.0`.** With `[daemon.incidents]` enabled, the
+  daemon now acknowledges and drops `deploy` and `restart` alerts by default,
+  through the new `[daemon.incidents] ignored_kinds` key: they are counted in
+  `perf_sentinel_incidents_ignored_total{kind}` and neither frozen, archived
+  nor pushed to PerfSentinelHub. Add `ignored_kinds = []` to the
+  `[daemon.incidents]` table in `config:` to record every kind as before. See
+  the application `CHANGELOG.md`.
+
+No `values.yaml` key is added or removed, and no template changes.
+
 ## [0.41.0]
 
 ### Changed
