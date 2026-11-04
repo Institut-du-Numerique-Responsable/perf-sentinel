@@ -251,7 +251,7 @@ which is exact rather than approximated:
 
 **Scaleway rows are derived, not published.** Cloud Carbon Footprint
 publishes coefficients for AWS, GCP and Azure only. Scaleway publishes
-no wattage either, but its Product Catalog API names the **exact CPU** of
+no wattage either, but its Product Catalog API names the exact CPU of
 every offer without authentication (`AMD EPYC 7543`, not a generic
 family). Each offer is priced by the CCF coefficient for that CPU's
 architecture, with the same vCPU-times-coefficient arithmetic as the
@@ -273,7 +273,7 @@ August 2026:
 
 - **Boavizta** ([BoaviztAPI](https://github.com/Boavizta/boaviztapi)) is
   the only third-party base that reaches instance granularity, with 50
-  OVHcloud sizes. Its files carry **no power column**, and the CPU a
+  OVHcloud sizes. Its files carry no power column, and the CPU a
   wattage would be derived from is Boavizta's own assumption, flagged
   `CPU not verified` on all 12 OVHcloud archetype rows. One
   credits a rack server with an `Intel Core i7-4940MX`, a mobile part,
@@ -328,7 +328,7 @@ une valeur exacte plutôt qu'approchée :
 **Les lignes Scaleway sont dérivées, pas publiées.** Cloud Carbon
 Footprint ne publie des coefficients que pour AWS, GCP et Azure.
 Scaleway ne publie pas non plus de puissance, mais son API Product
-Catalog nomme le **CPU exact** de chaque offre sans authentification
+Catalog nomme le CPU exact de chaque offre sans authentification
 (`AMD EPYC 7543`, et non une famille générique). Chaque offre est
 valorisée par le coefficient CCF de l'architecture de ce CPU, selon la
 même arithmétique vCPU fois coefficient que les trois autres. Cela
@@ -350,8 +350,8 @@ plutôt qu'approchés :
 
 - **Boavizta** ([BoaviztAPI](https://github.com/Boavizta/boaviztapi))
   est la seule base tierce à descendre au type d'instance, avec 50
-  tailles OVHcloud. Ses fichiers ne portent **aucune colonne de
-  puissance**, et le CPU dont une puissance serait dérivée est une
+  tailles OVHcloud. Ses fichiers ne portent aucune colonne de
+  puissance, et le CPU dont une puissance serait dérivée est une
   hypothèse de Boavizta lui-même, marquée `CPU not verified` sur les 12
   lignes d'archétype OVHcloud. L'une crédite un serveur rack d'un
   `Intel Core i7-4940MX`, une puce mobile, sur deux sockets. OVHcloud

@@ -437,7 +437,7 @@ Avec les artefacts natifs de chaque plateforme, le M4 Pro soutient environ 2,1x 
 <details>
 <summary><b>Méthodologie du bench (périmètre du chrono, jeux de données)</b></summary>
 
-La lecture du fichier, le parsing JSON et l'ingestion ont tous lieu avant le démarrage du chrono, et les lots d'entrée sont clonés en amont. Le pipeline est mono-thread (pas de rayon), le nombre de cœurs ne change donc pas le débit. Les deux jeux de données comptent chacun 44 043 évènements synthétiques, construits en dupliquant la fixture de démo (`crates/sentinel-cli/src/demo_data.json`), l'un répétant le même motif et l'autre avec du SQL aléatoire par requête. Cela isole bien le débit du pipeline mais ne reflète pas la diversité d'une vraie production.
+La lecture du fichier, le parsing JSON et l'ingestion ont tous lieu avant le démarrage du chrono, et chaque itération clone son lot d'entrée avant le démarrage de son propre chrono. Le pipeline est mono-thread (pas de rayon), le nombre de cœurs ne change donc pas le débit. Les deux jeux de données comptent chacun 44 043 évènements synthétiques, construits en dupliquant la fixture de démo (`crates/sentinel-cli/src/demo_data.json`), l'un répétant le même motif et l'autre avec du SQL aléatoire par requête. Cela isole bien le débit du pipeline mais ne reflète pas la diversité d'une vraie production.
 
 </details>
 
@@ -458,7 +458,7 @@ Même puce, mêmes jeux de données : le build musl + mimalloc tourne environ 13
 <details>
 <summary><b>Mémoire : repos en labo vs daemon en production</b></summary>
 
-`bench` affiche aussi `rss_peak_bytes`, mais cette valeur est dominée par les lots d'entrée pré-clonés gardés en mémoire (10 itérations x 44 043 évènements), ce n'est donc pas l'empreinte mémoire du daemon. Elle n'est pas non plus comparable d'un OS à l'autre : `rss_peak_bytes` lit le RSS courant via `/proc` sous Linux mais le RSS de pic via `getrusage` sous macOS.
+`bench` affiche aussi `rss_peak_bytes`, mais cette valeur inclut les copies de l'entrée que garde le harnais (deux copies des 44 043 évènements depuis la 0.8.7, une par itération sur les mesures 0.8.5 ci-dessus), ce n'est donc pas l'empreinte mémoire du daemon. Elle n'est pas non plus comparable d'un OS à l'autre : `rss_peak_bytes` lit le RSS courant via `/proc` sous Linux mais le RSS de pic via `getrusage` sous macOS.
 
 Séparément, la mémoire du daemon de longue durée a été profilée sur le même M4 Pro avec le build musl + mimalloc dans une VM Docker Desktop `linux/arm64` (15,6 Go). Il tourne à **~17 Mo** au repos, à comparer aux chiffres "agent au repos" des autres outils. Le build natif tourne à ~10 Mo, car mimalloc échange un peu de RSS contre de la vitesse d'allocation. Sous une charge d'ingestion soutenue de ~1,0 M évts/s, le même daemon culmine à **~190 Mo** (contre 237 Mo sur 0.6.1, sous le plafond de 250 Mo).
 

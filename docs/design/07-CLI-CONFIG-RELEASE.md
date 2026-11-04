@@ -18,15 +18,18 @@ The `--format` flag provides explicit control over the output format: `text` (co
 
 Output formats: `--format text` (colored tree with Unicode box-drawing characters, default) or `--format json` (nested JSON structure). Both include a `MAX_TREE_DEPTH` guard of 256 levels to prevent stack overflow on deeply nested traces.
 
-### Bench: pre-cloned batches
+### Bench: per-iteration clone
 
 ```rust
-let batches: Vec<Vec<SpanEvent>> = (0..iterations)
-    .map(|_| events.clone())
-    .collect();
+for _ in 0..iterations {
+    let batch = events.clone();
+    let start = std::time::Instant::now();
+    let _ = pipeline::analyze(batch, &config);
+    durations_ns.push(start.elapsed().as_nanos() as u64);
+}
 ```
 
-Input batches are cloned before timing begins, so the benchmark measures only `pipeline::analyze` performance, not `Vec<SpanEvent>::clone` overhead. Since `analyze` consumes its input (`Vec<SpanEvent>` is moved), each iteration needs its own copy.
+Each iteration clones the input batch before its timer starts, so the benchmark measures only `pipeline::analyze` performance, not `Vec<SpanEvent>::clone` overhead. Since `analyze` consumes its input (`Vec<SpanEvent>` is moved), each iteration needs its own copy. Cloning inside the loop, since 0.8.7, keeps two copies of the input in memory instead of `iterations` copies.
 
 ### Percentile computation
 

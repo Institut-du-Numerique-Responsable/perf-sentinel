@@ -71,7 +71,7 @@ For anything older, the source of truth is your trace backend (typically Grafana
 
 ### What survives the window
 
-Three different lifetimes are in play, and the visible 30 s TTL is the shortest of them. Reaching for Tempo when the archive already holds the answer is the common misstep.
+Each row below has its own lifetime, and the visible 30 s TTL is among the shortest: only live correlations go sooner. Reaching for Tempo when the archive already holds the answer is the common misstep.
 
 | What                                                  | Lives in                                                | Expires when                                                                                                                                                  |
 |-------------------------------------------------------|---------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|

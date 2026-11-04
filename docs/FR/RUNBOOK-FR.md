@@ -71,7 +71,7 @@ Pour tout ce qui est plus ancien, la source de vérité est votre backend de tra
 
 ### Ce qui survit à la fenêtre
 
-Trois durées de vie différentes coexistent, et le TTL de 30 s, le plus visible, est le plus court des trois. Aller chercher Tempo alors que l'archive contient déjà la réponse est l'erreur la plus fréquente.
+Chaque ligne ci-dessous a sa propre durée de vie, et le TTL de 30 s, le plus visible, est parmi les plus courts : seules les corrélations en direct disparaissent plus vite. Aller chercher Tempo alors que l'archive contient déjà la réponse est l'erreur la plus fréquente.
 
 | Quoi                                                                 | Vit dans                                                         | Expire quand                                                                                                                                                                      |
 |----------------------------------------------------------------------|------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

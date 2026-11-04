@@ -437,7 +437,7 @@ With the per-platform native artifacts the M4 Pro sustains about 2.1x the throug
 <details>
 <summary><b>Bench methodology (clock scope, datasets)</b></summary>
 
-File reads, JSON parsing and ingestion all happen before the clock starts, and the input batches are cloned up front. The pipeline is single-threaded (no rayon), so core count does not change the throughput. Both datasets hold 44,043 synthetic events built by duplicating the demo fixture (`crates/sentinel-cli/src/demo_data.json`), one repeating the same pattern and one with randomized SQL per statement. That isolates pipeline throughput well but does not reflect real production diversity.
+File reads, JSON parsing and ingestion all happen before the clock starts, and each iteration clones its input batch before its own timer starts. The pipeline is single-threaded (no rayon), so core count does not change the throughput. Both datasets hold 44,043 synthetic events built by duplicating the demo fixture (`crates/sentinel-cli/src/demo_data.json`), one repeating the same pattern and one with randomized SQL per statement. That isolates pipeline throughput well but does not reflect real production diversity.
 
 </details>
 
@@ -458,7 +458,7 @@ Same chip, same datasets: the musl + mimalloc build runs about 13% faster than t
 <details>
 <summary><b>Memory: lab idle vs a production daemon</b></summary>
 
-`bench` also prints `rss_peak_bytes`, but that value is dominated by the pre-cloned input batches kept in memory (10 iterations x 44,043 events), so it is not the daemon's memory footprint. It is also not comparable across operating systems: `rss_peak_bytes` reads the current RSS from `/proc` on Linux but the peak RSS via `getrusage` on macOS.
+`bench` also prints `rss_peak_bytes`, but that value includes the input copies the harness holds (two copies of the 44,043 events since 0.8.7, one per iteration on the 0.8.5 runs above), so it is not the daemon's memory footprint. It is also not comparable across operating systems: `rss_peak_bytes` reads the current RSS from `/proc` on Linux but the peak RSS via `getrusage` on macOS.
 
 Separately, the long-running daemon's memory was profiled on the same M4 Pro using the musl + mimalloc build inside a Docker Desktop `linux/arm64` VM (15.6 GB). It idles at **~17 MB**, apples-to-apples with the idle-agent figures for the other tools. The native build idles at ~10 MB, because mimalloc trades a little RSS for allocator speed. Under a sustained ~1.0 M events / sec ingestion load it peaks at **~190 MB** (down from 237 MB on 0.6.1, under the 250 MB ceiling).
 

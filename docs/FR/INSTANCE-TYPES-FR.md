@@ -28,7 +28,7 @@ une valeur exacte plutôt qu'approchée :
 **Les lignes Scaleway sont dérivées, pas publiées.** Cloud Carbon
 Footprint ne publie des coefficients que pour AWS, GCP et Azure.
 Scaleway ne publie pas non plus de puissance, mais son API Product
-Catalog nomme le **CPU exact** de chaque offre sans authentification
+Catalog nomme le CPU exact de chaque offre sans authentification
 (`AMD EPYC 7543`, et non une famille générique). Chaque offre est
 valorisée par le coefficient CCF de l'architecture de ce CPU, selon la
 même arithmétique vCPU fois coefficient que les trois autres. Cela
@@ -50,8 +50,8 @@ plutôt qu'approchés :
 
 - **Boavizta** ([BoaviztAPI](https://github.com/Boavizta/boaviztapi))
   est la seule base tierce à descendre au type d'instance, avec 50
-  tailles OVHcloud. Ses fichiers ne portent **aucune colonne de
-  puissance**, et le CPU dont une puissance serait dérivée est une
+  tailles OVHcloud. Ses fichiers ne portent aucune colonne de
+  puissance, et le CPU dont une puissance serait dérivée est une
   hypothèse de Boavizta lui-même, marquée `CPU not verified` sur les 12
   lignes d'archétype OVHcloud. L'une crédite un serveur rack d'un
   `Intel Core i7-4940MX`, une puce mobile, sur deux sockets. OVHcloud
