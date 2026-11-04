@@ -7,8 +7,7 @@ alimenter des alertes Prometheus, des dashboards Grafana, des runbooks
 on-call ou des scripts de gate CI personnalisés sans parser les logs
 NDJSON.
 
-L'API a été livrée en v0.4.0. Cette page la documente comme
-surface produit de premier plan, avec un contrat de stabilité.
+L'API a été livrée en v0.4.0 et a un contrat de stabilité.
 
 ## Sommaire
 
@@ -158,8 +157,8 @@ Une fois l'interrupteur actif, chaque lecteur a besoin de la clé :
 ## Restreindre les écritures en production (reverse proxy)
 
 Un besoin de production fréquent est de laisser n'importe quel dev
-**lire** les findings tout en réservant les chemins d'**écriture**
-(acquitter et révoquer) ainsi que l'**export du rapport officiel** aux
+lire les findings tout en réservant les chemins d'écriture
+(acquitter et révoquer) ainsi que l'export du rapport officiel aux
 architectes ou au DevOps. Cela empêche qu'un finding soit acquitté sans
 l'aval des personnes responsables de la posture de production.
 
@@ -403,8 +402,8 @@ curl -sS http://127.0.0.1:4318/api/status
 La configuration `[daemon]` effective du daemon, en lecture seule
 (depuis 0.8.8). Alimente l'onglet Config de `perf-sentinel query
 monitor`. Construite en liste blanche explicite, jamais une
-sérialisation brute de la config interne, donc **aucun secret n'est
-exposé** : les chemins de cert/clé TLS et les clés d'API sont résumés
+sérialisation brute de la config interne, donc aucun secret n'est
+exposé : les chemins de cert/clé TLS et les clés d'API sont résumés
 en booléens (`tls_configured`, `ack_api_key_set`, `read_api_key_set`) et
 jamais renvoyés. Les valeurs sont figées au démarrage du daemon.
 
@@ -604,8 +603,8 @@ alors que sur les détections comprises dans la fenêtre, donc
 `first_seen_ms` et `seen_count` décrivent la fenêtre. Sans cela, un
 pattern chronique qui tourne depuis une semaine correspondrait à toutes
 les fenêtres d'incident jamais demandées, puisque après le repli son
-enveloppe de vie les chevauche toutes. **`since_ms` seul est un poll de
-rattrapage** : appliqué après le repli, contre la détection la plus
+enveloppe de vie les chevauche toutes. `since_ms` seul est un poll de
+rattrapage : appliqué après le repli, contre la détection la plus
 récente de chaque ligne, donc la ligne continue de rapporter son
 historique retenu entier quelle que soit la borne.
 
@@ -748,7 +747,7 @@ chaque entrée porte `seen_count: 1`.
 Le segment est URL-décodé par axum avant comparaison.
 
 **Forme de la réponse :** même `Vec<StoredFinding>` que `/api/findings`.
-Un **tableau vide `[]`** est retourné quand le trace ID est inconnu
+Un tableau vide `[]` est retourné quand le trace ID est inconnu
 (l'endpoint ne renvoie pas 404).
 
 **Exemple :**
@@ -789,8 +788,8 @@ curl -sS "http://127.0.0.1:4318/api/findings/trace-n1-sql"
 
 ### GET /api/explain/{trace_id}
 
-Retourne l'arbre de spans d'une trace **encore présente dans la fenêtre
-de corrélation du daemon** (TTL par défaut : 30 secondes après l'arrivée
+Retourne l'arbre de spans d'une trace encore présente dans la fenêtre
+de corrélation du daemon (TTL par défaut : 30 secondes après l'arrivée
 du dernier span de la trace). Utile pour déboguer une trace live juste
 après son émission.
 
@@ -1444,7 +1443,7 @@ Chaque objet de `days` :
 | `sampling_rate`         | number  | `[daemon] sampling_rate` : les comptes couvrent cette part des traces                        |
 | `thresholds`            | object  | Les seuils appliqués par le daemon, constants pour un `ledger_id`, voir plus bas             |
 | `avoidable_gco2`        | number  | CO₂ évitable des lots analysés du jour, en gCO₂eq : l'estimation opérationnelle de `green_summary.co2.avoidable.mid`. Absent quand le scoring green est coupé, qu'aucun lot n'a résolu de région ou qu'aucun lot ne l'a apporté |
-| `avoidable_gco2_low`    | number  | La borne basse de la même estimation (`green_summary.co2.avoidable.low`), pour un chiffre prudent de type « au moins » |
+| `avoidable_gco2_low`    | number  | La borne basse de la même estimation (`green_summary.co2.avoidable.low`), pour un chiffre prudent de type "au moins" |
 | `avoidable_io_ops`      | number  | I/O évitables des mêmes lots, dédupliquées par lot comme `green_summary.avoidable_io_ops` |
 | `total_io_ops`          | number  | I/O totales des mêmes lots (`green_summary.total_io_ops`). `avoidable_io_ops / total_io_ops` est le ratio de gaspillage du jour, qui ne bouge pas avec le trafic comme un volume absolu |
 
@@ -1585,8 +1584,8 @@ La troisième page clôt le parcours, `next_after` vaut `null` :
 
 Le daemon lit `.perf-sentinel-acknowledgments.toml` (chemin
 configurable via `[daemon.ack] toml_path`) au démarrage et unit ses
-entrées à celles du store JSONL au moment de la requête. **Le TOML
-l'emporte en cas de conflit** : quand une signature est acquittée dans
+entrées à celles du store JSONL au moment de la requête. Le TOML
+l'emporte en cas de conflit : quand une signature est acquittée dans
 les deux, la réponse porte la métadonnée TOML (`source: "toml"`). Cela
 garde la baseline CI immuable côté daemon, donc un SRE ne peut pas
 écraser par accident ce que l'équipe a validé en revue de PR.
@@ -1664,7 +1663,7 @@ donc vous n'avez pas besoin de l'API de requêtage pour compter les alertes.
 Enveloppez-le dans `sum()` comme ci-dessus : depuis 0.18.0 le compteur
 porte un label `service` et depuis 0.19.0 un label `grouping`, et une
 alerte non agrégée se déclenche une fois par paire.
-Utilisez l'API de requêtage pour récupérer le **payload** (template,
+Utilisez l'API de requêtage pour récupérer le payload (template,
 trace ID, suggestion) que le handler d'alerte inclut dans la
 notification.
 
@@ -1689,7 +1688,7 @@ Fields:  $.finding.type,
 
 Couplez cela avec l'endpoint Prometheus `/metrics` déjà exposé par le
 daemon pour les tendances en séries temporelles et utilisez l'API de requêtage
-pour la **liste de findings concrets** sur lesquels l'utilisateur peut
+pour la liste de findings concrets sur lesquels l'utilisateur peut
 cliquer.
 
 ### Runbook SRE : page sur scraper bloqué

@@ -141,10 +141,10 @@ détecteur de redondance le récupère sous l'étiquette `redundant_sql` au
 lieu de `n_plus_one_sql`. Ce paramètre contrôle l'heuristique qui
 restaure la classification correcte :
 
-- `"auto"` (défaut) : émet `n_plus_one_sql` quand **soit** le signal de
+- `"auto"` (défaut) : émet `n_plus_one_sql` quand soit le signal de
   scope ORM se déclenche (Spring Data, Hibernate, EF Core, SQLAlchemy,
   ActiveRecord, GORM, Prisma, Diesel, Laravel/Eloquent, Doctrine, ...),
-  **soit** la variance des durées par span est suffisante pour indiquer
+  soit la variance des durées par span est suffisante pour indiquer
   des accès à des lignes distinctes. Sinon, le groupe reste à la charge
   du détecteur de redondance. Meilleur rappel sur les stacks ORM de
   production Spring Data, EF Core et similaires.
@@ -159,8 +159,8 @@ restaure la classification correcte :
   barre de haute occurrence (par défaut 15), tout groupe sanitisé se
   déclenche quel que soit le scope ORM, les siblings séquentiels ou la
   variance, sous la garde `looks_sanitized`. À utiliser quand les
-  findings `redundant_sql` sont un signal exploitable qui ne doit pas
-  être absorbé silencieusement par `n_plus_one_sql`. Le laboratoire de
+  findings `redundant_sql` exploitables ne doivent pas être absorbés
+  silencieusement par `n_plus_one_sql`. Le laboratoire de
   simulation fait tourner toutes ses stacks ainsi, parce que sous `auto`
   un marqueur de scope ORM suffit à reclassifier en N+1 une répétition
   de la même requête servie par un cache. Ce changement de verdict ne
@@ -344,13 +344,13 @@ cmdline_contains = "chat-svc.jar"
 exe_contains = "/opt/native-svc/bin/native-svc"
 ```
 
-**Pourquoi `exe_contains` ET `cmdline_contains`.** Scaphandre émet `exe` comme chemin absolu du runtime (`/usr/lib/jvm/.../bin/java`, `/usr/share/dotnet/dotnet`). Plusieurs services co-localisés partageant un runtime (plusieurs JVMs, plusieurs assemblies .NET) entrent en collision sur `exe`, et seul `cmdline` les distingue. Scaphandre concatène en plus argv sans séparateurs : `java -jar /tmp/order-svc.jar` apparaît comme `cmdline="java-jar/tmp/order-svc.jar"`. Configurez `cmdline_contains` avec une sous-chaîne présente dans cette forme concaténée (par exemple le nom du jar ou de la dll), PAS avec une ligne de commande POSIX contenant des espaces.
+**Pourquoi `exe_contains` et `cmdline_contains`.** Scaphandre émet `exe` comme chemin absolu du runtime (`/usr/lib/jvm/.../bin/java`, `/usr/share/dotnet/dotnet`). Plusieurs services co-localisés partageant un runtime (plusieurs JVMs, plusieurs assemblies .NET) entrent en collision sur `exe`, et seul `cmdline` les distingue. Scaphandre concatène en plus argv sans séparateurs : `java -jar /tmp/order-svc.jar` apparaît comme `cmdline="java-jar/tmp/order-svc.jar"`. Configurez `cmdline_contains` avec une sous-chaîne présente dans cette forme concaténée (par exemple le nom du jar ou de la dll), PAS avec une ligne de commande POSIX contenant des espaces.
 
 **Ignoré en mode batch `analyze`.** Seul le daemon `watch` lance le scraper. La commande `analyze` utilise toujours le modèle proxy quelle que soit cette section.
 
 **Comportement de repli.** Quand l'endpoint est inaccessible, qu'un service n'est pas présent dans `process_map` ou qu'un service a eu zéro ops dans la fenêtre de scrape courante, l'étape de scoring se rabat sur le modèle proxy pour ces spans. Le premier échec est journalisé en niveau `warn`, les échecs suivants en `debug` pour éviter le spam. La jauge Prometheus `perf_sentinel_scaphandre_last_scrape_age_seconds` permet aux opérateurs de détecter un scraper bloqué.
 
-**Limites de précision (important).** Scaphandre améliore le coefficient énergétique **au niveau service** mais ne donne PAS d'attribution par finding. RAPL est au niveau processus, pas au niveau span : deux findings dans le même processus pendant la même fenêtre de scrape partagent le même coefficient. Voir [docs/FR/LIMITATIONS-FR.md](LIMITATIONS-FR.md#limites-de-précision-scaphandre) pour la discussion complète.
+**Limites de précision (important).** Scaphandre améliore le coefficient énergétique au niveau service mais ne donne **pas** d'attribution par finding. RAPL est au niveau processus, pas au niveau span : deux findings dans le même processus pendant la même fenêtre de scrape partagent le même coefficient. Voir [docs/FR/LIMITATIONS-FR.md](LIMITATIONS-FR.md#limites-de-précision-scaphandre) pour la discussion complète.
 
 #### `[green.kepler]` (optionnel, opt-in)
 
@@ -557,11 +557,11 @@ shared_with = ["orders", "billing"]
 
 Le chargement refuse un `shared_with` de plus de 256 entrées, un doublon, un nom qui n'est pas une clé de `[green.cloud.services]`, des services répartis sur plusieurs requêtes CPU, un groupe auquel il manque un de ses services, des services aux enveloppes différentes ou une enveloppe différente de celle d'`instance_type`, et un service mappé dans `[green.redfish]` ou dans `[green.alumet]` sous `label_key = "domain"` : ces backends lisent le nœud entier, l'hôte est donc déjà dans leur lecture et ne doit pas être déclaré. Un hôte partagé avec un `shared_with` vide à côté de `[green.cloud.services]`, de mappings Redfish ou de domaines Alumet se charge avec un avertissement, puisque sa part est facturée en plus de chaque lecture : ce n'est juste que si aucune lecture applicative ne contient son nœud, un nœud dont Kepler lit les services par conteneur par exemple. Une base répartie sur plusieurs nœuds applicatifs ne peut pas être déclarée partagée, un nœud est une lecture. Mesurez-la par conteneur (Kepler, un cgroup Alumet), ou déclarez-la dédiée seulement quand ses nœuds n'hébergent aucun service cloud tracé.
 
-Daemon uniquement. Quand cette section et `[green.alumet.database]` sont toutes deux configurées, **la mesure gagne** : le plafond ne facture que les périodes où la série Alumet de la base est périmée, selon l'arbitrage que `[green.broker_static]` décrit ci-dessous. Un seul daemon déclare la base : chaque daemon qui la déclare facture le cluster entier, des daemons shardés qui portent tous la section comptent donc la base une fois par daemon.
+Daemon uniquement. Quand cette section et `[green.alumet.database]` sont toutes deux configurées, la mesure gagne : le plafond ne facture que les périodes où la série Alumet de la base est périmée, selon l'arbitrage que `[green.broker_static]` décrit ci-dessous. Un seul daemon déclare la base : chaque daemon qui la déclare facture le cluster entier, des daemons shardés qui portent tous la section comptent donc la base une fois par daemon.
 
 #### `[green.broker_static]` (optionnel, opt-in)
 
-Déclare un cluster de brokers **provisionné**, sans agent ni métrique. C'est la voie d'un cluster de brokers provisionné avec une classe d'instance typée et aucun hôte instrumentable, comme un cluster Kafka ou MQ managé, ou des VM autogérées sans agent. Les brokers serverless ou facturés en unités de capacité n'ont aucun nœud provisionné et ne peuvent pas être déclarés.
+Déclare un cluster de brokers provisionné, sans agent ni métrique. C'est la voie d'un cluster de brokers provisionné avec une classe d'instance typée et aucun hôte instrumentable, comme un cluster Kafka ou MQ managé, ou des VM autogérées sans agent. Les brokers serverless ou facturés en unités de capacité n'ont aucun nœud provisionné et ne peuvent pas être déclarés.
 
 ```toml
 [green.broker_static]
@@ -586,7 +586,7 @@ L'énergie vaut `nodes × max_watts × durée de la fenêtre`, suivant `E(n) = n
 - **Il compte l'infrastructure provisionnée, pas consommée.** Un cluster de trois nœuds est immobilisé qu'il tourne à 10 % ou à 60 %. Dans l'autre sens, une période sans trafic facture au plus une heure, donc un cluster majoritairement inactif est sous-compté.
 - **Le chiffre ne réagit à aucun changement applicatif.** Grouper vos publications ne le fera pas bouger, puisque rien dedans ne dépend du trafic. Si vous voulez un chiffre qui répond à une remédiation, il faut la voie mesurée.
 
-Daemon uniquement, comme toute voie mesurée, puisqu'une durée de fenêtre est nécessaire. Quand cette section et `[green.alumet.broker]` sont toutes deux configurées, **la mesure gagne**. La précédence suit la série Alumet du broker, pas l'endpoint de scrape : un scrape qui répond sans porter le `label_value` déclaré ne mesure rien, la déclaration prend donc le relais au lieu d'être supprimée par un endpoint qui fonctionne. L'énergie déjà mise de côté par la série est livrée d'abord, et le delta qui arrive à la reprise est jeté une fois, puisqu'il remonte sur du temps déjà facturé par la déclaration.
+Daemon uniquement, comme toute voie mesurée, puisqu'une durée de fenêtre est nécessaire. Quand cette section et `[green.alumet.broker]` sont toutes deux configurées, la mesure gagne. La précédence suit la série Alumet du broker, pas l'endpoint de scrape : un scrape qui répond sans porter le `label_value` déclaré ne mesure rien, la déclaration prend donc le relais au lieu d'être supprimée par un endpoint qui fonctionne. L'énergie déjà mise de côté par la série est livrée d'abord, et le delta qui arrive à la reprise est jeté une fois, puisqu'il remonte sur du temps déjà facturé par la déclaration.
 
 #### `[green.redfish]` (optionnel, opt-in)
 
@@ -642,7 +642,7 @@ Une flotte mixte se déclare en donnant à chaque châssis le schema que son fir
 
 **Ignoré en mode batch `analyze`.** Comme Scaphandre et Kepler, seul `watch` intègre Redfish.
 
-**Coefficient au niveau du nœud.** Chaque service mappé au même châssis reçoit le **même** coefficient. Deux services sur un même châssis n'auront jamais de coefficients mesurés distincts via Redfish. Voir [docs/FR/LIMITATIONS-FR.md](LIMITATIONS-FR.md#limites-de-précision-redfish-bmc) pour la discussion complète de ce compromis et de la variance JSON entre fournisseurs.
+**Coefficient au niveau du nœud.** Chaque service mappé au même châssis reçoit le même coefficient. Deux services sur un même châssis n'auront jamais de coefficients mesurés distincts via Redfish. Voir [docs/FR/LIMITATIONS-FR.md](LIMITATIONS-FR.md#limites-de-précision-redfish-bmc) pour la discussion complète de ce compromis et de la variance JSON entre fournisseurs.
 
 #### `[green.cloud]` (optionnel, opt-in)
 
@@ -823,7 +823,7 @@ calibration_file = ".perf-sentinel-calibration.toml"
 
 #### `perf-sentinel tempo` (pas de section de config)
 
-La sous-commande `tempo` s'exécute en **mode batch** (pas daemon), récupère les traces depuis l'API HTTP d'un Grafana Tempo et les passe dans le pipeline d'analyse standard. Ses réglages propres sont des flags CLI uniquement, il n'existe pas de section `[tempo]` : `--endpoint` est obligatoire, `--max-traces` vaut `100` par défaut et est borné à 1..=10000 (le plafond de lecture du client, pas celui de Tempo), aux côtés de `--trace-id`, `--service`, `--lookback`, `--from`/`--to`, `--sort` et `--auth-header`. Lancez `perf-sentinel tempo --help` pour la liste à jour. Une table `[tempo]` écrite dans le fichier de config fait échouer le chargement depuis la 0.12.0, comme toute table racine inconnue. Le fichier `--config` s'applique quand même pour le reste, les seuils et la détection en particulier, puisque les traces récupérées passent par le même pipeline.
+La sous-commande `tempo` s'exécute en mode batch (pas daemon), récupère les traces depuis l'API HTTP d'un Grafana Tempo et les passe dans le pipeline d'analyse standard. Ses réglages propres sont des flags CLI uniquement, il n'existe pas de section `[tempo]` : `--endpoint` est obligatoire, `--max-traces` vaut `100` par défaut et est borné à 1..=10000 (le plafond de lecture du client, pas celui de Tempo), aux côtés de `--trace-id`, `--service`, `--lookback`, `--from`/`--to`, `--sort` et `--auth-header`. Lancez `perf-sentinel tempo --help` pour la liste à jour. Une table `[tempo]` écrite dans le fichier de config fait échouer le chargement depuis la 0.12.0, comme toute table racine inconnue. Le fichier `--config` s'applique quand même pour le reste, les seuils et la détection en particulier, puisque les traces récupérées passent par le même pipeline.
 
 ### `[daemon]`
 

@@ -131,10 +131,10 @@ the group and the redundant detector picks it up as `redundant_sql`
 instead of `n_plus_one_sql`. This setting controls the heuristic that
 recovers the correct classification:
 
-- `"auto"` (default): emit `n_plus_one_sql` when **either** the ORM
+- `"auto"` (default): emit `n_plus_one_sql` when either the ORM
   scope signal (Spring Data, Hibernate, EF Core, SQLAlchemy,
   ActiveRecord, GORM, Prisma, Diesel, Laravel/Eloquent, Doctrine, ...)
-  **or** the per-span timing
+  or the per-span timing
   variance is high enough to indicate distinct row lookups. Otherwise
   leave the group to the redundant detector. Best recall on production
   Spring Data, EF Core and similar ORM stacks.
@@ -147,8 +147,7 @@ recovers the correct classification:
   the high-occurrence bar (default 15), any sanitized group fires
   regardless of ORM scope, sequential siblings, or variance, under the
   `looks_sanitized` guard. Use this when actionable `redundant_sql`
-  findings are valuable signal that should not be silently absorbed
-  into `n_plus_one_sql`. The simulation lab runs all of its stacks this
+  findings should not be silently absorbed into `n_plus_one_sql`. The simulation lab runs all of its stacks this
   way, because under `auto` an ORM scope marker alone reclassifies a
   cache-warmed repeat of the same query as an N+1. The change of verdict
   only applies to moderate counts, since the high-occurrence bar above
@@ -335,7 +334,7 @@ exe_contains = "/opt/native-svc/bin/native-svc"
 
 **Fallback behaviour.** When the endpoint is unreachable, a service is not present in `process_map` or a service had zero ops in the current scrape window, the scoring stage falls back to the proxy model for those spans. The first failure logs at `warn` level, subsequent failures at `debug` to avoid spam. The `perf_sentinel_scaphandre_last_scrape_age_seconds` Prometheus gauge lets operators detect a hung scraper.
 
-**Precision bounds (important).** Scaphandre improves the **per-service** energy coefficient but does NOT give per-finding attribution. RAPL is process-level, not span-level: two findings in the same process during the same scrape window share the same coefficient. See [docs/LIMITATIONS.md](LIMITATIONS.md#scaphandre-precision-bounds) for the full discussion.
+**Precision bounds (important).** Scaphandre improves the per-service energy coefficient but does **not** give per-finding attribution. RAPL is process-level, not span-level: two findings in the same process during the same scrape window share the same coefficient. See [docs/LIMITATIONS.md](LIMITATIONS.md#scaphandre-precision-bounds) for the full discussion.
 
 #### `[green.kepler]` (optional, opt-in)
 
@@ -542,11 +541,11 @@ shared_with = ["orders", "billing"]
 
 The load refuses a `shared_with` with more than 256 entries, a duplicate, a name that is not a `[green.cloud.services]` key, services spread over several CPU queries, a group missing one of its services, services with different envelopes or an envelope different from `instance_type`'s, and a service mapped in `[green.redfish]` or in `[green.alumet]` under `label_key = "domain"`: those backends read the node whole, so the host is already inside their reading and must not be declared. A shared host with an empty `shared_with` next to `[green.cloud.services]`, Redfish or Alumet domain mappings loads with a warning, since its share is billed on top of every reading: that is right only when no application reading holds its node, a node whose services Kepler reads per container for instance. A database spread over several application nodes cannot be declared shared, one node is one reading. Measure it per container (Kepler, an Alumet cgroup), or declare it dedicated only when its nodes host no traced cloud service.
 
-Daemon only. When this section and `[green.alumet.database]` are both configured, **the measurement wins**: the ceiling bills only the stretches where the database's Alumet series is stale, under the arbitration `[green.broker_static]` describes below. One daemon declares the database: each daemon that declares it bills the whole cluster, so sharded daemons that each carry the section count the database once per daemon.
+Daemon only. When this section and `[green.alumet.database]` are both configured, the measurement wins: the ceiling bills only the stretches where the database's Alumet series is stale, under the arbitration `[green.broker_static]` describes below. One daemon declares the database: each daemon that declares it bills the whole cluster, so sharded daemons that each carry the section count the database once per daemon.
 
 #### `[green.broker_static]` (optional, opt-in)
 
-Declares a **provisioned** broker cluster, with no agent and no metric. This is the path for a provisioned broker cluster with a typed instance class and no host to instrument, such as a managed Kafka or MQ cluster, or self-managed VMs without an agent. Serverless and capacity-unit brokers have no provisioned node and cannot be declared.
+Declares a provisioned broker cluster, with no agent and no metric. This is the path for a provisioned broker cluster with a typed instance class and no host to instrument, such as a managed Kafka or MQ cluster, or self-managed VMs without an agent. Serverless and capacity-unit brokers have no provisioned node and cannot be declared.
 
 ```toml
 [green.broker_static]
@@ -571,7 +570,7 @@ The energy is `nodes × max_watts × window duration`, following `E(n) = n × P_
 - **It counts provisioned infrastructure, not consumed.** A three-node cluster is immobilized whether it runs at 10 % or 60 %. In the other direction, a stretch with no traffic bills at most one hour, so a mostly-idle cluster is under-counted.
 - **It does not react to application changes.** Batching your publishes will not move this number, because nothing about it depends on traffic. If you want a figure that responds to remediation, you need the measured path.
 
-Daemon only, like every measured path, since a window duration is needed. When both this section and `[green.alumet.broker]` are configured, **the measurement wins**. Precedence follows the broker's own Alumet series, not the scrape endpoint: a scrape that answers without carrying the declared `label_value` measures nothing, so the declaration takes over rather than being suppressed by a working endpoint. Energy the series already banked is delivered first, and the delta that lands when it recovers is dropped once, since it reaches back over wall clock the declaration billed.
+Daemon only, like every measured path, since a window duration is needed. When both this section and `[green.alumet.broker]` are configured, the measurement wins. Precedence follows the broker's own Alumet series, not the scrape endpoint: a scrape that answers without carrying the declared `label_value` measures nothing, so the declaration takes over rather than being suppressed by a working endpoint. Energy the series already banked is delivered first, and the delta that lands when it recovers is dropped once, since it reaches back over wall clock the declaration billed.
 
 #### `[green.redfish]` (optional, opt-in)
 
@@ -627,7 +626,7 @@ A mixed fleet is declared by giving each chassis the schema its firmware serves.
 
 **Ignored in `analyze` batch mode.** Like Scaphandre and Kepler, only `watch` integrates Redfish.
 
-**Node-level coefficient.** Every service mapped to the same chassis receives the **same** coefficient. Two services on one chassis will never get distinct measured per-op values via Redfish. See [docs/LIMITATIONS.md](LIMITATIONS.md#redfish-bmc-precision-bounds) for the full discussion of this trade-off and the vendor-specific JSON response variance.
+**Node-level coefficient.** Every service mapped to the same chassis receives the same coefficient. Two services on one chassis will never get distinct measured per-op values via Redfish. See [docs/LIMITATIONS.md](LIMITATIONS.md#redfish-bmc-precision-bounds) for the full discussion of this trade-off and the vendor-specific JSON response variance.
 
 #### `[green.cloud]` (optional, opt-in)
 
@@ -809,7 +808,7 @@ calibration_file = ".perf-sentinel-calibration.toml"
 
 #### `perf-sentinel tempo` (no config section)
 
-The `tempo` subcommand runs in **batch mode** (not daemon), fetches traces from a Grafana Tempo HTTP API and pipes them through the standard analysis pipeline. Its own settings are CLI flags only, there is no `[tempo]` section: `--endpoint` is required, `--max-traces` defaults to `100` and is bounded to 1..=10000 (the client's own read ceiling, not Tempo's), alongside `--trace-id`, `--service`, `--lookback`, `--from`/`--to`, `--sort` and `--auth-header`. Run `perf-sentinel tempo --help` for the current list. A `[tempo]` table written into the config file fails the load since 0.12.0, as any unknown top-level table does. The `--config` file still applies for everything else, thresholds and detection in particular, since the fetched traces go through the same pipeline.
+The `tempo` subcommand runs in batch mode (not daemon), fetches traces from a Grafana Tempo HTTP API and pipes them through the standard analysis pipeline. Its own settings are CLI flags only, there is no `[tempo]` section: `--endpoint` is required, `--max-traces` defaults to `100` and is bounded to 1..=10000 (the client's own read ceiling, not Tempo's), alongside `--trace-id`, `--service`, `--lookback`, `--from`/`--to`, `--sort` and `--auth-header`. Run `perf-sentinel tempo --help` for the current list. A `[tempo]` table written into the config file fails the load since 0.12.0, as any unknown top-level table does. The `--config` file still applies for everything else, thresholds and detection in particular, since the fetched traces go through the same pipeline.
 
 ### `[daemon]`
 

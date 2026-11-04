@@ -37,7 +37,7 @@ Perf Sentinel accepte les traces OpenTelemetry via OTLP (gRPC sur 4317, HTTP sur
 
 ## Démarrage rapide : CI batch
 
-Exécutez Perf Sentinel dans votre pipeline CI pour détecter les requêtes N+1 avant qu'elles n'atteignent la production. Pas de daemon, pas de Docker, juste un binaire qui lit un fichier de traces et retourne le code 1 quand le quality gate échoue.
+Exécutez Perf Sentinel dans votre pipeline CI pour détecter les requêtes N+1 avant qu'elles n'atteignent la production. Il ne faut ni daemon ni Docker : le binaire lit un fichier de traces et retourne le code 1 quand le quality gate échoue.
 
 ### Installation
 
@@ -176,7 +176,7 @@ scrape_configs:
       - targets: ['perf-sentinel:4318']
 ```
 
-Métriques clés : `perf_sentinel_findings_total{type, severity, service, grouping}`, `perf_sentinel_io_waste_ratio`, `perf_sentinel_events_processed_total`, `perf_sentinel_traces_analyzed_total`, `perf_sentinel_slow_duration_seconds{type, service, grouping}`. Voir [`METRICS-FR.md`](./METRICS-FR.md) pour le schéma complet et [`examples/otel-collector-config.yaml`](../../examples/otel-collector-config.yaml) pour la config du collector.
+Principales métriques : `perf_sentinel_findings_total{type, severity, service, grouping}`, `perf_sentinel_io_waste_ratio`, `perf_sentinel_events_processed_total`, `perf_sentinel_traces_analyzed_total`, `perf_sentinel_slow_duration_seconds{type, service, grouping}`. Voir [`METRICS-FR.md`](./METRICS-FR.md) pour le schéma complet et [`examples/otel-collector-config.yaml`](../../examples/otel-collector-config.yaml) pour la config du collector.
 
 ---
 
@@ -195,7 +195,7 @@ Perf Sentinel lit nativement la ressource Datadog (`dd.span.Resource`, où dd-tr
 
 **PHP (Laravel, Symfony) via dd-trace-php.** La même réserve d'obfuscation s'applique : un vrai N+1 Laravel ou Symfony peut apparaître comme `redundant_sql` en mode `auto`, utilisez donc `sanitizer_aware_classification = "strict"`. Le pont perd aussi le signal de framework : le `datadogreceiver` pose un scope d'instrumentation `Datadog` fixe et ne mappe aucun attribut `code.*`, donc les findings dd-trace-php n'ont pas de `suggested_fix` adapté au framework (ils retombent sur `php_generic` ou restent non enrichis). Les corrections spécifiques Laravel/Eloquent et Symfony/Doctrine exigent l'instrumentation OpenTelemetry PHP native (scopes `io.opentelemetry.contrib.php.*`), voir [INSTRUMENTATION-FR.md](INSTRUMENTATION-FR.md).
 
-La mention "OpenTelemetry compliant" de Datadog est souvent mal comprise. Elle désigne en général l'agent Datadog qui **ingère** de l'OTLP (entrant, depuis des SDK OTel), ce qui est le sens inverse. Faire **sortir** les données dd-trace vers un backend OTLP passe par le chemin Collector ci-dessous.
+La mention "OpenTelemetry compliant" de Datadog est souvent mal comprise. Elle désigne en général l'agent Datadog qui ingère de l'OTLP (entrant, depuis des SDK OTel), ce qui est le sens inverse. Faire sortir les données dd-trace vers un backend OTLP passe par le chemin Collector ci-dessous.
 
 > **Stabilité.** La prise en charge des traces du `datadogreceiver` est en **alpha** dans opentelemetry-collector-contrib (en 2026). Le receiver convient à l'évaluation et aux preuves de concept. Surveillez-le si vous le maintenez en permanence devant la production.
 

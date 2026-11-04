@@ -111,7 +111,7 @@ The directory of `--output` is created if it is missing, so
 build tool has not created `target/` yet. In wrapper mode the build tool
 has not run yet.
 
-Progress and the final count go to **stderr**, never stdout: in wrapper
+Progress and the final count go to stderr, never stdout: in wrapper
 mode that stream belongs to the wrapped command. The summary is how you
 tell "no anti-patterns found" from "nothing was ever exported", and an
 empty trace file is rejected by `analyze` rather than reported as a

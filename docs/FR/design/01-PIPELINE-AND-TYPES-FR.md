@@ -2,15 +2,15 @@
 
 ## Pourquoi un pipeline linéaire
 
-Perf Sentinel traite les traces I/O à travers une séquence de transformations : `event -> normalize -> correlate -> detect -> score -> report`. C'est un **pipeline linéaire**, pas une architecture hexagonale (ports et adaptateurs).
+Perf Sentinel traite les traces I/O à travers une séquence de transformations : `event -> normalize -> correlate -> detect -> score -> report`. C'est un pipeline linéaire, pas une architecture hexagonale (ports et adaptateurs).
 
 Les données circulent dans une seule direction. Les événements entrent, sont transformés à chaque étape et produisent un rapport. Il n'y a pas de dépendances bidirectionnelles, pas d'événements de domaine, pas de patterns d'interaction complexes. Une architecture hexagonale introduirait de l'indirection par traits entre chaque étape, ajoutant de la charge cognitive, du coût à la compilation et du dispatch dynamique pour zéro bénéfice.
 
-Les traits ne sont utilisés qu'aux **frontières** du pipeline :
+Les traits ne sont utilisés qu'aux frontières du pipeline :
 - **Entrée :** trait `IngestSource` (JSON, OTLP)
 - **Sortie :** trait `ReportSink` (fichier JSON, stdout)
 
-Entre les frontières, chaque étape est une **fonction pure** : elle prend des données en entrée et retourne des données transformées en sortie. Pas d'effets de bord, pas d'état, pas d'objets trait. Cela rend chaque étape testable indépendamment sans mocks : il suffit de construire les données d'entrée et de vérifier la sortie.
+Entre les frontières, chaque étape est une fonction pure : elle prend des données en entrée et retourne des données transformées en sortie. Pas d'effets de bord, pas d'état, pas d'objets trait. Cela rend chaque étape testable indépendamment sans mocks : il suffit de construire les données d'entrée et de vérifier la sortie.
 
 Ce pattern est courant dans les outils de traitement de données de l'écosystème Rust. Des projets comme [ripgrep](https://github.com/BurntSushi/ripgrep) et [bat](https://github.com/sharkdp/bat) suivent des architectures similaires de "pipeline de transformations".
 
@@ -58,7 +58,7 @@ pub(crate) fn sort_findings(findings: &mut [Finding]) {
 
 Cette fonction est définie dans `detect/mod.rs` et donne à chaque générateur le même ordre de base déterministe. Les couches de présentation trient par-dessus plutôt que de le remplacer : `--sort` sur `analyze`, `report`, `tempo` et `jaeger-query`, l'`initial_sort` du dashboard et l'ouverture par impact du TUI réordonnent une liste dont cet ordre canonique a déjà départagé les égalités. Cela nécessite que `FindingType` et `Severity` implémentent `Ord`. Le `Ord` dérivé utilise l'ordre de déclaration des variantes, donnant un tri stable : `NPlusOneSql < NPlusOneHttp < NPlusOneMessaging < RedundantSql < ... < ExcessiveFanout < ... < SerializedCalls`.
 
-Les top offenders sont triés de manière similaire (IIS décroissant, ordre alphabétique en cas d'égalité) pour garantir le même rapport pour la même entrée.
+Les top offenders sont triés de manière similaire (IIS décroissant, ordre alphabétique en cas d'égalité), si bien que la même entrée donne le même rapport.
 
 ## Découpage en workspace
 
@@ -75,7 +75,7 @@ La direction de dépendance est unidirectionnelle : `sentinel-cli` dépend de `s
 Le quality gate (`quality_gate::evaluate`) est une étape distincte appelée après le scoring, pas intégrée dans la détection ou le reporting. Cette séparation permet :
 - À la détection de trouver **tous** les problèmes indépendamment des seuils
 - Au scoring de calculer **toutes** les métriques indépendamment du pass/fail
-- Au quality gate de prendre une décision binaire pass/fail basée sur des **règles configurables**
+- Au quality gate de prendre une décision binaire pass/fail basée sur des règles configurables
 
 Les cinq règles (max N+1 SQL critiques, max N+1 HTTP warning+, max N+1 messaging warning+, max ratio de gaspillage, et le ratio minimal de spans exploitables en opt-in) sont évaluées indépendamment. Le gate passe uniquement si toutes les règles passent. C'est plus flexible qu'un seuil de sévérité unique.
 

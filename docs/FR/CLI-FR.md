@@ -118,7 +118,7 @@ Le répertoire de `--output` est créé s'il manque, de sorte que
 l'outil de build n'a pas encore créé `target/`. En mode enveloppe, cet
 outil de build n'a pas encore tourné.
 
-La progression et le décompte final vont sur **stderr**, jamais sur
+La progression et le décompte final vont sur stderr, jamais sur
 stdout : en mode enveloppe, ce flux appartient à la commande enveloppée.
 Ce résumé est ce qui permet de distinguer "aucun anti-pattern trouvé" de
 "rien n'a jamais été exporté", et un fichier de traces vide est rejeté
@@ -296,7 +296,7 @@ une indication exploitable le cas échéant.
 `login`, `logout` et `hub` s'adressent à un
 [Perf Sentinel Hub](https://github.com/Institut-du-Numerique-Responsable/PerfSentinelHub),
 pas à un daemon. La ligne d'aide de chaque action `hub` commence par
-« Through the Hub: », ce qui distingue `hub analyze`, `hub ack` et
+"Through the Hub:", ce qui distingue `hub analyze`, `hub ack` et
 `hub findings` de `analyze`, `ack` et `query findings`.
 
 ### `login` et `logout`
@@ -321,8 +321,8 @@ rafraîchissement : relancez `login` quand il expire.
 Un Hub sans connexion terminal, parce que son contrôle d'accès est
 désactivé, que `TrustedProxyNetworks` n'est pas renseigné ou qu'il est
 antérieur à la fonction, répond à la première requête par une
-redirection, un `401` ou un `404` : `login` affiche alors « This Hub does
-not offer terminal sign-in » et sort en 1.
+redirection, un `401` ou un `404` : `login` affiche alors "This Hub does
+not offer terminal sign-in" et sort en 1.
 
 Le jeton est écrit dans `$XDG_CONFIG_HOME/perf-sentinel/hub-token.json`,
 sinon `~/.config/perf-sentinel/hub-token.json`, ou
@@ -374,8 +374,8 @@ Le justificatif, dans cet ordre :
 1. `PERF_SENTINEL_HUB_TOKEN`, un jeton terminal ou machine. Il exige une
    URL de Hub via `--hub` ou `PERF_SENTINEL_HUB_URL`.
 2. Le jeton enregistré par `login`, dont le Hub devient la valeur par
-   défaut. Un `--hub` qui désigne un autre Hub est refusé (« The stored
-   token was issued by ... »).
+   défaut. Un `--hub` qui désigne un autre Hub est refusé ("The stored
+   token was issued by ...").
 3. Aucun des deux : la requête part sans en-tête `Authorization` et le Hub
    décide. Un Hub sans contrôle d'accès répond à `GET /api/findings` de
    façon anonyme.
@@ -388,7 +388,7 @@ suivie : un `3xx` signifie que le Hub veut une session navigateur, soit
 parce que la route demande `perf-sentinel login`, soit parce que le
 contrôle d'accès du Hub est désactivé et que cette route exige une
 session. Un `401` affiche la commande `login` à lancer, un `403`, `404` ou
-`409` le `detail` du Hub, et un `503` sans détail « Hub busy, retry ».
+`409` le `detail` du Hub, et un `503` sans détail "Hub busy, retry".
 Toute erreur sort en 1.
 
 ## Autres sous-commandes

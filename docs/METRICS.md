@@ -110,7 +110,7 @@ sibling Pod cannot read the daemon's process state freely.
   falls 5 percentage points back below the mark (hysteresis). The live
   on/off state is on the `perf_sentinel_ingest_memory_pressure` gauge
   (`1` while rejecting), which is what the Helm alert keys on. These
-  rejections happen BEFORE the request is decoded, so
+  rejections happen before the request is decoded, so
   `perf_sentinel_otlp_spans_received_total` does not advance during an
   episode (the span counts are unknowable). The counter tallies
   requests, not spans. Never fires when the guard is disabled
@@ -459,9 +459,8 @@ other than `Chassis`, counts as `path_missing`.
 ## Warning kinds: transient vs sticky
 
 `Report.warning_details` (since 0.5.19) has five stable kinds today,
-each with a different lifecycle. The distinction matters for
-monitoring strategies: a transient warning self-resolves, a sticky one
-persists until the daemon restarts.
+each with a different lifecycle. For monitoring, a transient warning
+self-resolves, a sticky one persists until the daemon restarts.
 
 `warning_details` is the field a consumer reads. A legacy `warnings`
 array of plain strings ships next to it, written only by the cold-start
@@ -518,7 +517,7 @@ to read the report rather than about a knob the load outgrew. The
 advisor reads the config snapshot taken at daemon startup, so a hint
 always reflects the values the running process uses.
 
-Sampling applied **before** the daemon (a collector running
+Sampling applied before the daemon (a collector running
 `tail_sampling` upstream) shrinks the same counts and raises no warning
 at all, because a kept trace is indistinguishable from a complete one.
 It is also worse for ratios: `errors` and `slow` policies bias retention

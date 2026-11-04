@@ -280,7 +280,7 @@ are current. Only the English overview is published to Grafana Labs.
 
 ## What the release workflow does
 
-For reference, here is what `release.yml` runs on every `v*` tag push:
+`release.yml` runs these jobs on every `v*` tag push:
 
 1. **check-versions**: `scripts/check-tag-version.sh "${GITHUB_REF_NAME}"` rejects any mismatch between the tag and the workspace version files (Cargo.toml only, see the script header for the exact scope).
 2. **build** (matrix): builds `perf-sentinel` for `linux-amd64-musl`, `linux-arm64-musl`, `macos-arm64` and `windows-amd64`. The arm64 Linux binary builds natively on an `ubuntu-24.04-arm` runner (not via the `cross` Docker tool), and every binary is produced with `cargo auditable build` so its dependency list is embedded for `cargo audit bin`. The musl variants use `mimalloc` as the global allocator (see `docs/design/07-CLI-CONFIG-RELEASE.md`).
@@ -318,4 +318,4 @@ The ledger at `release-gate/lab-validations.txt` is tab-separated, append-only, 
 - `date`: UTC calendar date when the validation completed. Must be strict `YYYY-MM-DD`. The gate rejects anything else (fuzzy strings like `now` are not accepted).
 - `verdict`: `PASS` or `FAIL`. The gate only accepts `PASS`.
 
-FAIL entries are not strictly required (the gate treats them the same as a missing entry), but recording them in the ledger preserves the institutional memory of why a candidate version was held back.
+FAIL entries are not strictly required (the gate treats them the same as a missing entry), but recording them in the ledger keeps a record of why a candidate version was held back.

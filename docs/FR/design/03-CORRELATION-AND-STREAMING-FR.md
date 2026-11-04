@@ -17,7 +17,7 @@ if let Some(vec) = map.get_mut(event.event.trace_id.as_str()) {
 }
 ```
 
-**Pourquoi pas `entry()` ?** L'API `entry()` nécessite une clé possédée d'emblée car elle doit stocker la clé si l'entrée est vacante. Cela signifierait cloner `trace_id` pour **chaque** événement, même quand la trace existe déjà (le cas courant). Le pattern manuel ne clone que sur le chemin lent (nouvelle trace). Pour une trace avec 50 événements, cela économise 49 clones de String inutiles.
+**Pourquoi pas `entry()` ?** L'API `entry()` nécessite une clé possédée d'emblée car elle doit stocker la clé si l'entrée est vacante. Cela signifierait cloner `trace_id` pour chaque événement, même quand la trace existe déjà (le cas courant). Le pattern manuel ne clone que sur le chemin lent (nouvelle trace). Pour une trace avec 50 événements, cela économise 49 clones de String inutiles.
 
 C'est un pattern d'optimisation Rust bien connu documenté dans le [Rust Performance Book](https://nnethercote.github.io/perf-book/hashing.html).
 
@@ -87,7 +87,7 @@ d'ascendance qui conserve le lien parent d'un événement et sa route prouvée
 facultative après rotation. Cela répare l'arrivée parent-après-enfant et les
 exports scindés par une recherche exacte à huit sauts, sans événement ni
 métrique I/O synthétique. Les événements, contextes d'endpoint, destinations de
-consumer et entrées d'ascendance forment quatre collections distinctes, **chacune** plafonnée par
+consumer et entrées d'ascendance forment quatre collections distinctes, chacune plafonnée par
 `max_events_per_trace`. Le LRU d'ascendance alloue sa
 mémoire progressivement au lieu de réserver le plafond configuré pour chaque
 trace. Au plafond minimal valide de un, la rotation peut remplacer l'unique
@@ -141,7 +141,7 @@ pub fn evict_expired(&mut self, now_ms: u64) -> Vec<(String, Vec<NormalizedEvent
 - **`evict()`** : supprime silencieusement les traces expirées (utilisé si l'appelant n'a pas besoin des données)
 - **`evict_expired()`** : retourne les traces expirées pour que le daemon puisse exécuter la détection avant de les supprimer
 
-Le daemon utilise toujours `evict_expired()` pour garantir qu'aucune donnée de trace n'est perdue sans analyse.
+Le daemon utilise toujours `evict_expired()`, si bien qu'aucune donnée de trace n'est perdue sans analyse.
 
 ### `Vec::from(VecDeque)` pour l'éviction
 

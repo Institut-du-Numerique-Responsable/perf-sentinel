@@ -8,10 +8,10 @@ PerfSentinelHub builds the card's figures from its own records and calls the eng
 
 A card has one of three angles:
 
-| Angle | `angle` | What it says |
-|---|---|---|
-| Story | `story` | One finding, how big it was before its fix, and since when it is gone. |
-| Curve | `curve` | The share of the work that was avoidable, period by period, 2 to 12 bars. |
+| Angle      | `angle`      | What it says                                                                                 |
+|------------|--------------|----------------------------------------------------------------------------------------------|
+| Story      | `story`      | One finding, how big it was before its fix, and since when it is gone.                       |
+| Curve      | `curve`      | The share of the work that was avoidable, period by period, 2 to 12 bars.                    |
 | Collective | `collective` | How many fixes were confirmed by measurement over a period, on how many services, by family. |
 
 Each card renders in English or French (`lang`) and in one of four formats:
@@ -73,29 +73,29 @@ The same file with one pixel changed prints, with exit 1:
 {"integrity":"ok","content":"modified","level":1,"domain":null,"key":"unknown","reason":"content_modified","figures":null}
 ```
 
-| Key | Values |
-|---|---|
+| Key         | Values                                                                                                                                                                                                                                                                                            |
+|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `integrity` | `ok` when the payload's signature holds and the payload's `key` is its public key's fingerprint, else `tampered`. `integrity` alone is not the verdict: `"integrity":"ok"` only says the payload's signature holds, and a retouched file prints it too, beside `"content":"modified"` and exit 1. |
-| `content` | On a file, `intact` when it is the file signed, `modified` when it is not (see [What the file signature covers](#what-the-file-signature-covers)). `not_checked` on a verify URL, which has no file, and on a `tampered` line. |
-| `level` | `1`: the signature holds, nothing ties the key to the domain. `2`: the domain publishes this key for the day the card was signed. |
-| `domain` | The card's `org.domain`, or `null`. Also `null` when the check stopped before the payload's rules (`tampered`, `content_modified`). |
-| `key` | `current`, `retired`, `revoked` or `unknown`, what the published list says of the key. |
-| `reason` | Why, from the closed list below. |
-| `figures` | The card's big figures as signed, so a reader compares them with the image, or `null` when the check stopped before the payload's rules. |
+| `content`   | On a file, `intact` when it is the file signed, `modified` when it is not (see [What the file signature covers](#what-the-file-signature-covers)). `not_checked` on a verify URL, which has no file, and on a `tampered` line.                                                                    |
+| `level`     | `1`: the signature holds, nothing ties the key to the domain. `2`: the domain publishes this key for the day the card was signed.                                                                                                                                                                 |
+| `domain`    | The card's `org.domain`, or `null`. Also `null` when the check stopped before the payload's rules (`tampered`, `content_modified`).                                                                                                                                                               |
+| `key`       | `current`, `retired`, `revoked` or `unknown`, what the published list says of the key.                                                                                                                                                                                                            |
+| `reason`    | Why, from the closed list below.                                                                                                                                                                                                                                                                  |
+| `figures`   | The card's big figures as signed, so a reader compares them with the image, or `null` when the check stopped before the payload's rules.                                                                                                                                                          |
 
 `figures` holds `angle`, `period` (`{"kind","from","to"}`) and `before_fix_period` (`{"from","to"}`, absent when the card prints none), then the compact payload's figures under these names. Values are the signed integers, unrounded: the verify page and the Hub format them. A file and its QR code give the same `figures`.
 
-| Name | Compact letter | Unit |
-|---|---|---|
-| `cited_ops` | `o` | Operations in the cited trace (story) |
-| `cited_ms` | `m` | Milliseconds of the cited call (story) |
-| `before_fix_ops` | `b` | Operations over the before-fix period (story) |
-| `threshold_ops` | `t` | Operations, the threshold the cited trace exceeds (story) |
-| `threshold_ms` | `u` | Milliseconds, the threshold the cited call exceeds (story) |
-| `last_waste_permille` | `w` | Per mille of wasted I/O over the card's period (curve) |
-| `previous_waste_permille` | `x` | Per mille of wasted I/O over the period before (curve) |
-| `confirmed_fixes_count` | `n` | Fixes confirmed by measurement (collective) |
-| `services_count` | `e` | Services those fixes touched (collective) |
+| Name                      | Compact letter | Unit                                                       |
+|---------------------------|----------------|------------------------------------------------------------|
+| `cited_ops`               | `o`            | Operations in the cited trace (story)                      |
+| `cited_ms`                | `m`            | Milliseconds of the cited call (story)                     |
+| `before_fix_ops`          | `b`            | Operations over the before-fix period (story)              |
+| `threshold_ops`           | `t`            | Operations, the threshold the cited trace exceeds (story)  |
+| `threshold_ms`            | `u`            | Milliseconds, the threshold the cited call exceeds (story) |
+| `last_waste_permille`     | `w`            | Per mille of wasted I/O over the card's period (curve)     |
+| `previous_waste_permille` | `x`            | Per mille of wasted I/O over the period before (curve)     |
+| `confirmed_fixes_count`   | `n`            | Fixes confirmed by measurement (collective)                |
+| `services_count`          | `e`            | Services those fixes touched (collective)                  |
 
 The checks run in a fixed order, and the first that fails decides the line: the envelope and its carrier, the payload's signature over the exact bytes the card carries, the fingerprint, the file's content signature, the payload's rules, then the key's binding. A bad signature is `tampered` whatever the bytes say, and a valid signature over a payload that breaks a rule is `malformed_input`. A file whose content signature does not hold is `content_modified`, and its key is not judged: no `--keys` lookup, no network request under `--online`.
 
@@ -114,20 +114,20 @@ jq -r .reason verdict.json
 
 An error prints `{"result":"<family>","reason":"<reason>"}`, plus `"field"` on `unsupported_characters` when the text comes from `free.title`, `free.team`, `free.label` or `org.name`, and on the `malformed_input` of a `free.title` holding the PDF slot marker (`"field":"free.title"`, see C3) or of an unknown `equivalence_country` (`"field":"equivalence_country"`). Any other text the fonts cannot draw (scope, service, endpoint) gives `unsupported_characters` without `field`.
 
-| Exit | `result` | `card keygen` and `card render` reasons |
-|---|---|---|
-| 0 | | Done. |
-| 1 | `refused` | `period_not_calendar`, `period_not_closed`, `incomplete_period`, `volume_not_avoidable`, `threshold_not_applicable`, `unknown_equivalence`, `equivalence_out_of_scale`, `unsupported_language`. The card would claim what its figures do not show. |
-| 3 | `input_error` | `missing_file`, `file_too_large`, `malformed_input`, `signing_key_permissions`, `signing_key_unreadable`, `key_exists`, `output_unwritable`. |
-| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`, `jxl_encode_failed`. |
+| Exit | `result`       | `card keygen` and `card render` reasons                                                                                                                                                                                                            |
+|------|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0    |                | Done.                                                                                                                                                                                                                                              |
+| 1    | `refused`      | `period_not_calendar`, `period_not_closed`, `incomplete_period`, `volume_not_avoidable`, `threshold_not_applicable`, `unknown_equivalence`, `equivalence_out_of_scale`, `unsupported_language`. The card would claim what its figures do not show. |
+| 3    | `input_error`  | `missing_file`, `file_too_large`, `malformed_input`, `signing_key_permissions`, `signing_key_unreadable`, `key_exists`, `output_unwritable`.                                                                                                       |
+| 5    | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`, `jxl_encode_failed`.                                                                                          |
 
-| Exit | `verify-card` line and reasons |
-|---|---|
-| 0 | `integrity` `ok` and `content` `intact` (a file) or `not_checked` (a URL). Level 2: `key_published`. Level 1: `no_key_list`, `key_not_published`. |
-| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), a file that is not the one signed (`content_modified`), or a key the list does not vouch for (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), level 1. |
-| 3 | `{"result":"input_error"}`: `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`. |
-| 4 | `--online` could not read the domain's keys: the verify line at level 1 with `binding_check_failed` or `binding_partial`, or `no_http_client` on a build without the HTTP features. |
-| 5 | `{"result":"unrenderable","reason":"unsupported_version"}`: the card's format is newer than this engine. |
+| Exit | `verify-card` line and reasons                                                                                                                                                                                                                 |
+|------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0    | `integrity` `ok` and `content` `intact` (a file) or `not_checked` (a URL). Level 2: `key_published`. Level 1: `no_key_list`, `key_not_published`.                                                                                              |
+| 1    | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), a file that is not the one signed (`content_modified`), or a key the list does not vouch for (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), level 1. |
+| 3    | `{"result":"input_error"}`: `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`.                                                                                                     |
+| 4    | `--online` could not read the domain's keys: the verify line at level 1 with `binding_check_failed` or `binding_partial`, or `no_http_client` on a build without the HTTP features.                                                            |
+| 5    | `{"result":"unrenderable","reason":"unsupported_version"}`: the card's format is newer than this engine.                                                                                                                                       |
 
 A payload whose last base64url character is changed to a non-canonical one (trailing bits not zero) is `malformed_input`, exit 3, not `tampered`: both reject the card. An envelope over 64 KiB inside a PDF is `malformed_input`, a PDF over 4 MiB `file_too_large`.
 
@@ -137,32 +137,32 @@ A payload whose last base64url character is changed to a non-canonical one (trai
 
 The Hub writes it, the engine reads it. Unknown keys are refused, every number is an integer from 0 to 2^53 − 1 (9 007 199 254 740 991, the largest a browser reads back exactly), and dates are `YYYY-MM-DD`.
 
-| Key | Required | Content and bounds |
-|---|---|---|
-| `angle` | yes | `story`, `curve` or `collective`. |
-| `lang` | yes | `en` or `fr`. Any other value is `malformed_input`. |
-| `period` | yes | `{"kind","from","to"}`. `kind` is `week` (Monday to Sunday), `month`, `quarter`, `semester` (January to June, July to December) or `year`. `from` and `to` bound exactly one calendar period of that kind (`period_not_calendar`), which ends before the UTC day of `generated_at_ms` (`period_not_closed`). |
-| `scope` | yes | `{"environment","sources","covered_days","restart_days","sampled_permille"}`. `environment` is optional. `sources` is not empty. `covered_days` equals the period's day count (`incomplete_period`), `restart_days` is at most `covered_days`, `sampled_permille` is 0 to 1000. `environment` and `sources`, joined with `", "`, take at most 120 characters. |
-| `figures` | yes | Integers whose name carries the unit, read by angle, see below. |
-| `story` | on a story only | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` is optional. `service` and `endpoint` take at most 200 characters each. `done_at` falls in or before the period, `observed_at` on or before `done_at`. |
-| `before_fix_period` | when the card prints one | `{"from","to"}`, one calendar period of `period.kind`, see [the before-fix period](#the-before-fix-period). |
-| `equivalence_country` | no | `fr`, `gb` or `us`, `fr` when absent. It selects the equivalence table, see [Equivalences](#equivalences). Any other value is `malformed_input`, with `"field":"equivalence_country"`. |
-| `equivalence` | no | An `id` of the table of the card's country. Absent, the engine picks one from that table. Any other `id`, including one that belongs to another country, is `unknown_equivalence`. |
-| `free` | yes, `{}` when empty | `{"title","team","label"}`, each optional: title 48 characters, team 48, label 80 (a story only). A title may not hold `{"content_sig":"`, the marker of the PDF's signature slot: `{"result":"input_error","reason":"malformed_input","field":"free.title"}`, exit 3, in every format. |
-| `org` | yes | `{"name","domain"}`. `name` takes at most 60 characters. `domain` is optional, a public DNS name: lowercase ASCII, at most 253, two labels or more of 1 to 63 `[a-z0-9-]` with no edge hyphen, the last one not all digits. |
-| `generated_at_ms` | yes | When the Hub built the card, in epoch milliseconds. |
+| Key                   | Required                 | Content and bounds                                                                                                                                                                                                                                                                                                                                            |
+|-----------------------|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `angle`               | yes                      | `story`, `curve` or `collective`.                                                                                                                                                                                                                                                                                                                             |
+| `lang`                | yes                      | `en` or `fr`. Any other value is `malformed_input`.                                                                                                                                                                                                                                                                                                           |
+| `period`              | yes                      | `{"kind","from","to"}`. `kind` is `week` (Monday to Sunday), `month`, `quarter`, `semester` (January to June, July to December) or `year`. `from` and `to` bound exactly one calendar period of that kind (`period_not_calendar`), which ends before the UTC day of `generated_at_ms` (`period_not_closed`).                                                  |
+| `scope`               | yes                      | `{"environment","sources","covered_days","restart_days","sampled_permille"}`. `environment` is optional. `sources` is not empty. `covered_days` equals the period's day count (`incomplete_period`), `restart_days` is at most `covered_days`, `sampled_permille` is 0 to 1000. `environment` and `sources`, joined with `", "`, take at most 120 characters. |
+| `figures`             | yes                      | Integers whose name carries the unit, read by angle, see below.                                                                                                                                                                                                                                                                                               |
+| `story`               | on a story only          | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` is optional. `service` and `endpoint` take at most 200 characters each. `done_at` falls in or before the period, `observed_at` on or before `done_at`.                                                                                                                         |
+| `before_fix_period`   | when the card prints one | `{"from","to"}`, one calendar period of `period.kind`, see [the before-fix period](#the-before-fix-period).                                                                                                                                                                                                                                                   |
+| `equivalence_country` | no                       | `fr`, `gb` or `us`, `fr` when absent. It selects the equivalence table, see [Equivalences](#equivalences). Any other value is `malformed_input`, with `"field":"equivalence_country"`.                                                                                                                                                                        |
+| `equivalence`         | no                       | An `id` of the table of the card's country. Absent, the engine picks one from that table. Any other `id`, including one that belongs to another country, is `unknown_equivalence`.                                                                                                                                                                            |
+| `free`                | yes, `{}` when empty     | `{"title","team","label"}`, each optional: title 48 characters, team 48, label 80 (a story only). A title may not hold `{"content_sig":"`, the marker of the PDF's signature slot: `{"result":"input_error","reason":"malformed_input","field":"free.title"}`, exit 3, in every format.                                                                       |
+| `org`                 | yes                      | `{"name","domain"}`. `name` takes at most 60 characters. `domain` is optional, a public DNS name: lowercase ASCII, at most 253, two labels or more of 1 to 63 `[a-z0-9-]` with no edge hyphen, the last one not all digits.                                                                                                                                   |
+| `generated_at_ms`     | yes                      | When the Hub built the card, in epoch milliseconds.                                                                                                                                                                                                                                                                                                           |
 
 Every text is trimmed (a value that differs from its trim is refused, never trimmed silently), not empty, and holds no control, bidirectional or invisible character.
 
 `figures` by angle:
 
-| Angle | Keys |
-|---|---|
-| Story, N+1 and redundant types | `cited_ops`, `before_fix_ops` (optional, the volume in the before-fix period), `co2_low_ug` (optional, only with `before_fix_ops`). No threshold (`threshold_not_applicable`). |
-| Story, `slow_*` types | `cited_ms`, `threshold_ms` (optional). |
-| Story, `excessive_fanout`, `chatty_service`, `pool_saturation`, `serialized_calls` | `cited_ops`, `threshold_ops` (optional). |
-| Curve | `waste_permille` (2 to 12 values of at most 1000, oldest first, the card's period last), `avoidable_ops` and `co2_low_ug` (optional) for the card's period. |
-| Collective | `confirmed_fixes_count` (at least 1), `previous_fixes_count` (optional, absent when the Hub cannot count the previous period honestly), `services_count` (1 to `confirmed_fixes_count`), `fixes_by_family_count` (`extra_calls`, `slow_calls`, `call_architecture`, adding up to `confirmed_fixes_count`), `before_fix_ops` (optional, needs an `extra_calls` fix), `co2_low_ug` (optional, only with `before_fix_ops`). |
+| Angle                                                                              | Keys                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Story, N+1 and redundant types                                                     | `cited_ops`, `before_fix_ops` (optional, the volume in the before-fix period), `co2_low_ug` (optional, only with `before_fix_ops`). No threshold (`threshold_not_applicable`).                                                                                                                                                                                                                                           |
+| Story, `slow_*` types                                                              | `cited_ms`, `threshold_ms` (optional).                                                                                                                                                                                                                                                                                                                                                                                   |
+| Story, `excessive_fanout`, `chatty_service`, `pool_saturation`, `serialized_calls` | `cited_ops`, `threshold_ops` (optional).                                                                                                                                                                                                                                                                                                                                                                                 |
+| Curve                                                                              | `waste_permille` (2 to 12 values of at most 1000, oldest first, the card's period last), `avoidable_ops` and `co2_low_ug` (optional) for the card's period.                                                                                                                                                                                                                                                              |
+| Collective                                                                         | `confirmed_fixes_count` (at least 1), `previous_fixes_count` (optional, absent when the Hub cannot count the previous period honestly), `services_count` (1 to `confirmed_fixes_count`), `fixes_by_family_count` (`extra_calls`, `slow_calls`, `call_architecture`, adding up to `confirmed_fixes_count`), `before_fix_ops` (optional, needs an `extra_calls` fix), `co2_low_ug` (optional, only with `before_fix_ops`). |
 
 Only N+1 and redundant findings have an avoidable volume: `before_fix_ops` on any other story type is `volume_not_avoidable`. On a collective, `before_fix_ops` sums the volume before the N+1 and redundant fixes only, and the card names that subset.
 
@@ -197,13 +197,13 @@ Anything else is `malformed_input`.
 
 The full payload is what the PNG and the PDF carry. It holds `card.json` with three changes: `v` (1), the resolved `equivalence` object, and the key.
 
-| Key | Content |
-|---|---|
-| `v` | The format version, `1`. A higher value is `unsupported_version`. |
-| `angle`, `lang`, `period`, `scope`, `figures`, `story`, `before_fix_period`, `free`, `org`, `generated_at_ms` | As in `card.json`. |
-| `equivalence` | `{"id","per_unit_ug","unit","source","vintage"}`, absent when the card prints no equivalence. |
-| `key` | The fingerprint of the signing key. |
-| `public_key` | The raw 32-byte Ed25519 public key, base64url. |
+| Key                                                                                                           | Content                                                                                       |
+|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| `v`                                                                                                           | The format version, `1`. A higher value is `unsupported_version`.                             |
+| `angle`, `lang`, `period`, `scope`, `figures`, `story`, `before_fix_period`, `free`, `org`, `generated_at_ms` | As in `card.json`.                                                                            |
+| `equivalence`                                                                                                 | `{"id","per_unit_ug","unit","source","vintage"}`, absent when the card prints no equivalence. |
+| `key`                                                                                                         | The fingerprint of the signing key.                                                           |
+| `public_key`                                                                                                  | The raw 32-byte Ed25519 public key, base64url.                                                |
 
 The equivalence object is the same for every country. The country is not signed apart: it reads in the `id`, which is unique across the tables, and in `source`. `equivalence_country` only selects the row, so a verifier never needs it.
 
@@ -219,22 +219,22 @@ The story fixture signs as:
 
 The compact payload is what the QR code carries: the angle, the period, the figures the card prints large, the before-fix period, the domain, the public key and the day. Days are epoch days, the days since 1970-01-01 UTC.
 
-| Key | Content |
-|---|---|
-| `v` | `1`. |
-| `a` | The angle: `s` story, `c` curve, `k` collective. |
+| Key | Content                                                                                                                                            |
+|-----|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `v` | `1`.                                                                                                                                               |
+| `a` | The angle: `s` story, `c` curve, `k` collective.                                                                                                   |
 | `p` | `[kind, from, to]`: the kind letter, then the period's first and last epoch days. Kinds: `w` week, `m` month, `q` quarter, `h` semester, `y` year. |
-| `f` | The figures, see below. |
-| `r` | `[from, to]`, the epoch days of the before-fix period, absent when the card prints none. Never on a curve. |
-| `d` | `org.domain`, absent when the card names none. |
-| `k` | The public key, base64url, as `public_key`. |
-| `g` | The epoch day of `generated_at_ms`, the day the card was signed. |
+| `f` | The figures, see below.                                                                                                                            |
+| `r` | `[from, to]`, the epoch days of the before-fix period, absent when the card prints none. Never on a curve.                                         |
+| `d` | `org.domain`, absent when the card names none.                                                                                                     |
+| `k` | The public key, base64url, as `public_key`.                                                                                                        |
+| `g` | The epoch day of `generated_at_ms`, the day the card was signed.                                                                                   |
 
-| Angle | `f` keys |
-|---|---|
-| Story | `o` `cited_ops`, `m` `cited_ms`, `b` `before_fix_ops`, `t` `threshold_ops`, `u` `threshold_ms`. One of the sets `o`, `b o`, `o t`, `m`, `m u`. |
-| Curve | `w` the card's period's `waste_permille`, `x` the period before the card's. |
-| Collective | `n` `confirmed_fixes_count`, `e` `services_count`. |
+| Angle      | `f` keys                                                                                                                                       |
+|------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| Story      | `o` `cited_ops`, `m` `cited_ms`, `b` `before_fix_ops`, `t` `threshold_ops`, `u` `threshold_ms`. One of the sets `o`, `b o`, `o t`, `m`, `m u`. |
+| Curve      | `w` the card's period's `waste_permille`, `x` the period before the card's.                                                                    |
+| Collective | `n` `confirmed_fixes_count`, `e` `services_count`.                                                                                             |
 
 The story fixture's compact payload:
 
@@ -338,16 +338,16 @@ The record is `v=ps1; k=<fingerprint>; from=YYYY-MM-DD[; to=YYYY-MM-DD][; revoke
 
 **Rotation and revocation.** A key is valid from `from` to `to`, both included, compared with the UTC day the card was signed (`generated_at_ms`, or `g`). That day is the signer's own claim, written by whoever holds the key.
 
-| The list says | Card signed | Result |
-|---|---|---|
-| Nothing (no list read) | | Level 1, `unknown`, `no_key_list` |
-| Not this fingerprint | | Level 1, `unknown`, `key_not_published` |
-| Another `public_key` for this fingerprint | | Level 1, `unknown`, `public_key_mismatch`, exit 1 |
-| `revoked` | any day | Level 1, `revoked`, `key_revoked`, exit 1 |
-| Valid, no `to` | before `from` | Level 1, `current`, `signed_outside_validity`, exit 1 |
-| Valid, with `to` | outside `from`..`to` | Level 1, `retired`, `signed_outside_validity`, exit 1 |
-| Valid, no `to` | inside its validity | Level 2, `current`, `key_published` |
-| Valid, with `to` | inside its validity | Level 2, `retired`, `key_published` |
+| The list says                             | Card signed          | Result                                                |
+|-------------------------------------------|----------------------|-------------------------------------------------------|
+| Nothing (no list read)                    |                      | Level 1, `unknown`, `no_key_list`                     |
+| Not this fingerprint                      |                      | Level 1, `unknown`, `key_not_published`               |
+| Another `public_key` for this fingerprint |                      | Level 1, `unknown`, `public_key_mismatch`, exit 1     |
+| `revoked`                                 | any day              | Level 1, `revoked`, `key_revoked`, exit 1             |
+| Valid, no `to`                            | before `from`        | Level 1, `current`, `signed_outside_validity`, exit 1 |
+| Valid, with `to`                          | outside `from`..`to` | Level 1, `retired`, `signed_outside_validity`, exit 1 |
+| Valid, no `to`                            | inside its validity  | Level 2, `current`, `key_published`                   |
+| Valid, with `to`                          | inside its validity  | Level 2, `retired`, `key_published`                   |
 
 To rotate, publish the new key with its `from` and set `to` on the old one: cards signed with the old key stay at level 2, `retired`. That window rests on the signer's own date, so a stolen key that is only retired can still date a card inside it. To withdraw a key that may have leaked, set `revoked`: every card it signed drops to level 1, `key_revoked`, whatever date the card states, because a stolen key could date a card before any revocation day. Honest cards that key signed lose level 2 too, and no third-party timestamp tells them apart. Revoke a key that may have leaked, retire one that did not. The `revoked` day is the first day the key may have leaked, not the day it was withdrawn: it changes no verdict and only tells a reader since when the key may have been exposed. When the DNS record and the well-known file both list a key, every limit either sets applies, so `revoked` wins over `to`, and `to` over no limit.
 
@@ -373,15 +373,15 @@ The `tgv_km` row is never picked by the engine. A card prints it only when `card
 <!-- equivalences:begin -->
 Embedded vintages: Base Carbone `V23.6 (2025-07-03)`, DESNZ `2026, v1.2`, US EPA `2024-10`.
 
-| `id` | Countries | Auto | Source | Source reference | Factor | `per_unit_ug` | `unit` | `label` | Validity |
-|---|---|---|---|---|---|---:|---|---|---|
-| `tgv_km` | fr | no | ADEME, Base Carbone | 43256 | 0.00293 kgCO2e/passager.km | 2_930_000 | `passenger_km` | km by high-speed train in France | avr-24 |
-| `gb_rail_km` | gb | yes | DESNZ, GHG conversion factors | 25_315_3147_11_1 + 26_911_3147_11_1 | 0.03092 + 0.00897 kgCO2e/passenger.km | 39_890_000 | `passenger_km` | km by train in the UK | 2026 |
-| `gb_car_km` | gb | yes | DESNZ, GHG conversion factors | 4_301_3074_4_1 + 26_904_3074_4_1 | 0.16591 + 0.04399 kgCO2e/km | 209_900_000 | `vehicle_km` | km driven by an average car in the UK | 2026 |
-| `car_km` | fr | yes | ADEME, Base Carbone | 43791 | 0.256 kgCO2e/km | 256_000_000 | `vehicle_km` | km driven by an average car in France | 2026 |
-| `us_car_mile` | us | yes | US EPA, GHG Equivalencies Calculator | Miles driven by the average gasoline-powered passenger vehicle | 3.93 x 10-4 metric tons CO2e/mile | 393_000_000 | `vehicle_mile` | miles driven by an average US car, tailpipe only | 2024-10 |
-| `meal` | fr | yes | ADEME, Base Carbone | 20682 | 2.04 kgCO2e/repas | 2_040_000_000 | `meal` | average meals in France | déc-21 |
-| `smartphone` | fr, gb, us | yes | ADEME, Base Carbone | 27013 | 39.1 kgCO2e/unité | 39_100_000_000 | `unit` | smartphones | 20/12/2021 |
+| `id`          | Countries  | Auto | Source                               | Source reference                                               | Factor                                |  `per_unit_ug` | `unit`         | `label`                                          | Validity   |
+|---------------|------------|------|--------------------------------------|----------------------------------------------------------------|---------------------------------------|---------------:|----------------|--------------------------------------------------|------------|
+| `tgv_km`      | fr         | no   | ADEME, Base Carbone                  | 43256                                                          | 0.00293 kgCO2e/passager.km            |      2_930_000 | `passenger_km` | km by high-speed train in France                 | avr-24     |
+| `gb_rail_km`  | gb         | yes  | DESNZ, GHG conversion factors        | 25_315_3147_11_1 + 26_911_3147_11_1                            | 0.03092 + 0.00897 kgCO2e/passenger.km |     39_890_000 | `passenger_km` | km by train in the UK                            | 2026       |
+| `gb_car_km`   | gb         | yes  | DESNZ, GHG conversion factors        | 4_301_3074_4_1 + 26_904_3074_4_1                               | 0.16591 + 0.04399 kgCO2e/km           |    209_900_000 | `vehicle_km`   | km driven by an average car in the UK            | 2026       |
+| `car_km`      | fr         | yes  | ADEME, Base Carbone                  | 43791                                                          | 0.256 kgCO2e/km                       |    256_000_000 | `vehicle_km`   | km driven by an average car in France            | 2026       |
+| `us_car_mile` | us         | yes  | US EPA, GHG Equivalencies Calculator | Miles driven by the average gasoline-powered passenger vehicle | 3.93 x 10-4 metric tons CO2e/mile     |    393_000_000 | `vehicle_mile` | miles driven by an average US car, tailpipe only | 2024-10    |
+| `meal`        | fr         | yes  | ADEME, Base Carbone                  | 20682                                                          | 2.04 kgCO2e/repas                     |  2_040_000_000 | `meal`         | average meals in France                          | déc-21     |
+| `smartphone`  | fr, gb, us | yes  | ADEME, Base Carbone                  | 27013                                                          | 39.1 kgCO2e/unité                     | 39_100_000_000 | `unit`         | smartphones                                      | 20/12/2021 |
 <!-- equivalences:end -->
 
 Base Carbone keeps a row `Valide générique` after its validity period has lapsed, so the last column shows how old each factor is.
@@ -428,38 +428,38 @@ Every sentence a card prints is listed here, the English ones on this page and t
 
 A story sentence has two forms. Without a threshold, `{lead}` is the label the user gave the action followed by `: `, or `For one action in the application, `. With a threshold, `{before}` is the before-fix period ("In August 2026"), and the label, when there is one, leads the sentence. `{n}` is the figure the story cites and `{threshold}` the alert threshold.
 
-| Finding types | Without a threshold | With a threshold |
-|---|---|---|
-| `n_plus_one_sql`, `n_plus_one_http`, `n_plus_one_messaging` | `{lead}the application fetched information {n} times instead of once.` | None, these types have no threshold. |
-| `redundant_sql`, `redundant_http` | `{lead}the application asked {n} times for the same information.` | None. |
-| `slow_sql`, `slow_http`, `slow_messaging` | `{lead}the slowest runs of one step took {n} or more.` | `{before}, before the fix, the slowest runs of one step took {n} or more. It still runs and no longer triggers the slowness alert, set at {threshold}.` |
-| `excessive_fanout` | `{lead}a single step set off {n} operations.` | `{before}, before the fix, a single step set off {n} operations. It still runs and no longer triggers the alert, set at {threshold} operations.` |
-| `chatty_service` | `{lead}the application reached out to other parts of the system {n} times.` | `{before}, before the fix, the application reached out to other parts of the system {n} times. The action still runs and no longer triggers the alert, set at {threshold} times.` |
-| `pool_saturation` | `{lead}{n} operations ran at the same moment, at the peak.` | `{before}, before the fix, {n} operations ran at the same moment, at the peak. The action still runs and no longer triggers the alert, set at {threshold} operations.` |
-| `serialized_calls` | `{lead}the application took {n} steps one after the other.` | `{before}, before the fix, the application took {n} steps one after the other. The action still runs and no longer triggers the alert, set at {threshold} steps.` |
+| Finding types                                               | Without a threshold                                                         | With a threshold                                                                                                                                                                  |
+|-------------------------------------------------------------|-----------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `n_plus_one_sql`, `n_plus_one_http`, `n_plus_one_messaging` | `{lead}the application fetched information {n} times instead of once.`      | None, these types have no threshold.                                                                                                                                              |
+| `redundant_sql`, `redundant_http`                           | `{lead}the application asked {n} times for the same information.`           | None.                                                                                                                                                                             |
+| `slow_sql`, `slow_http`, `slow_messaging`                   | `{lead}the slowest runs of one step took {n} or more.`                      | `{before}, before the fix, the slowest runs of one step took {n} or more. It still runs and no longer triggers the slowness alert, set at {threshold}.`                           |
+| `excessive_fanout`                                          | `{lead}a single step set off {n} operations.`                               | `{before}, before the fix, a single step set off {n} operations. It still runs and no longer triggers the alert, set at {threshold} operations.`                                  |
+| `chatty_service`                                            | `{lead}the application reached out to other parts of the system {n} times.` | `{before}, before the fix, the application reached out to other parts of the system {n} times. The action still runs and no longer triggers the alert, set at {threshold} times.` |
+| `pool_saturation`                                           | `{lead}{n} operations ran at the same moment, at the peak.`                 | `{before}, before the fix, {n} operations ran at the same moment, at the peak. The action still runs and no longer triggers the alert, set at {threshold} operations.`            |
+| `serialized_calls`                                          | `{lead}the application took {n} steps one after the other.`                 | `{before}, before the fix, the application took {n} steps one after the other. The action still runs and no longer triggers the alert, set at {threshold} steps.`                 |
 
 The Hub sends a threshold, and so gets the threshold form, only when it saw passes below the threshold and no detection on a day after the fix (contract C1). Otherwise the card takes the form without a threshold and says since when the finding is no longer detected.
 
 The other lines:
 
-| Where | Line |
-|---|---|
-| Story, under the sentence | `Seen on {date}.` (when `observed_at` is set), then `Not detected since {date}.` (without a threshold) |
-| Story CO2 line | `{before}, before the fix: {n} unnecessary operations, at least {co2} CO2e (estimate)` |
-| Curve CO2 line | `Avoidable in {period}: {n} operations, at least {co2} CO2e (estimate)` |
-| Collective CO2 line | `{before}, before the fix of work done more than once: ...` with one N+1 or redundant fix, `{before}, before the {n} fixes of work done more than once: ...` with several |
-| Equivalence | `Equal to at least {n} {unit}`, then `1 {unit} = {factor} CO2e. Source: {source}, {vintage}` |
-| Collective | `{n} fixes confirmed by measurement, across {s} services`, with a trailing comma and then `against {p} the month before` (or week, quarter, half-year, year) when the Hub counted the previous period |
-| Collective families | `What was fixed`: `Work done more than once`, `Slow steps`, `How the work was ordered` |
-| Curve | `Share of the work that was avoidable`, `in {period}, against {x} in {previous period}`, `The lower, the better.`, and the legend `Share of the work that was avoidable, month by month` (or week by week, quarter by quarter, half-year by half-year, year by year) |
-| Slow story bars | `Slowest runs, before the fix` and the dashed `Alert threshold` |
-| Proof | `Fix confirmed by measurement` (story) or `Fixes confirmed by measurement` (collective), none on a curve, which names no fix |
-| Scope | `Measured on {sources}, {environment}, {days} days`, then `, {n} days with a restart` and `, on {p} of traffic` when they apply |
-| Organisation | `Organisation, as declared: {name}` |
-| Footer | `Generated on {date}`, `Measured with Perf Sentinel, free software carried by the Institut du Numérique Responsable` |
-| Verify | `Check it and read the method: perf-sentinel.dev/verifier` |
-| Carousel, page 2 | `Every unnecessary operation costs server time, energy and sometimes waiting.` and `Measuring them shows where the application can do the same work with less.` |
-| Carousel, page 4 | `Check these figures` and `Method:` followed by the link to this page |
+| Where                     | Line                                                                                                                                                                                                                                                                 |
+|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Story, under the sentence | `Seen on {date}.` (when `observed_at` is set), then `Not detected since {date}.` (without a threshold)                                                                                                                                                               |
+| Story CO2 line            | `{before}, before the fix: {n} unnecessary operations, at least {co2} CO2e (estimate)`                                                                                                                                                                               |
+| Curve CO2 line            | `Avoidable in {period}: {n} operations, at least {co2} CO2e (estimate)`                                                                                                                                                                                              |
+| Collective CO2 line       | `{before}, before the fix of work done more than once: ...` with one N+1 or redundant fix, `{before}, before the {n} fixes of work done more than once: ...` with several                                                                                            |
+| Equivalence               | `Equal to at least {n} {unit}`, then `1 {unit} = {factor} CO2e. Source: {source}, {vintage}`                                                                                                                                                                         |
+| Collective                | `{n} fixes confirmed by measurement, across {s} services`, with a trailing comma and then `against {p} the month before` (or week, quarter, half-year, year) when the Hub counted the previous period                                                                |
+| Collective families       | `What was fixed`: `Work done more than once`, `Slow steps`, `How the work was ordered`                                                                                                                                                                               |
+| Curve                     | `Share of the work that was avoidable`, `in {period}, against {x} in {previous period}`, `The lower, the better.`, and the legend `Share of the work that was avoidable, month by month` (or week by week, quarter by quarter, half-year by half-year, year by year) |
+| Slow story bars           | `Slowest runs, before the fix` and the dashed `Alert threshold`                                                                                                                                                                                                      |
+| Proof                     | `Fix confirmed by measurement` (story) or `Fixes confirmed by measurement` (collective), none on a curve, which names no fix                                                                                                                                         |
+| Scope                     | `Measured on {sources}, {environment}, {days} days`, then `, {n} days with a restart` and `, on {p} of traffic` when they apply                                                                                                                                      |
+| Organisation              | `Organisation, as declared: {name}`                                                                                                                                                                                                                                  |
+| Footer                    | `Generated on {date}`, `Measured with Perf Sentinel, free software carried by the Institut du Numérique Responsable`                                                                                                                                                 |
+| Verify                    | `Check it and read the method: perf-sentinel.dev/verifier`                                                                                                                                                                                                           |
+| Carousel, page 2          | `Every unnecessary operation costs server time, energy and sometimes waiting.` and `Measuring them shows where the application can do the same work with less.`                                                                                                      |
+| Carousel, page 4          | `Check these figures` and `Method:` followed by the link to this page                                                                                                                                                                                                |
 
 In the `Measured with` line, the two names Perf Sentinel and Institut du Numérique Responsable print in bold, underlined, in the brand green `#107a56`, and each stays whole on one line. The words are the same as in the table.
 
@@ -491,23 +491,23 @@ One line per drawing operation follows, in the PNG's order, then `</svg>`. The o
 
 The envelope only holds JSON punctuation (`{`, `}`, `"`, `:`, `,`) and base64url characters, so it needs no XML escaping. `card render` checks every byte before writing and stops with `svg_encode_failed` otherwise, which the canonical envelope never triggers. `verify-card` reads the envelope without an XML parser: the engine writes the element in one form only, and a parser would be a new dependency and more code exposed to a file a stranger sends. It looks for the exact string `<metadata id="perf-sentinel-card">` and takes its text up to the next `</metadata>`:
 
-| The file | Reason |
-|---|---|
-| Over 16 MiB | `file_too_large` |
-| Not UTF-8, or not starting with `<?xml` or `<svg` after an optional UTF-8 BOM and whitespace | `malformed_input` |
-| No such element | `no_card_payload` |
-| The element twice | `duplicate_card_payload` |
-| No `</metadata>`, more than 64 KiB, or a byte outside the set above | `malformed_input` |
-| The element anywhere but right after the first `</title>` and its newline | `malformed_input` |
+| The file                                                                                     | Reason                   |
+|----------------------------------------------------------------------------------------------|--------------------------|
+| Over 16 MiB                                                                                  | `file_too_large`         |
+| Not UTF-8, or not starting with `<?xml` or `<svg` after an optional UTF-8 BOM and whitespace | `malformed_input`        |
+| No such element                                                                              | `no_card_payload`        |
+| The element twice                                                                            | `duplicate_card_payload` |
+| No `</metadata>`, more than 64 KiB, or a byte outside the set above                          | `malformed_input`        |
+| The element anywhere but right after the first `</title>` and its newline                    | `malformed_input`        |
 
 On an original file, the envelope's `content_sig` covers the drawing too, see [What the file signature covers](#what-the-file-signature-covers).
 
 Sizes measured on the test fixtures, envelope included:
 
-| Fixture | English | French |
-|---|---|---|
-| Story | 319 KiB | 324 KiB |
-| Curve | 298 KiB | 293 KiB |
+| Fixture    | English | French  |
+|------------|---------|---------|
+| Story      | 319 KiB | 324 KiB |
+| Curve      | 298 KiB | 293 KiB |
 | Collective | 325 KiB | 338 KiB |
 
 ## The JPEG XL
@@ -516,11 +516,11 @@ Sizes measured on the test fixtures, envelope included:
 
 Sizes measured on the test fixtures (English, envelope included):
 
-| Fixture | `card.jxl` | `card.png` | Ratio |
-|---|---|---|---|
-| Story | 44,822 B | 112,089 B | 0.40 |
-| Curve | 41,486 B | 110,649 B | 0.37 |
-| Collective | 42,114 B | 116,822 B | 0.36 |
+| Fixture    | `card.jxl` | `card.png` | Ratio |
+|------------|------------|------------|-------|
+| Story      | 44,822 B   | 112,089 B  | 0.40  |
+| Curve      | 41,486 B   | 110,649 B  | 0.37  |
+| Collective | 42,114 B   | 116,822 B  | 0.36  |
 
 JPEG XL is an archival or high-quality export. The PNG stays the format to post: LinkedIn does not accept JPEG XL ([its help page](https://www.linkedin.com/help/linkedin/answer/a564109) lists GIF, HEIF/HEIC on iOS, JPEG, PNG and WEBP for images), and browser support is recent and uneven: Chrome turns it on by default from version 155, Firefox from 158, Safari has partial support since 17, and Edge does not display it ([caniuse](https://caniuse.com/jpegxl), checked 2026-10-30).
 
@@ -539,15 +539,15 @@ Sizes are 32-bit big-endian and count the 8-byte header. Nothing follows `jxlc`.
 
 `verify-card` reads the envelope by walking the top-level boxes, without decoding the codestream: a decoder would be a large dependency exposed to a file a stranger sends, for bytes the reader never needs. A box of size 1 has a 64-bit size after its type, a box of size 0 runs to the end of the file. Every box other than `pscd` is skipped by its length and never read, so a `pscd` box nested inside another box is not seen.
 
-| The file | Reason |
-|---|---|
-| Over 16 MiB | `file_too_large` |
-| A bare codestream (starts `FF 0A`) | `no_card_payload` |
-| Not starting with the signature box | `malformed_input` |
-| A box smaller than its header, running past the end of the file, or cut inside its header | `malformed_input` |
-| No top-level `pscd` box | `no_card_payload` |
-| Two top-level `pscd` boxes | `duplicate_card_payload` |
-| A `pscd` payload over 64 KiB or not UTF-8 | `malformed_input` |
+| The file                                                                                  | Reason                   |
+|-------------------------------------------------------------------------------------------|--------------------------|
+| Over 16 MiB                                                                               | `file_too_large`         |
+| A bare codestream (starts `FF 0A`)                                                        | `no_card_payload`        |
+| Not starting with the signature box                                                       | `malformed_input`        |
+| A box smaller than its header, running past the end of the file, or cut inside its header | `malformed_input`        |
+| No top-level `pscd` box                                                                   | `no_card_payload`        |
+| Two top-level `pscd` boxes                                                                | `duplicate_card_payload` |
+| A `pscd` payload over 64 KiB or not UTF-8                                                 | `malformed_input`        |
 
 `verify-card` then requires the `pscd` box where the engine writes it and checks the file's content signature, see [What the file signature covers](#what-the-file-signature-covers).
 

@@ -115,7 +115,7 @@ Publier les deux permet à un lecteur de les comparer et de voir combien de gasp
 Chaque rapport énonce ce périmètre trois fois :
 
 - `notes.disclaimers` se termine par une ligne par sous-système, base de données puis broker, ajoutée après les avertissements personnalisés ou par défaut. Elle dit que les hôtes sont dans les totaux sur les N fenêtres qui portaient un chiffre ou sur K fenêtres sur N (en nommant les fenêtres estimées et celles gardées à côté des totaux), avec les modèles et placements vus sur la période, ou que les totaux ne contiennent aucune énergie des hôtes de ce sous-système. Quand un hôte est inclus, la ligne ajoute que son carbone est dans `total_carbon_kgco2eq` et dans les chiffres d'aucune application.
-- La page « At a glance » du PDF nomme les hôtes de base de données et de broker dont le `in_totals_windows` n'est pas nul, le test de `notes.disclaimers`, avec leur `in_totals_energy_kwh` (et `in K of N windows` quand seule une partie des fenêtres les a comptés), et dit que les autres sont hors des totaux. Le tableau des applications ajoute une ligne `Database hosts` et une ligne `Broker hosts` pour ces mêmes hôtes, si bien que ses lignes s'additionnent jusqu'à la ligne Total.
+- La page "At a glance" du PDF nomme les hôtes de base de données et de broker dont le `in_totals_windows` n'est pas nul, le test de `notes.disclaimers`, avec leur `in_totals_energy_kwh` (et `in K of N windows` quand seule une partie des fenêtres les a comptés), et dit que les autres sont hors des totaux. Le tableau des applications ajoute une ligne `Database hosts` et une ligne `Broker hosts` pour ces mêmes hôtes, si bien que ses lignes s'additionnent jusqu'à la ligne Total.
 - `carbon_breakdown.database_kgco2eq` et `messaging_kgco2eq` portent le carbone des hôtes inclus, `database_waste.in_totals_energy_kwh` et `messaging_waste.in_totals_energy_kwh` leur énergie.
 
 Pour `intent = official`, le validateur contrôle ce périmètre : les deux termes carbone des hôtes sont finis et >= 0, les cinq termes de la ventilation s'additionnent en `total_carbon_kgco2eq` à 1e-6 près en relatif (contrôle sauté quand `carbon_methodologies` contient l'étiquette ancienne `sci_v1_numerator`), et le `energy_kwh` des applications plus les deux parts d'hôtes incluses tiennent dans `total_energy_kwh`.
@@ -233,7 +233,7 @@ chemins d'écriture du daemon (voir
 [`docs/FR/QUERY-API-FR.md`](./QUERY-API-FR.md#restreindre-les-écritures-en-production-reverse-proxy)).
 
 En CI, gardez le job qui lance `disclose --intent official` derrière un
-**environnement GitHub avec reviewers requis**. Un développeur peut
+environnement GitHub avec reviewers requis. Un développeur peut
 toujours ouvrir la PR ou déclencher le workflow, mais le job se met en
 pause jusqu'à ce qu'un reviewer nommé (un architecte ou un responsable
 DevOps) approuve.
@@ -441,7 +441,7 @@ le binaire producteur porte aussi une provenance SLSA.)
 ### Ce que le hash prouve, et où il s'arrête
 
 Le `content_hash`, la signature cosign et la provenance SLSA lient le
-**document publié**. Depuis la 0.9.25, le daemon chaîne aussi par
+document publié. Depuis la 0.9.25, le daemon chaîne aussi par
 hachage chaque fenêtre archivée au moment où il l'écrit. `disclose`
 parcourt cette chaîne pendant l'agrégation et publie le résultat dans
 `integrity.trace_integrity_chain` : fenêtres vérifiées, fenêtres écrites
@@ -481,9 +481,7 @@ chaîne cohérente, exactement comme il peut choisir un coefficient
 défavorable. Ces paramètres sont désormais publiés eux aussi, voir
 `carbon_methodologies`, `scoring_coefficients` et les champs du
 carbone embarqué dans `methodology.calibration_inputs`, ce qui les
-rend contestables plutôt qu'invisibles. L'étape restante est
-l'ancrage de la tête de chaîne hors du contrôle de l'opérateur, ce à quoi
-`integrity.cross_period_log` reste réservé. La garantie permet de
+rend contestables plutôt qu'invisibles. La garantie permet de
 détecter une altération après coup, mais reste auto-déclarée à la
 source.
 
@@ -584,10 +582,6 @@ jq --arg url "https://transparency.example.fr/bundle.sig" \
    } | .report_metadata.integrity_level = "signed"' \
    report.json > report-signed.json && mv report-signed.json report.json
 ```
-
-C'est une solution de contournement provisoire. `perf-sentinel sign`
-remplacera la combinaison bash + jq par une seule sous-commande dès sa
-livraison.
 
 Les opérateurs qui font tourner une instance Rekor privée fixent
 `[reporting.sigstore] rekor_url = "..."` dans leur config
@@ -735,7 +729,7 @@ donc qu'un second contrôle par-dessus.
 ### Convention URL des sidecars en mode `--url`
 
 `verify-hash --url <REPORT_URL>` récupère trois fichiers depuis le
-même répertoire, avec des **noms fixes** :
+même répertoire, avec des noms fixes :
 
 ```
 https://example.fr/<report-filename>            (le rapport)

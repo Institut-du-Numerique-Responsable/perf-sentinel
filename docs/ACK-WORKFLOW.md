@@ -11,9 +11,9 @@ different operational scenarios and can be used side-by-side.
   <img alt="The two acknowledgment stores, their writers and their readers" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/ack-stores.svg">
 </picture>
 
-Two things the diagram makes visible. The daemon reads both stores
-while batch reads only the TOML. And the HTML dashboard is always
-produced by batch `report`. The daemon serves no HTML at all.
+The daemon reads both stores, while batch reads only the TOML. The
+HTML dashboard is always produced by batch `report`: the daemon serves
+no HTML at all.
 `--daemon-url` only makes that generated file talk to a daemon from the
 browser, which puts Ack buttons on it. A static report has no ack path
 because it has no one to post to.
@@ -136,8 +136,7 @@ place to copy one from.
 
 ### Writing a TOML entry without transcribing it
 
-Nothing needs copying by hand. The JSON report already carries every
-field an entry takes, so one command appends a complete block. Adjust
+The JSON report already carries every field an entry takes, so one command appends a complete block. Adjust
 the `select(...)` to pick your finding:
 
 ```bash

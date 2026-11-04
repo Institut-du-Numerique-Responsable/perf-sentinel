@@ -246,7 +246,7 @@ Both sections are optional. Their absence leaves Perf Sentinel in its prior beha
 
 - **Runtime-calibrated energy + per-service carbon when present.** `Builder::process_window` reads the source window's `green_summary.energy_kwh` and `per_service_carbon_kgco2eq` / `per_service_energy_kwh` / `per_service_region` maps when they are populated, and falls back to the I/O proxy + share distribution when they are not (proxy-only archives). The aggregator surfaces the observed `energy_model` tags under `methodology.calibration_inputs.energy_source_models`. See `docs/design/09-CARBON-ATTRIBUTION.md`.
 - **Optimization potential excludes embodied.** `estimated_optimization_potential_kgco2eq` sums `co2.avoidable.mid` only. `total_carbon_kgco2eq` is the full `co2.total.mid` (operational + embodied). The default disclaimers spell this out.
-- **`_unattributed` co-routes findings.** A window with no `per_endpoint_io_ops` and no runtime per-service maps lands its energy/carbon AND its findings under `_unattributed`. Without this routing, a service with N+1 findings could publish at `efficiency_score = 100` when its `total_io_ops` happened to be zero in the same window.
+- **`_unattributed` co-routes findings.** A window with no `per_endpoint_io_ops` and no runtime per-service maps lands both its energy/carbon and its findings under `_unattributed`. Without this routing, a service with N+1 findings could publish at `efficiency_score = 100` when its `total_io_ops` happened to be zero in the same window.
 
 ## The 75% runtime-calibration threshold
 
@@ -279,7 +279,7 @@ This threshold is not normative. It should be tuned if field feedback from opera
 
 ### Why it is a published warning, not a gate
 
-Daemon archiving is **traffic-gated**, not timer-based. `process_traces` returns early on an empty batch and the archive `try_send` sits after that guard, so a window with no traffic writes no NDJSON line. Consequently `temporal_coverage` measures *days with observed traffic*, a lower bound on activity, not daemon uptime. Legitimately quiet days (nights, weekends, low-traffic services, a service with no requests on a holiday) lower it. A hard `official` gate would therefore reject legitimate reports from intermittent or low-traffic deployments. So `validate_official` only range-checks the field (`[0, 1]`, finite) and never gates on it. The `disclose` CLI publishes the value, prints a stderr warning below `LOW_TEMPORAL_COVERAGE_WARN_THRESHOLD`, and appends an in-band (hash-covered) disclaimer carrying the traffic-gated caveat. The reader judges.
+Daemon archiving is traffic-gated, not timer-based. `process_traces` returns early on an empty batch and the archive `try_send` sits after that guard, so a window with no traffic writes no NDJSON line. Consequently `temporal_coverage` measures *days with observed traffic*, a lower bound on activity, not daemon uptime. Legitimately quiet days (nights, weekends, low-traffic services, a service with no requests on a holiday) lower it. A hard `official` gate would therefore reject legitimate reports from intermittent or low-traffic deployments. So `validate_official` only range-checks the field (`[0, 1]`, finite) and never gates on it. The `disclose` CLI publishes the value, prints a stderr warning below `LOW_TEMPORAL_COVERAGE_WARN_THRESHOLD`, and appends an in-band (hash-covered) disclaimer carrying the traffic-gated caveat.
 
 ### What it does and does not address
 
@@ -307,7 +307,7 @@ v1.4 adds `aggregate.database_waste` and v1.5 its messaging twin `aggregate.mess
 
 `score/canonical.rs` exists because of a conflict of interest built into the tool. The operator sets `n_plus_one_threshold`, which decides how many repetitions become a finding. Raising it is a legitimate tuning move in CI, where the goal is a signal-to-noise ratio a team will act on. But the avoidable energy and carbon a disclosure publishes derive from those same findings, so the same knob that quiets CI also shrinks the number the organisation discloses.
 
-Every archived window therefore carries **two** avoidable tiers. The operational tier uses the operator's configured threshold and is what the CLI, the gate and the dashboards show. The canonical tier uses `DISCLOSURE_N_PLUS_ONE_THRESHOLD`, pinned in the binary, and is what the disclosure publishes. Turning the knob moves the first and cannot move the second.
+Every archived window therefore carries two avoidable tiers. The operational tier uses the operator's configured threshold and is what the CLI, the gate and the dashboards show. The canonical tier uses `DISCLOSURE_N_PLUS_ONE_THRESHOLD`, pinned in the binary, and is what the disclosure publishes. Turning the knob moves the first and cannot move the second.
 
 Three consequences follow.
 

@@ -12,9 +12,9 @@ cohabiter.
   <img alt="Les deux magasins d'acquittements, leurs rédacteurs et leurs lecteurs" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/diagrams/svg/ack-stores.svg">
 </picture>
 
-Deux choses que le schéma rend visibles. Le daemon lit les deux
-magasins, le batch ne lit que le TOML. Et le dashboard HTML est
-toujours produit par le `report` batch. Le daemon ne sert aucun HTML.
+Le daemon lit les deux magasins, le batch ne lit que le TOML. Le
+dashboard HTML est toujours produit par le `report` batch : le daemon
+ne sert aucun HTML.
 `--daemon-url` fait seulement que le fichier généré dialogue avec un
 daemon depuis le navigateur, ce qui lui ajoute les boutons Ack. Un
 rapport statique n'a aucun chemin d'acquittement, car il n'a personne
@@ -142,8 +142,7 @@ côtés, le dashboard est donc un bon endroit d'où la copier.
 
 ### Écrire une entrée TOML sans rien recopier
 
-Rien n'est à transcrire à la main. Le rapport JSON porte déjà tous les
-champs d'une entrée, donc une seule commande ajoute un bloc complet.
+Le rapport JSON porte déjà tous les champs d'une entrée, donc une seule commande ajoute un bloc complet.
 Ajustez le `select(...)` pour viser votre finding :
 
 ```bash

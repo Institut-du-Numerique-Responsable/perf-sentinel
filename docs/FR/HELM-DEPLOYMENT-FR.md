@@ -90,7 +90,7 @@ motif DDL non ancré comme `.*DROP\s+.*` écarte aussi des requêtes
 applicatives qui contiennent seulement le mot.
 
 Si le volume supplémentaire pose problème, restreignez la branche
-d'analyse **par périmètre plutôt que par hasard**. Ne routez que les
+d'analyse par périmètre plutôt que par hasard. Ne routez que les
 namespaces ou les services sur lesquels vous travaillez, ce qui garde
 leurs chiffres entiers, au lieu d'un échantillon probabiliste qui rend
 partiels les chiffres de tous les services. `filter/drop_noise` retire
@@ -101,7 +101,7 @@ moins que celle du stockage.
 Deux contraintes si vous ne pouvez pas éviter un sampling devant le
 daemon :
 
-- Préférez le **tail-based**. Il décide par trace entière après coup,
+- Préférez le tail-based. Il décide par trace entière après coup,
   donc les traces arrivent complètes, et ses politiques habituelles
   (garder les erreurs, garder les traces lentes) biaisent la rétention
   vers l'endroit où vit le gaspillage structurel. Un head-sampling à
@@ -216,7 +216,7 @@ Sous Windows, lancez cette commande depuis PowerShell ou WSL plutôt que depuis 
 
 Un run réussi affiche l'entrée du log Rekor et les détails du certificat. Une signature discordante ou absente retourne un code non nul.
 
-**Il n'y a pas de fichier `.prov`, donc `helm install --verify` n'est pas disponible.** C'est un choix, pas un oubli. Le mécanisme de provenance natif de Helm suppose une clé PGP de longue durée conservée en secret de CI, avec la charge de rotation, de révocation et de publication d'empreinte qui va avec. La signature Cosign keyless et l'attestation SLSA répondent à la même question, cet artefact vient-il bien du workflow de release de ce dépôt, sans qu'aucune clé de signature statique existe nulle part. Vérifiez avec la commande `cosign verify` ci-dessus plutôt qu'avec `helm --verify`.
+**Il n'y a pas de fichier `.prov`, donc `helm install --verify` n'est pas disponible.** Cette absence est délibérée. Le mécanisme de provenance natif de Helm suppose une clé PGP de longue durée conservée en secret de CI, avec la charge de rotation, de révocation et de publication d'empreinte qui va avec. La signature Cosign keyless et l'attestation SLSA répondent à la même question, cet artefact vient-il bien du workflow de release de ce dépôt, sans qu'aucune clé de signature statique existe nulle part. Vérifiez avec la commande `cosign verify` ci-dessus plutôt qu'avec `helm --verify`.
 
 ### Vérifier la provenance de build SLSA
 
@@ -699,7 +699,7 @@ serviceMonitor:
     release: prometheus
 ```
 
-`honorLabels` vaut `true` par défaut depuis la version 0.17.1 du chart, et ce défaut compte. L'opérateur attache un label de cible nommé `service`, tiré du nom du Service, et quand honor labels est désactivé Prometheus renomme le label homonyme exposé par la cible : le `service` du daemon était stocké en `exported_service`. La variable `Service` du tableau de bord ne proposait plus que le nom de la release, et son panneau par service réduisait tous les services analysés à une seule ligne. Le daemon n'expose ni `job`, ni `instance`, ni `namespace`, donc rien d'autre ne change de main et `Namespace` lit toujours ce que le scrape attache. Honor labels tranche une collision et ne remplace rien. Le label `service` propre au daemon (`perf_sentinel_service_io_ops_total`, et depuis 0.18.0 `perf_sentinel_findings_total`, `perf_sentinel_slow_duration_seconds` et les compteurs d'analyse par service) est conservé là où il est exposé. Toutes les autres séries reçoivent toujours le `service` de l'opérateur attaché à la cible, et tout ce qui route sur ce label reste intact. Le label `grouping` que ces séries gagnent en 0.19.0 n'entre en collision avec rien de ce que l'opérateur attache. Il ne s'appelle pas `namespace` parce que l'opérateur attache bien un label de cible `namespace`. Honor labels ferait gagner celui du daemon, et la variable `Daemon namespace` du tableau de bord comme tous les filtres `namespace=~"$namespace"` se mettraient à sélectionner les namespaces des charges au lieu de l'installation. Un panneau ou une alerte écrits sur la forme produite par le bug, qui filtrent `service="<nom complet de la release>"` sur la métrique par service, ne renvoient plus rien, car les vrais noms de services ont pris la place. Sur une installation qui a déjà stocké les séries renommées, `helm upgrade` corrige le scrape suivant et laisse l'historique en l'état.
+`honorLabels` vaut `true` par défaut depuis la version 0.17.1 du chart. L'opérateur attache un label de cible nommé `service`, tiré du nom du Service, et quand honor labels est désactivé Prometheus renomme le label homonyme exposé par la cible : le `service` du daemon était stocké en `exported_service`. La variable `Service` du tableau de bord ne proposait plus que le nom de la release, et son panneau par service réduisait tous les services analysés à une seule ligne. Le daemon n'expose ni `job`, ni `instance`, ni `namespace`, donc rien d'autre ne change de main et `Namespace` lit toujours ce que le scrape attache. Honor labels tranche une collision et ne remplace rien. Le label `service` propre au daemon (`perf_sentinel_service_io_ops_total`, et depuis 0.18.0 `perf_sentinel_findings_total`, `perf_sentinel_slow_duration_seconds` et les compteurs d'analyse par service) est conservé là où il est exposé. Toutes les autres séries reçoivent toujours le `service` de l'opérateur attaché à la cible, et tout ce qui route sur ce label reste intact. Le label `grouping` que ces séries gagnent en 0.19.0 n'entre en collision avec rien de ce que l'opérateur attache. Il ne s'appelle pas `namespace` parce que l'opérateur attache bien un label de cible `namespace`. Honor labels ferait gagner celui du daemon, et la variable `Daemon namespace` du tableau de bord comme tous les filtres `namespace=~"$namespace"` se mettraient à sélectionner les namespaces des charges au lieu de l'installation. Un panneau ou une alerte écrits sur la forme produite par le bug, qui filtrent `service="<nom complet de la release>"` sur la métrique par service, ne renvoient plus rien, car les vrais noms de services ont pris la place. Sur une installation qui a déjà stocké les séries renommées, `helm upgrade` corrige le scrape suivant et laisse l'historique en l'état.
 
 #### Dashboards qui scrapent `/api/findings`
 
@@ -741,7 +741,7 @@ anglais : l'importer remplace le tableau de bord anglais au lieu d'en
 ajouter un second. Le tableau de bord des findings décrit plus bas a la
 sienne.
 
-**Une pastille `Compatibility`** termine la première ligne de panneaux. Elle passe à
+Une pastille `Compatibility` termine la première ligne de panneaux. Elle passe à
 l'orange quand le daemon est antérieur à la 0.20.0, où `Service silence`
 n'a rien à tracer. Elle passe au rouge sous la 0.18.0, où les sélecteurs
 `Service` et `Grouping` proposent encore des noms que les panneaux de
@@ -756,7 +756,7 @@ un verdict sur la version. Des panneaux vides sur un daemon à jour
 relèvent de la configuration et non de l'âge, et la description de la
 pastille nomme les trois interrupteurs qui les vident.
 
-**Quatre variables de template** surmontent les panneaux. `Job` choisit les
+Quatre variables de template surmontent les panneaux. `Job` choisit les
 jobs Prometheus à lire, `All` par défaut, ce qui compte quand plusieurs
 daemons sont scrapés par le même Prometheus, staging et production par
 exemple : n'en garder qu'un les sépare. `Namespace`
@@ -786,7 +786,7 @@ l'histogramme, débordement replié dans `service="_other"`).
 comptent les paires (service, grouping) admises après les plafonds de services
 et ne replient que la moitié regroupement dans `grouping="_other"`.
 
-**Tous les panneaux suivent le sélecteur de plage**, avec une règle et
+Tous les panneaux suivent le sélecteur de plage, avec une règle et
 une exception assumée. Les panneaux de taux utilisent `$__rate_interval`
 et les panneaux à fenêtre utilisent `$__range` : choisir `Last 6 hours`
 signifie donc que le classement, la répartition et la table de détail

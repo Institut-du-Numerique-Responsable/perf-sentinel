@@ -230,7 +230,7 @@ in `perf-sentinel` itself, the same split as for the daemon write paths
 (see [`docs/QUERY-API.md`](./QUERY-API.md#restricting-writes-in-production-reverse-proxy)).
 
 In CI, gate the job that runs `disclose --intent official` behind a
-**GitHub Environment with required reviewers**. A developer can still
+GitHub Environment with required reviewers. A developer can still
 open the PR or trigger the workflow, but the job pauses until a named
 reviewer (an architect or a DevOps lead) approves.
 
@@ -430,7 +430,7 @@ producing binary also carries SLSA provenance.)
 ### What the hash proves, and where it stops
 
 The `content_hash`, the cosign signature and the SLSA provenance bind
-the **published document**. Since 0.9.25 the daemon also hash-chains
+the published document. Since 0.9.25 the daemon also hash-chains
 each archived window as it writes it. `disclose` walks that chain while
 aggregating and publishes the result in
 `integrity.trace_integrity_chain`: windows verified, windows written
@@ -467,9 +467,7 @@ regenerate a consistent chain, exactly as they can choose an
 unfavourable coefficient. Those parameters are now published too, see
 `carbon_methodologies`, `scoring_coefficients` and the embodied fields
 in `methodology.calibration_inputs`, which makes them contestable
-rather than invisible. The remaining step is anchoring the chain head
-outside the operator's control, which is what
-`integrity.cross_period_log` stays reserved for. The guarantee is
+rather than invisible. The guarantee is
 tamper-evident after the fact but self-declared at the source.
 
 ### Content hash stays valid
@@ -565,9 +563,6 @@ jq --arg url "https://transparency.example.fr/bundle.sig" \
    } | .report_metadata.integrity_level = "signed"' \
    report.json > report-signed.json && mv report-signed.json report.json
 ```
-
-This is an interim workaround. `perf-sentinel sign` will replace
-the bash + jq combo with a single subcommand once it ships.
 
 Operators who run a private Rekor instance set
 `[reporting.sigstore] rekor_url = "..."` in their Perf Sentinel
@@ -712,7 +707,7 @@ hash, so its `git_commit` is only a second check on top.
 ### Sidecar URL convention in `--url` mode
 
 `verify-hash --url <REPORT_URL>` fetches three files from the same
-directory, with **fixed filenames**:
+directory, with fixed filenames:
 
 ```
 https://example.fr/<report-filename>            (the report)

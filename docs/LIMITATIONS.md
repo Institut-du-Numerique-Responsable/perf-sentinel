@@ -160,7 +160,7 @@ The outbound-HTTP template keeps the callee host (`GET user-svc/api/x`), so two 
 
 ## Slow findings and waste ratio
 
-Slow findings (`slow_sql`, `slow_http`) represent operations that are **necessary but slow**, not avoidable I/O. Therefore, slow findings do **not** contribute to the I/O waste ratio or the `avoidable_io_ops` count in the GreenOps summary. They still appear in the findings list with `green_impact.estimated_extra_io_ops: 0`.
+Slow findings (`slow_sql`, `slow_http`) represent operations that are necessary but slow, not avoidable I/O. Therefore, slow findings do **not** contribute to the I/O waste ratio or the `avoidable_io_ops` count in the GreenOps summary. They still appear in the findings list with `green_impact.estimated_extra_io_ops: 0`.
 
 The waste ratio measures how much I/O could be eliminated (N+1, redundant), while slow findings highlight operations that need optimization (indexing, caching) rather than elimination. Energy does not read `duration_us` either: a slow query weighs one operation in every energy figure, so a long query's host cost is not modelled.
 
@@ -254,7 +254,7 @@ The `perf-sentinel bench` command reports peak RSS (Resident Set Size) using pla
 
 ## Upstream sampling and detection accuracy
 
-Upstream sampling is applied **before** Perf Sentinel, in the SDK or the collector. It is separate from the daemon's own `sampling_rate` knob, covered below.
+Upstream sampling is applied before Perf Sentinel, in the SDK or the collector. It is separate from the daemon's own `sampling_rate` knob, covered below.
 
 Head-based sampling keeps or drops a whole trace at its root. Traces that are kept arrive complete, so the per-trace detectors (`n_plus_one`, `chatty_service`, `excessive_fanout`, `pool_saturation`, `serialized_calls`) stay correct on the traces Perf Sentinel does see: an N+1 inside a kept trace is still fully visible. What aggressive head-based sampling (the common 1% to 10% used in production, for cost) degrades is coverage, not per-trace structure:
 
@@ -267,7 +267,7 @@ Perf Sentinel does not inspect the W3C `sampled` flag and cannot tell a complete
 Recommendations:
 
 - For CI quality gates, run batch mode (`perf-sentinel analyze`) on fully captured traces. A gate should not decide on 1% of traffic.
-- In the daemon, if you must sample for cost, prefer **tail-based** sampling at the collector. Tail-based keeps whole traces too, but lets you bias retention toward slow or error traces, which is where structural waste concentrates.
+- In the daemon, if you must sample for cost, prefer tail-based sampling at the collector. Tail-based keeps whole traces too, but lets you bias retention toward slow or error traces, which is where structural waste concentrates.
 - Better still, do not sample the branch that feeds Perf Sentinel at all. Sampling bounds what a trace store retains, and Perf Sentinel retains nothing beyond a per-trace in-memory window, so a second collector pipeline exporting to the daemon without the sampler costs storage nothing. See [HELM-DEPLOYMENT.md](HELM-DEPLOYMENT.md#collector-sampling-and-what-reaches-the-daemon) for the layout.
 - Tail-based sampling does not fix the aggregates, only the per-trace structure. Worse for interpretation, the `errors` and `slow` policies bias retention toward heavy traces, so the surviving sample is not representative and no single factor corrects it. Do not publish a waste ratio or a carbon figure computed behind a sampler as a whole-traffic number, and treat `disclose` output from a sampled window as an understatement.
 
@@ -296,7 +296,7 @@ For traces with very high event counts, increase `max_events_per_trace` or inves
 
 The streaming detector window evicts a trace when it has been inactive for `trace_ttl_ms` (default 30s). "Inactive" means no span event for that `trace_id` was ingested within the TTL. The active TTL is reset on every span ingest, so a trace that emits a span every <30s stays alive indefinitely.
 
-But a trace that emits sparse, gap-heavy spans (e.g. a long batch job emitting one span every 60s, or a long-polling websocket) will be evicted between bursts. A late span with the same `trace_id` arriving after eviction creates a **new** trace bucket. The previous events are gone. Threshold-driven detections that rely on co-located spans within one trace (`n_plus_one`, `chatty_service`, `excessive_fanout`, `pool_saturation`, `serialized_calls`) will silently underreport because each fragment falls below the per-trace threshold.
+But a trace that emits sparse, gap-heavy spans (e.g. a long batch job emitting one span every 60s, or a long-polling websocket) will be evicted between bursts. A late span with the same `trace_id` arriving after eviction creates a new trace bucket. The previous events are gone. Threshold-driven detections that rely on co-located spans within one trace (`n_plus_one`, `chatty_service`, `excessive_fanout`, `pool_saturation`, `serialized_calls`) will silently underreport because each fragment falls below the per-trace threshold.
 
 Mitigations, in order of precision:
 
@@ -323,7 +323,7 @@ Analysis shedding is separate from archive retention. The per-window disclosure 
 
 ## Daemon state model: in-memory, single-process, no shared state
 
-The daemon's correlation state is entirely in memory: a 30s rolling window (`trace_ttl_ms`) over a 10,000-trace LRU (`max_active_traces`), both tunable under `[daemon]`. There is no persistence layer, no write-ahead log, no snapshot, no disk spill. This shapes three operational properties that matter for a serious production deployment.
+The daemon's correlation state is entirely in memory: a 30s rolling window (`trace_ttl_ms`) over a 10,000-trace LRU (`max_active_traces`), both tunable under `[daemon]`. There is no persistence layer, no write-ahead log, no snapshot, no disk spill. This shapes three operational properties.
 
 **A graceful shutdown drains, an ungraceful kill does not.** On a clean shutdown the daemon drains its window through detection before exiting. Both SIGINT (Ctrl+C) and, on Unix, SIGTERM trigger this drain, so a normal Kubernetes pod termination (rolling update, scale-down) flushes the in-flight window instead of dropping it. An *ungraceful* death still loses it: SIGKILL (the kubelet's forced kill after the termination grace period), an OOM kill, or a process crash skips the drain and drops the in-flight traces, up to one full window, with no recovery.
 
@@ -376,13 +376,13 @@ Every cell in the CSVs exported by the HTML dashboard's per-tab **Export CSV** b
 
 Perf Sentinel does **not** implement authentication on its ingestion endpoints. By default, the daemon binds to `127.0.0.1` (loopback only), which is safe for single-machine deployments.
 
-**TLS is supported** on the OTLP gRPC and HTTP listeners via the `[daemon] tls_cert_path` and `tls_key_path` configuration fields. When both are set, the daemon serves OTLP and `/metrics` over TLS. The JSON unix socket and Prometheus `/metrics` scraping are not separately configurable: `/metrics` shares the HTTP port and inherits its TLS setting. See [`docs/CONFIGURATION.md`](CONFIGURATION.md) for the full reference.
+TLS is supported on the OTLP gRPC and HTTP listeners via the `[daemon] tls_cert_path` and `tls_key_path` configuration fields. When both are set, the daemon serves OTLP and `/metrics` over TLS. The JSON unix socket and Prometheus `/metrics` scraping are not separately configurable: `/metrics` shares the HTTP port and inherits its TLS setting. See [`docs/CONFIGURATION.md`](CONFIGURATION.md) for the full reference.
 
 If you expose Perf Sentinel to a network:
 
-- **Enable TLS** via `tls_cert_path` and `tls_key_path` to encrypt traffic in transit
+- Enable TLS via `tls_cert_path` and `tls_key_path` to encrypt traffic in transit
 - Use network policies (Kubernetes `NetworkPolicy`, Docker network isolation, firewall rules) to restrict access
-- For **authentication**, place Perf Sentinel behind a reverse proxy (nginx, envoy) that handles bearer tokens or mTLS client certificates
+- For authentication, place Perf Sentinel behind a reverse proxy (nginx, envoy) that handles bearer tokens or mTLS client certificates
 - Route traces through an OpenTelemetry Collector with its own auth extensions and forward to Perf Sentinel on a trusted internal network
 
 Never expose Perf Sentinel directly to untrusted networks without at minimum TLS enabled and network-level access controls in place.
@@ -403,13 +403,13 @@ These defenses only matter when `json_socket` lives in a directory writeable by 
 
 ### JSON socket per-connection payload budget
 
-`[daemon] max_payload_size` (default 1 MiB) caps individual NDJSON batches submitted through the JSON socket. A single connection may stream multiple batches before closing and the daemon tolerates up to **16× `max_payload_size`** per connection before truncating the stream. At the default setting this means one connection can transfer up to 16 MiB of trace data.
+`[daemon] max_payload_size` (default 1 MiB) caps individual NDJSON batches submitted through the JSON socket. A single connection may stream multiple batches before closing and the daemon tolerates up to 16× `max_payload_size` per connection before truncating the stream. At the default setting this means one connection can transfer up to 16 MiB of trace data.
 
 The factor accommodates clients that emit many small batches over a single long-lived connection (e.g. a sidecar shipping a buffered queue after a flush), without exposing the daemon to memory exhaustion from an attacker. A client that needs more than 16× the configured batch size should open a new connection. The cap cannot be disabled.
 
 ### TLS handshake concurrency cap
 
-Each TLS listener (OTLP gRPC and OTLP HTTP) caps concurrent in-flight handshakes and live HTTPS connections at **128**. Handshakes run in dedicated tasks so a single stalled peer cannot block the accept loop. The cap bounds fds, rustls buffers and task slots against a handshake flood. A 10s handshake timeout (`TLS_HANDSHAKE_TIMEOUT`) drops peers that complete TCP but never send a `ClientHello`. The cap is not configurable and mirrors the Unix JSON socket listener budget.
+Each TLS listener (OTLP gRPC and OTLP HTTP) caps concurrent in-flight handshakes and live HTTPS connections at 128. Handshakes run in dedicated tasks so a single stalled peer cannot block the accept loop. The cap bounds fds, rustls buffers and task slots against a handshake flood. A 10s handshake timeout (`TLS_HANDSHAKE_TIMEOUT`) drops peers that complete TCP but never send a `ClientHello`. The cap is not configurable and mirrors the Unix JSON socket listener budget.
 
 ## Query-API subcommands: endpoint value must be trusted
 
@@ -456,7 +456,7 @@ Caveats shared by both flags:
 
 ## Carbon estimates accuracy
 
-Perf Sentinel uses an **I/O → energy → CO₂ proxy model** to estimate the carbon footprint of analyzed workloads. The chain has three steps and an inherent margin of error at each:
+Perf Sentinel uses an I/O → energy → CO₂ proxy model to estimate the carbon footprint of analyzed workloads. The chain has three steps and an inherent margin of error at each:
 
 1. **I/O operations → energy**: each I/O op the emitting service issues (SQL query, HTTP call) is multiplied by a fixed `ENERGY_PER_IO_OP_KWH` constant of `0.0000001 kWh` (~0.1 mWh). This is **not measured**: it is an order-of-magnitude approximation. Every rung of the ladder, the I/O proxy included, prices the emitting service's own host for each operation it issues: CPU, memory and network stack on that host. The callee (database server, broker, downstream service) is never in it. Database and broker host energy enters a report only through a declared or measured source: `[green.alumet.database]`, `[green.database_static]`, `[green.alumet.broker]` or `[green.broker_static]`. SQL verb weights and HTTP tiers are relative weights that rank operation classes. Their ratios come from database-server benchmarks, but they bill no database host.
 2. **Energy → CO₂**: energy is multiplied by a per-region grid carbon intensity (gCO₂eq/kWh) sourced from Electricity Maps and Cloud Carbon Footprint annual averages (2023-2024), with a per-provider PUE applied (AWS 1.15, GCP 1.09, Azure 1.17, Generic 1.2). The three provider PUEs are not strictly comparable in scope. AWS publishes a global fleet average for calendar year 2024, GCP a global fleet trailing-twelve-month average for 2024, and Azure an FY25 (July 2024 to June 2025) figure for its owned-and-controlled facilities only (leased and colocation are excluded). The cross-window gap is around 12 months and the scope difference is around a few percent of the fleet.
@@ -573,7 +573,7 @@ Since 0.8.7 the profile is rescaled (shape preserved, level normalized to the El
 
 **What this means for your reports:**
 
-- Reports with `default_region = "eu-central-1"` (or spans carrying `cloud.region = eu-central-1`) and the default `use_hourly_profiles = true` show **CO₂ numbers roughly 21% lower** than 0.8.6.
+- Reports with `default_region = "eu-central-1"` (or spans carrying `cloud.region = eu-central-1`) and the default `use_hourly_profiles = true` show CO₂ numbers roughly 21% lower than 0.8.6.
 - No rule in `[thresholds]` reads a CO₂ figure: the rules count findings, compare the I/O waste ratio or check the share of analyzable spans. A CI quality gate is therefore not affected. Only a threshold you set yourself on a CO₂ value would need recalibrating.
 
 A regression test (`de_flat_annual_numerical_regression`) pins the flat-annual value, and the profile-vs-annual ±5% invariant is now enforced for every region with no exception.
@@ -592,10 +592,10 @@ Perf Sentinel ships an opt-in integration with [Alumet](https://github.com/alume
 
 **Why it outranks Scaphandre.** Both read RAPL. Alumet's sampling is measurably less error-prone, as characterized by its own authors in [Dissecting the software-based measurement of CPU energy consumption](https://hal.science/hal-04420527v2/document) (Raffin et al.), and it attributes per cgroup rather than per process, which matches container workloads more closely. Being ranked first is a statement about attribution fidelity, not about coverage: like Scaphandre, RAPL only sees CPU and DRAM, roughly half to two thirds of wall-plug power. For total server energy, see [Redfish BMC precision bounds](#redfish-bmc-precision-bounds).
 
-**The interval-mismatch failure mode.** Alumet's `prometheus-exporter` publishes every measurement as a Prometheus **gauge holding the last flushed value**, and `rapl_consumed_energy` is a `CounterDiff`: the joules consumed during one source `poll_interval`. It is neither a cumulative counter (like Kepler) nor a power reading (like Scaphandre). Two consequences:
+**The interval-mismatch failure mode.** Alumet's `prometheus-exporter` publishes every measurement as a Prometheus gauge holding the last flushed value, and `rapl_consumed_energy` is a `CounterDiff`: the joules consumed during one source `poll_interval`. It is neither a cumulative counter (like Kepler) nor a power reading (like Scaphandre). Two consequences:
 
 - Summing raw readings across scrapes is wrong in both directions. Scraping faster than Alumet flushes double-counts the same value, scraping slower drops whole intervals. Perf Sentinel therefore never sums. It divides by `energy_interval_secs` to recover watts and integrates over its own scrape window, exactly as it does for Scaphandre's power gauge.
-- **`energy_interval_secs` cannot be verified against the wire.** The interval is nowhere in the exposition. If the declared value drifts from the Alumet-side `poll_interval`, every energy and carbon figure for the mapped services is rescaled linearly and **silently**. Declaring `1.0` while Alumet polls at `5s` overstates energy 5x, with no warning, no failed scrape, and a `measured` provenance tag that looks authoritative. For a RAPL series, this is the largest correctness risk in the integration. Re-check both files together whenever either changes. The daemon echoes the value it is using in the `Alumet scraper started` log line so the mistake is at least visible at startup.
+- **`energy_interval_secs` cannot be verified against the wire.** The interval is nowhere in the exposition. If the declared value drifts from the Alumet-side `poll_interval`, every energy and carbon figure for the mapped services is rescaled linearly and silently. Declaring `1.0` while Alumet polls at `5s` overstates energy 5x, with no warning, no failed scrape, and a `measured` provenance tag that looks authoritative. For a RAPL series, this is the largest correctness risk in the integration. Re-check both files together whenever either changes. The daemon echoes the value it is using in the `Alumet scraper started` log line so the mistake is at least visible at startup.
 
 The stationarity assumption is the same one Scaphandre carries: the sampled interval is taken as representative of the whole scrape window. Alumet's reading is a mean over its `poll_interval` rather than an instantaneous sample, which if anything is the better-behaved of the two.
 
@@ -605,7 +605,7 @@ The stationarity assumption is the same one Scaphandre carries: the sampled inte
 
 **A label value shared by services is split.** Several services mapped to one `label_key` value read one energy figure, every service mapped to `package` under `label_key = "domain"` included. It is counted once and split between those services by the ops each emitted in the scrape window, so a host-wide domain reading spreads over the services that did I/O, not over the processes that drew the power.
 
-**Upstream version.** Alumet is **pre-1.0** (v0.9.5 at time of writing) and its wire-conformance CI job covers the exporter (procfs) but not RAPL: GitHub runners expose no powercap tree. Metric names and plugin config may change between releases. The runtime net is the zero-sample warn-once, which fires after three consecutive HTTP-200 ticks with no matching samples and names the likely causes. Treat an Alumet upgrade as a reason to re-run `curl <endpoint> | grep -i energy` and compare against `metric_name`.
+**Upstream version.** Alumet is pre-1.0 (v0.9.5 at time of writing) and its wire-conformance CI job covers the exporter (procfs) but not RAPL: GitHub runners expose no powercap tree. Metric names and plugin config may change between releases. The runtime net is the zero-sample warn-once, which fires after three consecutive HTTP-200 ticks with no matching samples and names the likely causes. Treat an Alumet upgrade as a reason to re-run `curl <endpoint> | grep -i energy` and compare against `metric_name`.
 
 **Platform requirements.** Linux, and the `rapl` source, which needs Intel or AMD x86_64 with RAPL access (perf-events or a readable `/sys/devices/virtual/powercap/intel-rapl`), so the same bare-metal and RAPL-passthrough constraints as Scaphandre apply. ARM has no RAPL. There, the Alumet sources that read built-in sensors target Nvidia hardware (`nvidia-jetson`, `grace-hopper`), and this integration does not support them: they report power in milli- or microwatts, or energy in millijoules, not joules per interval. **The `alumet_rapl` model tag is applied to every Alumet reading regardless of which source plugin produced it.** Beyond the startup warning on known non-RAPL names, Perf Sentinel cannot tell a RAPL series from another one, since the metric name is operator-chosen. A non-RAPL series would therefore carry `alumet_rapl` into the report, `energy_source_models` and any published disclosure, on top of any unit error.
 
@@ -636,7 +636,7 @@ Perf Sentinel ships an opt-in integration with [Scaphandre](https://github.com/h
 
 **Prefer Alumet for new deployments.** [Alumet precision bounds](#alumet-precision-bounds) above explains why `alumet_rapl` outranks `scaphandre_rapl`: same RAPL source, less error-prone sampling as characterized in the Raffin et al. paper, and per-cgroup attribution. Upstream pace points the same way: the latest Scaphandre release, v1.0.3 (July 2026), came 17 months after v1.0.2 and attaches no binary to its GitHub release, and the ARM tracking issue below has been open since 2020. The Scaphandre integration stays supported for existing deployments.
 
-**Upstream version.** The parser is version-agnostic: it consumes the standard Prometheus exposition for `scaph_process_power_consumption_microwatts` with `exe` and `cmdline` labels, which has been stable across upstream releases. The wire-conformance CI job (`.github/workflows/upstream-wire-conformance.yml`) pins the upstream **Scaphandre v1.0.3** container image by digest as the validated reference version. That binary reports itself as 1.0.2, because the v1.0.3 tag kept `version = "1.0.2"` in its `Cargo.toml`. Other recent releases are expected to work. An upstream rename of the metric or labels would trip the zero-sample warn-once net at runtime and the wire-conformance assertion in CI.
+**Upstream version.** The parser is version-agnostic: it consumes the standard Prometheus exposition for `scaph_process_power_consumption_microwatts` with `exe` and `cmdline` labels, which has been stable across upstream releases. The wire-conformance CI job (`.github/workflows/upstream-wire-conformance.yml`) pins the upstream Scaphandre v1.0.3 container image by digest as the validated reference version. That binary reports itself as 1.0.2, because the v1.0.3 tag kept `version = "1.0.2"` in its `Cargo.toml`. Other recent releases are expected to work. An upstream rename of the metric or labels would trip the zero-sample warn-once net at runtime and the wire-conformance assertion in CI.
 
 **Platform requirements.** Scaphandre works on:
 
@@ -648,7 +648,7 @@ Perf Sentinel ships an opt-in integration with [Scaphandre](https://github.com/h
 
 On unsupported platforms, the `[green.scaphandre]` section is parsed and the scraper spawns, but it will fail to find the endpoint and silently fall back to the proxy model. A single warn-level log line is emitted at first failure so operators notice the misconfiguration.
 
-**What Scaphandre improves.** The integration replaces the fixed proxy coefficient (0.1 mWh per I/O op) with a **service-level measured value** derived from the actual power consumption of the mapped process over the scrape window. Formula:
+**What Scaphandre improves.** The integration replaces the fixed proxy coefficient (0.1 mWh per I/O op) with a service-level measured value derived from the actual power consumption of the mapped process over the scrape window. Formula:
 
 ```
 energy_per_op_kwh = (process_power_watts × scrape_interval_secs) / ops_in_window / 3_600_000
@@ -662,14 +662,14 @@ This captures:
 
 Reports where at least one service used a measured coefficient are tagged with `model = "scaphandre_rapl"`. Full precedence chain: `electricity_maps_api` > `grid_operator_api` > `alumet_rapl` > `scaphandre_rapl` > `kepler_ebpf` > `redfish_bmc` > `cloud_specpower` > `io_proxy_v3` > `io_proxy_v2` > `io_proxy_v1`. When calibration factors are active on proxy models, the suffix `+cal` is appended (e.g. `io_proxy_v2+cal`). The `+cal` suffix never applies to a measured tag, the calibration multiplier targets the proxy coefficient and has no meaning once a measured reading replaces it.
 
-**What Scaphandre does NOT do.** This is the critical limitation: **Scaphandre gives per-service coefficients, not per-finding attribution**. Specifically:
+**What Scaphandre does NOT do.** **Scaphandre gives per-service coefficients, not per-finding attribution**. Specifically:
 
 1. **RAPL is process-level, not span-level.** The metric `scaph_process_power_consumption_microwatts{exe="java"}` reports the total power draw of the `java` process. It cannot distinguish between two concurrent N+1 findings running in the same process at the same time. They share the coefficient by construction.
 2. **Scrape interval is not the precision bottleneck.** A 5-second scrape window averages power over 5 seconds. Going to 1 second would not give you per-finding precision because RAPL itself averages at the 2s-Scaphandre-step granularity. The actual precision floor is "one coefficient per (service, scrape_window)".
 3. **Services selecting one process split its power.** If your architecture runs multiple logical services in the same JVM, Scaphandre's `exe="java"` reading covers all of them together. When several `process_map` matchers select that one process, its power is counted once and split between those services by the ops each emitted in the scrape window. The split follows op counts, not the CPU each service used inside the process.
 4. **OS scheduler noise.** Per-process power attribution via `process_cpu_time / total_cpu_time` is inherently noisy under mixed loads.
 
-**Correct mental model.** Scaphandre gives you a **dynamic, measured, service-level per-op coefficient** instead of a **fixed, proxied, global constant**. It is a meaningful improvement in the energy attribution layer of the carbon estimate stack, but it does not transform Perf Sentinel into a regulatory-grade carbon accounting tool. The 2× multiplicative uncertainty bracket still applies.
+**Correct mental model.** Scaphandre gives you a dynamic, measured, service-level per-op coefficient instead of a fixed, proxied, global constant. It improves the energy attribution layer of the carbon estimate stack, but it does not turn Perf Sentinel into a regulatory-grade carbon accounting tool. The 2× multiplicative uncertainty bracket still applies.
 
 **Staleness handling.** The daemon drops entries older than 3× the scrape interval when building the per-tick snapshot. A hung scraper or a service that stops emitting events will silently fall back to the proxy model after ~3 scrape intervals. The `perf_sentinel_scaphandre_last_scrape_age_seconds` Prometheus gauge lets operators set up Grafana alerts on scraper health.
 
@@ -717,9 +717,9 @@ Perf Sentinel ships an opt-in integration with the [Redfish](https://www.dmtf.or
 
 **What Redfish improves vs the proxy.** A measured power reading for the whole chassis. Unlike Scaphandre and Kepler (which see CPU + DRAM only, through RAPL), the BMC reading covers fans, drives and network cards. The Redfish schemas do not say where that reading is taken: `PowerConsumedWatts` and `PowerWatts` are defined as the power the chassis consumes, with no mention of the power supply input or output. Power supply conversion losses are included only when your BMC measures at the supply input. Check its documentation, or compare the reading with the input power the same BMC reports for each supply.
 
-**What Redfish does NOT do.** This is the critical limitation of node-level power:
+**What Redfish does NOT do.** These are the limits of node-level power:
 
-1. **Chassis granularity, not per-service or per-finding.** Every service mapped to the same chassis receives the **same** coefficient (`chassis_joules / sum_of_ops_deltas`) for a given scrape window. Two services on the same node will never get distinct measured coefficients via Redfish. Each chassis is declared once: two endpoint ids that resolve one chassis (same scheme, host, port and `/redfish/v1/Chassis/<id>` path) are rejected at load. A chassis that lists some services of a cloud CPU query but not all, or a domain under `[green.alumet] label_key = "domain"` that lists some services of a chassis or a CPU query but not all, logs a load-time warning: the services left out keep a share of a node the higher backend bills again.
+1. **Chassis granularity, not per-service or per-finding.** Every service mapped to the same chassis receives the same coefficient (`chassis_joules / sum_of_ops_deltas`) for a given scrape window. Two services on the same node will never get distinct measured coefficients via Redfish. Each chassis is declared once: two endpoint ids that resolve one chassis (same scheme, host, port and `/redfish/v1/Chassis/<id>` path) are rejected at load. A chassis that lists some services of a cloud CPU query but not all, or a domain under `[green.alumet] label_key = "domain"` that lists some services of a chassis or a CPU query but not all, logs a load-time warning: the services left out keep a share of a node the higher backend bills again.
 2. **No process-level attribution.** Idle processes still consume baseline power that gets allocated to the active services. Treat the per-service coefficient as an upper bound on what those services drew.
 3. **No per-finding attribution.** Same as every other measured tag in the chain.
 4. **Vendor variance in the JSON response.** The DMTF schemas allow `null` for each of the three readings. Perf Sentinel rejects null/zero/negative/NaN values as invalid and keeps the previous coefficient until a healthy reading lands. Vendor OEM properties are not configurable: v0.7.6 typed the schema as an enum and dropped the operator-typed JSON pointer. OEMs that publish wattage only at a non-standard path must front the BMC with a reverse proxy that re-shapes the payload to a standard schema.
@@ -732,7 +732,7 @@ Perf Sentinel ships an opt-in integration with the [Redfish](https://www.dmtf.or
 
 **IPMI is out of scope.** Redfish is the modern standard. The IPMI path would require linking `ipmitool` or `freeipmi` C bindings which falls outside the "no heavyweight deps" rule. Document any IPMI-only fleet as a gap.
 
-**Staleness handling.** Same `3 × scrape_interval` rule as the other measured sources, with `perf_sentinel_redfish_last_scrape_age_seconds` seeded at scraper start so the gauge climbs from boot even when no chassis has ever succeeded. The gauge is **aggregate**: it resets to zero as soon as any chassis succeeds in a tick. A multi-chassis fleet with one healthy BMC and several failing ones therefore reports `age = 0`. The per-chassis failure signal lives in `perf_sentinel_redfish_scrape_failed_total{reason=...}`. Pair both metrics in Grafana alerts that need per-chassis granularity.
+**Staleness handling.** Same `3 × scrape_interval` rule as the other measured sources, with `perf_sentinel_redfish_last_scrape_age_seconds` seeded at scraper start so the gauge climbs from boot even when no chassis has ever succeeded. The gauge is aggregate: it resets to zero as soon as any chassis succeeds in a tick. A multi-chassis fleet with one healthy BMC and several failing ones therefore reports `age = 0`. The per-chassis failure signal lives in `perf_sentinel_redfish_scrape_failed_total{reason=...}`. Pair both metrics in Grafana alerts that need per-chassis granularity.
 
 **Batch mode.** Same shape, `analyze` never spawns the Redfish scraper.
 
@@ -772,7 +772,7 @@ The embedded lookup table follows a single homogeneous methodology: `idle_watts 
 
 #### Graviton 2/3/4 and Cobalt 100 are estimated, not measured.
 
-AWS does not submit Graviton to SPECpower. Microsoft does not submit Cobalt 100. The table holds Graviton 2 (`m6g`, `c6g`, `r6g`, `t4g`), Graviton 3 (`m7g`, `c7g`, `r7g`) and Graviton 4 (`m8g`, `c8g`, `r8g`) rows, and the 2026-04-24 CCF refresh gives all three its EPYC 2nd Gen coefficient (0.474 idle / 1.693 max W/vCPU) as a conservative proxy in the absence of measured data, so they share the same per-vCPU CPU coefficient, and the memory-optimized `r6g`, `r7g` and `r8g` rows add the memory premium described below. A Graviton `.medium` is 1 vCPU, half a `.large`. AWS publicly claims each Graviton generation is more efficient than the previous one, but no SPECpower submission exists yet to differentiate them. Cobalt 100 (Neoverse N2) is absent from the CCF Azure CSV and is kept on a midpoint blend 0.60/2.20 W/vCPU between Ampere Altra Q80-30 (Neoverse N1, SPECpower 2024 Q1, 0.67/1.75 W/vCPU floor) and the Graviton 3 V1 reference, pending direct Cobalt SPECpower data. These ARM values carry an additional layer of uncertainty: expect **+/-40% rather than +/-30%** for Graviton, Cobalt 100, and Ampere Altra-derived entries.
+AWS does not submit Graviton to SPECpower. Microsoft does not submit Cobalt 100. The table holds Graviton 2 (`m6g`, `c6g`, `r6g`, `t4g`), Graviton 3 (`m7g`, `c7g`, `r7g`) and Graviton 4 (`m8g`, `c8g`, `r8g`) rows, and the 2026-04-24 CCF refresh gives all three its EPYC 2nd Gen coefficient (0.474 idle / 1.693 max W/vCPU) as a conservative proxy in the absence of measured data, so they share the same per-vCPU CPU coefficient, and the memory-optimized `r6g`, `r7g` and `r8g` rows add the memory premium described below. A Graviton `.medium` is 1 vCPU, half a `.large`. AWS publicly claims each Graviton generation is more efficient than the previous one, but no SPECpower submission exists yet to differentiate them. Cobalt 100 (Neoverse N2) is absent from the CCF Azure CSV and is kept on a midpoint blend 0.60/2.20 W/vCPU between Ampere Altra Q80-30 (Neoverse N1, SPECpower 2024 Q1, 0.67/1.75 W/vCPU floor) and the Graviton 3 V1 reference, pending direct Cobalt SPECpower data. These ARM values carry an additional layer of uncertainty: expect +/-40% rather than +/-30% for Graviton, Cobalt 100, and Ampere Altra-derived entries.
 
 #### Modifier and managed names resolve to their base family.
 
@@ -792,7 +792,7 @@ AWS `t3`, `t3a`, `t4g` and Azure `Standard_B*` are priced as if every vCPU could
 
 #### EPYC 5th Gen Turin is proxied to Genoa pending an upstream CCF correction.
 
-The CCF 2026-04-24 entry for EPYC 5th Gen Turin is 3.682 idle / 8.961 max W/vCPU, roughly five times higher than the neighbouring EPYC 4th Gen Genoa (0.739 / 2.282) on the same row layout. The upstream SPECpower submission that feeds this row likely was measured at chip rather than thread granularity, or reflects a tiny sample that does not generalize. We override Turin (AWS `m8a` / `c8a`) to the Genoa coefficient instead of importing the CCF row verbatim. A silent 4x inflation on m8a customers would damage the directional waste-signal credibility of the tool, while a Genoa proxy is at worst conservative and at best correct, since Zen 5 is supposed to be at least as efficient as Zen 4 per-thread. The override is tracked here for re-evaluation when CCF publishes a revised EPYC 5th Gen row or when independent SPECpower submissions for EPYC 9755 / 9655 land. Carry **+/-40%** uncertainty on Turin until then.
+The CCF 2026-04-24 entry for EPYC 5th Gen Turin is 3.682 idle / 8.961 max W/vCPU, roughly five times higher than the neighbouring EPYC 4th Gen Genoa (0.739 / 2.282) on the same row layout. The upstream SPECpower submission that feeds this row likely was measured at chip rather than thread granularity, or reflects a tiny sample that does not generalize. We override Turin (AWS `m8a` / `c8a`) to the Genoa coefficient instead of importing the CCF row verbatim. A silent 4x inflation on m8a customers would damage the directional waste-signal credibility of the tool, while a Genoa proxy is at worst conservative and at best correct, since Zen 5 is supposed to be at least as efficient as Zen 4 per-thread. The override is tracked here for re-evaluation when CCF publishes a revised EPYC 5th Gen row or when independent SPECpower submissions for EPYC 9755 / 9655 land. Carry +/-40% uncertainty on Turin until then.
 
 #### Memory-optimized SKUs carry an additive DRAM premium on top of the CPU coefficient.
 
@@ -808,9 +808,9 @@ Cloud SPECpower is a daemon-only feature (`watch` mode). The `analyze` batch com
 
 ### Per-operation energy coefficients
 
-The per-operation energy multipliers (SQL verb weighting, HTTP payload size tiers) are heuristic estimates derived from academic DBMS energy benchmarks (Xu et al. ICDE 2010, Tsirogiannis et al. SIGMOD 2010) and the Cloud Carbon Footprint methodology. They are relative weights that rank operation classes on the emitting service: the benchmarks measured database servers, but the weights bill no database host. The relative ratios between operations (SELECT < DELETE < INSERT/UPDATE) are more robust than the absolute values, which vary across hardware generations and database engines.
+The per-operation energy multipliers (SQL verb weighting, HTTP payload size tiers) are heuristic estimates derived from academic DBMS energy benchmarks (Xu et al. ICDE 2010, Tsirogiannis et al. SIGMOD 2010) and the Cloud Carbon Footprint methodology. They are relative weights that rank operation classes on the emitting service: the benchmarks measured database servers, but the weights bill no database host. The relative ratios between operations (SELECT < DELETE < INSERT/UPDATE) are more reliable than the absolute values, which vary across hardware generations and database engines.
 
-Key limitations:
+Limitations:
 
 - **No query complexity analysis.** A full table scan SELECT costs more energy than an indexed point lookup, but both get the same 0.5x coefficient. The coefficients capture the average operation class, not the specific query plan. A long-running query also weighs one operation: `duration_us` is never read, so its host cost is not modelled.
 - **HTTP payload size requires OTel attributes.** The `http.response.body.size` (or legacy `http.response_content_length`) attribute must be present on HTTP spans. When absent, the coefficient falls back to 1.0x (the base constant). Most HTTP instrumentation libraries do not emit this attribute by default.
@@ -822,7 +822,7 @@ Set `per_operation_coefficients = false` to disable this feature and use the fla
 
 The optional network transport energy term estimates the energy cost of moving bytes between regions. The coefficient (0.04 kWh/GB, fixed since 0.9.25 so every disclosure scales transport identically) is a conservative value below recent whole-network averages (Sustainable Web Design Model v4, 2024: 0.059 kWh/GB operational for networks) and an upper bound for cross-region server traffic, where inter-datacenter coefficients run as low as 0.001 kWh/GB (Cloud Carbon Footprint). The disclosure publishes the term under that sourced 0.001-0.059 bracket beside the mid value.
 
-Key limitations:
+Limitations:
 
 - **Wide estimate range.** The sources cited above range from 0.001 to 0.059 kWh/GB depending on the study, year and scope (backbone only vs. full path). The actual cost depends on the number of hops, distance and infrastructure.
 - **No CDN or compression effects.** Content delivery networks, HTTP compression and connection reuse all reduce the effective transport energy but are not modeled.
@@ -976,7 +976,7 @@ When the daemon runs with `api_enabled = true`, the query API exposes findings (
 
 ## gCO2eq energy constant (legacy section, kept for cross-references)
 
-The carbon estimation uses a fixed energy constant (`0.1 mWh per I/O operation`) as a rough order-of-magnitude approximation. See **Carbon estimates accuracy** above for the complete methodology and disclaimer.
+The carbon estimation uses a fixed energy constant (`0.1 mWh per I/O operation`) as a rough order-of-magnitude approximation. See Carbon estimates accuracy above for the complete methodology and disclaimer.
 
 ## pg_stat_statements ingestion
 

@@ -247,7 +247,7 @@ statut du quality gate) donne aux reviewers une vue d'ensemble
 immédiate. Pour une inspection plus approfondie (arbre des spans avec
 les N+1 surlignés, correctifs suggérés propres au framework, drill-down
 pg_stat, Diff complet contre trunk), le template GitHub Actions publie
-en option un **dashboard HTML complet** sur GitHub Pages à chaque PR,
+en option un dashboard HTML complet sur GitHub Pages à chaque PR,
 lié depuis le sticky comment sous la forme :
 
 > 📊 **Interactive report (Diff view)** → `https://<owner>.github.io/<repo>/perf-sentinel-reports/pr-<N>/index.html#diff`
@@ -405,7 +405,7 @@ où le générateur commence à élaguer. Dimensionnez un quota sur ce plafond,
 pas sur le plancher. Avec
 la rétention gérée par le workflow de cleanup, la branche gh-pages ne
 porte que les rapports des PRs ouvertes plus l'unique
-`baseline.json`. Pas de croissance illimitée.
+`baseline.json`.
 
 **Autres fournisseurs**. Voir "Rapport interactif via GitLab Pages"
 et "Rapport interactif via Jenkins HTML Publisher" ci-dessous.
@@ -636,9 +636,9 @@ page, en texte brut non stylé, qui dit que son contenu est construit
 par script, qu'une politique restrictive est la raison habituelle
 pour laquelle il n'a pas tourné, et qui renvoie ici. Un script placé
 juste après le retire pendant le parsing, un chargement normal ne
-l'affiche donc jamais. Une page qui s'explique n'est pas un dashboard
-affiché. Elle remplace seulement une page blanche qui laisse le
-lecteur fouiller ses logs de build.
+l'affiche donc jamais. Le dashboard ne s'affiche toujours pas, mais
+le lecteur obtient cette explication au lieu d'une page blanche et
+d'une fouille dans ses logs de build.
 
 La contrainte est propre à Jenkins. GitHub Pages et GitLab Pages
 servent le rapport sans politique à eux, et les deux chemins ci-dessus
@@ -659,7 +659,7 @@ tirer `perf-sentinel-report.json` directement depuis un build
 précédent. Même modèle que la "new code period" de SonarQube
 ("comparer avec ce dans quoi on fusionne"). Sur un build de PR
 (`env.CHANGE_TARGET` posé par MultiBranch Pipeline), la baseline est
-le dernier build réussi du job de la **branche cible**. Hors PR (pas
+le dernier build réussi du job de la branche cible. Hors PR (pas
 de `CHANGE_TARGET` à résoudre, et ce stage tourne sans checkout git
 donc la base ne peut pas être déduite autrement), on se rabat sur le
 dernier build réussi du job lui-même. Les deux recherches se font au

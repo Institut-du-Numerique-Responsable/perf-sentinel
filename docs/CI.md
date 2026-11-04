@@ -121,7 +121,7 @@ The sticky PR comment (markdown block with finding counts and quality
 gate status) gives reviewers an at-a-glance view. For a deeper
 inspection (span tree with highlighted N+1s, framework-specific
 suggested fixes, pg_stat drill-down, full Diff against trunk), the
-GitHub Actions template optionally publishes a **full HTML dashboard**
+GitHub Actions template optionally publishes a full HTML dashboard
 to GitHub Pages on every PR, linked from the sticky comment as:
 
 > 📊 **Interactive report (Diff view)** → `https://<owner>.github.io/<repo>/perf-sentinel-reports/pr-<N>/index.html#diff`
@@ -271,8 +271,7 @@ grows from there with the number of findings, up to a 5 MiB ceiling
 where the sink starts trimming. Size a quota on that ceiling, not on
 the floor. With retention
 handled by the cleanup workflow, the gh-pages branch only carries
-reports for open PRs plus the single `baseline.json`. No unbounded
-growth.
+reports for open PRs plus the single `baseline.json`.
 
 **Other providers**. See "Interactive report via GitLab Pages" and
 "Interactive report via Jenkins HTML Publisher" below.
@@ -487,9 +486,9 @@ What the report does carry since 0.9.25 is a notice at the top of
 the page, in plain unstyled text, saying that its content is built
 by script, that a restrictive policy is the usual reason it did not
 run, and pointing here. A script placed right after it removes it
-during parsing, so a normal load never shows it. A page that
-explains itself is not a rendered dashboard. It only replaces a
-blank page that leaves the reader searching through build logs.
+during parsing, so a normal load never shows it. The dashboard still
+does not render, but the reader gets that explanation instead of a
+blank page and a search through build logs.
 
 The constraint is specific to Jenkins. GitHub Pages and GitLab Pages
 serve the report with no policy of their own, and the two paths above
@@ -507,7 +506,7 @@ instead, pulling `perf-sentinel-report.json` straight from a previous
 build. This follows the same "compare against what you are merging
 into" model as SonarQube's new-code period. On a PR build
 (`env.CHANGE_TARGET` set by MultiBranch Pipeline) the baseline is the
-last successful build of the **target branch's** job. Outside a PR (no
+last successful build of the target branch's job. Outside a PR (no
 `CHANGE_TARGET` to resolve, and this stage runs without a git checkout
 so the base cannot be inferred any other way) it falls back to this
 job's own last successful build. Both lookups are best-effort

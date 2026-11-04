@@ -26,7 +26,7 @@ let batches: Vec<Vec<SpanEvent>> = (0..iterations)
     .collect();
 ```
 
-Input batches are cloned **before** timing begins. This ensures the benchmark measures only `pipeline::analyze` performance, not `Vec<SpanEvent>::clone` overhead. Since `analyze` consumes its input (`Vec<SpanEvent>` is moved), each iteration needs its own copy.
+Input batches are cloned before timing begins, so the benchmark measures only `pipeline::analyze` performance, not `Vec<SpanEvent>::clone` overhead. Since `analyze` consumes its input (`Vec<SpanEvent>` is moved), each iteration needs its own copy.
 
 ### Percentile computation
 
@@ -104,7 +104,7 @@ This subcommand is separate from `analyze` because `pg_stat_statements` data has
 - Safe to ship as a CI artifact: no lockfile to invalidate, no supply-chain vectors through a bundled minifier.
 - Fast to review in PRs: the template is a single `.html` file that diffs cleanly.
 
-The front-end uses DOM APIs directly (`document.createElement`, `Element.textContent`, `Element.setAttribute`). No framework. No Web Components (considered, but plain modules fit the dashboard's scope better and keep the file ~15 KB smaller).
+The front-end uses DOM APIs directly (`document.createElement`, `Element.textContent`, `Element.setAttribute`), with no framework. Web Components were considered, but plain modules fit the dashboard's scope better and keep the file ~15 KB smaller.
 
 **Security model: `textContent` only, grep-level CI check.** All user-controlled data (SQL templates, URLs, service names, trace IDs, code locations, `SuggestedFix` text) is injected inside a `<script id="report-data" type="application/json">` block and read once at boot via `textContent` + `JSON.parse`. The JS then renders via `textContent` and `createElement` exclusively. Forbidden: `innerHTML`, `insertAdjacentHTML`, `document.write`, `eval`, `new Function`. A unit test (`no_forbidden_apis_in_template` in `report/html/tests.rs`) greps the template on every build and fails CI if any of those strings appear. Second-layer defense: the Rust injector escapes the substring `</` to `<\/` in the serialized JSON so a hostile user-controlled value cannot close the script block early. `\/` is a permitted JSON escape, so `JSON.parse` recovers the original value unchanged.
 
@@ -138,7 +138,7 @@ Only `reference_url` from `SuggestedFix` becomes a hyperlink, and only when the 
 
 **Baseline JSON round-trip.** `--before` requires the `Report` struct to derive `Deserialize`. The cascade adds `Deserialize` to `Report`, `Analysis`, `GreenSummary`, `QualityGate`, `QualityRule`, `TopOffender`, `CarbonReport`, `CarbonEstimate`, `RegionBreakdown` and `IntensitySource`. Optional fields with `skip_serializing_if` gain a matching `#[serde(default)]` so round-trip parses cleanly even when the source JSON omits them. Two `&'static str` fields on `CarbonEstimate` (`model`, `methodology`) and one on `RegionBreakdown` (`status`) became `String` for serde round-trip. The cost is a handful of `.to_string()` calls on construction-site constants, invisible next to the surrounding numeric work.
 
-**Client-side-only ergonomics.** CSV export, deep-link hash, session-scoped persistence and a `?` cheatsheet modal are all strictly client-side additions to `html_template.html`. No Rust sink changes, no new endpoints, no new dependencies.
+**Client-side-only ergonomics.** CSV export, deep-link hash, session-scoped persistence and a `?` cheatsheet modal are all client-side additions to `html_template.html`, with no change to the Rust sink, no new endpoint and no new dependency.
 
 - **CSV export**: every listable tab (Findings, pg_stat, Diff, Correlations) carries an Export CSV button above the list/table. The click handler runs the same filter predicate that renders the DOM, assembles RFC 4180-escaped rows with pure string concatenation (no `innerHTML` risk), and triggers a download via `Blob` + `URL.createObjectURL` + a temporary `<a download>`. The object URL is revoked on a 0ms `setTimeout` to avoid a memory leak while letting the browser complete the download. Explain (not a list) and GreenOps (single summary, regions table short enough to read in-place) do not get export buttons.
 - **Deep-link hash**: the URL fragment encodes `tab[&search=...][&ranking=...][&severity=...][&service=...]` on every tab switch, chip click and search input change. Writes go through `history.replaceState` so back/forward history is not polluted. Old-browser fallback assigns `location.hash` directly (one history push, acceptable). Reads on `DOMContentLoaded` validate the tab is registered. An unknown target or malformed hash silently falls through to defaults.
@@ -419,7 +419,7 @@ The alternative `opt-level = "s"` (optimize for size) was considered but rejecte
 
 Enabling it in release would be net-negative for this binary. It only affects integer arithmetic, and combined with `panic = "abort"` above, every checked overflow becomes an immediate process abort. On a long-running `watch` daemon that ingests untrusted network traffic, that turns any integer overflow on attacker-influenced arithmetic (span counts, payload sizes, durations) into a remote denial of service. The rest of the ingest path is built to avoid that failure mode.
 
-The flag also does not address the concern most often raised here, a silent wrap in the carbon counters. Those accumulators are `f64` (`operational_gco2`, `total_transport_gco2`, `energy_kwh` in `score/carbon_compute.rs`), and floats never wrap. They saturate to `inf` and produce `NaN` on invalid operations. `overflow-checks` is integer-only and has no effect on them. The real correctness risk in the carbon math is `inf`/`NaN` propagation, handled by a value guard at the site (for example the `calls > 0` divisor guard in `ingest/pg_stat.rs`), not by a build profile.
+The flag also does not address the concern most often raised here, a silent wrap in the carbon counters. Those accumulators are `f64` (`operational_gco2`, `total_transport_gco2`, `energy_kwh` in `score/carbon_compute.rs`), and floats never wrap. They saturate to `inf` and produce `NaN` on invalid operations. `overflow-checks` is integer-only and has no effect on them. The correctness risk that does apply to the carbon math is `inf`/`NaN` propagation, handled by a value guard at the site (for example the `calls > 0` divisor guard in `ingest/pg_stat.rs`), not by a build profile.
 
 Where a specific integer computation on hostile input could overflow and a wrong result would matter, the code hardens that site locally with `checked_*`, `saturating_*` or `u64::try_from(...).ok()` instead of arming a global panic.
 
@@ -489,7 +489,7 @@ GitHub Actions are pinned to commit SHAs for supply-chain security. The `cross` 
 
 `perf-sentinel diff --before <traces-old.json> --after <traces-new.json> [--config foo.toml] [--format text|json|sarif] [--output file]`
 
-Compares two trace sets and emits a delta report. Primary use case: PR CI integration that surfaces regressions and improvements introduced by a change. The handler runs `pipeline::analyze` on each trace file with the **same** `Config`, then calls `diff::diff_runs(&before_report, &after_report)`.
+Compares two trace sets and emits a delta report. Primary use case: PR CI integration that surfaces regressions and improvements introduced by a change. The handler runs `pipeline::analyze` on each trace file with the same `Config`, then calls `diff::diff_runs(&before_report, &after_report)`.
 
 ### Identity tuple
 
@@ -520,8 +520,8 @@ The `analyze --ci` quality gate is not duplicated on `diff`: the diff itself is 
 
 - `IIS_HIGH` (5.0) is anchored on the N+1 detector's default `n_plus_one_threshold`. An endpoint reaching it is arithmetically at the point where `detect_n_plus_one` starts emitting.
 - `IIS_CRITICAL` (10.0) is mechanically anchored on `detect::n_plus_one::CRITICAL_OCCURRENCE_THRESHOLD`, with a drift-guard test that fails the build if either value moves without the other.
-- `IIS_MODERATE` (2.0) is **a rule of thumb**, not empirical: the intuition that a typical CRUD endpoint makes one or two I/O ops per request. Expect many legitimate endpoints to land here.
-- `WASTE_RATIO_HIGH` (0.30) is anchored on the **default** `io_waste_ratio_max`, not on the operator's configured value. The gate is user policy, the interpretation is a fixed heuristic, and a reader comparing two reports needs the second to mean the same thing in both.
+- `IIS_MODERATE` (2.0) is a rule of thumb, not empirical: the intuition that a typical CRUD endpoint makes one or two I/O ops per request. Expect many legitimate endpoints to land here.
+- `WASTE_RATIO_HIGH` (0.30) is anchored on the default `io_waste_ratio_max`, not on the operator's configured value. The gate is user policy, the interpretation is a fixed heuristic, and a reader comparing two reports needs the second to mean the same thing in both.
 
 **The JSON contract splits stability in two.** The enum values (`"healthy"`, `"moderate"`, `"high"`, `"critical"`) are stable across versions and downstream consumers may rely on them. The thresholds behind them are versioned with the binary and may move. A consumer wanting a version-independent classification must read the raw `io_intensity_score` and `io_waste_ratio` and apply its own bands. This mirrors how `co2.model` evolves through `io_proxy_v1..v3` without breaking a consumer that only wants to know which model ran.
 
@@ -531,7 +531,7 @@ The `analyze --ci` quality gate is not duplicated on `diff`: the diff itself is 
 
 Three sinks put strings into somebody else's user interface, and all three treat the same class of attack as in scope: a hostile span setting `service.name`, `http.url` or `code.filepath` to something that *renders* differently than it *reads*. JSON escaping at the consumer closes injection but not spoofing.
 
-**SARIF (`report/sarif.rs`)** is the strictest, because GitHub and GitLab code scanning render it. Every untrusted string reaching a message or logical location has BiDi overrides and invisible format characters stripped (Trojan Source, CVE-2021-42574): `char::is_control` does not catch these because they are format characters. `code.filepath` gets a dedicated validator that rejects **any** colon rather than carving out a Windows drive-letter exception, because the exception opens `javascript:`, `data:` and `A:B:C://` bypasses while legitimate instrumented source paths contain no colons. Overlong UTF-8 encodings of `.` (`%c0%ae`, `%e0%80%ae`, the classic IIS bug) are rejected wholesale. A path failing any check is dropped rather than sanitized, since a half-repaired path misleads more than an absent one. Ack metadata gets the same treatment on the way out: it is operator-controlled free text, and `alice<RLO>@evil.com` spoofs an identity in the reviewer's UI.
+**SARIF (`report/sarif.rs`)** is the strictest, because GitHub and GitLab code scanning render it. Every untrusted string reaching a message or logical location has BiDi overrides and invisible format characters stripped (Trojan Source, CVE-2021-42574): `char::is_control` does not catch these because they are format characters. `code.filepath` gets a dedicated validator that rejects any colon rather than carving out a Windows drive-letter exception, because the exception opens `javascript:`, `data:` and `A:B:C://` bypasses while legitimate instrumented source paths contain no colons. Overlong UTF-8 encodings of `.` (`%c0%ae`, `%e0%80%ae`, the classic IIS bug) are rejected wholesale. A path failing any check is dropped rather than sanitized, since a half-repaired path misleads more than an absent one. Ack metadata gets the same treatment on the way out: it is operator-controlled free text, and `alice<RLO>@evil.com` spoofs an identity in the reviewer's UI.
 
 **Warnings (`report/warnings.rs`)** carry an explicit contract rather than a mechanism. `Warning::new` does no sanitization because every current producer passes a hardcoded literal or a `format!` over a counter. That is a property of today's call sites, not of the type, so the module states the rule: a `Warning` built from anything touching user-controlled bytes (OTLP attributes, span names, headers, config strings) must go through `Warning::from_untrusted`. The structured `warning_details` coexists with the legacy `warnings: Vec<String>`, renderers preferring the former when non-empty, so older baselines keep parsing through `serde(default)`.
 

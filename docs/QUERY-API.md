@@ -5,8 +5,7 @@ systems pull findings, trace explanations, cross-trace correlations, and
 daemon liveness. Use it to feed Prometheus alerts, Grafana dashboards,
 on-call runbooks or custom CI gate scripts without parsing NDJSON logs.
 
-The API shipped in v0.4.0. This page documents it as a
-first-class product surface with a stability contract.
+The API shipped in v0.4.0 and has a stability contract.
 
 ## Contents
 
@@ -148,9 +147,9 @@ Once the switch is on, every reader needs the key:
 
 ## Restricting writes in production (reverse proxy)
 
-A common production requirement is to let any developer **read** findings
-while reserving the **write** paths (acknowledge and revoke) and the
-**official report export** to architects or DevOps. This stops a finding
+A common production requirement is to let any developer read findings
+while reserving the write paths (acknowledge and revoke) and the
+official report export to architects or DevOps. This stops a finding
 from being acked without sign-off from the people accountable for the
 production posture.
 
@@ -386,7 +385,7 @@ curl -sS http://127.0.0.1:4318/api/status
 The daemon's effective `[daemon]` configuration, read-only (since
 0.8.8). Backs the Config tab of `perf-sentinel query monitor`. Built as
 an explicit allowlist, never a blanket serialization of the internal
-config, so **no secret is exposed**: TLS cert/key paths and the API keys
+config, so no secret is exposed: TLS cert/key paths and the API keys
 are summarized to booleans (`tls_configured`, `ack_api_key_set`,
 `read_api_key_set`) and never echoed. The values are frozen at daemon
 startup.
@@ -583,8 +582,8 @@ bound, which is what `max_retained_findings` governs.
 over the detections inside the window alone, so `first_seen_ms` and
 `seen_count` describe the window. Without that, a chronic pattern running
 all week would match every incident window ever asked for, because after
-the fold its lifetime envelope overlaps all of them. **`since_ms` alone
-is a delta poll**: applied after the fold, against each row's most recent
+the fold its lifetime envelope overlaps all of them. `since_ms` alone
+is a delta poll: applied after the fold, against each row's most recent
 detection, so the row keeps reporting its whole retained history however
 the bound moves.
 
@@ -722,7 +721,7 @@ each entry carries `seen_count: 1`.
 URL-decoded by axum before comparison.
 
 **Response shape:** same `Vec<StoredFinding>` as `/api/findings`. An
-**empty array `[]`** is returned when the trace ID is unknown (the
+empty array `[]` is returned when the trace ID is unknown (the
 endpoint does not return 404).
 
 **Example:**
@@ -763,8 +762,8 @@ curl -sS "http://127.0.0.1:4318/api/findings/trace-n1-sql"
 
 ### GET /api/explain/{trace_id}
 
-Returns the span tree for a trace **still held in the daemon correlation
-window** (default TTL: 30 seconds after the last span of the trace
+Returns the span tree for a trace still held in the daemon correlation
+window (default TTL: 30 seconds after the last span of the trace
 arrived). Useful for debugging a live trace right after it is emitted.
 
 **Important:** findings are retained in the ring buffer long after the
@@ -1525,7 +1524,7 @@ The third page ends the walk, `next_after` is `null`:
 
 The daemon reads `.perf-sentinel-acknowledgments.toml` (path
 configurable via `[daemon.ack] toml_path`) at startup and unions its
-entries with the JSONL store at query time. **TOML wins on conflict**:
+entries with the JSONL store at query time. TOML wins on conflict:
 when a signature is acked in both, the response carries the TOML
 metadata (`source: "toml"`). This keeps the CI baseline immutable from
 the daemon side, so an SRE cannot accidentally override what the team
@@ -1602,7 +1601,7 @@ The built-in Prometheus scrape endpoint at `/metrics` already exposes
 do not need the query API for counting alerts. Wrap it in `sum()` as above: since
 0.18.0 the counter carries a `service` label and since 0.19.0 a `grouping`
 label, and an unaggregated alert fires once per pair. Use the query API to fetch the
-**payload** (template, trace ID, suggestion) that the alert handler
+payload (template, trace ID, suggestion) that the alert handler
 includes in the notification.
 
 ### Custom Grafana dashboard via the JSON datasource
@@ -1625,8 +1624,8 @@ Fields:  $.finding.type,
 ```
 
 Pair this with the Prometheus `/metrics` endpoint already exposed by the
-daemon for time-series trends and use the query API for the **list of
-concrete findings** the user can click into.
+daemon for time-series trends and use the query API for the list of
+concrete findings the user can click into.
 
 ### SRE runbook: page on a stuck scraper
 

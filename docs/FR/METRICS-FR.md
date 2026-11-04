@@ -483,9 +483,9 @@ n'est pas en `W`, ou dont le `PhysicalContext` désigne autre chose que
 ## Kinds de warning : transitoire vs collant
 
 `Report.warning_details` (depuis 0.5.19) compte aujourd'hui cinq kinds
-stables, chacun avec un cycle de vie différent. La distinction compte
-pour la stratégie de monitoring : un warning transitoire se résout seul,
-un collant persiste jusqu'au redémarrage du daemon.
+stables, chacun avec un cycle de vie différent. Côté monitoring, un
+warning transitoire se résout seul, un collant persiste jusqu'au
+redémarrage du daemon.
 
 `warning_details` est le champ que lit un consommateur. Un tableau
 `warnings` de chaînes simples subsiste à côté, écrit par le seul chemin
@@ -545,7 +545,7 @@ dépassé. Le conseiller lit le snapshot de config pris au démarrage du
 daemon, une indication reflète donc toujours les valeurs utilisées par
 le processus en cours.
 
-Un échantillonnage appliqué **avant** le daemon (un collector qui fait
+Un échantillonnage appliqué avant le daemon (un collector qui fait
 tourner `tail_sampling` en amont) rétrécit les mêmes comptes et ne lève
 aucun avertissement, parce qu'une trace conservée est indiscernable d'une
 trace complète. Il est aussi pire pour les ratios : les politiques

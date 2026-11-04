@@ -8,10 +8,10 @@ PerfSentinelHub construit les chiffres de la carte à partir de ses propres donn
 
 Une carte a l'un de ces trois angles :
 
-| Angle | `angle` | Ce qu'elle dit |
-|---|---|---|
-| Histoire | `story` | Un finding, son ampleur avant sa correction, et depuis quand il a disparu. |
-| Courbe | `curve` | La part du travail évitable, période par période, de 2 à 12 barres. |
+| Angle     | `angle`      | Ce qu'elle dit                                                                                       |
+|-----------|--------------|------------------------------------------------------------------------------------------------------|
+| Histoire  | `story`      | Un finding, son ampleur avant sa correction, et depuis quand il a disparu.                           |
+| Courbe    | `curve`      | La part du travail évitable, période par période, de 2 à 12 barres.                                  |
 | Collectif | `collective` | Combien de corrections la mesure a confirmées sur une période, sur combien de services, par famille. |
 
 Chaque carte se rend en anglais ou en français (`lang`) et dans l'un de ces quatre formats :
@@ -73,29 +73,29 @@ Le même fichier avec un pixel changé affiche, avec la sortie 1 :
 {"integrity":"ok","content":"modified","level":1,"domain":null,"key":"unknown","reason":"content_modified","figures":null}
 ```
 
-| Clé | Valeurs |
-|---|---|
+| Clé         | Valeurs                                                                                                                                                                                                                                                                                                                                                    |
+|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `integrity` | `ok` quand la signature tient sur la charge utile et que la `key` de la charge utile est l'empreinte de sa clé publique, sinon `tampered`. `integrity` seul n'est pas le verdict : `"integrity":"ok"` dit seulement que la signature de la charge utile tient, et un fichier retouché l'affiche aussi, à côté de `"content":"modified"` et de la sortie 1. |
-| `content` | Sur un fichier, `intact` quand c'est le fichier signé, `modified` sinon (voir [Ce que couvre la signature du fichier](#ce-que-couvre-la-signature-du-fichier)). `not_checked` sur une URL de vérification, qui n'a pas de fichier, et sur une ligne `tampered`. |
-| `level` | `1` : la signature tient, rien ne lie la clé au domaine. `2` : le domaine publie cette clé pour le jour où la carte a été signée. |
-| `domain` | Le `org.domain` de la carte, ou `null`. Aussi `null` quand la vérification s'est arrêtée avant les règles de la charge utile (`tampered`, `content_modified`). |
-| `key` | `current`, `retired`, `revoked` ou `unknown`, ce que la liste publiée dit de la clé. |
-| `reason` | Pourquoi, tiré de la liste fermée ci-dessous. |
-| `figures` | Les grands chiffres de la carte tels que signés, pour qu'un lecteur les compare avec l'image, ou `null` quand la vérification s'est arrêtée avant les règles de la charge utile. |
+| `content`   | Sur un fichier, `intact` quand c'est le fichier signé, `modified` sinon (voir [Ce que couvre la signature du fichier](#ce-que-couvre-la-signature-du-fichier)). `not_checked` sur une URL de vérification, qui n'a pas de fichier, et sur une ligne `tampered`.                                                                                            |
+| `level`     | `1` : la signature tient, rien ne lie la clé au domaine. `2` : le domaine publie cette clé pour le jour où la carte a été signée.                                                                                                                                                                                                                          |
+| `domain`    | Le `org.domain` de la carte, ou `null`. Aussi `null` quand la vérification s'est arrêtée avant les règles de la charge utile (`tampered`, `content_modified`).                                                                                                                                                                                             |
+| `key`       | `current`, `retired`, `revoked` ou `unknown`, ce que la liste publiée dit de la clé.                                                                                                                                                                                                                                                                       |
+| `reason`    | Pourquoi, tiré de la liste fermée ci-dessous.                                                                                                                                                                                                                                                                                                              |
+| `figures`   | Les grands chiffres de la carte tels que signés, pour qu'un lecteur les compare avec l'image, ou `null` quand la vérification s'est arrêtée avant les règles de la charge utile.                                                                                                                                                                           |
 
 `figures` contient `angle`, `period` (`{"kind","from","to"}`) et `before_fix_period` (`{"from","to"}`, absent quand la carte n'en imprime pas), puis les chiffres de la charge utile compacte sous ces noms. Les valeurs sont les entiers signés, sans arrondi : la page de vérification et le Hub les mettent en forme. Un fichier et son QR code donnent les mêmes `figures`.
 
-| Nom | Lettre compacte | Unité |
-|---|---|---|
-| `cited_ops` | `o` | Opérations de la trace citée (histoire) |
-| `cited_ms` | `m` | Millisecondes de l'appel cité (histoire) |
-| `before_fix_ops` | `b` | Opérations sur la période avant correction (histoire) |
-| `threshold_ops` | `t` | Opérations, le seuil que dépasse la trace citée (histoire) |
-| `threshold_ms` | `u` | Millisecondes, le seuil que dépasse l'appel cité (histoire) |
-| `last_waste_permille` | `w` | Pour mille d'I/O gaspillées sur la période de la carte (courbe) |
-| `previous_waste_permille` | `x` | Pour mille d'I/O gaspillées sur la période précédente (courbe) |
-| `confirmed_fixes_count` | `n` | Corrections confirmées par la mesure (collectif) |
-| `services_count` | `e` | Services que ces corrections touchent (collectif) |
+| Nom                       | Lettre compacte | Unité                                                           |
+|---------------------------|-----------------|-----------------------------------------------------------------|
+| `cited_ops`               | `o`             | Opérations de la trace citée (histoire)                         |
+| `cited_ms`                | `m`             | Millisecondes de l'appel cité (histoire)                        |
+| `before_fix_ops`          | `b`             | Opérations sur la période avant correction (histoire)           |
+| `threshold_ops`           | `t`             | Opérations, le seuil que dépasse la trace citée (histoire)      |
+| `threshold_ms`            | `u`             | Millisecondes, le seuil que dépasse l'appel cité (histoire)     |
+| `last_waste_permille`     | `w`             | Pour mille d'I/O gaspillées sur la période de la carte (courbe) |
+| `previous_waste_permille` | `x`             | Pour mille d'I/O gaspillées sur la période précédente (courbe)  |
+| `confirmed_fixes_count`   | `n`             | Corrections confirmées par la mesure (collectif)                |
+| `services_count`          | `e`             | Services que ces corrections touchent (collectif)               |
 
 Les vérifications suivent un ordre fixe, et la première qui échoue décide de la ligne : l'enveloppe et son support, la signature de la charge utile sur les octets exacts que porte la carte, l'empreinte, la signature du contenu du fichier, les règles de la charge utile, puis le lien de la clé. Une mauvaise signature donne `tampered` quoi que disent les octets, et une signature valide sur une charge utile qui enfreint une règle donne `malformed_input`. Un fichier dont la signature de contenu ne tient pas donne `content_modified`, et sa clé n'est pas jugée : aucune lecture de `--keys`, aucune requête réseau sous `--online`.
 
@@ -114,20 +114,20 @@ jq -r .reason verdict.json
 
 Une erreur affiche `{"result":"<famille>","reason":"<raison>"}`, plus `"field"` sur `unsupported_characters` quand le texte vient de `free.title`, `free.team`, `free.label` ou `org.name`, et sur le `malformed_input` d'un `free.title` qui contient le marqueur de l'emplacement PDF (`"field":"free.title"`, voir C3) ou d'un `equivalence_country` inconnu (`"field":"equivalence_country"`). Tout autre texte que les polices ne savent pas dessiner (périmètre, service, endpoint) donne `unsupported_characters` sans `field`.
 
-| Sortie | `result` | Raisons de `card keygen` et `card render` |
-|---|---|---|
-| 0 | | Fait. |
-| 1 | `refused` | `period_not_calendar`, `period_not_closed`, `incomplete_period`, `volume_not_avoidable`, `threshold_not_applicable`, `unknown_equivalence`, `equivalence_out_of_scale`, `unsupported_language`. La carte annoncerait ce que ses chiffres ne montrent pas. |
-| 3 | `input_error` | `missing_file`, `file_too_large`, `malformed_input`, `signing_key_permissions`, `signing_key_unreadable`, `key_exists`, `output_unwritable`. |
-| 5 | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`, `jxl_encode_failed`. |
+| Sortie | `result`       | Raisons de `card keygen` et `card render`                                                                                                                                                                                                                 |
+|--------|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0      |                | Fait.                                                                                                                                                                                                                                                     |
+| 1      | `refused`      | `period_not_calendar`, `period_not_closed`, `incomplete_period`, `volume_not_avoidable`, `threshold_not_applicable`, `unknown_equivalence`, `equivalence_out_of_scale`, `unsupported_language`. La carte annoncerait ce que ses chiffres ne montrent pas. |
+| 3      | `input_error`  | `missing_file`, `file_too_large`, `malformed_input`, `signing_key_permissions`, `signing_key_unreadable`, `key_exists`, `output_unwritable`.                                                                                                              |
+| 5      | `unrenderable` | `compact_too_large`, `unsupported_characters`, `unsupported_version`, `png_encode_failed`, `pdf_export_failed`, `svg_encode_failed`, `jxl_encode_failed`.                                                                                                 |
 
-| Sortie | Ligne et raisons de `verify-card` |
-|---|---|
-| 0 | `integrity` `ok` et `content` `intact` (un fichier) ou `not_checked` (une URL). Niveau 2 : `key_published`. Niveau 1 : `no_key_list`, `key_not_published`. |
-| 1 | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), un fichier qui n'est pas celui qui a été signé (`content_modified`), ou une clé dont la liste ne se porte pas garante (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), au niveau 1. |
-| 3 | `{"result":"input_error"}` : `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`. |
-| 4 | `--online` n'a pas pu lire les clés du domaine : la ligne de vérification au niveau 1 avec `binding_check_failed` ou `binding_partial`, ou `no_http_client` sur une compilation sans les features HTTP. |
-| 5 | `{"result":"unrenderable","reason":"unsupported_version"}` : le format de la carte est plus récent que ce moteur. |
+| Sortie | Ligne et raisons de `verify-card`                                                                                                                                                                                                                                           |
+|--------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0      | `integrity` `ok` et `content` `intact` (un fichier) ou `not_checked` (une URL). Niveau 2 : `key_published`. Niveau 1 : `no_key_list`, `key_not_published`.                                                                                                                  |
+| 1      | `integrity` `tampered` (`signature_invalid`, `fingerprint_mismatch`), un fichier qui n'est pas celui qui a été signé (`content_modified`), ou une clé dont la liste ne se porte pas garante (`key_revoked`, `signed_outside_validity`, `public_key_mismatch`), au niveau 1. |
+| 3      | `{"result":"input_error"}` : `missing_file`, `file_too_large`, `malformed_input`, `no_card_payload`, `duplicate_card_payload`, `no_domain`.                                                                                                                                 |
+| 4      | `--online` n'a pas pu lire les clés du domaine : la ligne de vérification au niveau 1 avec `binding_check_failed` ou `binding_partial`, ou `no_http_client` sur une compilation sans les features HTTP.                                                                     |
+| 5      | `{"result":"unrenderable","reason":"unsupported_version"}` : le format de la carte est plus récent que ce moteur.                                                                                                                                                           |
 
 Une charge utile dont le dernier caractère base64url est remplacé par un caractère non canonique (bits de fin non nuls) donne `malformed_input`, sortie 3, et non `tampered` : les deux rejettent la carte. Une enveloppe de plus de 64 Kio dans un PDF donne `malformed_input`, un PDF de plus de 4 Mio `file_too_large`.
 
@@ -137,32 +137,32 @@ Une charge utile dont le dernier caractère base64url est remplacé par un carac
 
 Le Hub l'écrit, le moteur le lit. Les clés inconnues sont refusées, chaque nombre est un entier de 0 à 2^53 − 1 (9 007 199 254 740 991, le plus grand qu'un navigateur relit exactement), et les dates s'écrivent `YYYY-MM-DD`.
 
-| Clé | Requise | Contenu et bornes |
-|---|---|---|
-| `angle` | oui | `story`, `curve` ou `collective`. |
-| `lang` | oui | `en` ou `fr`. Toute autre valeur donne `malformed_input`. |
-| `period` | oui | `{"kind","from","to"}`. `kind` vaut `week` (du lundi au dimanche), `month`, `quarter`, `semester` (de janvier à juin, de juillet à décembre) ou `year`. `from` et `to` bornent exactement une période civile de ce type (`period_not_calendar`), qui se termine avant le jour UTC de `generated_at_ms` (`period_not_closed`). |
-| `scope` | oui | `{"environment","sources","covered_days","restart_days","sampled_permille"}`. `environment` est facultatif. `sources` n'est pas vide. `covered_days` vaut le nombre de jours de la période (`incomplete_period`), `restart_days` vaut au plus `covered_days`, `sampled_permille` va de 0 à 1000. `environment` et `sources`, joints par `", "`, tiennent en 120 caractères. |
-| `figures` | oui | Des entiers dont le nom porte l'unité, lus selon l'angle, voir plus bas. |
-| `story` | sur une histoire seulement | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` est facultatif. `service` et `endpoint` tiennent chacun en 200 caractères. `done_at` tombe dans la période ou avant, `observed_at` le jour de `done_at` ou avant. |
-| `before_fix_period` | quand la carte en imprime une | `{"from","to"}`, une période civile de type `period.kind`, voir [la période d'avant la correction](#la-période-davant-la-correction). |
-| `equivalence_country` | non | `fr`, `gb` ou `us`, `fr` si absent. Il choisit la table des équivalences, voir [Équivalences](#équivalences). Toute autre valeur est `malformed_input`, avec `"field":"equivalence_country"`. |
-| `equivalence` | non | Un `id` de la table du pays de la carte. Absent, le moteur en choisit une dans cette table. Tout autre `id`, y compris celui d'un autre pays, est `unknown_equivalence`. |
-| `free` | oui, `{}` si vide | `{"title","team","label"}`, chacun facultatif : titre 48 caractères, équipe 48, libellé 80 (sur une histoire seulement). Un titre ne peut pas contenir `{"content_sig":"`, le marqueur de l'emplacement de signature du PDF : `{"result":"input_error","reason":"malformed_input","field":"free.title"}`, sortie 3, quel que soit le format. |
-| `org` | oui | `{"name","domain"}`. `name` tient en 60 caractères. `domain` est facultatif, un nom DNS public : ASCII minuscule, 253 au plus, au moins deux étiquettes de 1 à 63 `[a-z0-9-]` sans tiret en bord, la dernière pas entièrement numérique. |
-| `generated_at_ms` | oui | Le moment où le Hub a construit la carte, en millisecondes epoch. |
+| Clé                   | Requise                       | Contenu et bornes                                                                                                                                                                                                                                                                                                                                                           |
+|-----------------------|-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `angle`               | oui                           | `story`, `curve` ou `collective`.                                                                                                                                                                                                                                                                                                                                           |
+| `lang`                | oui                           | `en` ou `fr`. Toute autre valeur donne `malformed_input`.                                                                                                                                                                                                                                                                                                                   |
+| `period`              | oui                           | `{"kind","from","to"}`. `kind` vaut `week` (du lundi au dimanche), `month`, `quarter`, `semester` (de janvier à juin, de juillet à décembre) ou `year`. `from` et `to` bornent exactement une période civile de ce type (`period_not_calendar`), qui se termine avant le jour UTC de `generated_at_ms` (`period_not_closed`).                                               |
+| `scope`               | oui                           | `{"environment","sources","covered_days","restart_days","sampled_permille"}`. `environment` est facultatif. `sources` n'est pas vide. `covered_days` vaut le nombre de jours de la période (`incomplete_period`), `restart_days` vaut au plus `covered_days`, `sampled_permille` va de 0 à 1000. `environment` et `sources`, joints par `", "`, tiennent en 120 caractères. |
+| `figures`             | oui                           | Des entiers dont le nom porte l'unité, lus selon l'angle, voir plus bas.                                                                                                                                                                                                                                                                                                    |
+| `story`               | sur une histoire seulement    | `{"finding_type","service","endpoint","observed_at","done_at"}`. `observed_at` est facultatif. `service` et `endpoint` tiennent chacun en 200 caractères. `done_at` tombe dans la période ou avant, `observed_at` le jour de `done_at` ou avant.                                                                                                                            |
+| `before_fix_period`   | quand la carte en imprime une | `{"from","to"}`, une période civile de type `period.kind`, voir [la période d'avant la correction](#la-période-davant-la-correction).                                                                                                                                                                                                                                       |
+| `equivalence_country` | non                           | `fr`, `gb` ou `us`, `fr` si absent. Il choisit la table des équivalences, voir [Équivalences](#équivalences). Toute autre valeur est `malformed_input`, avec `"field":"equivalence_country"`.                                                                                                                                                                               |
+| `equivalence`         | non                           | Un `id` de la table du pays de la carte. Absent, le moteur en choisit une dans cette table. Tout autre `id`, y compris celui d'un autre pays, est `unknown_equivalence`.                                                                                                                                                                                                    |
+| `free`                | oui, `{}` si vide             | `{"title","team","label"}`, chacun facultatif : titre 48 caractères, équipe 48, libellé 80 (sur une histoire seulement). Un titre ne peut pas contenir `{"content_sig":"`, le marqueur de l'emplacement de signature du PDF : `{"result":"input_error","reason":"malformed_input","field":"free.title"}`, sortie 3, quel que soit le format.                                |
+| `org`                 | oui                           | `{"name","domain"}`. `name` tient en 60 caractères. `domain` est facultatif, un nom DNS public : ASCII minuscule, 253 au plus, au moins deux étiquettes de 1 à 63 `[a-z0-9-]` sans tiret en bord, la dernière pas entièrement numérique.                                                                                                                                    |
+| `generated_at_ms`     | oui                           | Le moment où le Hub a construit la carte, en millisecondes epoch.                                                                                                                                                                                                                                                                                                           |
 
 Chaque texte est déjà débarrassé de ses espaces de bord (une valeur qui diffère de sa version nettoyée est refusée, jamais nettoyée en silence), non vide, et ne contient aucun caractère de contrôle, bidirectionnel ou invisible.
 
 `figures` selon l'angle :
 
-| Angle | Clés |
-|---|---|
-| Histoire, types N+1 et redondant | `cited_ops`, `before_fix_ops` (facultatif, le volume de la période d'avant la correction), `co2_low_ug` (facultatif, seulement avec `before_fix_ops`). Pas de seuil (`threshold_not_applicable`). |
-| Histoire, types `slow_*` | `cited_ms`, `threshold_ms` (facultatif). |
-| Histoire, `excessive_fanout`, `chatty_service`, `pool_saturation`, `serialized_calls` | `cited_ops`, `threshold_ops` (facultatif). |
-| Courbe | `waste_permille` (2 à 12 valeurs d'au plus 1000, la plus ancienne d'abord, la période de la carte en dernier), `avoidable_ops` et `co2_low_ug` (facultatif) pour la période de la carte. |
-| Collectif | `confirmed_fixes_count` (au moins 1), `previous_fixes_count` (facultatif, absent quand le Hub ne peut pas compter honnêtement la période précédente), `services_count` (de 1 à `confirmed_fixes_count`), `fixes_by_family_count` (`extra_calls`, `slow_calls`, `call_architecture`, dont la somme vaut `confirmed_fixes_count`), `before_fix_ops` (facultatif, demande une correction `extra_calls`), `co2_low_ug` (facultatif, seulement avec `before_fix_ops`). |
+| Angle                                                                                 | Clés                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|---------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Histoire, types N+1 et redondant                                                      | `cited_ops`, `before_fix_ops` (facultatif, le volume de la période d'avant la correction), `co2_low_ug` (facultatif, seulement avec `before_fix_ops`). Pas de seuil (`threshold_not_applicable`).                                                                                                                                                                                                                                                                 |
+| Histoire, types `slow_*`                                                              | `cited_ms`, `threshold_ms` (facultatif).                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Histoire, `excessive_fanout`, `chatty_service`, `pool_saturation`, `serialized_calls` | `cited_ops`, `threshold_ops` (facultatif).                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Courbe                                                                                | `waste_permille` (2 à 12 valeurs d'au plus 1000, la plus ancienne d'abord, la période de la carte en dernier), `avoidable_ops` et `co2_low_ug` (facultatif) pour la période de la carte.                                                                                                                                                                                                                                                                          |
+| Collectif                                                                             | `confirmed_fixes_count` (au moins 1), `previous_fixes_count` (facultatif, absent quand le Hub ne peut pas compter honnêtement la période précédente), `services_count` (de 1 à `confirmed_fixes_count`), `fixes_by_family_count` (`extra_calls`, `slow_calls`, `call_architecture`, dont la somme vaut `confirmed_fixes_count`), `before_fix_ops` (facultatif, demande une correction `extra_calls`), `co2_low_ug` (facultatif, seulement avec `before_fix_ops`). |
 
 Seuls les findings N+1 et redondants ont un volume évitable : `before_fix_ops` sur tout autre type d'histoire donne `volume_not_avoidable`. Sur un collectif, `before_fix_ops` additionne le volume d'avant les seules corrections N+1 et redondantes, et la carte nomme ce sous-ensemble.
 
@@ -185,7 +185,7 @@ Les trois fixtures de `tests/fixtures/card/` sont des exemples complets : `story
 
 ### La période d'avant la correction
 
-La carte nomme la période d'où viennent ses chiffres « avant la correction », et les deux charges utiles la signent. Elle est présente exactement quand la carte en imprime une, et doit être :
+La carte nomme la période d'où viennent ses chiffres "avant la correction", et les deux charges utiles la signent. Elle est présente exactement quand la carte en imprime une, et doit être :
 
 - sur une histoire avec `before_fix_ops` : la période civile qui précède celle qui contient `done_at`,
 - sur une histoire avec un seuil : la période qui contient `observed_at`, alors requis (la trace d'où vient son chiffre),
@@ -197,13 +197,13 @@ Tout autre cas donne `malformed_input`.
 
 La charge utile complète est celle que portent le PNG et le PDF. Elle reprend `card.json` avec trois changements : `v` (1), l'objet `equivalence` résolu, et la clé.
 
-| Clé | Contenu |
-|---|---|
-| `v` | La version du format, `1`. Une valeur plus haute donne `unsupported_version`. |
-| `angle`, `lang`, `period`, `scope`, `figures`, `story`, `before_fix_period`, `free`, `org`, `generated_at_ms` | Comme dans `card.json`. |
-| `equivalence` | `{"id","per_unit_ug","unit","source","vintage"}`, absent quand la carte n'imprime pas d'équivalence. |
-| `key` | L'empreinte de la clé de signature. |
-| `public_key` | La clé publique Ed25519 brute de 32 octets, en base64url. |
+| Clé                                                                                                           | Contenu                                                                                              |
+|---------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| `v`                                                                                                           | La version du format, `1`. Une valeur plus haute donne `unsupported_version`.                        |
+| `angle`, `lang`, `period`, `scope`, `figures`, `story`, `before_fix_period`, `free`, `org`, `generated_at_ms` | Comme dans `card.json`.                                                                              |
+| `equivalence`                                                                                                 | `{"id","per_unit_ug","unit","source","vintage"}`, absent quand la carte n'imprime pas d'équivalence. |
+| `key`                                                                                                         | L'empreinte de la clé de signature.                                                                  |
+| `public_key`                                                                                                  | La clé publique Ed25519 brute de 32 octets, en base64url.                                            |
 
 L'objet `equivalence` est le même pour tous les pays. Le pays n'est pas signé à part : il se lit dans l'`id`, unique dans toutes les tables, et dans `source`. `equivalence_country` ne sert qu'à choisir la ligne, un vérificateur n'en a donc jamais besoin.
 
@@ -219,22 +219,22 @@ La fixture d'histoire se signe ainsi :
 
 La charge utile compacte est celle que porte le QR code : l'angle, la période, les chiffres que la carte imprime en gros, la période d'avant la correction, le domaine, la clé publique et le jour. Les jours sont des jours epoch, comptés depuis le 1970-01-01 UTC.
 
-| Clé | Contenu |
-|---|---|
-| `v` | `1`. |
-| `a` | L'angle : `s` histoire, `c` courbe, `k` collectif. |
+| Clé | Contenu                                                                                                                                                                |
+|-----|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `v` | `1`.                                                                                                                                                                   |
+| `a` | L'angle : `s` histoire, `c` courbe, `k` collectif.                                                                                                                     |
 | `p` | `[type, from, to]` : la lettre du type, puis le premier et le dernier jour epoch de la période. Types : `w` semaine, `m` mois, `q` trimestre, `h` semestre, `y` année. |
-| `f` | Les chiffres, voir plus bas. |
-| `r` | `[from, to]`, les jours epoch de la période d'avant la correction, absent quand la carte n'en imprime pas. Jamais sur une courbe. |
-| `d` | `org.domain`, absent quand la carte n'en nomme pas. |
-| `k` | La clé publique en base64url, comme `public_key`. |
-| `g` | Le jour epoch de `generated_at_ms`, le jour où la carte a été signée. |
+| `f` | Les chiffres, voir plus bas.                                                                                                                                           |
+| `r` | `[from, to]`, les jours epoch de la période d'avant la correction, absent quand la carte n'en imprime pas. Jamais sur une courbe.                                      |
+| `d` | `org.domain`, absent quand la carte n'en nomme pas.                                                                                                                    |
+| `k` | La clé publique en base64url, comme `public_key`.                                                                                                                      |
+| `g` | Le jour epoch de `generated_at_ms`, le jour où la carte a été signée.                                                                                                  |
 
-| Angle | Clés de `f` |
-|---|---|
-| Histoire | `o` `cited_ops`, `m` `cited_ms`, `b` `before_fix_ops`, `t` `threshold_ops`, `u` `threshold_ms`. L'un des ensembles `o`, `b o`, `o t`, `m`, `m u`. |
-| Courbe | `w` le `waste_permille` de la période de la carte, `x` celui de la période qui la précède. |
-| Collectif | `n` `confirmed_fixes_count`, `e` `services_count`. |
+| Angle     | Clés de `f`                                                                                                                                       |
+|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| Histoire  | `o` `cited_ops`, `m` `cited_ms`, `b` `before_fix_ops`, `t` `threshold_ops`, `u` `threshold_ms`. L'un des ensembles `o`, `b o`, `o t`, `m`, `m u`. |
+| Courbe    | `w` le `waste_permille` de la période de la carte, `x` celui de la période qui la précède.                                                        |
+| Collectif | `n` `confirmed_fixes_count`, `e` `services_count`.                                                                                                |
 
 La charge utile compacte de la fixture d'histoire :
 
@@ -268,7 +268,7 @@ perf-sentinel-card-content-v1
 <SHA-256 en hexadécimal du contenu>
 ```
 
-`<format>` vaut `png`, `svg`, `jxl` ou `pdf`. La première ligne distingue le message d'une charge utile, qui commence toujours par `{`. Le format empêche une enveloppe de passer à un autre format de la même carte. L'empreinte de la charge utile empêche l'échange entre deux vraies cartes d'une même clé : sans elle, la charge utile de la carte B à côté du fichier de la carte A et du `content_sig` de A donnerait « intact » alors que les pixels montrent A. Vecteur de test, format `png`, charge utile `{}`, contenu `abc` :
+`<format>` vaut `png`, `svg`, `jxl` ou `pdf`. La première ligne distingue le message d'une charge utile, qui commence toujours par `{`. Le format empêche une enveloppe de passer à un autre format de la même carte. L'empreinte de la charge utile empêche l'échange entre deux vraies cartes d'une même clé : sans elle, la charge utile de la carte B à côté du fichier de la carte A et du `content_sig` de A donnerait "intact" alors que les pixels montrent A. Vecteur de test, format `png`, charge utile `{}`, contenu `abc` :
 
 ```text
 perf-sentinel-card-content-v1
@@ -277,7 +277,7 @@ png
 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 ```
 
-**Le texte de l'enveloppe est vérifié octet par octet.** Le contenu laisse de côté tout le support, si bien qu'aucune signature ne couvre le texte de l'enveloppe, et un analyseur JSON lit beaucoup de textes comme une seule valeur. Un lecteur décode les trois valeurs, réécrit l'enveloppe à partir d'elles et exige les mêmes octets, sinon `malformed_input`. Sans cette règle, un vrai PNG dont le texte `iTXt` reçoit ses clés dans un autre ordre, une espace après un deux-points, un saut de ligne final ou un échappement `\u0041` (CRC recalculé) garderait son contenu et donnerait « intact ». Il en va de même pour chaque format.
+**Le texte de l'enveloppe est vérifié octet par octet.** Le contenu laisse de côté tout le support, si bien qu'aucune signature ne couvre le texte de l'enveloppe, et un analyseur JSON lit beaucoup de textes comme une seule valeur. Un lecteur décode les trois valeurs, réécrit l'enveloppe à partir d'elles et exige les mêmes octets, sinon `malformed_input`. Sans cette règle, un vrai PNG dont le texte `iTXt` reçoit ses clés dans un autre ordre, une espace après un deux-points, un saut de ligne final ou un échappement `\u0041` (CRC recalculé) garderait son contenu et donnerait "intact". Il en va de même pour chaque format.
 
 **Le contenu, par format**, lu sur les octets bruts, sans rien décoder :
 
@@ -286,7 +286,7 @@ ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 - **JPEG XL** : le fichier sans la boîte `pscd`, retirée en entier (taille, type et charge). La boîte doit se trouver là où le moteur l'écrit : les boîtes de premier niveau commencent par la boîte de signature, `ftyp`, `pscd` et `jxlc`, dans cet ordre, la boîte `pscd` à l'offset 32 avec une taille sur 32 bits (ni 0, ni 1). `verify-card` lit encore l'enveloppe d'une boîte `pscd` placée ailleurs, puis refuse le fichier avec `malformed_input`.
 - **PDF** : tout le fichier, les 86 octets de la valeur de `content_sig` remis à 86 `A`, le base64url de 64 octets nuls. Une recherche d'octets trouve cet emplacement : `{"content_sig":"` apparaît exactement une fois dans le fichier brut, les 86 octets qui suivent égalent le `content_sig` de l'enveloppe, et `","payload":"` les suit. Tout autre cas donne `content_modified`.
 
-Un élément SVG ou une boîte JPEG XL déplacés sont refusés plutôt que hachés : retirer le support de n'importe quel endroit laisse les mêmes octets, si bien que l'empreinte seule ne voit pas qu'il a bougé. Un élément SVG déplacé dans `<title>` ou dans l'attribut `d` d'un chemin donnerait « intact » alors que le fichier se nomme ou se dessine autrement.
+Un élément SVG ou une boîte JPEG XL déplacés sont refusés plutôt que hachés : retirer le support de n'importe quel endroit laisse les mêmes octets, si bien que l'empreinte seule ne voit pas qu'il a bougé. Un élément SVG déplacé dans `<title>` ou dans l'attribut `d` d'un chemin donnerait "intact" alors que le fichier se nomme ou se dessine autrement.
 
 Le PDF utilise un emplacement fixe plutôt qu'une enveloppe dans une mise à jour incrémentale ajoutée à la fin. Une mise à jour demanderait une révision PDF écrite à la main (un nouveau catalogue, les entrées `/AF` et `/EmbeddedFiles` qu'exige PDF/A-3, une section xref avec `/Prev`), et une règle pour distinguer la mise à jour du moteur d'une autre ajoutée après elle. L'emplacement couvre tous les octets sauf 86, une mise à jour ajoutée comprise, et reste une recherche d'octets qu'un navigateur sait faire.
 
@@ -297,7 +297,7 @@ Le PDF utilise un emplacement fixe plutôt qu'une enveloppe dans une mise à jou
 3. Le premier chunk est `IHDR`, de longueur 13, sinon `malformed_input` : un PNG de carte commence comme tout PNG.
 4. Le parcours s'arrête au premier `IEND`, et un fichier sans `IEND` donne `malformed_input`. Les octets après `IEND` ne sont pas parcourus mais font partie du contenu, si bien que des octets ajoutés à un original donnent `content_modified`, jamais une erreur de format et jamais un oubli.
 5. Le chunk de la carte est un `iTXt` dont les données commencent par `perf-sentinel-card` et un NUL. Aucun dans le parcours : `no_card_payload`. Deux ou plus, avant ou après `IDAT` : `duplicate_card_payload`. Le seul placé après le premier `IDAT` : `no_card_payload`, puisqu'un décodeur qui s'arrête aux données d'image ne le voit jamais.
-6. Le CRC du chunk de la carte (CRC-32 sur son type et ses données) correspond. Les quatre octets qui suivent le NUL du mot-clé valent `00 00 00 00` : pas de compression, méthode 0, une étiquette de langue vide et un mot-clé traduit vide. Le texte, à partir de l'octet 23 des données, est en UTF-8 et fait au plus 64 Kio. Tout autre cas donne `malformed_input`. Ces octets d'en-tête se trouvent dans le chunk exclu, qu'aucune signature ne couvre, si bien qu'une étiquette de langue au contenu libre laisserait un fichier qui donne « intact » porter des données non signées, jusqu'au plafond de 16 Mio. Le texte est stocké sans compression pour que le support garde sa longueur entre le brouillon et le fichier scellé.
+6. Le CRC du chunk de la carte (CRC-32 sur son type et ses données) correspond. Les quatre octets qui suivent le NUL du mot-clé valent `00 00 00 00` : pas de compression, méthode 0, une étiquette de langue vide et un mot-clé traduit vide. Le texte, à partir de l'octet 23 des données, est en UTF-8 et fait au plus 64 Kio. Tout autre cas donne `malformed_input`. Ces octets d'en-tête se trouvent dans le chunk exclu, qu'aucune signature ne couvre, si bien qu'une étiquette de langue au contenu libre laisserait un fichier qui donne "intact" porter des données non signées, jusqu'au plafond de 16 Mio. Le texte est stocké sans compression pour que le support garde sa longueur entre le brouillon et le fichier scellé.
 
 Les CRC des autres chunks ne sont pas vérifiés : ils font partie du contenu, si bien qu'un CRC modifié là donne `content_modified`. La place du chunk de la carte parmi les chunks entre `IHDR` et le premier `IDAT` n'est pas signée, voir [`LIMITATIONS-FR.md`](./LIMITATIONS-FR.md#cartes-à-partager).
 
@@ -324,7 +324,7 @@ Une organisation lie ses clés à son domaine à deux endroits, l'un ou l'autre 
 _perf-sentinel.acme.fr. TXT "v=ps1; k=ps1:BjFPvCKhcizo9T39wJxfhA; from=2026-09-01"
 ```
 
-L'enregistrement s'écrit `v=ps1; k=<empreinte>; from=YYYY-MM-DD[; to=YYYY-MM-DD][; revoked=YYYY-MM-DD]`. Il doit se lire exactement : un enregistrement dont le premier champ n'est pas `v=ps1`, avec un champ sans `=`, une date invalide ou un paramètre donné deux fois est ignoré, une faute de frappe se lit donc comme « non publiée ». Les paramètres inconnus sont ignorés. Un enregistrement coupé en plusieurs chaînes entre guillemets est recollé.
+L'enregistrement s'écrit `v=ps1; k=<empreinte>; from=YYYY-MM-DD[; to=YYYY-MM-DD][; revoked=YYYY-MM-DD]`. Il doit se lire exactement : un enregistrement dont le premier champ n'est pas `v=ps1`, avec un champ sans `=`, une date invalide ou un paramètre donné deux fois est ignoré, une faute de frappe se lit donc comme "non publiée". Les paramètres inconnus sont ignorés. Un enregistrement coupé en plusieurs chaînes entre guillemets est recollé.
 
 **Well-known.** `https://<domaine>/.well-known/perf-sentinel-key` :
 
@@ -338,16 +338,16 @@ L'enregistrement s'écrit `v=ps1; k=<empreinte>; from=YYYY-MM-DD[; to=YYYY-MM-DD
 
 **Rotation et révocation.** Une clé est valide de `from` à `to`, bornes comprises, comparées au jour UTC où la carte a été signée (`generated_at_ms`, ou `g`). Ce jour est une affirmation du signataire, écrite par qui détient la clé.
 
-| La liste dit | Carte signée | Résultat |
-|---|---|---|
-| Rien (aucune liste lue) | | Niveau 1, `unknown`, `no_key_list` |
-| Pas cette empreinte | | Niveau 1, `unknown`, `key_not_published` |
-| Une autre `public_key` pour cette empreinte | | Niveau 1, `unknown`, `public_key_mismatch`, sortie 1 |
-| `revoked` | n'importe quel jour | Niveau 1, `revoked`, `key_revoked`, sortie 1 |
-| Valide, sans `to` | avant `from` | Niveau 1, `current`, `signed_outside_validity`, sortie 1 |
-| Valide, avec `to` | hors de `from`..`to` | Niveau 1, `retired`, `signed_outside_validity`, sortie 1 |
-| Valide, sans `to` | dans sa validité | Niveau 2, `current`, `key_published` |
-| Valide, avec `to` | dans sa validité | Niveau 2, `retired`, `key_published` |
+| La liste dit                                | Carte signée         | Résultat                                                 |
+|---------------------------------------------|----------------------|----------------------------------------------------------|
+| Rien (aucune liste lue)                     |                      | Niveau 1, `unknown`, `no_key_list`                       |
+| Pas cette empreinte                         |                      | Niveau 1, `unknown`, `key_not_published`                 |
+| Une autre `public_key` pour cette empreinte |                      | Niveau 1, `unknown`, `public_key_mismatch`, sortie 1     |
+| `revoked`                                   | n'importe quel jour  | Niveau 1, `revoked`, `key_revoked`, sortie 1             |
+| Valide, sans `to`                           | avant `from`         | Niveau 1, `current`, `signed_outside_validity`, sortie 1 |
+| Valide, avec `to`                           | hors de `from`..`to` | Niveau 1, `retired`, `signed_outside_validity`, sortie 1 |
+| Valide, sans `to`                           | dans sa validité     | Niveau 2, `current`, `key_published`                     |
+| Valide, avec `to`                           | dans sa validité     | Niveau 2, `retired`, `key_published`                     |
 
 Pour changer de clé, publiez la nouvelle avec son `from` et posez `to` sur l'ancienne : les cartes signées avec l'ancienne restent au niveau 2, `retired`. Cette fenêtre repose sur la date du signataire : une clé volée qui est seulement retirée peut encore dater une carte à l'intérieur. Pour écarter une clé qui a pu fuiter, posez `revoked` : toute carte qu'elle a signée tombe au niveau 1, `key_revoked`, quelle que soit la date que la carte affiche, car une clé volée pourrait dater une carte d'avant n'importe quel jour de révocation. Les cartes honnêtes signées par cette clé perdent aussi le niveau 2, et aucun horodatage tiers ne les distingue. Révoquez une clé qui a pu fuiter, retirez celle qui n'a pas fui. Le jour `revoked` est le premier jour où la clé a pu fuiter, pas le jour où elle a été écartée : il ne change aucun verdict et indique seulement au lecteur depuis quand la clé a pu être exposée. Quand l'enregistrement DNS et le fichier well-known listent tous deux une clé, chaque limite posée par l'un ou l'autre s'applique : `revoked` l'emporte sur `to`, et `to` sur l'absence de limite.
 
@@ -355,10 +355,10 @@ Pour changer de clé, publiez la nouvelle avec son `from` et posez `to` sur l'an
 
 `verify-card --online` lit le domaine de la carte (`org.domain`, ou `d`), une carte sans domaine donne donc `no_domain`. La commande interroge deux endroits en même temps, par le client HTTP partagé du moteur :
 
-1. Les enregistrements TXT de `_perf-sentinel.<domaine>`, auprès d'un service DNS-over-HTTPS JSON (`application/dns-json`) : `https://cloudflare-dns.com/dns-query` par défaut, ou l'URL `https://` que nomme `--doh`. Le moteur n'interroge qu'un domaine qui respecte la règle de domaine de la carte, et ne lit une réponse que si sa question et ses enregistrements TXT nomment `_perf-sentinel.<domaine>`, à la casse et à un point final près. Un enregistrement TXT atteint par des enregistrements CNAME présents dans la même réponse compte : le moteur suit cette chaîne dans la réponse, sur 8 sauts au plus. Une réponse dont les noms ne se relient pas ainsi à `_perf-sentinel.<domaine>` se lit « vérification impossible ».
+1. Les enregistrements TXT de `_perf-sentinel.<domaine>`, auprès d'un service DNS-over-HTTPS JSON (`application/dns-json`) : `https://cloudflare-dns.com/dns-query` par défaut, ou l'URL `https://` que nomme `--doh`. Le moteur n'interroge qu'un domaine qui respecte la règle de domaine de la carte, et ne lit une réponse que si sa question et ses enregistrements TXT nomment `_perf-sentinel.<domaine>`, à la casse et à un point final près. Un enregistrement TXT atteint par des enregistrements CNAME présents dans la même réponse compte : le moteur suit cette chaîne dans la réponse, sur 8 sauts au plus. Une réponse dont les noms ne se relient pas ainsi à `_perf-sentinel.<domaine>` se lit "vérification impossible".
 2. `https://<domaine>/.well-known/perf-sentinel-key`, sur le domaine lui-même, sans port ni partie utilisateur.
 
-Chaque requête dispose de 5 s et lit 64 Kio au plus. Aucune redirection n'est suivie : un domaine dont l'apex redirige vers `www` fait échouer la lecture du well-known, publiez donc le fichier sur l'apex, ou comptez sur l'enregistrement DNS. Un 404, un NXDOMAIN ou l'absence d'enregistrement `v=ps1` signifient « ne publie rien ». Un délai dépassé, un statut d'erreur, une redirection ou un corps qui n'a pas la forme attendue signifient « vérification impossible ». Les deux réponses se fusionnent par empreinte. Quand une requête n'a pas pu vérifier et que l'autre n'a trouvé aucune clé, le résultat est `binding_check_failed` au niveau 1, sortie 4 : « vérification impossible » ne se lit jamais « non publiée », puisque la réponse manquante a pu révoquer la clé. Quand une requête n'a pas pu vérifier et que l'autre a trouvé la clé, le résultat est `binding_partial` au niveau 1, sortie 4, pour la même raison : la source non lue est peut-être celle qui révoque la clé. Un NXDOMAIN ou un 404 est une réponse, pas un échec, donc un domaine qui publie à un seul endroit atteint quand même le niveau 2.
+Chaque requête dispose de 5 s et lit 64 Kio au plus. Aucune redirection n'est suivie : un domaine dont l'apex redirige vers `www` fait échouer la lecture du well-known, publiez donc le fichier sur l'apex, ou comptez sur l'enregistrement DNS. Un 404, un NXDOMAIN ou l'absence d'enregistrement `v=ps1` signifient "ne publie rien". Un délai dépassé, un statut d'erreur, une redirection ou un corps qui n'a pas la forme attendue signifient "vérification impossible". Les deux réponses se fusionnent par empreinte. Quand une requête n'a pas pu vérifier et que l'autre n'a trouvé aucune clé, le résultat est `binding_check_failed` au niveau 1, sortie 4 : "vérification impossible" ne se lit jamais "non publiée", puisque la réponse manquante a pu révoquer la clé. Quand une requête n'a pas pu vérifier et que l'autre a trouvé la clé, le résultat est `binding_partial` au niveau 1, sortie 4, pour la même raison : la source non lue est peut-être celle qui révoque la clé. Un NXDOMAIN ou un 404 est une réponse, pas un échec, donc un domaine qui publie à un seul endroit atteint quand même le niveau 2.
 
 Ce sont les seuls appels réseau que le moteur fait pour une carte, et seulement avec `--online`. Sans lui, `verify-card` reste hors ligne.
 
@@ -366,22 +366,22 @@ Ce sont les seuls appels réseau que le moteur fait pour une carte, et seulement
 
 Les équivalences viennent de trois sources officielles : la Base Carbone de l'ADEME (France), les facteurs de conversion des gaz à effet de serre du DESNZ (Royaume-Uni) et le Greenhouse Gas Equivalencies Calculator de l'EPA américaine (États-Unis). La table est embarquée dans le binaire, qui ne la télécharge jamais à l'exécution.
 
-La clé `equivalence_country` de `card.json` (`fr`, `gb` ou `us`, `fr` par défaut) choisit les lignes qu'une carte peut utiliser. Autres pays : utilisez `fr`, et chaque ligne propre à la France la nomme dans son libellé (« en France », ou le TGV par son nom), si bien que la carte ne fait jamais passer un facteur français pour un facteur local. La ligne smartphone, de l'ADEME, figure dans les trois tables : ses 39,1 kg sont presque tous des matières premières, sans phase d'usage, elle ne dépend donc pas du réseau électrique français.
+La clé `equivalence_country` de `card.json` (`fr`, `gb` ou `us`, `fr` par défaut) choisit les lignes qu'une carte peut utiliser. Autres pays : utilisez `fr`, et chaque ligne propre à la France la nomme dans son libellé ("en France", ou le TGV par son nom), si bien que la carte ne fait jamais passer un facteur français pour un facteur local. La ligne smartphone, de l'ADEME, figure dans les trois tables : ses 39,1 kg sont presque tous des matières premières, sans phase d'usage, elle ne dépend donc pas du réseau électrique français.
 
 La ligne `tgv_km` n'est jamais choisie par le moteur. Une carte ne l'imprime que si `card.json` nomme `"equivalence":"tgv_km"` et que le pays est `fr`. La plus petite économie qui imprime une équivalence vaut donc deux unités de la ligne la plus légère que choisit le moteur, comptées sur le CO2 imprimé (deux chiffres significatifs, arrondi par défaut) : 520 g en France (deux kilomètres de voiture moyenne), 80 g au Royaume-Uni (deux kilomètres en train), 790 g aux États-Unis (deux miles de voiture moyenne). En dessous, la carte n'imprime pas d'équivalence.
 
 <!-- equivalences:begin -->
 Millésimes embarqués : Base Carbone `V23.6 (2025-07-03)`, DESNZ `2026, v1.2`, US EPA `2024-10`.
 
-| `id` | Pays | Auto | Source | Référence de la source | Facteur | `per_unit_ug` | `unit` | `label` | Validité |
-|---|---|---|---|---|---|---:|---|---|---|
-| `tgv_km` | fr | non | ADEME, Base Carbone | 43256 | 0.00293 kgCO2e/passager.km | 2_930_000 | `passenger_km` | km by high-speed train in France | avr-24 |
-| `gb_rail_km` | gb | oui | DESNZ, GHG conversion factors | 25_315_3147_11_1 + 26_911_3147_11_1 | 0.03092 + 0.00897 kgCO2e/passenger.km | 39_890_000 | `passenger_km` | km by train in the UK | 2026 |
-| `gb_car_km` | gb | oui | DESNZ, GHG conversion factors | 4_301_3074_4_1 + 26_904_3074_4_1 | 0.16591 + 0.04399 kgCO2e/km | 209_900_000 | `vehicle_km` | km driven by an average car in the UK | 2026 |
-| `car_km` | fr | oui | ADEME, Base Carbone | 43791 | 0.256 kgCO2e/km | 256_000_000 | `vehicle_km` | km driven by an average car in France | 2026 |
-| `us_car_mile` | us | oui | US EPA, GHG Equivalencies Calculator | Miles driven by the average gasoline-powered passenger vehicle | 3.93 x 10-4 metric tons CO2e/mile | 393_000_000 | `vehicle_mile` | miles driven by an average US car, tailpipe only | 2024-10 |
-| `meal` | fr | oui | ADEME, Base Carbone | 20682 | 2.04 kgCO2e/repas | 2_040_000_000 | `meal` | average meals in France | déc-21 |
-| `smartphone` | fr, gb, us | oui | ADEME, Base Carbone | 27013 | 39.1 kgCO2e/unité | 39_100_000_000 | `unit` | smartphones | 20/12/2021 |
+| `id`          | Pays       | Auto | Source                               | Référence de la source                                         | Facteur                               |  `per_unit_ug` | `unit`         | `label`                                          | Validité   |
+|---------------|------------|------|--------------------------------------|----------------------------------------------------------------|---------------------------------------|---------------:|----------------|--------------------------------------------------|------------|
+| `tgv_km`      | fr         | non  | ADEME, Base Carbone                  | 43256                                                          | 0.00293 kgCO2e/passager.km            |      2_930_000 | `passenger_km` | km by high-speed train in France                 | avr-24     |
+| `gb_rail_km`  | gb         | oui  | DESNZ, GHG conversion factors        | 25_315_3147_11_1 + 26_911_3147_11_1                            | 0.03092 + 0.00897 kgCO2e/passenger.km |     39_890_000 | `passenger_km` | km by train in the UK                            | 2026       |
+| `gb_car_km`   | gb         | oui  | DESNZ, GHG conversion factors        | 4_301_3074_4_1 + 26_904_3074_4_1                               | 0.16591 + 0.04399 kgCO2e/km           |    209_900_000 | `vehicle_km`   | km driven by an average car in the UK            | 2026       |
+| `car_km`      | fr         | oui  | ADEME, Base Carbone                  | 43791                                                          | 0.256 kgCO2e/km                       |    256_000_000 | `vehicle_km`   | km driven by an average car in France            | 2026       |
+| `us_car_mile` | us         | oui  | US EPA, GHG Equivalencies Calculator | Miles driven by the average gasoline-powered passenger vehicle | 3.93 x 10-4 metric tons CO2e/mile     |    393_000_000 | `vehicle_mile` | miles driven by an average US car, tailpipe only | 2024-10    |
+| `meal`        | fr         | oui  | ADEME, Base Carbone                  | 20682                                                          | 2.04 kgCO2e/repas                     |  2_040_000_000 | `meal`         | average meals in France                          | déc-21     |
+| `smartphone`  | fr, gb, us | oui  | ADEME, Base Carbone                  | 27013                                                          | 39.1 kgCO2e/unité                     | 39_100_000_000 | `unit`         | smartphones                                      | 20/12/2021 |
 <!-- equivalences:end -->
 
 La Base Carbone garde une ligne `Valide générique` après la fin de sa période de validité, la dernière colonne montre donc l'âge de chaque facteur.
@@ -391,21 +391,21 @@ La Base Carbone garde une ligne `Valide générique` après la fin de sa périod
 1. Chaque ligne vient d'une publication officielle de son pays (l'ADEME pour la France et pour le smartphone, le DESNZ pour le Royaume-Uni, l'EPA pour les États-Unis), sous une licence qui permet de l'embarquer avec attribution : Licence Ouverte 2.0, Open Government Licence v3.0, domaine public fédéral américain.
 2. L'unité est une chose du quotidien qui se compte : un kilomètre passager, un kilomètre, un mile, un repas, une unité. Jamais par euro, par kg ou par kWh.
 3. Triées par facteur, les lignes automatiques d'un même pays se suivent à 200 fois au plus, pour qu'un chiffre de CO2 trouve toujours une ligne qui donne un nombre lisible. Un compte automatique vaut donc au plus 399.
-4. Entre variantes, le facteur le plus haut l'emporte, et toujours le périmètre le plus large que publie la source : échappement plus amont au Royaume-Uni, le calculateur de l'EPA (qui compte les SUV) plutôt que la ligne « Passenger Car » du GHG Emission Factors Hub. La ligne smartphone est le modèle de plus de 5,5 pouces (39,1 kg), pas le « classique » (16,5 kg).
+4. Entre variantes, le facteur le plus haut l'emporte, et toujours le périmètre le plus large que publie la source : échappement plus amont au Royaume-Uni, le calculateur de l'EPA (qui compte les SUV) plutôt que la ligne "Passenger Car" du GHG Emission Factors Hub. La ligne smartphone est le modèle de plus de 5,5 pouces (39,1 kg), pas le "classique" (16,5 kg).
 5. Pas d'avion, aucune comparaison qui suggère un coût que la mesure ne montre pas, aucune émission évitée ni séquestration (sacs recyclés, arbres de l'EPA).
-6. Un périmètre plus étroit que celui de la ligne française se dit dans le libellé (« à l'échappement seul »).
+6. Un périmètre plus étroit que celui de la ligne française se dit dans le libellé ("à l'échappement seul").
 
 `scripts/refresh-equivalences.py` applique les règles 1 (les identifiants, le statut et le lieu que chaque ligne doit avoir dans sa source), 2 et 3, et sort en 1 quand une ligne y échoue. Les tests appliquent aussi la règle 3. Les règles 4 à 6 se jugent à la main quand une ligne est ajoutée aux `ROWS` du script.
 
 ### Calcul du nombre
 
-Le nombre part du CO2 tel que la carte l'imprime, jamais de la mesure brute. Le CO2 imprimé garde deux chiffres significatifs, arrondi vers le bas, et le nombre est la division entière de ce chiffre par le facteur. Une économie de 12,4 kg s'imprime « 12 kg » et 5 repas moyens (12 ÷ 2,04 = 5,88), là où les 12,4 kg bruts auraient donné 6. Les deux arrondis vont vers le bas, la carte n'annonce donc jamais plus que ce qui a été mesuré.
+Le nombre part du CO2 tel que la carte l'imprime, jamais de la mesure brute. Le CO2 imprimé garde deux chiffres significatifs, arrondi vers le bas, et le nombre est la division entière de ce chiffre par le facteur. Une économie de 12,4 kg s'imprime "12 kg" et 5 repas moyens (12 ÷ 2,04 = 5,88), là où les 12,4 kg bruts auraient donné 6. Les deux arrondis vont vers le bas, la carte n'annonce donc jamais plus que ce qui a été mesuré.
 
 Quand l'appelant ne choisit pas d'équivalence, la carte prend la plus grande ligne automatique du pays de la carte dont le facteur compte encore au moins 2. Une équivalence choisie doit appartenir à la table de ce pays et compter entre 2 et 1000.
 
 ### Attribution et licence
 
-Chaque carte imprime le facteur utilisé, sa source (« ADEME, Base Carbone », « DESNZ, GHG conversion factors » ou « US EPA, GHG Equivalencies Calculator ») et le millésime embarqué de cette source. La Base Carbone est publiée sous Licence Ouverte 2.0 (Etalab), qui autorise la réutilisation avec attribution.
+Chaque carte imprime le facteur utilisé, sa source ("ADEME, Base Carbone", "DESNZ, GHG conversion factors" ou "US EPA, GHG Equivalencies Calculator") et le millésime embarqué de cette source. La Base Carbone est publiée sous Licence Ouverte 2.0 (Etalab), qui autorise la réutilisation avec attribution.
 
 Contains public sector information licensed under the Open Government Licence v3.0. (Cette mention est celle que le DESNZ demande, elle reste en anglais.)
 
@@ -426,44 +426,44 @@ Le script lit les trois sources : le jeu de données par l'API data.ademe.fr, le
 
 Chaque phrase qu'imprime une carte est listée ici, les françaises sur cette page et les anglaises sur la page anglaise. Le test `docs_list_every_story_sentence` échoue quand une phrase d'histoire change dans `crates/sentinel-core/src/report/card/copy.rs` et pas ici.
 
-Une phrase d'histoire a deux formes. Sans seuil, `{lead}` est le libellé que l'utilisateur a donné à l'action suivi de ` : `, ou `Pour une action de l'application, `. Avec un seuil, `{before}` est la période d'avant la correction (« En août 2026 »), et le libellé, s'il y en a un, ouvre la phrase. `{n}` est le chiffre que cite l'histoire et `{threshold}` le seuil d'alerte.
+Une phrase d'histoire a deux formes. Sans seuil, `{lead}` est le libellé que l'utilisateur a donné à l'action suivi de ` : `, ou `Pour une action de l'application, `. Avec un seuil, `{before}` est la période d'avant la correction ("En août 2026"), et le libellé, s'il y en a un, ouvre la phrase. `{n}` est le chiffre que cite l'histoire et `{threshold}` le seuil d'alerte.
 
-| Types de finding | Sans seuil | Avec un seuil |
-|---|---|---|
-| `n_plus_one_sql`, `n_plus_one_http`, `n_plus_one_messaging` | `{lead}l'application allait chercher les informations {n} fois au lieu d'une.` | Aucune, ces types n'ont pas de seuil. |
-| `redundant_sql`, `redundant_http` | `{lead}l'application demandait {n} fois la même information.` | Aucune. |
-| `slow_sql`, `slow_http`, `slow_messaging` | `{lead}les passages les plus lents d'une étape prenaient {n} ou plus.` | `{before}, avant la correction, les passages les plus lents d'une étape prenaient {n} ou plus. Elle tourne toujours et ne déclenche plus l'alerte de lenteur, réglée à {threshold}.` |
-| `excessive_fanout` | `{lead}une seule étape lançait {n} opérations.` | `{before}, avant la correction, une seule étape lançait {n} opérations. Elle tourne toujours et ne déclenche plus l'alerte, réglée à {threshold} opérations.` |
-| `chatty_service` | `{lead}l'application sollicitait d'autres parties du système {n} fois.` | `{before}, avant la correction, l'application sollicitait d'autres parties du système {n} fois. L'action tourne toujours et ne déclenche plus l'alerte, réglée à {threshold} fois.` |
-| `pool_saturation` | `{lead}{n} opérations tournaient au même moment, au plus fort.` | `{before}, avant la correction, {n} opérations tournaient au même moment, au plus fort. L'action tourne toujours et ne déclenche plus l'alerte, réglée à {threshold} opérations.` |
-| `serialized_calls` | `{lead}l'application enchaînait {n} étapes l'une après l'autre.` | `{before}, avant la correction, l'application enchaînait {n} étapes l'une après l'autre. L'action tourne toujours et ne déclenche plus l'alerte, réglée à {threshold} étapes.` |
+| Types de finding                                            | Sans seuil                                                                     | Avec un seuil                                                                                                                                                                        |
+|-------------------------------------------------------------|--------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `n_plus_one_sql`, `n_plus_one_http`, `n_plus_one_messaging` | `{lead}l'application allait chercher les informations {n} fois au lieu d'une.` | Aucune, ces types n'ont pas de seuil.                                                                                                                                                |
+| `redundant_sql`, `redundant_http`                           | `{lead}l'application demandait {n} fois la même information.`                  | Aucune.                                                                                                                                                                              |
+| `slow_sql`, `slow_http`, `slow_messaging`                   | `{lead}les passages les plus lents d'une étape prenaient {n} ou plus.`         | `{before}, avant la correction, les passages les plus lents d'une étape prenaient {n} ou plus. Elle tourne toujours et ne déclenche plus l'alerte de lenteur, réglée à {threshold}.` |
+| `excessive_fanout`                                          | `{lead}une seule étape lançait {n} opérations.`                                | `{before}, avant la correction, une seule étape lançait {n} opérations. Elle tourne toujours et ne déclenche plus l'alerte, réglée à {threshold} opérations.`                        |
+| `chatty_service`                                            | `{lead}l'application sollicitait d'autres parties du système {n} fois.`        | `{before}, avant la correction, l'application sollicitait d'autres parties du système {n} fois. L'action tourne toujours et ne déclenche plus l'alerte, réglée à {threshold} fois.`  |
+| `pool_saturation`                                           | `{lead}{n} opérations tournaient au même moment, au plus fort.`                | `{before}, avant la correction, {n} opérations tournaient au même moment, au plus fort. L'action tourne toujours et ne déclenche plus l'alerte, réglée à {threshold} opérations.`    |
+| `serialized_calls`                                          | `{lead}l'application enchaînait {n} étapes l'une après l'autre.`               | `{before}, avant la correction, l'application enchaînait {n} étapes l'une après l'autre. L'action tourne toujours et ne déclenche plus l'alerte, réglée à {threshold} étapes.`       |
 
 Le Hub n'envoie un seuil, et n'obtient donc la forme avec seuil, que s'il a vu des passages sous le seuil et aucune détection un jour après la correction (contrat C1). Sinon la carte prend la forme sans seuil et dit depuis quand le finding n'est plus détecté.
 
 Les autres lignes :
 
-| Où | Ligne |
-|---|---|
-| Histoire, sous la phrase | `Observé le {date}.` (quand `observed_at` est renseigné), puis `N'est plus détecté depuis le {date}.` (sans seuil) |
-| Ligne CO2 d'une histoire | `{before}, avant la correction : {n} opérations inutiles, au moins {co2} CO2e (estimation)` |
-| Ligne CO2 d'une courbe | `Évitable {période} : {n} opérations, au moins {co2} CO2e (estimation)` |
-| Ligne CO2 d'un collectif | `{before}, avant la correction de travail fait plusieurs fois : ...` avec une correction N+1 ou redondante, `{before}, avant les {n} corrections de travail fait plusieurs fois : ...` avec plusieurs |
-| Équivalence | `L'équivalent d'au moins {n} {unité}`, puis `1 {unité} = {facteur} CO2e. Source : {source}, {millésime}` |
-| Collectif | `{n} corrections confirmées par la mesure, sur {s} services`, suivi d'une virgule puis de `contre {p} le mois précédent` (ou la semaine précédente, le trimestre précédent, le semestre précédent, l'année précédente) quand le Hub a compté la période précédente |
-| Familles du collectif | `Ce qui a été corrigé` : `Travail fait plusieurs fois`, `Étapes lentes`, `Ordre dans lequel le travail était fait` |
-| Courbe | `Part du travail évitable`, `en {période}, contre {x} en {période précédente}`, `Plus c'est bas, mieux c'est.`, et la légende `Part du travail évitable, mois par mois` (ou semaine par semaine, trimestre par trimestre, semestre par semestre, année par année) |
-| Barres d'une étape lente | `Passages les plus lents, avant la correction` et, en pointillés, `Seuil d'alerte` |
-| Preuve | `Correction confirmée par la mesure` (histoire) ou `Corrections confirmées par la mesure` (collectif), rien sur une courbe, qui ne nomme aucune correction |
-| Périmètre | `Mesuré sur {sources}, {environnement}, {jours} jours`, puis `, {n} jours avec redémarrage` et `, sur {p} du trafic` quand ils s'appliquent |
-| Organisation | `Organisation déclarée : {nom}` |
-| Pied | `Généré le {date}`, `Mesuré avec Perf Sentinel, logiciel libre porté par l'Institut du Numérique Responsable` |
-| Vérification | `Vérifiez la carte et lisez la méthode : perf-sentinel.dev/verifier` |
-| Carrousel, page 2 | `Chaque opération inutile coûte du temps de serveur, de l'énergie et parfois de l'attente.` et `Les mesurer montre où l'application peut faire le même travail avec moins.` |
-| Carrousel, page 4 | `Vérifiez ces chiffres` et `Méthode :` suivi du lien vers cette page |
+| Où                       | Ligne                                                                                                                                                                                                                                                              |
+|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Histoire, sous la phrase | `Observé le {date}.` (quand `observed_at` est renseigné), puis `N'est plus détecté depuis le {date}.` (sans seuil)                                                                                                                                                 |
+| Ligne CO2 d'une histoire | `{before}, avant la correction : {n} opérations inutiles, au moins {co2} CO2e (estimation)`                                                                                                                                                                        |
+| Ligne CO2 d'une courbe   | `Évitable {période} : {n} opérations, au moins {co2} CO2e (estimation)`                                                                                                                                                                                            |
+| Ligne CO2 d'un collectif | `{before}, avant la correction de travail fait plusieurs fois : ...` avec une correction N+1 ou redondante, `{before}, avant les {n} corrections de travail fait plusieurs fois : ...` avec plusieurs                                                              |
+| Équivalence              | `L'équivalent d'au moins {n} {unité}`, puis `1 {unité} = {facteur} CO2e. Source : {source}, {millésime}`                                                                                                                                                           |
+| Collectif                | `{n} corrections confirmées par la mesure, sur {s} services`, suivi d'une virgule puis de `contre {p} le mois précédent` (ou la semaine précédente, le trimestre précédent, le semestre précédent, l'année précédente) quand le Hub a compté la période précédente |
+| Familles du collectif    | `Ce qui a été corrigé` : `Travail fait plusieurs fois`, `Étapes lentes`, `Ordre dans lequel le travail était fait`                                                                                                                                                 |
+| Courbe                   | `Part du travail évitable`, `en {période}, contre {x} en {période précédente}`, `Plus c'est bas, mieux c'est.`, et la légende `Part du travail évitable, mois par mois` (ou semaine par semaine, trimestre par trimestre, semestre par semestre, année par année)  |
+| Barres d'une étape lente | `Passages les plus lents, avant la correction` et, en pointillés, `Seuil d'alerte`                                                                                                                                                                                 |
+| Preuve                   | `Correction confirmée par la mesure` (histoire) ou `Corrections confirmées par la mesure` (collectif), rien sur une courbe, qui ne nomme aucune correction                                                                                                         |
+| Périmètre                | `Mesuré sur {sources}, {environnement}, {jours} jours`, puis `, {n} jours avec redémarrage` et `, sur {p} du trafic` quand ils s'appliquent                                                                                                                        |
+| Organisation             | `Organisation déclarée : {nom}`                                                                                                                                                                                                                                    |
+| Pied                     | `Généré le {date}`, `Mesuré avec Perf Sentinel, logiciel libre porté par l'Institut du Numérique Responsable`                                                                                                                                                      |
+| Vérification             | `Vérifiez la carte et lisez la méthode : perf-sentinel.dev/verifier`                                                                                                                                                                                               |
+| Carrousel, page 2        | `Chaque opération inutile coûte du temps de serveur, de l'énergie et parfois de l'attente.` et `Les mesurer montre où l'application peut faire le même travail avec moins.`                                                                                        |
+| Carrousel, page 4        | `Vérifiez ces chiffres` et `Méthode :` suivi du lien vers cette page                                                                                                                                                                                               |
 
 Dans la ligne `Mesuré avec`, les deux noms Perf Sentinel et Institut du Numérique Responsable s'impriment en gras, soulignés, dans le vert de la marque `#107a56`, et chacun reste entier sur une ligne. Les mots sont ceux du tableau.
 
-En français, une espace insécable sépare un chiffre de son unité, les groupes de milliers, et précède `:` et `%`. Chaque chiffre est arrondi vers le bas : les nombres sont exacts sous 10 000, puis gardent deux chiffres significatifs (« 1,9 million »), les durées sont en millisecondes entières sous 100 ms, puis en secondes avec une décimale, et une part sous 0,1 % se lit « moins de 0,1 % ». Les unités que compte une équivalence sont `repas moyen(s) en France`, `km en TGV`, `km parcourus par une voiture moyenne en France`, `smartphone(s)`, `km en train au Royaume-Uni`, `km parcourus par une voiture moyenne au Royaume-Uni` et `mile(s) parcouru(s) par une voiture moyenne aux États-Unis, à l'échappement seul`.
+En français, une espace insécable sépare un chiffre de son unité, les groupes de milliers, et précède `:` et `%`. Chaque chiffre est arrondi vers le bas : les nombres sont exacts sous 10 000, puis gardent deux chiffres significatifs ("1,9 million"), les durées sont en millisecondes entières sous 100 ms, puis en secondes avec une décimale, et une part sous 0,1 % se lit "moins de 0,1 %". Les unités que compte une équivalence sont `repas moyen(s) en France`, `km en TGV`, `km parcourus par une voiture moyenne en France`, `smartphone(s)`, `km en train au Royaume-Uni`, `km parcourus par une voiture moyenne au Royaume-Uni` et `mile(s) parcouru(s) par une voiture moyenne aux États-Unis, à l'échappement seul`.
 
 La ligne CO2 d'une histoire couvre la seule période d'avant la correction, celle d'une courbe la période de la carte, et celle d'un collectif la période d'avant la correction de ses seules corrections N+1 et redondantes. La ligne de périmètre d'une courbe compte les jours de toutes les périodes qu'elle montre, de la première barre à la dernière.
 
@@ -491,24 +491,24 @@ Suivent une ligne par opération de dessin, dans l'ordre du PNG, puis `</svg>`. 
 
 L'enveloppe ne contient que de la ponctuation JSON (`{`, `}`, `"`, `:`, `,`) et des caractères base64url, elle n'a donc besoin d'aucun échappement XML. `card render` vérifie chaque octet avant d'écrire et s'arrête sinon sur `svg_encode_failed`, ce que l'enveloppe canonique ne déclenche jamais. `verify-card` lit l'enveloppe sans analyseur XML : le moteur écrit l'élément sous une seule forme, et un analyseur serait une dépendance de plus et davantage de code exposé à un fichier envoyé par un inconnu. Il cherche la chaîne exacte `<metadata id="perf-sentinel-card">` et prend son texte jusqu'au `</metadata>` suivant :
 
-| Le fichier | Raison |
-|---|---|
-| Plus de 16 Mio | `file_too_large` |
-| Pas en UTF-8, ou ne commence pas par `<?xml` ou `<svg` après un BOM UTF-8 facultatif et des blancs | `malformed_input` |
-| Aucun élément de ce type | `no_card_payload` |
-| L'élément deux fois | `duplicate_card_payload` |
-| Pas de `</metadata>`, plus de 64 Kio, ou un octet hors de l'ensemble ci-dessus | `malformed_input` |
-| L'élément ailleurs que juste après le premier `</title>` et son saut de ligne | `malformed_input` |
+| Le fichier                                                                                         | Raison                   |
+|----------------------------------------------------------------------------------------------------|--------------------------|
+| Plus de 16 Mio                                                                                     | `file_too_large`         |
+| Pas en UTF-8, ou ne commence pas par `<?xml` ou `<svg` après un BOM UTF-8 facultatif et des blancs | `malformed_input`        |
+| Aucun élément de ce type                                                                           | `no_card_payload`        |
+| L'élément deux fois                                                                                | `duplicate_card_payload` |
+| Pas de `</metadata>`, plus de 64 Kio, ou un octet hors de l'ensemble ci-dessus                     | `malformed_input`        |
+| L'élément ailleurs que juste après le premier `</title>` et son saut de ligne                      | `malformed_input`        |
 
 Sur un fichier original, le `content_sig` de l'enveloppe couvre aussi le dessin, voir [Ce que couvre la signature du fichier](#ce-que-couvre-la-signature-du-fichier).
 
 Tailles mesurées sur les fixtures de test, enveloppe comprise :
 
-| Fixture | Anglais | Français |
-|---|---|---|
-| Histoire | 319 Kio | 324 Kio |
-| Courbe | 298 Kio | 293 Kio |
-| Collectif | 325 Kio | 338 Kio |
+| Fixture   | Anglais | Français |
+|-----------|---------|----------|
+| Histoire  | 319 Kio | 324 Kio  |
+| Courbe    | 298 Kio | 293 Kio  |
+| Collectif | 325 Kio | 338 Kio  |
 
 ## Le JPEG XL
 
@@ -516,11 +516,11 @@ Tailles mesurées sur les fixtures de test, enveloppe comprise :
 
 Tailles mesurées sur les fixtures de test (anglais, enveloppe comprise) :
 
-| Fixture | `card.jxl` | `card.png` | Rapport |
-|---|---|---|---|
-| Histoire | 44 822 o | 112 089 o | 0,40 |
-| Courbe | 41 486 o | 110 649 o | 0,37 |
-| Collectif | 42 114 o | 116 822 o | 0,36 |
+| Fixture   | `card.jxl` | `card.png` | Rapport |
+|-----------|------------|------------|---------|
+| Histoire  | 44 822 o   | 112 089 o  | 0,40    |
+| Courbe    | 41 486 o   | 110 649 o  | 0,37    |
+| Collectif | 42 114 o   | 116 822 o  | 0,36    |
 
 Le JPEG XL est un export d'archive ou de haute qualité. Le PNG reste le format à publier : LinkedIn n'accepte pas le JPEG XL ([sa page d'aide](https://www.linkedin.com/help/linkedin/answer/a564109) liste GIF, HEIF/HEIC sous iOS, JPEG, PNG et WEBP pour les images), et la prise en charge des navigateurs est récente et inégale : Chrome l'active par défaut depuis la version 155, Firefox depuis la 158, Safari la prend en charge partiellement depuis la 17, et Edge ne l'affiche pas ([caniuse](https://caniuse.com/jpegxl), vérifié le 2026-10-30).
 
@@ -539,15 +539,15 @@ Les tailles sont sur 32 bits gros-boutiste et comptent l'en-tête de 8 octets. R
 
 `verify-card` lit l'enveloppe en parcourant les boîtes de premier niveau, sans décoder le codestream : un décodeur serait une grosse dépendance exposée à un fichier envoyé par un inconnu, pour des octets dont le lecteur n'a jamais besoin. Une boîte de taille 1 porte une taille sur 64 bits après son type, une boîte de taille 0 court jusqu'à la fin du fichier. Toute boîte autre que `pscd` est sautée selon sa longueur et jamais lue, une boîte `pscd` imbriquée dans une autre n'est donc pas vue.
 
-| Le fichier | Raison |
-|---|---|
-| Plus de 16 Mio | `file_too_large` |
-| Un codestream nu (commence par `FF 0A`) | `no_card_payload` |
-| Ne commence pas par la boîte de signature | `malformed_input` |
-| Une boîte plus petite que son en-tête, qui dépasse la fin du fichier, ou coupée dans son en-tête | `malformed_input` |
-| Aucune boîte `pscd` de premier niveau | `no_card_payload` |
-| Deux boîtes `pscd` de premier niveau | `duplicate_card_payload` |
-| Une charge de `pscd` de plus de 64 Kio ou pas en UTF-8 | `malformed_input` |
+| Le fichier                                                                                       | Raison                   |
+|--------------------------------------------------------------------------------------------------|--------------------------|
+| Plus de 16 Mio                                                                                   | `file_too_large`         |
+| Un codestream nu (commence par `FF 0A`)                                                          | `no_card_payload`        |
+| Ne commence pas par la boîte de signature                                                        | `malformed_input`        |
+| Une boîte plus petite que son en-tête, qui dépasse la fin du fichier, ou coupée dans son en-tête | `malformed_input`        |
+| Aucune boîte `pscd` de premier niveau                                                            | `no_card_payload`        |
+| Deux boîtes `pscd` de premier niveau                                                             | `duplicate_card_payload` |
+| Une charge de `pscd` de plus de 64 Kio ou pas en UTF-8                                           | `malformed_input`        |
 
 `verify-card` exige ensuite la boîte `pscd` là où le moteur l'écrit et vérifie la signature du contenu du fichier, voir [Ce que couvre la signature du fichier](#ce-que-couvre-la-signature-du-fichier).
 

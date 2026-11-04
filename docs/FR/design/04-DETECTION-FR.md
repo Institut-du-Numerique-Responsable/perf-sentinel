@@ -4,7 +4,7 @@ La détection est la quatrième étape du pipeline. Elle analyse les traces corr
 
 ## Pattern partagé : clés HashMap empruntées
 
-Les trois détecteurs regroupent les spans par une clé composite. Les spans vivent dans la struct `Trace`, qui survit à la fonction de détection, donc nous pouvons **emprunter** depuis les spans au lieu de cloner :
+Les trois détecteurs regroupent les spans par une clé composite. Les spans vivent dans la struct `Trace`, qui survit à la fonction de détection, donc nous pouvons emprunter depuis les spans au lieu de cloner :
 
 ```rust
 // N+1 : grouper par (event_type, template)
@@ -28,7 +28,7 @@ Pour une trace avec 50 spans, chacun ayant un template de 40 caractères, les cl
 0. Ignorer les spans SQL dont le template est une commande de session (`normalize::sql::is_session_command`)
 1. Grouper les spans par `(&EventType, &str template)`
 2. Ignorer les groupes avec moins de `threshold` occurrences (défaut 5)
-3. Compter les **jeux de paramètres distincts** via `HashSet<&[String]>`
+3. Compter les jeux de paramètres distincts via `HashSet<&[String]>`
 4. Ignorer les groupes avec moins de `threshold` paramètres distincts (mêmes paramètres = redondant, pas N+1)
 5. Calculer la fenêtre temporelle entre le plus ancien et le plus récent horodatage
 6. Ignorer les groupes où la fenêtre dépasse `window_limit_ms` (défaut 500ms)
@@ -121,7 +121,7 @@ L'heuristique dans `crates/sentinel-core/src/detect/sanitizer_aware.rs` rétabli
 2. `has_orm_scope` : au moins un scope d'instrumentation OpenTelemetry sur les spans correspond à un marqueur ORM connu (Hibernate, Spring Data, EF Core, SQLAlchemy, ActiveRecord, GORM, Prisma, Diesel, Laravel/Eloquent, Doctrine, etc.). Les marqueurs sont comparés avec une vérification de frontière de mot (précédé et suivi d'un octet non alphanumérique), donc `jpa` ne se déclenche que sur `spring-data-jpa` et apparentés, jamais sur `myappjpastats`. Une correspondance positive est traitée comme une preuve forte de N+1.
 3. `timing_variance_suggests_n_plus_one` : quand le signal scope est absent, se rabattre sur le coefficient de variation de `duration_us`. Un vrai N+1 touche des lignes différentes avec des états de cache différents, donc l'écart est plus large. Les appels redondants en cache se regroupent étroitement. Seuil `0.5` empirique.
 4. `sequential_siblings_indexed` (mode Strict uniquement) : tous les spans partagent un même `parent_span_id` non vide et le groupe chaîne `prev.end_us <= next.start_us` après tri par horodatage de début. Les bornes sont calculées en microsecondes pour éviter la troncation silencieuse des durées sous-milliseconde. Se substitue à `has_orm_scope` sur les piles en accès direct au driver (Vert.x reactive PG, pgx, asyncpg, sqlx, Prisma `queryRaw`), qui n'émettent jamais de scope ORM.
-5. `high_occurrence` (mode Strict, toutes branches) : un nombre d'occurrences élevé (>= 3 x `n_plus_one_threshold`, par défaut 15) sert de signal primaire ET corroboratif. Sous la garde `looks_sanitized` (params vides, template avec `?`), 15+ templates sanitisés identiques dans une seule trace est structurellement un n+1 quel que soit le scope ORM, les siblings séquentiels ou la variance. Les boucles de polling legacy sous le seuil (typiquement 5-10 appels par requête) restent classées en `redundant_sql`.
+5. `high_occurrence` (mode Strict, toutes branches) : un nombre d'occurrences élevé (>= 3 x `n_plus_one_threshold`, par défaut 15) est à la fois un signal primaire et un signal corroboratif. Sous la garde `looks_sanitized` (params vides, template avec `?`), 15+ templates sanitisés identiques dans une seule trace est structurellement un n+1 quel que soit le scope ORM, les siblings séquentiels ou la variance. Les boucles de polling legacy sous le seuil (typiquement 5-10 appels par requête) restent classées en `redundant_sql`.
 
 Les quatre modes d'émission (`Auto`, `Strict`, `Always`, `Never`) sont documentés dans `docs/FR/CONFIGURATION-FR.md` § "`sanitizer_aware_classification`" avec leurs compromis précision/rappel.
 
@@ -140,7 +140,7 @@ Le même aiguillage couvre aussi les groupes HTTP sortants via `classify_http_gr
 
 #### Limite connue : redaction de la query string
 
-La détection des N+1 HTTP exige que le paramètre variable soit visible dans le span. Une boucle N+1 qui fait varier un segment de path est détectée (params extraits distincts, ou le placeholder `{id}` ancre le primaire Strict). Une boucle N+1 qui fait varier un **paramètre de query** est invisible quand l'instrumentation masque la query string avant l'export. Sur .NET, `url.full` porte une query masquée par défaut (l'activité `System.Net.Http` du runtime à partir de .NET 9, le paquet `OpenTelemetry.Instrumentation.Http` avant), donc chaque appel porte un `url.full` identique à l'octet près, `distinct_params` retombe à 1, et le groupe est correctement classé en `redundant_http`. Le paramètre distinctif a été détruit en amont, donc aucun consommateur de traces ne peut le récupérer. Voir `docs/FR/LIMITATIONS-FR.md` § "Redaction de la query string HTTP et visibilité des N+1" pour les contournements côté opérateur.
+La détection des N+1 HTTP exige que le paramètre variable soit visible dans le span. Une boucle N+1 qui fait varier un segment de path est détectée (params extraits distincts, ou le placeholder `{id}` ancre le primaire Strict). Une boucle N+1 qui fait varier un paramètre de query est invisible quand l'instrumentation masque la query string avant l'export. Sur .NET, `url.full` porte une query masquée par défaut (l'activité `System.Net.Http` du runtime à partir de .NET 9, le paquet `OpenTelemetry.Instrumentation.Http` avant), donc chaque appel porte un `url.full` identique à l'octet près, `distinct_params` retombe à 1, et le groupe est correctement classé en `redundant_http`. Le paramètre distinctif a été détruit en amont, donc aucun consommateur de traces ne peut le récupérer. Voir `docs/FR/LIMITATIONS-FR.md` § "Redaction de la query string HTTP et visibilité des N+1" pour les contournements côté opérateur.
 
 ## Détection redondante
 
@@ -150,7 +150,7 @@ La détection des N+1 HTTP exige que le paramètre variable soit visible dans le
 HashMap<(&EventType, &str, &[String]), Vec<usize>>
 ```
 
-La clé en trois parties inclut le slice complet des paramètres, garantissant que deux spans avec le même template mais des paramètres différents sont dans des groupes différents. La détection redondante signale les **doublons exacts** (même template ET mêmes paramètres).
+La clé en trois parties inclut le slice complet des paramètres, si bien que deux spans avec le même template mais des paramètres différents tombent dans des groupes différents. La détection redondante signale les **doublons exacts** (même template ET mêmes paramètres).
 
 L'utilisation de `&[String]` au lieu de joindre les paramètres en une seule chaîne prévient un bug subtil de collision : `["a,b"]` (un paramètre contenant une virgule) et `["a", "b"]` (deux paramètres) produiraient la même clé jointe `"a,b"` mais sont des jeux de paramètres sémantiquement différents.
 
@@ -178,7 +178,7 @@ L'heuristique consciente du sanitizer introduite en 0.5.7 restaure la classifica
 1. **Marqueur de scope d'instrumentation** (confiance élevée). Les chaînes `instrumentation_scopes` par span sont fouillées, en mode insensible à la casse, à la recherche de l'une des sous-chaînes ORM connues : `spring-data`, `hibernate`, `jpa`, `micronaut-data`, `jdbi`, `r2dbc`, `entityframeworkcore`, `entity-framework`, `sqlalchemy`, `django`, `active-record`/`activerecord`, `gorm`, `sequelize`, `prisma`, `typeorm`, `mongoose`, `sea-orm`, `diesel`. Les drivers SQL sans ORM comme `sqlx` (Go/Rust), `pgx`, `asyncpg` et le client réactif Vert.x PG sont exclus : leurs patterns n+1 sont pris en charge par le signal "siblings séquentiels". Une correspondance fait basculer le verdict en `LikelyNPlusOne`.
 2. **Repli sur la variance temporelle** (confiance moyenne). En l'absence de marqueur ORM, l'heuristique calcule le coefficient de variation (`écart-type / moyenne`) des `duration_us`. Les vrais accès N+1 touchent des lignes différentes avec des états de cache différents, donc les durées s'étalent (CV typiquement 0,4 à 1,0). Les appels redondants sur du contenu en cache se regroupent (CV proche de 0). Le seuil de `0.5` est empirique et constitue le seul levier de l'heuristique. Au moins 3 spans sont nécessaires pour une estimation de variance stable.
 
-Le mode configurable `[detection] sanitizer_aware_classification` positionne l'émission sur un cadran rappel-vs-précision en quatre crans : `auto` (défaut) émet dès qu'**un** des signaux se déclenche, `strict` (0.5.8+) exige un signal primaire (scope ORM OU siblings séquentiels OU nombre d'occurrences élevé) plus un signal corroboratif (variance OU nombre d'occurrences élevé), `always` reclassifie tout groupe sanitisé sans condition, et `never` désactive entièrement la seconde passe. Les findings émis par l'heuristique portent `classification_method = SanitizerHeuristic` pour permettre aux consommateurs de les distinguer des classifications directes. Le mode choisit où se placer sur le compromis :
+Le mode configurable `[detection] sanitizer_aware_classification` positionne l'émission sur un cadran rappel-vs-précision en quatre crans : `auto` (défaut) émet dès qu'un des signaux se déclenche, `strict` (0.5.8+) exige un signal primaire (scope ORM OU siblings séquentiels OU nombre d'occurrences élevé) plus un signal corroboratif (variance OU nombre d'occurrences élevé), `always` reclassifie tout groupe sanitisé sans condition, et `never` désactive entièrement la seconde passe. Les findings émis par l'heuristique portent `classification_method = SanitizerHeuristic` pour permettre aux consommateurs de les distinguer des classifications directes. Le mode choisit où se placer sur le compromis :
 
 - `auto` privilégie le rappel : il capture tous les N+1 induits par un ORM parce que le scope ORM seul déclenche le verdict. Le prix est d'absorber des findings `redundant_sql` légitimes sur les stacks Spring Data / EF Core (un `findById(sameId)` appelé en boucle et servi depuis le cache de lignes bascule en `n_plus_one_sql`).
 - `strict` privilégie la précision : il préserve les findings `redundant_sql` sur les requêtes identiques en cache, en nombre modéré (sous la barre `3 x threshold`), parce que le signal de variance temporelle reste bas. Au-dessus de la barre (par défaut 15 occurrences), tout groupe sanitisé se déclenche quel que soit le scope ORM, les siblings séquentiels ou la variance. Recommandé quand des findings `redundant_sql` exploitables ont de la valeur dans votre environnement.
@@ -203,7 +203,7 @@ if max_duration_us > threshold_us.saturating_mul(5) {
 
 ### Ne fait pas partie du ratio de gaspillage
 
-Les findings lents ont `green_impact.estimated_extra_io_ops = 0`. Ce sont des opérations **nécessaires** qui se trouvent être lentes : elles ont besoin d'optimisation (indexation, cache), pas d'élimination. Les inclure dans le ratio de gaspillage confondrait "I/O évitables" (N+1, redondant) avec "I/O lentes" (qui nécessitent une solution différente).
+Les findings lents ont `green_impact.estimated_extra_io_ops = 0`. Ce sont des opérations nécessaires qui se trouvent être lentes : elles ont besoin d'optimisation (indexation, cache), pas d'élimination. Les inclure dans le ratio de gaspillage confondrait "I/O évitables" (N+1, redondant) avec "I/O lentes" (qui nécessitent une solution différente).
 
 ## Orchestration de la détection
 
@@ -295,7 +295,7 @@ emit finding with top_endpoints in suggestion
 
 ### Différence avec le fanout
 
-Le fanout excessif détecte un **parent unique** avec trop d'enfants directs. Le service bavard détecte une **trace entière** avec trop d'appels HTTP sortants, indépendamment de la structure parent-enfant. Une trace peut déclencher les deux si un seul parent génère tous les appels ou seulement le service bavard si les appels sont répartis sur plusieurs parents.
+Le fanout excessif détecte un parent unique avec trop d'enfants directs. Le service bavard détecte une trace entière avec trop d'appels HTTP sortants, indépendamment de la structure parent-enfant. Une trace peut déclencher les deux si un seul parent génère tous les appels ou seulement le service bavard si les appels sont répartis sur plusieurs parents.
 
 ### Pas dans le ratio de gaspillage
 
@@ -350,7 +350,7 @@ Les findings de saturation du pool ont `green_impact.estimated_extra_io_ops = 0`
 
 0. Écarter les spans SQL frères dont le template est une commande de session : un `COMMIT` ne peut pas sortir de la chaîne, et le compter gonfle à la fois le nombre de maillons et le total séquentiel
 1. Grouper les spans frères par `parent_span_id`
-2. Pour chaque groupe, trier les enfants par **temps de fin** (croissant)
+2. Pour chaque groupe, trier les enfants par temps de fin (croissant)
 3. Trouver la plus longue sous-séquence non chevauchante via programmation dynamique (Weighted Interval Scheduling avec poids unitaires)
 4. Si la séquence optimale a >= `serialized_min_sequential` (défaut 3) spans avec des templates distincts, émettre un finding
 5. Sévérité : toujours Info (heuristique, risque inhérent de faux positifs)
@@ -487,7 +487,7 @@ Une paire chaude qui se déclenche des milliers de fois dans la fenêtre ferait 
 - Tant que le réservoir a de la place, ajout inconditionnel.
 - Une fois plein, tirer `r` uniformément dans `[0, total_observations)` via `SplitMix64`. Si `r < MAX_LAG_SAMPLES`, remplacer `lags_ms[r]`. Conditionnellement à `r < k`, `r` est lui-même uniforme dans `[0, k)`, donc le choix de l'emplacement est non biaisé sans tirage PRNG supplémentaire.
 
-Le PRNG est un état `SplitMix64` par `PairState`, initialisé à la construction depuis `now_ms ^ (hash_endpoint(source) << 17) ^ hash_endpoint(target)`. `hash_endpoint` est un FNV-1a déterministe sur les champs `finding_type`, `service` et `template` de l'endpoint (PAS le `DefaultHasher` qui utilise un `RandomState` par processus et rendrait le corrélateur non déterministe entre exécutions). Deux exécutions du daemon rejouant le même fichier de traces produisent des échantillons de réservoir identiques et donc des médianes identiques.
+Le PRNG est un état `SplitMix64` par `PairState`, initialisé à la construction depuis `now_ms ^ (hash_endpoint(source) << 17) ^ hash_endpoint(target)`. `hash_endpoint` est un FNV-1a déterministe sur les champs `finding_type`, `service` et `template` de l'endpoint (pas le `DefaultHasher` qui utilise un `RandomState` par processus et rendrait le corrélateur non déterministe entre exécutions). Deux exécutions du daemon rejouant le même fichier de traces produisent des échantillons de réservoir identiques et donc des médianes identiques.
 
 ### Calcul de la médiane
 
@@ -549,7 +549,7 @@ Le détecteur est une fonction pure sur des champs déjà présents sur `Finding
 
 Les findings structurels (`serialized_calls`, `excessive_fanout`, `chatty_service`, `pool_saturation`) n'ont pas de span d'origine unique. Chacun porte les `instrumentation_scopes` et le `code_location` d'un appel représentatif qu'il référence déjà : le premier appel de la séquence sérialisée, le premier enfant du fan-out, le premier appel HTTP sortant de la trace chatty, le premier span SQL du service saturé. Le détecteur les lit comme pour tout autre finding. Chaque surface qui affiche `code_location` (`Source:` en CLI, `source` dans le rapport HTML, `locations[]` en SARIF) pointe alors sur cet appel représentatif, comme elle pointe sur le premier span du groupe pour un finding N+1.
 
-La correspondance de namespace respecte les frontières de segment des **deux côtés** : l'indication doit commencer à la racine du namespace ou juste après un séparateur et doit se terminer à la fin du namespace ou juste avant un autre séparateur. Les caractères de séparation sont `.` (Java, C#) et `::` (Rust). Exemples :
+La correspondance de namespace respecte les frontières de segment des deux côtés : l'indication doit commencer à la racine du namespace ou juste après un séparateur et doit se terminer à la fin du namespace ou juste avant un autre séparateur. Les caractères de séparation sont `.` (Java, C#) et `::` (Rust). Exemples :
 
 - `diesel::` correspond à `diesel::query_dsl::FilterDsl` et à `crate::diesel::reexport` mais **pas** à `crate::mydiesel::query` (la frontière de tête protège le code utilisateur qui contient l'indication).
 - `io.helidon` correspond à `io.helidon.webserver.Routing` mais **pas** à `io.helidongrpc.Foo` (la frontière de fin protège les paquets utilisateur dont le premier segment commence simplement par l'indication).
@@ -700,9 +700,9 @@ Aucun changement de câblage ailleurs : l'orchestrateur `detect()` appelle déj�
 
 `acknowledgments.rs` est la moitié batch/CI du workflow d'acquittement. Il charge `.perf-sentinel-acknowledgments.toml`, calcule une signature par finding, déplace les findings acquittés dans `report.acknowledged_findings`, puis réévalue la porte qualité sur ce qui reste. Le store runtime du daemon (`daemon/ack.rs`) partage le format de signature et est fusionné avec le TOML au moment de la requête, le TOML l'emportant : c'est la référence immuable passée par revue de PR.
 
-**La signature est la pièce maîtresse**, parce que c'est à elle qu'est épinglée la décision `won't fix` d'un opérateur. Sa forme est `<finding_type>:<service>:<sanitized_endpoint>:<sha256-prefix-of-template>`.
+**L'essentiel de la conception tient dans la signature**, parce que c'est à elle qu'est épinglée la décision `won't fix` d'un opérateur. Sa forme est `<finding_type>:<service>:<sanitized_endpoint>:<sha256-prefix-of-template>`.
 
-- **Pourquoi un hash uniquement sur le template.** Le triplet `(finding_type, service, sanitized_endpoint)` est déjà dans la signature, le hash ne désambiguïse donc que les templates au sein d'un même triplet, une population minuscule. Ses 32 caractères hexadécimaux (128 bits) ne sont donc pas de la résistance aux collisions pour elle-même, mais une défense en profondeur contre un acquittement qui masquerait un *autre* finding après une refonte SQL ou un renommage de service.
+- **Pourquoi un hash uniquement sur le template.** Le triplet `(finding_type, service, sanitized_endpoint)` est déjà dans la signature, le hash ne désambiguïse donc que les templates au sein d'un même triplet, une population minuscule. Ses 32 caractères hexadécimaux (128 bits) dépassent donc largement ce que la résistance aux collisions exige dans cette population : ils sont une défense en profondeur contre un acquittement qui masquerait un *autre* finding après une refonte SQL ou un renommage de service.
 - **Pourquoi `/` et l'espace deviennent `_`.** Pour que `:` reste un séparateur unique et non ambigu, qu'un opérateur peut découper au `cut -d:` dans un pipeline shell.
 - **Pourquoi les caractères BiDi et invisibles sont retirés** de `service` et `source_endpoint` (Trojan Source, CVE-2021-42574) : deux signatures qui s'affichent à l'identique ne doivent pas désigner deux entrées distinctes, sinon un acquittement devient invérifiable à la lecture.
 

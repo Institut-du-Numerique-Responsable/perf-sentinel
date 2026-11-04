@@ -14,7 +14,7 @@ post-mortem exploration of a trace set. It runs in two modes:
   status indicator, an Acknowledgments panel, a `Show acknowledged`
   toggle, and a manual refresh button. The static panels (Findings,
   Explain, pg_stat, mysql_stat, Diff, Correlations, Carbon) keep the same
-  static-mode behavior. The live mode is purely additive.
+  static-mode behavior.
 
 ## Static mode
 

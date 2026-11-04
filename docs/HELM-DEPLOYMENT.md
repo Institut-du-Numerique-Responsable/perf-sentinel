@@ -104,7 +104,7 @@ An unanchored DDL pattern such as `.*DROP\s+.*` also drops application
 queries that merely contain the word.
 
 If the extra volume is the problem, narrow the analysis branch by
-**scope rather than by chance**. Route only the namespaces or services
+scope rather than by chance. Route only the namespaces or services
 you are actively working on, which keeps their figures whole, instead
 of a probabilistic sample that makes every service's figures partial.
 `filter/drop_noise` already removes the spans Perf Sentinel would
@@ -113,7 +113,7 @@ carries less than the storage one to begin with.
 
 Two constraints if you cannot avoid sampling in front of the daemon:
 
-- Prefer **tail-based**. It decides per whole trace after the fact, so
+- Prefer tail-based. It decides per whole trace after the fact, so
   traces arrive complete, and its usual policies (keep errors, keep
   slow traces) bias retention toward where structural waste lives.
   Head-based sampling at 1-10% is the worst case for detection.
@@ -261,7 +261,7 @@ A successful run prints the Rekor log entry and the certificate
 details. A mismatched or absent signature exits non-zero.
 
 **There is no `.prov` file, so `helm install --verify` is not available.**
-That is a choice, not an omission. Helm's native provenance
+The omission is deliberate. Helm's native provenance
 mechanism requires a long-lived PGP key held as a CI secret, with the
 rotation, revocation and fingerprint-publication burden that comes with
 it. Cosign keyless signing plus the SLSA attestation cover the same
@@ -955,8 +955,7 @@ serviceMonitor:
     release: prometheus
 ```
 
-`honorLabels` defaults to `true` since chart 0.17.1, and that default
-matters. The operator attaches a target label named `service`, taken
+`honorLabels` defaults to `true` since chart 0.17.1. The operator attaches a target label named `service`, taken
 from the Service name, and with honor labels off Prometheus renames the
 colliding label a target exposes, so the daemon's own `service` was
 stored as `exported_service`. The dashboard's `Service` variable then
@@ -1029,7 +1028,7 @@ and imports the same way. It keeps the English file's uid, so importing it
 replaces the English dashboard rather than adding a second one. The
 findings dashboard below has one too.
 
-**A `Compatibility` badge** ends the first panel line. It turns orange when
+A `Compatibility` badge ends the first panel line. It turns orange when
 the daemon predates 0.20.0, where `Service silence` has nothing to draw.
 It turns red below 0.18.0, where the `Service` and `Grouping` pickers still
 offer names the findings panels cannot honour, so a filtered view reads
@@ -1043,7 +1042,7 @@ on the version. Empty panels on a current daemon are configuration
 rather than age, and the badge's own description names the three
 switches that do it.
 
-**Four template variables** sit above the panels. `Job` selects which
+Four template variables sit above the panels. `Job` selects which
 Prometheus jobs to read, `All` by default, which matters when several
 daemons are scraped by the same Prometheus, staging and production for
 instance: pick one to keep them apart.
@@ -1072,7 +1071,7 @@ histogram, overflow folded into `service="_other"`).
 admitted (service, grouping) pairs after the service caps and fold only
 the grouping half into `grouping="_other"`.
 
-**Every panel follows the time picker**, with one rule and one stated
+Every panel follows the time picker, with one rule and one stated
 exception. Rate panels use `$__rate_interval` and windowed panels use
 `$__range`, so picking `Last 6 hours` means the ranking, the
 distribution and the detail table all answer for those six hours and

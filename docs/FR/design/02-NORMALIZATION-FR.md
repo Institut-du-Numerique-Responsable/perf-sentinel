@@ -90,8 +90,6 @@ let template = if has_in_list {
 };
 ```
 
-Cette approche à trois niveaux garantit zéro allocation inutile.
-
 ### `LazyLock` pour la regex
 
 La regex `IN_LIST_RE` est compilée une seule fois via [`std::sync::LazyLock`](https://doc.rust-lang.org/std/sync/struct.LazyLock.html) (stable depuis Rust 1.80) :

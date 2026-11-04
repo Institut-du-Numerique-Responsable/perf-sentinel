@@ -2,15 +2,15 @@
 
 ## Why a linear pipeline
 
-Perf Sentinel processes I/O traces through a sequence of transformations: `event -> normalize -> correlate -> detect -> score -> report`. This is a **linear pipeline**, not a hexagonal (ports-and-adapters) architecture.
+Perf Sentinel processes I/O traces through a sequence of transformations: `event -> normalize -> correlate -> detect -> score -> report`. This is a linear pipeline, not a hexagonal (ports-and-adapters) architecture.
 
 The data flows in one direction. Events enter, get transformed at each stage and produce a report. There are no bidirectional dependencies, no domain events, no complex interaction patterns. A hexagonal architecture would introduce trait indirection between every stage, adding cognitive overhead, compile-time cost and dynamic dispatch for zero benefit.
 
-Traits are used only at the **borders** of the pipeline:
+Traits are used only at the borders of the pipeline:
 - **Input:** `IngestSource` trait (JSON, OTLP)
 - **Output:** `ReportSink` trait (JSON file, stdout)
 
-Between the borders, every stage is a **pure function**: it takes data in and returns transformed data out. No side effects, no state, no trait objects. This makes each stage independently testable without mocks: just construct input data and assert on the output.
+Between the borders, every stage is a pure function: it takes data in and returns transformed data out. No side effects, no state, no trait objects. This makes each stage independently testable without mocks: just construct input data and assert on the output.
 
 This pattern is common in data-processing tools in the Rust ecosystem. Projects like [ripgrep](https://github.com/BurntSushi/ripgrep) and [bat](https://github.com/sharkdp/bat) follow similar "pipeline of transformations" architectures.
 
@@ -58,7 +58,7 @@ pub(crate) fn sort_findings(findings: &mut [Finding]) {
 
 This function is defined in `detect/mod.rs` and gives every sink the same deterministic baseline order. Presentation layers sort on top of it rather than replacing it: `--sort` on `analyze`, `report`, `tempo` and `jaeger-query`, the dashboard's `initial_sort`, and the TUI's impact-first opening all reorder a list whose ties this canonical order already settled. It requires `FindingType` and `Severity` to implement `Ord`. The derived `Ord` uses variant declaration order, giving a stable sort: `NPlusOneSql < NPlusOneHttp < NPlusOneMessaging < RedundantSql < ... < ExcessiveFanout < ... < SerializedCalls`.
 
-Top offenders are similarly sorted (IIS descending, alphabetical tiebreaker) to ensure the same report for the same input.
+Top offenders are similarly sorted (IIS descending, alphabetical tiebreaker), so the same input gives the same report.
 
 ## Workspace split
 
@@ -75,7 +75,7 @@ The dependency direction is one-way: `sentinel-cli` depends on `sentinel-core`, 
 The quality gate (`quality_gate::evaluate`) is a distinct stage called after scoring, not baked into detection or reporting. This separation allows:
 - Detection to find **all** issues regardless of thresholds
 - Scoring to compute **all** metrics regardless of pass/fail
-- The quality gate to make a binary pass/fail decision based on **configurable rules**
+- The quality gate to make a binary pass/fail decision based on configurable rules
 
 The five rules (max critical SQL N+1, max warning+ HTTP N+1, max warning+ messaging N+1, max waste ratio, and the opt-in minimum usable span ratio) are evaluated independently. The gate passes only if all rules pass. This is more flexible than a single severity threshold.
 

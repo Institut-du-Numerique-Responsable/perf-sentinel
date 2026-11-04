@@ -35,7 +35,7 @@ If you have not used OpenTelemetry before, this short primer is a prerequisite f
 - **A protocol** (OTLP, OpenTelemetry Protocol) that any application can use to ship traces and metrics to any backend that speaks it. OTLP is wire-format-stable, ships in both gRPC and HTTP+protobuf variants, and is what Perf Sentinel ingests on ports 4317 (gRPC) and 4318 (HTTP).
 - **SDKs** (Java, Python, Go, .NET, Rust, JavaScript, ...) that handle the boring parts: capturing each HTTP/SQL call as a *span*, propagating the trace ID across services, batching, retrying, and sending OTLP. Most language SDKs include auto-instrumentation for popular frameworks (Spring, Quarkus, ASP.NET Core, Django, Express) so the application code itself rarely changes.
 
-**Key concepts.**
+**Concepts.**
 
 - A **span** is a unit of work, typically one HTTP request or one SQL query. It carries a duration, a status, a name (`GET /api/orders`), and a structured attribute bag.
 - A **trace** is the tree of spans that share a `trace_id`. A single user request typically crosses several services, each producing several spans, all linked by the same `trace_id`.
@@ -165,7 +165,7 @@ spec:
 
 ## Cloud provider integrations
 
-Perf Sentinel is cloud-agnostic: it receives standard OTLP traces. The key is to route a copy of your traces to Perf Sentinel alongside your cloud-native trace backend.
+Perf Sentinel is cloud-agnostic: it receives standard OTLP traces. Route a copy of your traces to Perf Sentinel alongside your cloud-native trace backend.
 
 ### AWS (X-Ray + OTel Collector)
 
@@ -358,7 +358,7 @@ Sampling in front of Perf Sentinel is supported, but it is lossy in
 ways the daemon cannot report: a kept trace is indistinguishable from a
 complete one, so nothing in the output says the numbers cover a tenth
 of the traffic. If volume forces you to narrow the analysis branch,
-narrow it by **scope rather than by chance**: route the namespaces or
+narrow it by scope rather than by chance: route the namespaces or
 services you are actively working on and keep their figures whole,
 instead of a probabilistic sample that makes every service's figures
 partial.
@@ -688,7 +688,7 @@ A failing test still leaves a complete, analyzable file.
 
 Spring Boot 4.0 ships its own OpenTelemetry support, the [`spring-boot-starter-opentelemetry`](https://spring.io/blog/2025/11/18/opentelemetry-with-spring-boot/) starter, and the Spring team presents it as its preferred option for Spring Boot applications. There is no agent: the Spring projects create the spans through Micrometer Observation, the Micrometer tracing bridge hands them to the OpenTelemetry SDK that Spring Boot configures, and the SDK exports them over OTLP. Nothing modifies bytecode, so the AOT cache and native images keep working, and the instrumentation always matches the versions of the libraries it observes.
 
-The trade-off is coverage. The starter traces less than the agent out of the box, and its spans follow the Spring conventions rather than the OpenTelemetry ones. The table lists what Perf Sentinel needs and where each part comes from.
+The trade-off is coverage. The starter traces less than the agent out of the box, and its spans follow the Spring conventions rather than the OpenTelemetry ones.
 
 | What Perf Sentinel reads           | Out of the box                                        | What to add                                                                                               |
 |------------------------------------|-------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
@@ -1281,7 +1281,7 @@ Different database drivers emit different placeholder syntax in the `db.statemen
 | `@p0`, `@Name` | .NET (Npgsql, SqlClient, MySqlConnector/Pomelo)                                                                         | `@p0` (kept)   | `WHERE id = @p0`  |
 | `:name`        | Oracle, SQLAlchemy named                                                                                                | `:name` (kept) | `WHERE id = :oid` |
 
-**What this means for operators.** No configuration is needed to enable detection for any of these stacks. The normalizer and the `template_has_placeholder` check in the detection pipeline handle the mapping automatically. The key requirement is that the OTel instrumentation emits `db.statement` on SQL spans. If `db.statement` is missing (some instrumentations omit it by default for security reasons), Perf Sentinel cannot detect SQL anti-patterns. Check your instrumentation library's documentation for how to enable statement capture.
+**What this means for operators.** No configuration is needed to enable detection for any of these stacks. The normalizer and the `template_has_placeholder` check in the detection pipeline handle the mapping automatically. Detection does require the OTel instrumentation to emit `db.statement` on SQL spans. If `db.statement` is missing (some instrumentations omit it by default for security reasons), Perf Sentinel cannot detect SQL anti-patterns. Check your instrumentation library's documentation for how to enable statement capture.
 
 **ORM scope markers.** The sanitizer-aware detection path also consults the OTel instrumentation scope (the library name) to decide whether a group of sanitized queries is likely N+1 or just redundant. The following scopes are recognized as ORM-level instrumentations, which raises the confidence that a repeated parameterized query is a loop iteration rather than a cache-warm pattern:
 

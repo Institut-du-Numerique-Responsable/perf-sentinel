@@ -17,7 +17,7 @@ if let Some(vec) = map.get_mut(event.event.trace_id.as_str()) {
 }
 ```
 
-**Why not `entry()`?** The `entry()` API requires an owned key upfront because it must store the key if the entry is vacant. This would mean cloning `trace_id` for **every** event, even when the trace already exists (the common case). The manual pattern only clones on the slow path (new trace). For a trace with 50 events, this saves 49 unnecessary String clones.
+**Why not `entry()`?** The `entry()` API requires an owned key upfront because it must store the key if the entry is vacant. This would mean cloning `trace_id` for every event, even when the trace already exists (the common case). The manual pattern only clones on the slow path (new trace). For a trace with 50 events, this saves 49 unnecessary String clones.
 
 This is a well-known Rust optimization pattern documented in the [Rust Performance Book](https://nnethercote.github.io/perf-book/hashing.html).
 
@@ -86,7 +86,7 @@ intermediate non-I/O spans enter the same span-ancestry LRU that retains an
 event's parent link and optional proven route after rotation. This repairs
 parent-after-child and split-export arrival with an exact eight-hop lookup,
 without adding synthetic events or I/O metrics. Events, endpoint contexts,
-consumer destinations and ancestry entries are separate collections, and **each** is capped at
+consumer destinations and ancestry entries are separate collections, and each is capped at
 `max_events_per_trace`. The ancestry LRU allocates
 progressively rather than reserving the configured cap for every trace.
 At the valid minimum cap of one, rotation may replace the sole parent entry.
@@ -137,7 +137,7 @@ pub fn evict_expired(&mut self, now_ms: u64) -> Vec<(String, Vec<NormalizedEvent
 - **`evict()`**: silently drops expired traces (used if the caller doesn't need the data)
 - **`evict_expired()`**: returns expired traces so the daemon can run detection before discarding
 
-The daemon always uses `evict_expired()` to ensure no trace data is lost without analysis.
+The daemon always uses `evict_expired()`, so no trace data is lost without analysis.
 
 ### `Vec::from(VecDeque)` for eviction
 

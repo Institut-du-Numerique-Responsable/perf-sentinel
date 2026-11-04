@@ -35,7 +35,7 @@ Si vous n'avez jamais utilisé OpenTelemetry, cette introduction courte est un p
 - **Un protocole** (OTLP, OpenTelemetry Protocol) qu'une application peut utiliser pour envoyer traces et métriques vers n'importe quel backend qui le parle. OTLP a un format de transmission stable, existe en variantes gRPC et HTTP+protobuf, et c'est ce que Perf Sentinel ingère sur les ports 4317 (gRPC) et 4318 (HTTP).
 - **Des SDK** (Java, Python, Go, .NET, Rust, JavaScript, ...) qui gèrent les parties ennuyeuses : capturer chaque appel HTTP/SQL comme un *span*, propager le trace ID entre services, regrouper en lots, réessayer, envoyer en OTLP. La plupart des SDK incluent une auto-instrumentation pour les frameworks populaires (Spring, Quarkus, ASP.NET Core, Django, Express) donc le code applicatif change rarement.
 
-**Concepts clés.**
+**Concepts.**
 
 - Un **span** est une unité de travail, typiquement une requête HTTP ou une requête SQL. Il porte une durée, un statut, un nom (`GET /api/orders`) et un sac d'attributs structurés.
 - Une **trace** est l'arbre de spans qui partagent un `trace_id`. Une requête utilisateur traverse typiquement plusieurs services, chacun produisant plusieurs spans, tous liés par le même `trace_id`.
@@ -165,7 +165,7 @@ spec:
 
 ## Intégrations cloud
 
-Perf Sentinel est agnostique au cloud : il reçoit des traces OTLP standard. L'essentiel est de router une copie de vos traces vers Perf Sentinel en parallèle de votre backend de traces cloud.
+Perf Sentinel est agnostique au cloud : il reçoit des traces OTLP standard. Routez une copie de vos traces vers Perf Sentinel en parallèle de votre backend de traces cloud.
 
 ### AWS (X-Ray + OTel Collector)
 
@@ -359,8 +359,8 @@ Sampler devant Perf Sentinel est pris en charge, mais cela entraîne une
 perte que le daemon ne peut pas signaler : une trace conservée est
 indiscernable d'une trace complète, donc rien dans la sortie ne dit que
 les chiffres couvrent un dixième du trafic. Si le volume impose de
-restreindre la branche d'analyse, restreignez-la **par périmètre plutôt
-que par hasard**. Routez les namespaces ou les services sur lesquels
+restreindre la branche d'analyse, restreignez-la par périmètre plutôt
+que par hasard. Routez les namespaces ou les services sur lesquels
 vous travaillez et gardez leurs chiffres entiers, au lieu d'un
 échantillon probabiliste qui rend partiels les chiffres de tous les
 services.
@@ -691,7 +691,7 @@ Un test en échec laisse quand même un fichier complet et analysable.
 
 Spring Boot 4.0 fournit son propre support OpenTelemetry, le starter [`spring-boot-starter-opentelemetry`](https://spring.io/blog/2025/11/18/opentelemetry-with-spring-boot/), et l'équipe Spring le présente comme son option préférée pour les applications Spring Boot. Il n'y a pas d'agent : les projets Spring créent les spans par Micrometer Observation, le pont de tracing Micrometer les transmet au SDK OpenTelemetry que Spring Boot configure, et le SDK les exporte en OTLP. Rien ne modifie le bytecode, donc le cache AOT et les images natives continuent de fonctionner, et l'instrumentation correspond toujours aux versions des bibliothèques qu'elle observe.
 
-La contrepartie est la couverture. Le starter trace moins que l'agent par défaut, et ses spans suivent les conventions Spring plutôt que celles d'OpenTelemetry. Le tableau liste ce dont Perf Sentinel a besoin et d'où vient chaque élément.
+La contrepartie est la couverture. Le starter trace moins que l'agent par défaut, et ses spans suivent les conventions Spring plutôt que celles d'OpenTelemetry.
 
 | Ce que lit Perf Sentinel              | Par défaut                                                         | Ce qu'il faut ajouter                                                                                    |
 |---------------------------------------|--------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
@@ -1284,7 +1284,7 @@ Les différents drivers de base de données émettent des syntaxes de placeholde
 | `@p0`, `@Name` | .NET (Npgsql, SqlClient, MySqlConnector/Pomelo)                                                                        | `@p0` (conservé)   | `WHERE id = @p0`  |
 | `:name`        | Oracle, SQLAlchemy named                                                                                               | `:name` (conservé) | `WHERE id = :oid` |
 
-**Ce que cela signifie pour les opérateurs.** Aucune configuration n'est nécessaire pour activer la détection sur ces stacks. Le normalizer et la vérification `template_has_placeholder` dans le pipeline de détection gèrent la correspondance automatiquement. L'exigence clé est que l'instrumentation OTel émette `db.statement` sur les spans SQL. Si `db.statement` est absent (certaines instrumentations l'omettent par défaut pour des raisons de sécurité), Perf Sentinel ne peut pas détecter les anti-patterns SQL. Consultez la documentation de votre bibliothèque d'instrumentation pour activer la capture des requêtes.
+**Ce que cela signifie pour les opérateurs.** Aucune configuration n'est nécessaire pour activer la détection sur ces stacks. Le normalizer et la vérification `template_has_placeholder` dans le pipeline de détection gèrent la correspondance automatiquement. La détection exige en revanche que l'instrumentation OTel émette `db.statement` sur les spans SQL. Si `db.statement` est absent (certaines instrumentations l'omettent par défaut pour des raisons de sécurité), Perf Sentinel ne peut pas détecter les anti-patterns SQL. Consultez la documentation de votre bibliothèque d'instrumentation pour activer la capture des requêtes.
 
 **Marqueurs de scope ORM.** Le chemin sanitizer-aware consulte aussi le scope d'instrumentation OTel (le nom de la bibliothèque) pour décider si un groupe de requêtes sanitizées est probablement N+1 ou juste redondant. Les scopes suivants sont reconnus comme des instrumentations de niveau ORM, ce qui renforce la probabilité qu'une requête paramétrée répétée soit une itération de boucle plutôt qu'un motif de préchauffage de cache :
 

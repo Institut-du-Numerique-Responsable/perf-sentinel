@@ -15,8 +15,7 @@ l'exploration post-mortem d'un ensemble de traces. Il fonctionne dans deux modes
   indicateur de statut de connexion, un panneau Acknowledgments, une
   bascule `Show acknowledged`, et un bouton de rafraîchissement manuel.
   Les panneaux statiques (Findings, Explain, pg_stat, mysql_stat, Diff,
-  Correlations, Carbon) conservent leur comportement statique. Le mode
-  live est purement additif.
+  Correlations, Carbon) conservent leur comportement statique.
 
 ## Mode statique
 

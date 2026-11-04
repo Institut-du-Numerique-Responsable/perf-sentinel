@@ -5,14 +5,14 @@ This directory contains two illustrative outputs of `perf-sentinel disclose`:
 - `example-internal-G1.json`: gate G1 (internal disclosure, audience: own organization).
 - `example-official-public-G2.json`: gate G2 (official public disclosure, audience: world).
 
-Both files are checked into the repository and serve as living references for the schema documented in [`docs/SCHEMA.md`](../../SCHEMA.md). They are also surfaced from the public reporting docs (`docs/REPORTING.md`).
+Both files are checked into the repository as reference examples of the schema documented in [`docs/SCHEMA.md`](../../SCHEMA.md). They are also surfaced from the public reporting docs (`docs/REPORTING.md`).
 
 ## Version fields convention
 
 The examples carry version information in two unrelated registers, and they bump on different cadences:
 
-- `binary_verification_url` (one occurrence per file) **always points to the latest released perf-sentinel version**. It tells a reader "here is where you can grab the current binary to verify these signatures yourself." It is the only field bumped by the release procedure (`docs/RELEASE-PROCEDURE.md` step 2).
-- `perf_sentinel_version`, `binary_version`, `binary_versions` (multiple occurrences) **are frozen at the example's historical baseline**: `0.7.0` and schema v1.2 for G1, with one narrative entry referencing `0.6.2` as a prior version, `0.37.1` and schema v1.8 for G2. They describe a snapshot of what a disclosure report looked like at that point in time. They are not bumped at every release. G2 also carries the `binary_hash` of the published 0.37.1 `perf-sentinel-linux-amd64` binary, so its `binary_verification_url` points to the 0.37.1 release that hash belongs to.
+- `binary_verification_url` (one occurrence per file) always points to the latest released perf-sentinel version. It tells a reader "here is where you can grab the current binary to verify these signatures yourself." It is the only field bumped by the release procedure (`docs/RELEASE-PROCEDURE.md` step 2).
+- `perf_sentinel_version`, `binary_version`, `binary_versions` (multiple occurrences) are frozen at the example's historical baseline: `0.7.0` and schema v1.2 for G1, with one narrative entry referencing `0.6.2` as a prior version, `0.37.1` and schema v1.8 for G2. They describe a snapshot of what a disclosure report looked like at that point in time. They are not bumped at every release. G2 also carries the `binary_hash` of the published 0.37.1 `perf-sentinel-linux-amd64` binary, so its `binary_verification_url` points to the 0.37.1 release that hash belongs to.
 
 This asymmetry lets the examples show what a real disclosure looks like (frozen narrative) while a reader can still fetch the current binary (live URL). Bumping the narrative fields at every release would make the examples drift away from the actual schema versions a real user would have produced.
 

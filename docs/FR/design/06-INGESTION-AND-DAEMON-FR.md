@@ -57,7 +57,7 @@ Pour un trace_id de 16 octets + un span_id de 8 octets, cela économise ~600ns p
 
 > **Note :** cette fonction vit dans le module partagé `time.rs` et est réutilisée par les ingestions Jaeger et Zipkin via `micros_to_iso8601`.
 
-La conversion de nanosecondes Unix vers `YYYY-MM-DDTHH:MM:SS.mmmZ` utilise l'algorithme de date civile de [Howard Hinnant](https://howardhinnant.github.io/date_algorithms.html). Les étapes clés :
+La conversion de nanosecondes Unix vers `YYYY-MM-DDTHH:MM:SS.mmmZ` utilise l'algorithme de date civile de [Howard Hinnant](https://howardhinnant.github.io/date_algorithms.html). Les étapes :
 
 1. Convertir les nanosecondes en jours depuis l'epoch + millisecondes restantes
 2. Décaler l'epoch au 1er mars, an 0 (en ajoutant 719 468 jours)
@@ -78,7 +78,7 @@ Les spans messaging (`messaging.system`, une seule convention pour Kafka, Rabbit
 
 L'arête producteur vers consommateur est un span link OTel, pas une relation parent-enfant, et le consommateur démarre le plus souvent sa propre trace. `resolve_producer_link` trouve le span `CONSUMER` qui porte ce lien, lit sa première entrée et pose l'identifiant de la trace productrice sur l'événement en `link_trace_id`. Le filtre sur `CONSUMER` compte : les batch span processors et les relations follows-from émettent aussi des liens. Un lien qui revient vers la trace du span est écarté. Les deux traces ne sont jamais fusionnées, voir [LIMITATIONS-FR.md](../LIMITATIONS-FR.md#messaging--traces-producteur-et-consommateur-reliées-pas-fusionnées) pour les raisons.
 
-**Deux topologies, parce que les instrumentations OTel ne placent pas `receive` au même endroit.** Certaines imbriquent le travail du handler **sous** le span `receive`, ce qu'une remontée d'ancêtres retrouve. L'instrumentation Kafka officielle OpenTelemetry Java et .NET ne fait pas cela : elle émet `receive` comme **frère** du travail qu'il déclenche, sous un parent commun.
+**Deux topologies, parce que les instrumentations OTel ne placent pas `receive` au même endroit.** Certaines imbriquent le travail du handler *sous* le span `receive`, ce qu'une remontée d'ancêtres retrouve. L'instrumentation Kafka officielle OpenTelemetry Java et .NET ne fait pas cela : elle émet `receive` comme frère du travail qu'il déclenche, sous un parent commun.
 
 ```
 order-consumed        INTERNAL   parent=""     links=[]
@@ -86,11 +86,11 @@ order-consumed        INTERNAL   parent=""     links=[]
 └─ postgresql         CLIENT     parent=root   links=[]        <- le span analysable
 ```
 
-La chaîne d'ancêtres du span SQL est `postgresql -> order-consumed`, le `CONSUMER` porteur du lien n'y figure donc jamais. Une remontée d'ancêtres seule a manqué **100 %** des liens sur deux corpus capturés pendant que tous les tests unitaires restaient verts, parce que les tests construisaient la forme ancêtre que le code attendait. La résolution essaie donc les frères d'abord, via un index des spans `CONSUMER` porteurs de lien indexés par parent, puis se rabat sur la chaîne d'ancêtres.
+La chaîne d'ancêtres du span SQL est `postgresql -> order-consumed`, le `CONSUMER` porteur du lien n'y figure donc jamais. Une remontée d'ancêtres seule a manqué 100 % des liens sur deux corpus capturés pendant que tous les tests unitaires restaient verts, parce que les tests construisaient la forme ancêtre que le code attendait. La résolution essaie donc les frères d'abord, via un index des spans `CONSUMER` porteurs de lien indexés par parent, puis se rabat sur la chaîne d'ancêtres.
 
 Cet index n'est construit que si la requête porte un span `CONSUMER` lié, et il sert aussi de garde par service : un service sans un tel span saute les deux recherches. L'indexation par parent impose une décision que la remontée d'ancêtres n'avait jamais eu à prendre, car plusieurs spans `receive` frères peuvent partager un parent. Le premier dans l'ordre du lot l'emporte, ce qui est déterministe mais arbitraire : rien dans les spans ne dit quel message a causé quelle requête.
 
-Les [conventions sémantiques OTel](https://opentelemetry.io/docs/specs/semconv/) legacy (pré-1.21) et stables (1.21+) sont toutes deux prises en charge : `db.statement` et `db.query.text` pour le SQL, `http.url` et `url.full` pour le HTTP, `http.method` et `http.request.method` pour le verbe, `http.status_code` et `http.response.status_code` pour le statut. Cela assure la compatibilité avec les anciens SDKs OTel comme avec les agents Java modernes (v2.x). Sur un span HTTP sortant, les tags Micrometer Observation `method` et `status` (RestClient, RestTemplate et WebClient de Spring Boot) sont lus en dernier, après les deux conventions.
+Les [conventions sémantiques OTel](https://opentelemetry.io/docs/specs/semconv/) legacy (pré-1.21) et stables (1.21+) sont toutes deux prises en charge : `db.statement` et `db.query.text` pour le SQL, `http.url` et `url.full` pour le HTTP, `http.method` et `http.request.method` pour le verbe, `http.status_code` et `http.response.status_code` pour le statut. Cela couvre les anciens SDKs OTel comme les agents Java modernes (v2.x). Sur un span HTTP sortant, les tags Micrometer Observation `method` et `status` (RestClient, RestTemplate et WebClient de Spring Boot) sont lus en dernier, après les deux conventions.
 
 ### Protection contre la dérive d'horloge
 
@@ -131,11 +131,11 @@ La taille du payload est vérifiée **avant** la désérialisation. Cela empêch
 
 Cela évite de parser tout le payload en `serde_json::Value` pour la détection, ce qui supprime un coût de parsing doublé. L'heuristique travaille sur les octets bruts (`std::str::from_utf8` sur un préfixe borné), ce qui la rend O(1) quelle que soit la taille du payload.
 
-**Sanitisation à la frontière.** Après le parsing, le chemin d'ingestion JSON valide `cloud_region` via `is_valid_region_id` et exécute `sanitize_span_event` sur chaque événement, appliquant les mêmes limites de champs et troncatures UTF-8 que le chemin OTLP. Cela garantit des données uniformément sanitisées en aval, quel que soit le format d'ingestion.
+**Sanitisation à la frontière.** Après le parsing, le chemin d'ingestion JSON valide `cloud_region` via `is_valid_region_id` et exécute `sanitize_span_event` sur chaque événement, appliquant les mêmes limites de champs et troncatures UTF-8 que le chemin OTLP. Le code en aval reçoit donc les mêmes données sanitisées, quel que soit le format d'ingestion.
 
 ### Ingestion Jaeger JSON
 
-`ingest/jaeger.rs` parse le format d'export Jaeger JSON (`{ "data": [{ "traceID": "...", "spans": [...], "processes": {...} }] }`). Correspondances principales :
+`ingest/jaeger.rs` parse le format d'export Jaeger JSON (`{ "data": [{ "traceID": "...", "spans": [...], "processes": {...} }] }`). Correspondances :
 
 - `startTime` (microsecondes) est converti via `micros_to_iso8601` du module partagé `time.rs`
 - `parent_span_id` est extrait depuis les `references` où `refType = "CHILD_OF"`
@@ -143,7 +143,7 @@ Cela évite de parser tout le payload en `serde_json::Value` pour la détection,
 
 ### Ingestion Zipkin JSON v2
 
-`ingest/zipkin.rs` parse le format Zipkin JSON v2 (tableau plat d'objets span). Différences principales avec Jaeger :
+`ingest/zipkin.rs` parse le format Zipkin JSON v2 (tableau plat d'objets span). Différences avec Jaeger :
 
 - `parentId` est un champ direct (pas dans un tableau de références)
 - Les tags sont un `HashMap<String, String>` (pas un tableau d'objets clé-valeur)
@@ -202,7 +202,7 @@ Le [hash FNV-1a](https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_ha
 
 **Pourquoi FNV-1a ?** Plus simple et plus rapide (~2ns pour un trace_id typique) que `std::hash::DefaultHasher` (SipHash, ~10ns). La qualité cryptographique n'est pas nécessaire pour l'échantillonnage : seule la distribution uniforme compte.
 
-**Déterministe :** le même `trace_id` produit toujours la même décision d'échantillonnage, garantissant que tous les événements d'une trace sont soit conservés soit supprimés ensemble.
+**Déterministe :** le même `trace_id` produit toujours la même décision d'échantillonnage, si bien que tous les événements d'une trace sont conservés ou supprimés ensemble.
 
 **Cache par lot :** la fonction `apply_sampling()` filtre un lot d'événements en utilisant un cache `HashMap<String, bool>`. Au sein d'un seul lot, plusieurs événements peuvent partager un `trace_id`. Le cache utilise `get()` avant `insert()` de sorte que `trace_id` n'est cloné que pour le premier événement de chaque trace, pas à chaque hit de cache. Extraire cette logique dans une fonction dédiée garde la boucle `tokio::select!` lisible.
 
@@ -220,7 +220,7 @@ detect+score sont liés au CPU. Les exécuter en ligne sur la tâche `select!` f
 qu'une passe d'analyse longue bloquait la boucle, l'empêchant d'interroger `rx.recv()`
 et le ticker d'éviction : la liveness d'ingestion et d'éviction dépendait alors de la
 latence d'analyse. À la place, les lots évincés (LRU), expirés (TTL) et vidés
-(shutdown) sont remis à un **unique** worker d'analyse via un second canal borné :
+(shutdown) sont remis à un unique worker d'analyse via un second canal borné :
 
 ```rust
 let (work_tx, work_rx) = mpsc::channel::<AnalysisBatch>(1024);
@@ -237,8 +237,7 @@ let worker = tokio::spawn(run_analysis_worker(work_rx, ctx));
   clone jeté. Quand la file est pleine (ou le worker arrêté), le lot entier est délesté
   et compté via `perf_sentinel_analysis_shed_batches_total` et
   `perf_sentinel_analysis_shed_traces_total`. `perf_sentinel_analysis_queue_depth`
-  suit le backlog. La surcharge est explicite et observable, jamais une perte
-  silencieuse. Sous surcharge soutenue, on perd des lots entiers plutôt que de bloquer
+  suit le backlog. Sous surcharge soutenue, on perd des lots entiers plutôt que de bloquer
   l'ingestion (un compromis de liveness/contre-pression, et non de débit).
 - **Contrôle d'admission par pression mémoire (opt-in).** Le délestage par profondeur de
   file est un proxy de la mémoire. Quand l'analyse suit, la file reste vide alors que
@@ -447,7 +446,7 @@ Les échecs par trace sont journalisés au niveau `debug`, pas `error`. Une seul
 
 Le daemon expose son état interne via des endpoints HTTP aux côtés des routes existantes `/v1/traces`, `/metrics` et `/health` sur le port 4318.
 
-L'endpoint `/health` est une sonde de liveness sans état pour Kubernetes, les répartiteurs de charge et systemd. Il retourne `200 OK` avec `{"status":"ok","version":"<pkg_version>"}`, ne prend aucun verrou et ne peut pas donner de faux négatif sous charge. Il est **toujours exposé**, indépendamment de `[daemon] api_enabled`, qui ne contrôle que la surface `/api/*` plus riche décrite ci-dessous.
+L'endpoint `/health` est une sonde de liveness sans état pour Kubernetes, les répartiteurs de charge et systemd. Il retourne `200 OK` avec `{"status":"ok","version":"<pkg_version>"}`, ne prend aucun verrou et ne peut pas donner de faux négatif sous charge. Il est toujours exposé, indépendamment de `[daemon] api_enabled`, qui ne contrôle que la surface `/api/*` plus riche décrite ci-dessous.
 
 ### Buffer circulaire `FindingsStore`
 
@@ -537,7 +536,7 @@ if let Some(correlator) = correlator {
 }
 ```
 
-Cet ordre garantit que le `FindingsStore` dispose toujours des findings avant que le corrélateur ne les traite.
+Avec cet ordre, le `FindingsStore` dispose toujours des findings avant que le corrélateur ne les traite.
 
 La contention sur le mutex partagé ne pose pas de problème à l'échelle visée : l'unique worker d'analyse est le seul écrivain, et les lecteurs de `/api/correlations` s'exécutent au rythme d'un dashboard sur une structure bornée (paires plafonnées, réservoirs de délais de 256 échantillons). `enforce_pair_cap` retourne immédiatement tant que le plafond n'est pas atteint et utilise un quickselect en O(n) une fois le plafond atteint. Le mutex tokio cède la main plutôt que de bloquer le runtime.
 
@@ -584,9 +583,9 @@ Le parsing est strict. Au-delà des vérifications au niveau hyper (nom token-on
 
 `ingest/mysql_stat.rs` est le pendant MySQL de `pg_stat_statements` : il lit un export CSV ou JSON de `events_statements_summary_by_digest` et classe les points chauds SQL. Comme la voie Postgres, il n'a pas de `trace_id`, c'est donc une vue complémentaire côté base et non quelque chose que le corrélateur peut joindre.
 
-Deux détails mécaniques faciles à rater. Les colonnes de temps (`SUM_TIMER_WAIT`, `AVG_TIMER_WAIT`) arrivent en **picosecondes** et sont converties au parsing. Les classements sortent dans un ordre fixe (temps total, nombre d'appels, temps moyen, lignes examinées) et les consommateurs indexent dans ce tableau, un nouveau classement s'ajoute donc à la fin et les positions existantes ne bougent jamais.
+Deux détails mécaniques faciles à rater. Les colonnes de temps (`SUM_TIMER_WAIT`, `AVG_TIMER_WAIT`) arrivent en picosecondes et sont converties au parsing. Les classements sortent dans un ordre fixe (temps total, nombre d'appels, temps moyen, lignes examinées) et les consommateurs indexent dans ce tableau, un nouveau classement s'ajoute donc à la fin et les positions existantes ne bougent jamais.
 
-**Le pont digest vers trace est la partie intéressante.** Marquer un digest comme "vu dans les traces" demande de comparer le `DIGEST_TEXT` de MySQL à un template normalisé depuis du SQL applicatif, et une comparaison littérale ne correspond jamais : MySQL espace chaque token (`` `c` . `name` ``), met les mots-clés en majuscules et force les backticks. La normalisation côté application ne conserve rien de tout cela. Les deux côtés sont donc canonicalisés d'abord, en retirant les backticks, en supprimant les espaces autour de la ponctuation, en réduisant les suites d'espaces et en passant en minuscules.
+Marquer un digest comme "vu dans les traces" (le pont digest vers trace) demande de comparer le `DIGEST_TEXT` de MySQL à un template normalisé depuis du SQL applicatif, et une comparaison littérale ne correspond jamais : MySQL espace chaque token (`` `c` . `name` ``), met les mots-clés en majuscules et force les backticks. La normalisation côté application ne conserve rien de tout cela. Les deux côtés sont donc canonicalisés d'abord, en retirant les backticks, en supprimant les espaces autour de la ponctuation, en réduisant les suites d'espaces et en passant en minuscules.
 
 Cette dernière étape a un plafond assumé. La mise en minuscules replie les identifiants en même temps que les mots-clés, donc sur un serveur sensible à la casse (`lower_case_table_names=0`) deux tables qui ne diffèrent que par la casse partagent une clé et le marqueur peut sur-correspondre. Ne replier que les mots-clés demanderait une table complète des mots-clés MySQL. Pour un marqueur informatif, la sur-correspondance est l'erreur la moins chère.
 
@@ -602,4 +601,4 @@ Une réserve s'applique quand on réutilise ceci hors du daemon : sous Unix, l'e
 
 Le parseur de lookback accepte les suffixes `d`, `h`, `m`, `s` et somme les formes composées (`2h30m` vaut 9000 s), avec de l'arithmétique vérifiée partout pour que `999999999h` remonte en erreur de débordement au lieu de boucler en release.
 
-Les helpers d'URL écrivent à la main un encodeur pour-cent minimal plutôt que de tirer `percent-encoding` pour douze lignes. Le validateur d'endpoint est étroit : il rejette un schéma autre que `http(s)` et les identifiants **dans l'autorité**, et accepte en revanche un `@` littéral dans le chemin ou la chaîne de requête, pour que `/api/traces?owner=foo%40example.com` fonctionne.
+Les helpers d'URL écrivent à la main un encodeur pour-cent minimal plutôt que de tirer `percent-encoding` pour douze lignes. Le validateur d'endpoint est étroit : il rejette un schéma autre que `http(s)` et les identifiants dans l'autorité, et accepte en revanche un `@` littéral dans le chemin ou la chaîne de requête, pour que `/api/traces?owner=foo%40example.com` fonctionne.

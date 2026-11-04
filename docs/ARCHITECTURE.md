@@ -7,7 +7,7 @@ Perf Sentinel is a polyglot performance anti-pattern detector built as a Rust wo
 
 ## Glossary
 
-A few terms recur across the docs and code, and the distinctions matter:
+A few terms recur across the docs and code, with distinct meanings:
 
 - **Event**: a single normalized SpanEvent. The pre-detection unit (input).
 - **Finding**: a detected anti-pattern (output of `detect`). The product-level concept exposed in CLI output, JSON, SARIF, HTML, the daemon API and acks.

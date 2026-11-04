@@ -62,10 +62,10 @@ For Kubernetes probes, use the dedicated `GET /health` endpoint (always exposed,
 
 ## Analyzing a trace older than the live window
 
-**Why you need this.** The daemon keeps traces in memory for **30 seconds** (`trace_ttl_ms`, default). Once evicted:
+**Why you need this.** The daemon keeps traces in memory for 30 seconds (`trace_ttl_ms`, default). Once evicted:
 
 - `GET /api/explain/{trace_id}` returns `{"error": "trace not found in daemon memory"}`
-- `GET /api/findings/{trace_id}` still returns findings (retained in the ring buffer up to `max_retained_findings = 10000`), but **the spans themselves are gone**, so no explain tree can be rebuilt from the daemon alone.
+- `GET /api/findings/{trace_id}` still returns findings (retained in the ring buffer up to `max_retained_findings = 10000`), but the spans themselves are gone, so no explain tree can be rebuilt from the daemon alone.
 
 For anything older, the source of truth is your trace backend (typically Grafana Tempo).
 

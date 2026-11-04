@@ -7,7 +7,7 @@ Perf Sentinel est un détecteur polyglotte d'anti-patterns de performance, const
 
 ## Glossaire
 
-Quelques termes récurrents dans la doc et le code, dont les distinctions comptent :
+Quelques termes reviennent dans la doc et le code, chacun avec un sens distinct :
 
 - **Event** : un SpanEvent normalisé. L'unité pré-détection (entrée).
 - **Finding** : un anti-pattern détecté (sortie de `detect`). Le concept produit, exposé dans la sortie CLI, JSON, SARIF, HTML, l'API daemon et les acks.

@@ -4,7 +4,7 @@ Detection is the fourth pipeline stage. It analyzes correlated traces to identif
 
 ## Shared pattern: borrowed HashMap keys
 
-All three detectors group spans by a composite key. The spans live in the `Trace` struct, which outlives the detector function, so we can **borrow** from the spans instead of cloning:
+All three detectors group spans by a composite key. The spans live in the `Trace` struct, which outlives the detector function, so we can borrow from the spans instead of cloning:
 
 ```rust
 // N+1: group by (event_type, template)
@@ -28,7 +28,7 @@ For a trace with 50 spans, each having a 40-character template string, borrowed 
 0. Skip SQL spans whose template is a session command (`normalize::sql::is_session_command`)
 1. Group spans by `(&EventType, &str template)`
 2. Skip groups with fewer than `threshold` occurrences (default 5)
-3. Count **distinct parameter sets** via `HashSet<&[String]>`
+3. Count distinct parameter sets via `HashSet<&[String]>`
 4. Skip groups with fewer than `threshold` distinct params (same params = redundant, not N+1)
 5. Compute time window between earliest and latest timestamp
 6. Skip groups where the window exceeds `window_limit_ms` (default 500ms)
@@ -121,7 +121,7 @@ The heuristic in `crates/sentinel-core/src/detect/sanitizer_aware.rs` recovers t
 2. `has_orm_scope`: at least one OpenTelemetry instrumentation scope on the spans matches a known ORM marker (Hibernate, Spring Data, EF Core, SQLAlchemy, ActiveRecord, GORM, Prisma, Diesel, Laravel/Eloquent, Doctrine, etc.). Markers are matched with a word-boundary check (preceded and followed by a non-alphanumeric byte), so `jpa` only fires on `spring-data-jpa` and friends, never on `myappjpastats`. A positive match is treated as strong evidence of N+1.
 3. `timing_variance_suggests_n_plus_one`: when the scope signal is absent, fall back to the coefficient of variation of `duration_us`. True N+1 hits different rows with different cache states, so the spread is wider. Cached redundant calls cluster tightly. Threshold `0.5` is empirical.
 4. `sequential_siblings_indexed` (Strict mode only): every span shares one non-empty `parent_span_id` and the group chains `prev.end_us <= next.start_us` after sort by start time. Bounds are computed in microseconds to avoid the silent truncation of sub-millisecond durations. Substitutes for `has_orm_scope` on bare-driver stacks (Vert.x reactive PG, pgx, asyncpg, sqlx, Prisma `queryRaw`) that never emit an ORM scope.
-5. `high_occurrence` (Strict mode, all branches): a high occurrence count (>= 3 x `n_plus_one_threshold`, default 15) serves as both a primary signal and a corroborator. Under the `looks_sanitized` guard (params empty, template has `?`), 15+ identical sanitized templates in one trace is structurally n+1 regardless of ORM scope, sequential siblings, or timing variance. Legacy polling loops below the threshold (typical 5-10 calls per request) stay classified as `redundant_sql`.
+5. `high_occurrence` (Strict mode, all branches): a high occurrence count (>= 3 x `n_plus_one_threshold`, default 15) is both a primary signal and a corroborator. Under the `looks_sanitized` guard (params empty, template has `?`), 15+ identical sanitized templates in one trace is structurally n+1 regardless of ORM scope, sequential siblings, or timing variance. Legacy polling loops below the threshold (typical 5-10 calls per request) stay classified as `redundant_sql`.
 
 The four emission modes (`Auto`, `Strict`, `Always`, `Never`) are documented in `docs/CONFIGURATION.md` § "`sanitizer_aware_classification`" with their precision/recall trade-offs.
 
@@ -140,7 +140,7 @@ The same dispatch also covers HTTP outbound groups via `classify_http_group_inde
 
 #### Known limit: query-string redaction
 
-N+1 HTTP detection requires the varying parameter to be visible in the span. An N+1 loop that varies a path segment is detected (distinct extracted params, or the `{id}` placeholder anchors the Strict primary). An N+1 loop that varies a **query parameter** is invisible when the instrumentation redacts the query string before export. On .NET, `url.full` carries a redacted query by default (the runtime's own `System.Net.Http` activity on .NET 9 and later, the `OpenTelemetry.Instrumentation.Http` package before), so every call carries a byte-identical `url.full`, `distinct_params` collapses to 1, and the group is correctly classified as `redundant_http`. The distinguishing parameter was destroyed upstream, so no trace consumer can recover it. See `docs/LIMITATIONS.md` § "HTTP query-string redaction and N+1 visibility" for the operator-facing workarounds.
+N+1 HTTP detection requires the varying parameter to be visible in the span. An N+1 loop that varies a path segment is detected (distinct extracted params, or the `{id}` placeholder anchors the Strict primary). An N+1 loop that varies a query parameter is invisible when the instrumentation redacts the query string before export. On .NET, `url.full` carries a redacted query by default (the runtime's own `System.Net.Http` activity on .NET 9 and later, the `OpenTelemetry.Instrumentation.Http` package before), so every call carries a byte-identical `url.full`, `distinct_params` collapses to 1, and the group is correctly classified as `redundant_http`. The distinguishing parameter was destroyed upstream, so no trace consumer can recover it. See `docs/LIMITATIONS.md` § "HTTP query-string redaction and N+1 visibility" for the operator-facing workarounds.
 
 ## Redundant detection
 
@@ -150,7 +150,7 @@ N+1 HTTP detection requires the varying parameter to be visible in the span. An 
 HashMap<(&EventType, &str, &[String]), Vec<usize>>
 ```
 
-The three-part key includes the full params slice, ensuring that two spans with the same template but different params are in different groups. Redundant detection flags **exact duplicates** (same template AND same params).
+The three-part key includes the full params slice, so two spans with the same template but different params land in different groups. Redundant detection flags **exact duplicates** (same template AND same params).
 
 The use of `&[String]` instead of joining params into a single string prevents a subtle collision bug: `["a,b"]` (one param containing a comma) and `["a", "b"]` (two params) would produce the same joined key `"a,b"` but are semantically different parameter sets.
 
@@ -178,10 +178,10 @@ The 0.5.7 sanitizer-aware heuristic recovers the correct classification by runni
 1. **Instrumentation scope marker** (high confidence). Per-span `instrumentation_scopes` chains are searched, case-insensitively, for any of the known ORM substrings: `spring-data`, `hibernate`, `jpa`, `micronaut-data`, `jdbi`, `r2dbc`, `entityframeworkcore`, `entity-framework`, `sqlalchemy`, `django`, `active-record`/`activerecord`, `gorm`, `sequelize`, `prisma`, `typeorm`, `mongoose`, `sea-orm`, `diesel`. Bare SQL drivers like `sqlx` (Go/Rust), `pgx`, `asyncpg` and the Vert.x reactive PG client are excluded: their n+1 patterns are handled by the sequential-siblings signal instead. A match flips the verdict to `LikelyNPlusOne`.
 2. **Timing-variance fallback** (medium confidence). When no ORM marker is present, the heuristic computes the coefficient of variation (`std-dev / mean`) of `duration_us`. True N+1 lookups hit different rows with different cache states, so durations spread out (CV typically 0.4 to 1.0). Cached redundant calls cluster tightly (CV near 0). The threshold of `0.5` is empirical and is the only knob in the heuristic. At least 3 spans are required for a stable variance estimate.
 
-The configurable `[detection] sanitizer_aware_classification` mode gates emission across four points on a recall-vs-precision dial: `auto` (default) emits when **either** signal fires, `strict` (0.5.8+) requires a primary signal (ORM scope OR sequential siblings OR high occurrence count) plus a corroborating signal (variance OR high occurrence count), `always` reclassifies every sanitized group regardless of signal, and `never` disables the second pass entirely. Findings emitted by the heuristic carry `classification_method = SanitizerHeuristic` so consumers can distinguish them from direct classifications. The mode picks where to sit on the trade-off:
+The configurable `[detection] sanitizer_aware_classification` mode gates emission across four points on a recall-vs-precision dial: `auto` (default) emits when either signal fires, `strict` (0.5.8+) requires a primary signal (ORM scope OR sequential siblings OR high occurrence count) plus a corroborating signal (variance OR high occurrence count), `always` reclassifies every sanitized group regardless of signal, and `never` disables the second pass entirely. Findings emitted by the heuristic carry `classification_method = SanitizerHeuristic` so consumers can distinguish them from direct classifications. The mode picks where to sit on the trade-off:
 
 - `auto` favors recall: it catches all ORM-induced N+1 because the ORM scope alone fires the verdict. The cost is absorbing legitimate `redundant_sql` findings on Spring Data / EF Core stacks (a `findById(sameId)` called in a loop served from row cache flips to `n_plus_one_sql`).
-- `strict` favors precision: it preserves `redundant_sql` findings on moderate-count cached identical queries (below the `3 x threshold` bar) because the timing-variance signal stays low. Above the bar (default 15 occurrences), any sanitized group fires regardless of ORM scope, sequential siblings, or variance. Recommended when actionable `redundant_sql` findings are valuable signal in your environment.
+- `strict` favors precision: it preserves `redundant_sql` findings on moderate-count cached identical queries (below the `3 x threshold` bar) because the timing-variance signal stays low. Above the bar (default 15 occurrences), any sanitized group fires regardless of ORM scope, sequential siblings, or variance. Recommended when actionable `redundant_sql` findings are useful signal in your environment.
 
 Known limits: a real single-param redundancy whose literal happens to be collapsed by the sanitizer (e.g. `SELECT * FROM config WHERE key = ?` queried 10 times for the same key) cannot be distinguished from an N+1 without scope or variance signal. In `auto` mode it flips to `n_plus_one_sql` whenever an ORM scope is present (harm-reducing direction: batch fetch is a strict superset of "cache one value"). In `strict` mode it stays `redundant_sql` because the timing variance is low. In `always` mode it always flips. In `never` mode the heuristic is bypassed entirely.
 
@@ -203,7 +203,7 @@ if max_duration_us > threshold_us.saturating_mul(5) {
 
 ### Not part of waste ratio
 
-Slow findings have `green_impact.estimated_extra_io_ops = 0`. They are **necessary** operations that happen to be slow: they need optimization (indexing, caching), not elimination. Including them in the waste ratio would conflate "avoidable I/O" (N+1, redundant) with "slow I/O" (needs a different fix).
+Slow findings have `green_impact.estimated_extra_io_ops = 0`. They are necessary operations that happen to be slow: they need optimization (indexing, caching), not elimination. Including them in the waste ratio would conflate "avoidable I/O" (N+1, redundant) with "slow I/O" (needs a different fix).
 
 ## Detection orchestration
 
@@ -295,7 +295,7 @@ emit finding with top_endpoints in suggestion
 
 ### Difference from fanout
 
-Excessive fanout detects a **single parent** with too many direct children. Chatty service detects an **entire trace** with too many outbound HTTP calls, independently of the parent-child structure. A trace can trigger both when a single parent generates all the calls or only chatty service when the calls are spread across multiple parents.
+Excessive fanout detects a single parent with too many direct children. Chatty service detects an entire trace with too many outbound HTTP calls, independently of the parent-child structure. A trace can trigger both when a single parent generates all the calls or only chatty service when the calls are spread across multiple parents.
 
 ### Not part of waste ratio
 
@@ -350,7 +350,7 @@ Pool saturation findings have `green_impact.estimated_extra_io_ops = 0`. High co
 
 0. Drop SQL siblings whose template is a session command: a `COMMIT` cannot move off the chain, and counting it inflates both the link count and the sequential total
 1. Group sibling spans by `parent_span_id`
-2. For each parent group, sort children by **end time** (ascending)
+2. For each parent group, sort children by end time (ascending)
 3. Find the longest non-overlapping subsequence via dynamic programming (Weighted Interval Scheduling with unit weights)
 4. If the optimal sequence has >= `serialized_min_sequential` (default 3) spans with distinct templates, emit a finding
 5. Severity: always Info (heuristic, inherent false positive risk)
@@ -487,7 +487,7 @@ A hot pair firing thousands of times within the window would otherwise grow `lag
 - While the reservoir has space, append unconditionally.
 - Once full, draw `r` uniformly in `[0, total_observations)` via `SplitMix64`. If `r < MAX_LAG_SAMPLES`, replace `lags_ms[r]`. Conditional on `r < k`, `r` is itself uniform in `[0, k)`, so the slot pick is unbiased without a second PRNG draw.
 
-The PRNG is a `SplitMix64` state per `PairState`, seeded at construction from `now_ms ^ (hash_endpoint(source) << 17) ^ hash_endpoint(target)`. `hash_endpoint` is a deterministic FNV-1a over the endpoint's `finding_type`, `service` and `template` strings (NOT the `DefaultHasher`, which uses a per-process `RandomState` and would make the correlator non-deterministic across runs). Two daemon runs replaying the same trace file produce identical reservoir samples and therefore identical median lags.
+The PRNG is a `SplitMix64` state per `PairState`, seeded at construction from `now_ms ^ (hash_endpoint(source) << 17) ^ hash_endpoint(target)`. `hash_endpoint` is a deterministic FNV-1a over the endpoint's `finding_type`, `service` and `template` strings (not the `DefaultHasher`, which uses a per-process `RandomState` and would make the correlator non-deterministic across runs). Two daemon runs replaying the same trace file produce identical reservoir samples and therefore identical median lags.
 
 ### Median lag calculation
 
@@ -549,7 +549,7 @@ The detector is a pure function over fields already present on `Finding` (`instr
 
 The structural findings (`serialized_calls`, `excessive_fanout`, `chatty_service`, `pool_saturation`) have no single originating span. Each carries the `instrumentation_scopes` and `code_location` of one representative call it already references: the first call of the serialized sequence, the first child of the fan-out, the first outbound HTTP call of the chatty trace, the first SQL span of the saturated service. The detector reads them like any other finding. Every surface that shows `code_location` (CLI `Source:`, HTML report `source`, SARIF `locations[]`) then points at that representative call, as it points at the first span of the group for an N+1 finding.
 
-The namespace match is segment-boundary-aware on **both** sides: the hint must start at the namespace root or immediately after a separator and must end at the namespace end or immediately before another separator. Boundary characters are `.` (Java, C#) and `::` (Rust). Examples:
+The namespace match is segment-boundary-aware on both sides: the hint must start at the namespace root or immediately after a separator and must end at the namespace end or immediately before another separator. Boundary characters are `.` (Java, C#) and `::` (Rust). Examples:
 
 - `diesel::` matches `diesel::query_dsl::FilterDsl` and `crate::diesel::reexport` but **not** `crate::mydiesel::query` (leading boundary protects user code that embeds the hint).
 - `io.helidon` matches `io.helidon.webserver.Routing` but **not** `io.helidongrpc.Foo` (trailing boundary protects against user packages whose first segment merely starts with the hint).
@@ -700,9 +700,9 @@ No wiring changes elsewhere: the `detect()` orchestrator already calls `suggesti
 
 `acknowledgments.rs` is the batch/CI half of the ack workflow. It loads `.perf-sentinel-acknowledgments.toml`, computes a signature per finding, moves acked findings into `report.acknowledged_findings`, and re-evaluates the quality gate on what survives. The daemon runtime store (`daemon/ack.rs`) shares the signature format and is unioned with the TOML at query time, with the TOML winning: it is the immutable baseline that went through PR review.
 
-**The signature is the key part**, because an operator's `won't fix` decision is pinned to it. Its shape is `<finding_type>:<service>:<sanitized_endpoint>:<sha256-prefix-of-template>`.
+**Most of the design is in the signature**, because an operator's `won't fix` decision is pinned to it. Its shape is `<finding_type>:<service>:<sanitized_endpoint>:<sha256-prefix-of-template>`.
 
-- **Why a hash only on the template.** The `(finding_type, service, sanitized_endpoint)` triple is already in the signature, so the hash only disambiguates templates within one triple, a tiny population. Its 32 hex characters (128 bits) are therefore not collision resistance for its own sake but defense in depth against an ack silently masking a *different* finding after a SQL refactor or a service rename.
+- **Why a hash only on the template.** The `(finding_type, service, sanitized_endpoint)` triple is already in the signature, so the hash only disambiguates templates within one triple, a tiny population. Its 32 hex characters (128 bits) are therefore far more than collision resistance in that population needs: they are defense in depth against an ack silently masking a *different* finding after a SQL refactor or a service rename.
 - **Why `/` and space become `_`.** So `:` stays a single unambiguous separator that operators can `cut -d:` in a shell pipeline.
 - **Why BiDi and invisible characters are stripped** from `service` and `source_endpoint` (Trojan Source, CVE-2021-42574): two signatures that render identically must not map to distinct ack entries, or an ack becomes unverifiable by reading it.
 
