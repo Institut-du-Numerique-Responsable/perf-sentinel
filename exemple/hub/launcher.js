@@ -35,9 +35,10 @@
     /**
      * A code-to-sentence table read from the text tables on each access, so it follows the
      * shown language without being rebuilt.
+     * @template {string} K
      * @param {string} prefix
-     * @param {string[]} codes
-     * @returns {Record<string, string>}
+     * @param {readonly K[]} codes
+     * @returns {Record<K, string>}
      */
     function textTable(prefix, codes) {
         /** @type {Record<string, string>} */
@@ -93,6 +94,10 @@
         return Math.min(1000 * Math.pow(2, failures - 1), 15000);
     }
 
+    /**
+     * @param {import('../types').Source} source
+     * @param {number} now
+     */
     function sourceHealth(source, now) {
         if (source.last_error_code === 'database_full' && !source.reachable)
             return {tone: 'crit', text: t('health.database_full')};
@@ -171,12 +176,18 @@
         return {daemons, backends, split: daemons.length > 0 && backends.length > 0};
     }
 
-    /** A countdown, watched: down to the second. */
+    /**
+     * A countdown, watched: down to the second.
+     * @param {number} ms
+     */
     function durPrecise(ms) {
         return durDown(ms, 's');
     }
 
-    /** An uptime, re-read on an interval: down to the minute, seconds would lie. */
+    /**
+     * An uptime, re-read on an interval: down to the minute, seconds would lie.
+     * @param {number} ms
+     */
     function durMinutes(ms) {
         return durDown(ms, 'm');
     }
@@ -363,7 +374,7 @@
      * Presentation status. `empty` is derived here and never stored: it must not
      * become a seventh value of `analysis_runs.status`.
      * @param {import('../types').Analysis} a
-     * @returns {import('../types').DisplayStatus}
+     * @returns {import('../types').AnalysisStatus | 'empty' | 'queued'}
      */
     function statusKey(a) {
         if (a.status === 'succeeded' && a.result && a.result.empty) return 'empty';
@@ -415,11 +426,17 @@
     function weightBand(n, cap) {
         const hardCap = typeof cap === 'number' && cap > 0 ? cap : 2000;
         /**
-         * @param {import('../types').WeightBand} key @param {string} tone @param {boolean} needsAck
+         * @param {import('../types').WeightBand} key
+         * @param {string} tone
+         * @param {boolean} needsAck
          */
         const band = (key, tone, needsAck) => ({
-            key: key, label: t('weight.' + key + '.label'),
-            fg: 'var(--' + tone + '-fg)', bg: 'var(--' + tone + '-bg)', bd: 'var(--' + tone + '-bd)', needsAck: needsAck,
+            key: key,
+            label: t('weight.' + key + '.label'),
+            fg: 'var(--' + tone + '-fg)',
+            bg: 'var(--' + tone + '-bg)',
+            bd: 'var(--' + tone + '-bd)',
+            needsAck: needsAck,
             body: t('weight.' + key + '.body', {cap: hardCap})
         });
         if (!Number.isFinite(n) || n < 1) return band('invalid', 'crit', false);
@@ -511,6 +528,9 @@
             : 'export ' + name + '=' + shell.quote(value);
     }
 
+    /**
+     * @param {string} id
+     */
     function shellById(id) {
         return SHELLS.find(function (shell) {
             return shell.id === id;
@@ -569,6 +589,7 @@
      *
      * @param {import('../types').Source} source
      * @param {Record<string, unknown>} request
+     * @param {string} [shellId] the shell the command is printed for, the first one when absent
      * @returns {string | null}
      */
     function analysisCommand(source, request, shellId) {
@@ -661,7 +682,10 @@
         })).join('\n');
     }
 
-    /** True when a value had to be quoted, so the block can name the shell. */
+    /**
+     * True when a value had to be quoted, so the block can name the shell.
+     * @param {string} command
+     */
     function quotedForShell(command) {
         return command.indexOf('\'') >= 0;
     }
@@ -876,7 +900,7 @@
             traces: light.traces,
             analysis_queue: light.analysis_queue,
             findings: light.findings,
-            state: lightState(light, previous.warnings.filter(function (hint) {
+            state: lightState(light, previous.warnings.filter(function (/** @type {{ kind: string; }} */ hint) {
                 // DaemonView.AdvisingCount's set: the other kinds describe the daemon.
                 return hint.kind === 'ingestion_drops' || hint.kind === 'tuning';
             }).length)
@@ -998,6 +1022,7 @@
      * @returns {Array<any>}
      */
     function sortFindings(rows, key, dir) {
+        /** @type {Record<string, (row: {seen_count?: number, first_seen_ms: number, finding?: any}) => string | number>} */
         const value = {
             type: function (row) {
                 const type = (row.finding || {}).type || '';
@@ -1024,10 +1049,15 @@
                 return row.first_seen_ms;
             }
         };
+        /**
+         * @param {string} name
+         * @param {{seen_count?: number, first_seen_ms: number, finding?: any}} a
+         * @param {{seen_count?: number, first_seen_ms: number, finding?: any}} b
+         */
         const compare = function (name, a, b) {
             const x = value[name](a);
             const y = value[name](b);
-            return typeof x === 'string' ? x.localeCompare(y) : x - y;
+            return typeof x === 'string' ? x.localeCompare(String(y)) : x - Number(y);
         };
         const sign = dir === 'asc' ? 1 : -1;
         return rows.slice().sort(function (a, b) {
@@ -1132,7 +1162,7 @@
         const text = String(hash || '');
         if (text.indexOf('#/new?') !== 0) return null;
         const params = new URLSearchParams(text.slice('#/new?'.length));
-        const number = function (key) {
+        const number = function (/** @type {string} */ key) {
             const raw = params.get(key);
             return raw === null || raw.trim() === '' ? NaN : Number(raw);
         };
@@ -1319,7 +1349,7 @@
      * @returns {string}
      */
     function pairLabel(episode) {
-        const side = function (end) {
+        const side = function (/** @type {{finding_type: string, service: string}} */ end) {
             return t('correlation.pair.side',
                 {type: FINDING_TYPE_LABEL[end.finding_type] || end.finding_type, service: end.service});
         };
@@ -1347,7 +1377,7 @@
      * @returns {string}
      */
     function ackRouteHash(signature, sourceId, environment) {
-        const part = function (key, value) {
+        const part = function (/** @type {string} */ key, /** @type {string} */ value) {
             const clean = String(value || '').trim();
             return clean === '' ? '' : '&' + key + '=' + encodeURIComponent(clean);
         };
@@ -1386,7 +1416,7 @@
         const text = String(hash || '');
         if (text.indexOf('#/ack?') !== 0) return null;
         const params = new URLSearchParams(text.slice('#/ack?'.length));
-        const named = function (key) {
+        const named = function (/** @type {string} */ key) {
             return (params.get(key) || '').trim() || null;
         };
         const signature = params.get('signature') || '';
@@ -1598,6 +1628,10 @@
      *   blocker: string | null, blocked: boolean, sentence: string}}
      */
     function ackPlan(rows, ticks, reason, expiryValue, nowMs) {
+        /**
+         * @param {string} action
+         * @returns {Array<{id: string, action: string, checked: boolean}>}
+         */
         const checked = function (action) {
             return rows.filter(function (row) {
                 return (row.action === action || row.action === 'either') && ackChecked(row, ticks);
@@ -1605,7 +1639,9 @@
         };
         const ack = checked('ack');
         const revoke = checked('revoke');
+        /** @type {string | null} */
         let expiresAt = null;
+        /** @type {string | null} */
         let blocker = null;
         if (ack.length === 0) blocker = t('ack.plan.no_ack_source');
         else if (String(reason || '').trim() === '') blocker = t('ack.plan.no_reason');
@@ -1725,16 +1761,29 @@
     const OFFICIAL_COVERAGE = 0.75;
     const RAIL_QUARTERS = 12;
 
-    /** The 16-hex id a disclosure route names, or null. */
+    /**
+     * The 16-hex id a disclosure route names, or null.
+     * @param {string} hash
+     */
     function readDisclosureId(hash) {
         const match = /^#\/disclosures\/([0-9a-f]{16})$/.exec(hash || '');
         return match ? match[1] : null;
     }
 
+    /**
+     * @param {number} year
+     * @param {number} month
+     */
     function quarterOf(year, month) {
         return (year * 4) + Math.floor((month - 1) / 3);
     }
 
+    /**
+     * @param {number} quarter
+     * @param {Array<{id: string, period: {to: string}, confidentiality: string, integrity_level: string | null, withdrawn: object | null}>} items
+     * @param {number} current
+     * @param {number} nowMs
+     */
     function railCell(quarter, items, current, nowMs) {
         const year = Math.floor(quarter / 4);
         const cell = {
@@ -1796,7 +1845,10 @@
      */
     function monthName(month, language = LANG) {
         if (language !== 'fr') return CARD_MONTHS[month - 1];
-        return new Intl.DateTimeFormat('fr-FR', {month: 'long', timeZone: 'UTC'}).format(new Date(Date.UTC(2000, month - 1, 1)));
+        return new Intl.DateTimeFormat('fr-FR', {
+            month: 'long',
+            timeZone: 'UTC'
+        }).format(new Date(Date.UTC(2000, month - 1, 1)));
     }
 
     /**
@@ -1807,13 +1859,19 @@
     function periodLabel(period) {
         const parts = String(period.to).split('-');
         const month = Number(parts[1]);
-        if (period.type === 'calendar-quarter') return t('period.quarter', {year: parts[0], quarter: Math.floor((month - 1) / 3) + 1});
+        if (period.type === 'calendar-quarter') return t('period.quarter', {
+            year: parts[0],
+            quarter: Math.floor((month - 1) / 3) + 1
+        });
         if (period.type === 'calendar-year') return parts[0];
         if (period.type === 'calendar-month') return monthName(month) + ' ' + parts[0];
         return t('period.range', {from: day(period.from, {withYear: true}), to: day(period.to, {withYear: true})});
     }
 
-    /** Runtime coverage as a whole percent, and whether it falls under the official 75 %. */
+    /**
+     * Runtime coverage as a whole percent, and whether it falls under the official 75 %.
+     * @param {number} coverage
+     */
     function coverageNotch(coverage) {
         if (coverage == null) return null;
         return {percent: Math.round(coverage * 100), below: coverage < OFFICIAL_COVERAGE};
@@ -1823,6 +1881,7 @@
      * Who checked what. The Hub checks the content hash and the attestation's binding with
      * its engine. The signature and the audit are only ever declared: whoever runs
      * verify-hash checks the first, nobody here checks the second.
+     * @param {{checks: Record<string, string>, disclosure: {integrity_level: string}}} detail
      */
     function checkRows(detail) {
         const checks = detail.checks;
@@ -1859,9 +1918,11 @@
      * The database and broker hosts a disclosure counts inside its total energy, which no
      * application carries: the rows that make the applications table add up to the total.
      * A block with no in-total window gives none, and so does a report older than v1.8.
+     * @param {{aggregate?: Record<string, any>} | null | undefined} report
      */
     function hostRows(report) {
         const aggregate = (report && report.aggregate) || {};
+        /** @type {{database_kgco2eq?: number | null, messaging_kgco2eq?: number | null}} */
         const breakdown = aggregate.carbon_breakdown || {};
         return [
             [t('disc.host.database'), aggregate.database_waste, breakdown.database_kgco2eq],
@@ -1881,12 +1942,18 @@
         });
     }
 
-    /** Host kWh with two decimals, scientific below 0.005 so a small in-total host never reads as zero. */
+    /**
+     * Host kWh with two decimals, scientific below 0.005 so a small in-total host never reads as zero.
+     * @param {number} value
+     */
     function hostKwh(value) {
         return decimal(value === 0 || value >= 0.005 ? value.toFixed(2) : value.toExponential(1));
     }
 
-    /** verify-hash on the downloaded PDF, with this Hub's expected signer when it has one. */
+    /**
+     * verify-hash on the downloaded PDF, with this Hub's expected signer when it has one.
+     * @param {{ expected_identity: string; expected_issuer: string; }} detail
+     */
     function verifyCommand(detail) {
         const lines = ['perf-sentinel verify-hash --report report.pdf'];
         if (detail.expected_identity && detail.expected_issuer) {
@@ -1896,7 +1963,10 @@
         return lines.join(' \\\n');
     }
 
-    /** The last steps of the CI job that produces, signs and publishes a disclosure. */
+    /**
+     * The last steps of the CI job that produces, signs and publishes a disclosure.
+     * @param {string} origin
+     */
     function publishCommand(origin) {
         return [
             'perf-sentinel disclose --intent official --confidentiality public \\',
@@ -1913,6 +1983,10 @@
         ].join('\n');
     }
 
+    /**
+     * @param {Blob} blob
+     * @param {string} filename
+     */
     function saveBlob(blob, filename) {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -1927,11 +2001,14 @@
     /**
      * A file saved through fetch and a Blob rather than a plain link, so a lapsed session
      * signs back in instead of saving the 401's body under the file's name.
+     * @param {string} url
+     * @param {string} filename
+     * @param {{fetch: (target: string) => Promise<Response>, reload: () => void, save: (blob: Blob, filename: string) => void}} [env]
      * @returns {Promise<boolean>} whether the file was handed to the browser
      */
     function downloadAs(url, filename, env) {
         const io = env || {
-            fetch: function (target) {
+            fetch: function (/** @type {string} */ target) {
                 return fetch(target, {credentials: 'same-origin'});
             },
             reload: function () {
@@ -2202,7 +2279,7 @@
         if (ownerDisplay) return {text: ownerDisplay, title: owner || null};
         if (!owner) return {text: '', title: null};
         if (owner.startsWith('machine:') || /\s|\p{Lu}/u.test(owner)) return {text: owner, title: null};
-        const upper = (word) => {
+        const upper = (/** @type {string} */ word) => {
             const first = String.fromCodePoint(word.codePointAt(0));
             return first.toLocaleUpperCase() + word.slice(first.length);
         };
@@ -2271,7 +2348,7 @@
         const text = String(hash || '');
         const query = text.indexOf('#/recap?') === 0 ? text.slice('#/recap?'.length) : '';
         const params = new URLSearchParams(query);
-        const filter = function (key) {
+        const filter = function (/** @type {string} */ key) {
             const value = (params.get(key) || '').trim();
             return value === '' || value.length > 256 || /\p{Cc}/u.test(value) ? null : value;
         };
@@ -2333,12 +2410,99 @@
      * @returns {string}
      */
     function recapPath(route) {
-        let path = '/api/recap?period=' + encodeURIComponent(route.period)
-            + '&view=' + encodeURIComponent(route.view);
+        return '/api/recap?period=' + encodeURIComponent(route.period)
+            + '&view=' + encodeURIComponent(route.view) + recapFilterQuery(route);
+    }
+
+    /**
+     * The day and the filters a route names, each as `&key=value`, in the order the Hub reads them.
+     * @param {ReturnType<typeof readRecapRoute>} route
+     * @returns {string}
+     */
+    function recapFilterQuery(route) {
+        let query = '';
         ['at', 'environment', 'service', 'grouping'].forEach(function (key) {
-            if (route[key]) path += '&' + key + '=' + encodeURIComponent(route[key]);
+            if (route[key]) query += '&' + key + '=' + encodeURIComponent(route[key]);
         });
-        return path;
+        return query;
+    }
+
+    /**
+     * What one recap job computes for a route: everything but the view, which the job's result is
+     * read in. Two routes with the same key read the same job.
+     * @param {ReturnType<typeof readRecapRoute>} route
+     * @param {number} [now] the moment that decides today when the route names no day, Date.now() by default
+     * @returns {string}
+     */
+    function recapJobKey(route, now) {
+        // The Hub reads an absent day as today in UTC and keys a job on its period's first day, so the
+        // key does too: another day of the same period is the same job, past its end another one.
+        const day = route.at || cardIso(new Date(now === undefined ? Date.now() : now));
+        const at = route.period === 'day' ? day : cardPeriodStart(route.period, day);
+        return recapPath(Object.assign({}, route, {view: 'tech', at: at}));
+    }
+
+    /**
+     * A random token naming one page among the screens that follow a recap job: 32 hex characters
+     * from the browser's random source.
+     * @returns {string}
+     */
+    function screenId() {
+        const bytes = new Uint8Array(16);
+        globalThis.crypto.getRandomValues(bytes);
+        return Array.from(bytes, function (b) {
+            return b.toString(16).padStart(2, '0');
+        }).join('');
+    }
+
+    /**
+     * The route that starts, joins or reuses the job for a route, computing it again with `refresh`.
+     * @param {ReturnType<typeof readRecapRoute>} route
+     * @param {boolean} refresh
+     * @returns {string}
+     */
+    function recapJobPath(route, refresh) {
+        const path = '/api/recap/jobs?period=' + encodeURIComponent(route.period) + recapFilterQuery(route);
+        return refresh ? path + '&refresh=true' : path;
+    }
+
+    /**
+     * A finished job's recap in one view, cut as GET /api/recap cuts it unless `all`.
+     * @param {string} id
+     * @param {'tech' | 'pilotage'} view
+     * @param {boolean} all
+     * @returns {string}
+     */
+    function recapJobResultPath(id, view, all) {
+        return '/api/recap/jobs/' + encodeURIComponent(id) + '/result?view=' + encodeURIComponent(view)
+            + (all ? '&moves=all' : '');
+    }
+
+    /**
+     * The share of a job's work behind it, as a whole percent: 100 once it succeeded, never 100 before.
+     * @param {{status: string, progress: number}} job
+     * @returns {number}
+     */
+    function recapJobPercent(job) {
+        if (job.status === 'succeeded') return 100;
+        const value = Math.floor((Number(job.progress) || 0) * 100);
+        return Math.max(0, Math.min(99, value));
+    }
+
+    /**
+     * When a recap was computed and until when the Hub reuses it: the time alone on the same day
+     * as `now`, the day and the time otherwise.
+     * @param {{finished_at_ms: number | null, expires_at_ms: number | null}} job
+     * @param {number} now
+     * @returns {{at: string, until: string} | null}
+     */
+    function recapFreshness(job, now) {
+        if (job.finished_at_ms == null || job.expires_at_ms == null) return null;
+        const today = new Date(now).toDateString();
+        const when = function (/** @type {number} */ ms) {
+            return new Date(ms).toDateString() !== today ? dateTime(ms) : time(ms);
+        };
+        return {at: when(job.finished_at_ms), until: when(job.expires_at_ms)};
     }
 
     /**
@@ -2688,7 +2852,10 @@
     /** The sentence under a format while it is picked, where the choice alone does not say where the file goes. */
     const CARD_FORMAT_NOTES = textTable('card.format_note.', ['jxl']);
 
-    /** The format a preview renders: a JPEG XL previews as the PNG of the same card, which every browser shows. */
+    /**
+     * The format a preview renders: a JPEG XL previews as the PNG of the same card, which every browser shows.
+     * @param {string} format
+     */
     function previewFormat(format) {
         return format === 'jxl' ? 'png' : format;
     }
@@ -2696,6 +2863,8 @@
     /**
      * The wait a busy render gate asks for, or null: its 503 carries Retry-After, the engine-off 503 does not.
      * Whole seconds from 1 to 10; a date form, or anything else, reads as 1.
+     * @param {number} status
+     * @param {string | null | undefined} retryAfter
      */
     function cardBusy(status, retryAfter) {
         if (status !== 503 || retryAfter === null || retryAfter === undefined) return null;
@@ -2709,7 +2878,10 @@
         'fieldWhy', 'stale', 'previewEmpty', 'previewBlocked', 'rendering', 'busy', 'pngNote', 'svgNote', 'pdfNote',
         'noDomain', 'keysTitle', 'keysOrigin', 'keysNone', 'keysPublish', 'keysFile', 'rotate', 'leaked']);
 
-    /** One plain sentence per verify-card reason the engine answers at level 1. */
+    /**
+     * One plain sentence per verify-card reason the engine answers at level 1.
+     * @type {Record<string, string>}
+     */
     const ATTACH_REASONS = textTable('card.attach.reason.', ['binding_check_failed', 'binding_partial',
         'key_not_published', 'no_domain', 'no_http_client']);
 
@@ -2717,7 +2889,10 @@
     const ATTACH_VERDICTS = textTable('card.attach.verdict.', ['key_revoked', 'public_key_mismatch',
         'signed_outside_validity']);
 
-    /** The signed figures verify-card reads back, in the order the screen lists them. */
+    /**
+     * The signed figures verify-card reads back, in the order the screen lists them.
+     * @type {Record<string, string>}
+     */
     const SIGNED_FIGURE_LABELS = textTable('card.figure.', ['period', 'before_fix_period', 'cited_ops', 'cited_ms',
         'before_fix_ops', 'threshold_ops', 'threshold_ms', 'last_waste_permille', 'previous_waste_permille',
         'confirmed_fixes_count', 'services_count']);
@@ -2734,7 +2909,9 @@
 
     /**
      * The first day of the period of `kind` that holds `day`; a week starts on Monday, UTC.
-     * @param {string} kind @param {string} day @returns {string}
+     * @param {string} kind
+     * @param {string} day
+     * @returns {string}
      */
     function cardPeriodStart(kind, day) {
         const date = cardDate(day);
@@ -2749,7 +2926,10 @@
 
     /**
      * The first day of the period `delta` steps away from the one starting on `from`.
-     * @param {string} kind @param {string} from @param {number} delta @returns {string}
+     * @param {string} kind
+     * @param {string} from
+     * @param {number} delta
+     * @returns {string}
      */
     function stepPeriod(kind, from, delta) {
         const date = cardDate(from);
@@ -2760,17 +2940,28 @@
 
     /**
      * The first day of the last period of `kind` that ended before `today` (UTC).
-     * @param {string} kind @param {string} today @returns {string}
+     * @param {string} kind
+     * @param {string} today
+     * @returns {string}
      */
     function lastClosedPeriod(kind, today) {
         return stepPeriod(kind, cardPeriodStart(kind, today), -1);
     }
 
-    /** False at the last closed period, so an open one can never be picked. */
+    /**
+     * False at the last closed period, so an open one can never be picked.
+     * @param {string} kind
+     * @param {string} from
+     * @param {string} today
+     */
     function canStepForward(kind, from, today) {
         return stepPeriod(kind, from, 1) <= lastClosedPeriod(kind, today);
     }
 
+    /**
+     * @param {string} day
+     * @param {boolean} withYear
+     */
     function cardDayText(day, withYear) {
         const date = cardDate(day);
         return date.getUTCDate() + ' ' + CARD_MONTHS[date.getUTCMonth()] + (withYear ? ' ' + date.getUTCFullYear() : '');
@@ -2778,12 +2969,20 @@
 
     /**
      * A period in words, as CardRules.PeriodName writes it.
-     * @param {string} kind @param {string} from @returns {string}
+     * @param {string} kind
+     * @param {string} from
+     * @param {string} [language]
+     * @returns {string}
      */
     function cardPeriodName(kind, from, language = LANG) {
         const date = cardDate(from);
         const year = String(date.getUTCFullYear());
-        if (kind === 'week') return tIn(language, 'card.period_name.week', {day: day(from, {withYear: true, language})});
+        if (kind === 'week') return tIn(language, 'card.period_name.week', {
+            day: day(from, {
+                withYear: true,
+                language
+            })
+        });
         if (kind === 'month') {
             return tIn(language, 'card.period_name.month', {month: monthName(date.getUTCMonth() + 1, language), year});
         }
@@ -2800,7 +2999,9 @@
     /**
      * Why no card, from its code and its period, as CardRules.Explain writes it in English: the
      * period before is named for a curve's refusal, every other code reads its problem sentence.
-     * @param {string} code @param {string} kind @param {string} from
+     * @param {string} code
+     * @param {string} kind
+     * @param {string} from
      * @returns {string}
      */
     function cardRefusalText(code, kind, from) {
@@ -2815,7 +3016,9 @@
 
     /**
      * The country choice shown: the one a person picked, else the Hub's, else France.
-     * @param {string|null} picked @param {string|undefined} hubCountry @returns {string}
+     * @param {string|null} picked
+     * @param {string|undefined} hubCountry
+     * @returns {string}
      */
     function cardCountry(picked, hubCountry) {
         if (picked !== null && CARD_COUNTRIES.indexOf(picked) >= 0) return picked;
@@ -2834,7 +3037,9 @@
 
     /**
      * The days a period covers: `1 to 31 October 2026, UTC`, the shared month or year written once.
-     * @param {string} from @param {string} to @returns {string}
+     * @param {string} from
+     * @param {string} to
+     * @returns {string}
      */
     function cardRangeText(from, to) {
         let start = day(from, {withYear: true});
@@ -2843,6 +3048,9 @@
         return t('card.range', {from: start, to: day(to, {withYear: true})});
     }
 
+    /**
+     * @param {string} value
+     */
     function cardText(value) {
         return typeof value === 'string' ? value.trim() : '';
     }
@@ -2864,7 +3072,10 @@
         return body;
     }
 
-    /** The options read of a form: the period always, the day and the scope when set. */
+    /**
+     * The options read of a form: the period always, the day and the scope when set.
+     * @param {Record<string, string>} form
+     */
     function cardOptionsPath(form) {
         let path = '/api/cards/options?period=' + encodeURIComponent(form.period);
         ['at', 'environment', 'source_id'].forEach(function (key) {
@@ -2874,7 +3085,10 @@
         return path;
     }
 
-    /** Whether the caller may name an action anywhere, which remembering a card's label does. */
+    /**
+     * Whether the caller may name an action anywhere, which remembering a card's label does.
+     * @param {Array<{permissions?: string[] | null}> | null | undefined} sources
+     */
     function canRememberLabel(sources) {
         return Array.isArray(sources) && sources.some(function (source) {
             return permits(source, 'labels.write');
@@ -2883,7 +3097,9 @@
 
     /**
      * The remember box: it waits for a new name, or for one that differs from the remembered one.
-     * @param {string} typed @param {string|null} remembered @param {string} place
+     * @param {string} typed
+     * @param {string|null} remembered
+     * @param {string} place
      * @returns {{text: string, enabled: boolean}}
      */
     function rememberState(typed, remembered, place) {
@@ -2895,9 +3111,14 @@
 
     // A heuristic for typing only, the engine's 422 stays the authority. (C) (R) and TM are pictographic
     // to Unicode but drawn by the card's fonts.
-    const CARD_UNDRAWABLE = /[\p{Cc}\p{Cf}]|(?![\u00A9\u00AE\u2122])\p{Extended_Pictographic}/u;
+    // Built from a string: Rider's regex checker does not know Extended_Pictographic, valid since ES2018.
+    const PICTOGRAPHIC = 'Extended_Pictographic';
+    const CARD_UNDRAWABLE = new RegExp('[\\p{Cc}\\p{Cf}]|(?![\\u00A9\\u00AE\\u2122])\\p{' + PICTOGRAPHIC + '}', 'u');
 
-    /** The first character a free field holds that the card cannot draw, as a sentence, or null. */
+    /**
+     * The first character a free field holds that the card cannot draw, as a sentence, or null.
+     * @param {string | null | undefined} text
+     */
     function cardFieldProblem(text) {
         const found = String(text || '').match(CARD_UNDRAWABLE);
         return found ? t('card.field_problem', {char: found[0]}) : null;
@@ -2914,7 +3135,11 @@
         return String(detail || '').indexOf('No curve for ') === 0;
     }
 
-    /** The two hosts the attachment check reaches. */
+    /**
+     * The two hosts the attachment check reaches.
+     * @param {string | null} domain
+     * @param {string} view
+     */
     function cardContactText(domain, view) {
         return t(view === 'pilotage' ? 'card.contact.pilotage' : 'card.contact.tech', {domain: domain});
     }
@@ -2947,7 +3172,8 @@
 
     /**
      * The sentence under the verdict when the file is the one signed; a modified file already has its own.
-     * @param {{content: string}} result @returns {string|null}
+     * @param {{content: string}} result
+     * @returns {string|null}
      */
     function contentLine(result) {
         return result.content === 'intact' ? t('card.content.intact') : null;
@@ -2976,7 +3202,9 @@
      * The revoke confirmation. The date bounds nothing: the check page reads every card of a revoked
      * key as revoked, and names the date as the day since when the key may have been exposed.
      * The consequence is the alert; the DNS steps are what to do next, read apart from it.
-     * @param {string} date yyyy-MM-dd @param {boolean} isCurrent @param {string|null} domain
+     * @param {string} date yyyy-MM-dd
+     * @param {boolean} isCurrent
+     * @param {string|null} domain
      * @returns {{alert: string, step: string}}
      */
     function revokeText(date, isCurrent, domain) {
@@ -2990,18 +3218,29 @@
         };
     }
 
-    /** What the check page prints for the card: the signer only once a check found the key. */
+    /**
+     * What the check page prints for the card: the signer only once a check found the key.
+     * @param {boolean} attached
+     * @param {string | null} domain
+     */
     function levelLine(attached, domain) {
         return t(attached ? 'card.level.attached' : 'card.level.unattached', {domain: domain});
     }
 
-    /** Where the card's environment comes from, and what it covers. */
+    /**
+     * Where the card's environment comes from, and what it covers.
+     * @param {string | null} environment
+     * @param {string} view
+     */
     function cardEnvironmentLine(environment, view) {
         return t('card.env.' + (environment ? 'one' : 'all') + '.' + (view === 'pilotage' ? 'pilotage' : 'tech'),
             {environment: environment});
     }
 
     // Rounded down, so the screen never shows more than the card will sign.
+    /**
+     * @param {number} value
+     */
     function cardVolume(value) {
         if (value < 10000) return num(value);
         if (value < 1000000) return t('card.volume.thousand', {n: Math.floor(value / 1000)});
@@ -3012,7 +3251,8 @@
     /**
      * What a fix row says the card prints: the volume before the fix, or the figure a problem with
      * no volume cites instead. `period` names the period before the fix, the Hub's English name when omitted.
-     * @param {*} fix @param {string} [period]
+     * @param {*} fix
+     * @param {string} [period]
      * @returns {{figure: string|null, text: string}}
      */
     function cardFixLine(fix, period) {
@@ -3093,7 +3333,8 @@
     }
 
     /**
-     * @param {string} language @param {string} key
+     * @param {string} language
+     * @param {string} key
      * @returns {string | undefined}
      */
     function textIn(language, key) {
@@ -3124,7 +3365,8 @@
 
     /**
      * `t` in `language` rather than the shown one.
-     * @param {string} language @param {string} key
+     * @param {string} language
+     * @param {string} key
      * @param {Record<string, string | number>} [vars]
      * @returns {string}
      */
@@ -3136,7 +3378,7 @@
             return key;
         }
         if (!vars) return value;
-        return value.replace(/\{(\w+)\}/g, (whole, name) => name in vars ? String(vars[name]) : whole);
+        return value.replace(/{(\w+)}/g, (whole, name) => name in vars ? String(vars[name]) : whole);
     }
 
     /**
@@ -3345,7 +3587,8 @@
 
     /**
      * From `open`, the index of the bracket that closes it.
-     * @param {string} code @param {number} open
+     * @param {string} code
+     * @param {number} open
      * @returns {number}
      */
     function closingBracket(code, open) {
@@ -3381,7 +3624,7 @@
     function isProse(text) {
         if (/:\/\//.test(text) || /^[.#[]/.test(text) || /^[a-z0-9_]+(\.[a-z0-9_-]+)+$/.test(text)) return false;
         if (text.indexOf(':') >= 0 && text.indexOf(';') >= 0) return false;
-        const words = text.replace(/\$\{[^}]*\}/g, 'X').split(/\s+/).filter(Boolean);
+        const words = text.replace(/\${[^}]*}/g, 'X').split(/\s+/).filter(Boolean);
         return words.length >= 2 && words.some(word => /^[a-z]{3,}$/.test(word.replace(/[^A-Za-z]/g, '')));
     }
 
@@ -3561,6 +3804,12 @@
         recapPlain,
         recapFreezeText,
         recapErrorText,
+        recapJobKey,
+        screenId,
+        recapJobPath,
+        recapJobResultPath,
+        recapJobPercent,
+        recapFreshness,
         recapTruncatedText,
         recapSourcesNote,
         recapLateNote,

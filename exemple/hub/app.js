@@ -14,7 +14,181 @@
     const THEME_POSITIONS = ['auto', 'light', 'dark'];
     const t = PSL.t;
 
-    /** Glyph paths lifted from the dashboard's themeIcon(), not redrawn. */
+    /** @typedef {import('../types').Source} Source */
+    /** @typedef {Error & {status?: number, problem?: any}} HttpError A refused fetchJson: the HTTP status and the parsed problem. */
+    /** @typedef {Node | null | undefined | false} Child What el() appends: a node, or a gap it skips. */
+    /** @typedef {Array<[string, Record<string, string>]>} GlyphPaths One SVG shape per entry: its tag and its attributes. */
+    /** @typedef {{open: boolean, onToggle: (open: boolean) => void}} Fold A fold whose open state the caller keeps. */
+    /**
+     * The outcome panel of a run, as outcomeSpec builds it for each status.
+     * @typedef {object} OutcomeSpec
+     * @property {string} tone
+     * @property {string} title
+     * @property {string} body
+     * @property {Array<[string, string, string]>} [counts]
+     * @property {import('../types').ResultWarning[]} [warnings]
+     * @property {OutcomeAction} primary
+     * @property {OutcomeAction} [secondary]
+     * @property {string | (() => string)} [note]
+     */
+    /** @typedef {{label: string, filled?: boolean, href?: string, action?: (button: HTMLButtonElement) => void}} OutcomeAction */
+    /**
+     * What the inline editor names on a recap row, as recapNameTarget builds it.
+     * @typedef {object} NameTarget
+     * @property {string} key
+     * @property {string} row
+     * @property {string | null} label
+     * @property {string} subject
+     * @property {string} name
+     * @property {string} rename
+     * @property {string} placeholder
+     * @property {string} path
+     * @property {{service: string, endpoint?: string}} body
+     */
+    /** @typedef {import('../types').DetectionKnob} DetectionKnob One of status.detection_knobs. */
+
+    /**
+     * A command or file block: what it is, the text or the per-shell line it prints, and its notes.
+     * @typedef {object} TerminalSpec
+     * @property {string} head
+     * @property {string} [sub]
+     * @property {string} [id]
+     * @property {(shellId: string) => string} [spell]
+     * @property {string} [text]
+     * @property {Fold} [fold]
+     * @property {string} copyLabel
+     * @property {Array<Node | string | null | false>} [notes]
+     * @property {string} [help]
+     * @property {string} [download]
+     */
+
+    /**
+     * One analysis run, as AnalysisRunWriter writes it.
+     * @typedef {object} Run
+     * @property {string} id
+     * @property {import('../types').AnalysisStatus} status
+     * @property {string} source_id
+     * @property {string} source_name
+     * @property {string} [environment]
+     * @property {import('../types').SourceKind} kind
+     * @property {RunRequest | null} [request]
+     * @property {string | null} [requested_by]
+     * @property {number} created_at_ms
+     * @property {number | null} [started_at_ms]
+     * @property {number | null} [finished_at_ms]
+     * @property {number | null} [expires_at_ms]
+     * @property {string | null} [producer_version]
+     * @property {import('../types').ErrorCode | null} [error_code]
+     * @property {RunResult | null} [result]
+     */
+
+    /**
+     * What a `#/recap?…` hash names, as PSL.readRecapRoute reads it.
+     * @typedef {{period: 'day' | 'week' | 'month', at: string | null, environment: string | null,
+     *   service: string | null, grouping: string | null, view: 'tech' | 'pilotage', jobKey?: string}} RecapRoute
+     */
+
+    // Payloads read field by field, named for what they are. Their shapes are in types.d.ts, each
+    // beside the API writer or record it mirrors.
+    /** @typedef {import('../types').HubStatus} HubStatus */
+    /** @typedef {import('../types').AccessView} AccessView */
+    /** @typedef {import('../types').TerminalToken} TerminalToken */
+    /** @typedef {import('../types').RunResult} RunResult */
+    /** @typedef {import('../types').RunRequest} RunRequest */
+    /** @typedef {import('../types').DaemonGauge} DaemonGauge */
+    /** @typedef {import('../types').DaemonSettings} DaemonSettings */
+    /** @typedef {import('../types').Finding} Finding */
+    /** @typedef {import('../types').StoredFindingRow} StoredFindingRow */
+    /** @typedef {import('../types').FindingEnvelope} FindingEnvelope */
+    /** @typedef {import('../types').FindingSource} FindingSource */
+    /** @typedef {import('../types').Incident} Incident */
+    /** @typedef {import('../types').Episode} Episode */
+    /** @typedef {import('../types').CorrelationPair} CorrelationPair */
+    /** @typedef {import('../types').DaemonView} DaemonView */
+    /** @typedef {import('../types').AckRow} AckRow */
+    /** @typedef {import('../types').RecapSnapshot} RecapSnapshot */
+    /** @typedef {import('../types').RecapPeriodInfo} RecapPeriodInfo */
+    /** @typedef {import('../types').RecapMovements} RecapMovements */
+    /** @typedef {import('../types').RecapPriority} RecapPriority */
+    /** @typedef {import('../types').RecapAction} RecapAction */
+    /** @typedef {import('../types').SuggestedFix} SuggestedFix */
+    /** @typedef {import('../types').CodeLocation} CodeLocation */
+    /** @typedef {import('../types').RecapJob} RecapJob */
+    /** @typedef {RecapJob & {key: string, receivedAt: number}} FollowedRecapJob A job the screen follows, with the key of its filters and when it was read. */
+    /** @typedef {import('../types').RecapReport} RecapReport */
+    /** @typedef {import('../types').CardOptions} CardOptions */
+    /** @typedef {import('../types').CardFix} CardFix */
+    /** @typedef {import('../types').CardKeys} CardKeys */
+    /** @typedef {import('../types').CardKey} CardKey */
+    /** @typedef {import('../types').CardAttachment} CardAttachment */
+    /** @typedef {import('../types').Disclosure} Disclosure */
+    /** @typedef {import('../types').DisclosureFigures} DisclosureFigures */
+    /** @typedef {import('../types').DisclosureDetail} DisclosureDetail */
+    /** @typedef {import('../types').DisclosureReport} DisclosureReport */
+    /** @typedef {import('../types').ShareLink} ShareLink */
+    /** @typedef {Record<string, unknown> & {format?: string}} CardBody A card request, as PSL.cardBody builds it. */
+    /** @typedef {{detail?: string, code?: string, reason?: string, path?: string}} DisclosureAnswer What a disclosure write answers: a problem, a refusal's reason, or a new share link's path. */
+    /** @typedef {{ok: boolean, status: number, payload: DisclosureAnswer | null}} DisclosureOutcome What sendDisclosure settles with. */
+    /** @typedef {{blob?: Blob, result?: CardAttachment, status?: number, field?: string | null, code?: string | null, detail?: string}} CardAnswer What cardPost settles with: a file, a JSON result, or a refusal. */
+    /** @typedef {import('../types').AccessConfiguration} AccessConfiguration */
+    /** @typedef {import('../types').AccessUnmatched} AccessUnmatched */
+    /** @typedef {Incident & {error_code?: string}} IncidentDetail A single-incident read, or the stub a failed one leaves with its error_code. */
+    /** @typedef {{fromMs: number, toMs: number, service: string, incidentId: string, pairKey: string, kind?: string, namespace?: string, atMs?: number}} Handoff An incident link, as PSL.readHandoff reads it, with the row's fields once found. */
+    /** @typedef {{traceId: string, otherTraceId: string}} TraceHandoff An episode's two traces, as PSL.readTraceHandoff reads them. */
+    /** @typedef {{label: string, energy_kwh: number, carbon_kgco2eq: number, partial: {windows: number, of: number} | null}} HostRow A host of a disclosure, as PSL.hostRows builds it. */
+    /**
+     * The ack page, from its link to what the last submit came to.
+     * @typedef {object} AckState
+     * @property {string} signature
+     * @property {string} reason
+     * @property {string} expiry
+     * @property {Array<{ok: boolean, text: string}>} lines
+     * @property {Record<string, {action: string, checked: boolean}>} checked
+     * @property {FindingEnvelope | null} [finding]
+     * @property {FindingEnvelope | null} [volume] the windowed read's finding, undefined when it failed
+     * @property {boolean} [error]
+     * @property {boolean} [busy]
+     */
+    /**
+     * The share card form, made by cardState.
+     * @typedef {object} ShareCard
+     * @property {boolean} open
+     * @property {string} angle
+     * @property {string} kind
+     * @property {string | null} from
+     * @property {string | null} signature
+     * @property {string | null} label
+     * @property {boolean} remember
+     * @property {string | null} rememberError
+     * @property {string} title
+     * @property {string} team
+     * @property {string | null} lang
+     * @property {string | null} country
+     * @property {string} format
+     * @property {(CardOptions & {error?: number}) | 'loading' | null} options a failed read leaves {error: status}
+     * @property {string | null} optionsPath
+     * @property {{path: string, code: string | null, text: string} | null} curveRefusal
+     * @property {boolean} showAllFixes
+     * @property {{url: string, format: string} | null} preview
+     * @property {boolean} stale
+     * @property {string | null} busy
+     * @property {string | null} renderError
+     * @property {Record<string, string>} fieldErrors
+     * @property {{result?: CardAttachment, error?: string} | null} attach
+     * @property {boolean} attachBusy
+     * @property {string | null} busyNote
+     * @property {string | null} attachNote
+     * @property {CardKeys | 'loading' | 'error' | null | undefined} keys
+     * @property {string | null} keysError
+     * @property {boolean} keysBusy
+     * @property {string | null} revoking
+     * @property {string} revokeDate
+     */
+
+    /**
+     * Glyph paths lifted from the dashboard's themeIcon(), not redrawn.
+     * @type {Record<string, GlyphPaths>}
+     */
     const THEME_GLYPHS = {
         auto: [['rect', {x: '3', y: '4', width: '18', height: '13', rx: '2'}], ['path', {d: 'M8 21h8M12 17v4'}]],
         light: [['circle', {cx: '12', cy: '12', r: '4'}], ['path', {
@@ -26,22 +200,29 @@
     const state = {
         themePosition: document.documentElement.getAttribute('data-theme-position') || 'auto',
         screen: 'new',
+        /** @type {HubStatus | null} */
         status: null,
         // The HTTP status /api/status failed with, which tells "no grant" from "down".
         statusError: undefined,
+        /** @type {Source[]} */
         sources: null,
         sourcesError: false,
         // GET /api/access, null when access is off (the route answers 404) or failed.
+        /** @type {AccessView | null} */
         access: null,
         // GET /api/tokens, read only with access on; null until it answers or when it failed.
+        /** @type {TerminalToken[] | null} */
         tokens: null,
         tokensFailed: false,
         // What the last Revoke did, {card, ok, text}, shown in the card it was pressed in.
+        /** @type {{card: string, ok: boolean, text: string} | null} */
         tokensNotice: null,
         // Set once the first screen has drawn: from then on a route change moves the focus.
         routed: false,
         loading: true,
+        /** @type {Run | null} */
         run: null,
+        /** @type {false | string} */
         runError: false,
         // Reads of the open run that failed in a row, for a reason other than its absence.
         runReadFailures: 0,
@@ -51,12 +232,15 @@
         // and the single ticker that rewrites them. A countdown drawn once is wrong
         // a second later, and re-rendering the screen to refresh it would replace
         // the report iframe and reload the report underneath the reader.
+        /** @type {Array<{node: HTMLElement, compute: () => string}>} */
         liveDurations: [],
         durationTicker: null,
+        /** @type {Run[]} */
         runs: null,
         // Which daemon rows are folded open, and what each one answered. Kept
         // across a render so a rebuilt table comes back the way it was left.
         daemonOpen: {},
+        /** @type {Record<string, DaemonView | 'loading'>} */
         daemonViews: {},
         daemonSettingsOpen: {},
         daemonGroupOpen: {},
@@ -81,6 +265,7 @@
         // What each gauge moved by on the read just adopted, shown once beside the
         // figure and then gone. Consumed by the render, so a rebuild for any other
         // reason does not replay a move that already had its moment.
+        /** @type {Record<string, Record<string, number | null>>} */
         daemonMoves: {},
         // Folds that belong to a screen rather than to a source. Kept in the same
         // record, since a reader does not care which of the two a fold is.
@@ -89,10 +274,13 @@
         // was short (nothing older to ask for), the filters, every service and
         // namespace seen across loads so the selects outlive their own filter,
         // and what each unfolded row answered.
+        /** @type {Incident[]} */
         incidents: null,
         // Set by the first read of the fleet that completes, failed or not, and
         // never reset: the filters it releases keep their lists across refreshes.
         incidentsRead: false,
+        // False, or why the last read fell short: a key of INCIDENT_ERROR_TEXT.
+        /** @type {false | 'stale' | 'unread' | 'page'} */
         incidentsError: false,
         incidentsDone: false,
         // Set while a live read of the fleet is in flight, so the read-now
@@ -102,13 +290,16 @@
         incidentFilter: {service: '', namespace: '', kind: '', environment: '', source_id: ''},
         incidentServices: [],
         incidentNamespaces: [],
+        /** @type {Record<string, IncidentDetail | 'loading'>} */
         incidentDetails: {},
         // The correlations screen: the episodes of the range, null until read, the incidents
         // its strips draw, every service seen so the select outlives its own filter, and the
         // filters. An unfolded incident's episodes sit apart, by incident key: 'loading',
         // 'error', or {rows, pushes}.
+        /** @type {Episode[]} */
         correlations: null,
         correlationsError: false,
+        /** @type {Incident[]} */
         correlationIncidents: [],
         correlationServices: [],
         // pair_key mirrors the route, `#/correlations?pair_key=…`, and is never set from a select.
@@ -117,6 +308,7 @@
         // of a failed read, whether the priorities are unfolded past ten, the sentence a refused
         // write left in its row by signature, the rows with a write in flight, the row whose
         // endpoint is being named, and the number of the latest read so an old one cannot land.
+        /** @type {RecapSnapshot} */
         recap: null,
         recapError: null,
         recapShowAll: false,
@@ -133,33 +325,59 @@
         // What was typed in the name field when the Hub refused it, so a refusal does not eat it.
         recapNameDraft: null,
         recapSeq: 0,
+        // When the recap now being computed was asked for, which its loading banner counts from.
+        recapLoadingSince: 0,
+        // The recap job the screen follows: what GET /api/recap/jobs/{id} last answered, with the key of
+        // the filters it computes (PSL.recapJobKey). True in recapDirect once the Hub has no job route,
+        // an older one or the site's replay, which reads GET /api/recap as before. The poll's timer and
+        // its failures in a row; recapHubBusy while the Hub runs as many recaps as it can at once.
+        /** @type {?FollowedRecapJob} */
+        recapJob: null,
+        recapDirect: false,
+        recapPollTimer: null,
+        recapPollFailures: 0,
+        recapHubBusy: false,
+        // The start sent and not answered yet, with the key it computes and the promise of its end.
+        /** @type {?{key: string, done: ?Promise<unknown>}} */
+        recapStarting: null,
+        // Jobs started again by the current read after the Hub forgot its own, at most one.
+        recapRestarts: 0,
         // The frozen reports under the recap: the list GET /api/recap/reports answered, null when the
         // Hub refused it (403, the section stays hidden) or while it loads, 'error' when it failed
         // otherwise; whether a generate is in flight and the sentence a refused one left.
+        /** @type {RecapReport[] | 'error'} */
         recapReports: null,
         recapGenerating: false,
         recapGenerateError: null,
         // The share card form, made on first use (cardState).
+        /** @type {?ShareCard} */
         card: null,
         // GET /api/disclosures, null while it loads.
+        /** @type {Disclosure[]} */
         disclosures: null,
         disclosuresError: false,
         // GET /api/disclosures/{id} and the report.json it serves, for the detail screen.
+        /** @type {DisclosureDetail} */
         disclosure: null,
+        /** @type {DisclosureReport | null} */
         disclosureReport: null,
         disclosureError: false,
         // What the last action on the detail did, and a share link's token, shown once.
         disclosureNote: null,
+        /** @type {?{id: string, pdfUrl: string, reportUrl: string}} */
         disclosureLink: null,
         disclosureBusy: false,
         withdrawOpen: false,
+        /** @type {Record<string, {rows: Episode[], pushes: boolean} | 'loading' | 'error'>} */
         incidentCorrelations: {},
         // The incident panels whose episodes list is shown whole, by their cache key.
         incidentCorrelationsAll: {},
         // A trace an episode handed to New analysis, with the pair's other one.
+        /** @type {?TraceHandoff} */
         traceHandoff: null,
         // The ack page: the finding its link names, the form, and what the last
         // submit came to. Null until a link opens it.
+        /** @type {AckState | null} */
         ack: null,
         // The route an in-app Ack link was followed from, for the page's way back.
         ackReturn: null,
@@ -169,6 +387,7 @@
         // What was typed above each incident's findings, by incident key.
         findingQuery: {},
         // The incident a `#/new?from=…` link pre-filled the form from, or null.
+        /** @type {?Handoff} */
         handoff: null,
         // Which shell every printed command is spelled for.
         shell: 'posix',
@@ -194,6 +413,13 @@
 
     // ------------------------------------------------------------ DOM helpers
 
+    /**
+     * @template {keyof HTMLElementTagNameMap} K
+     * @param {K} tag
+     * @param {Record<string, any>} [attrs]
+     * @param {Child[]} [children]
+     * @returns {HTMLElementTagNameMap[K]}
+     */
     function el(tag, attrs, children) {
         const node = document.createElement(tag);
         Object.keys(attrs || {}).forEach(function (key) {
@@ -207,6 +433,10 @@
         return node;
     }
 
+    /**
+     * @param {GlyphPaths} paths
+     * @param {number} [size]
+     */
     function svg(paths, size) {
         const node = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         node.setAttribute('viewBox', '0 0 24 24');
@@ -233,6 +463,11 @@
     // Write-only: the read happens in the inline script, before this file loads.
     // sessionStorage throws in Safari private mode and under some enterprise
     // policies, and a theme is not worth an error.
+    /**
+     * @param {string} area
+     * @param {string} key
+     * @param {string} value
+     */
     function store(area, key, value) {
         try {
             globalThis[area].setItem(key, value);
@@ -243,11 +478,17 @@
 
     // ---------------------------------------------------------------- theme
 
+    /**
+     * @param {string} position
+     */
     function resolveTheme(position) {
         if (position !== 'auto') return position;
         return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     }
 
+    /**
+     * @param {boolean} animate
+     */
     function applyTheme(animate) {
         const root = document.documentElement;
         root.setAttribute('data-theme', resolveTheme(state.themePosition));
@@ -288,6 +529,7 @@
      * Writes the tables' text into every `[data-i18n]` under `root`, and each attribute a
      * `data-i18n-attr="aria-label:key;title:key"` names. index.html keeps its English as the
      * text a page shows before any script runs.
+     * @param {ParentNode} root
      */
     function applyStaticText(root) {
         root.querySelectorAll('[data-i18n]').forEach(function (node) {
@@ -301,7 +543,10 @@
         });
     }
 
-    /** Marks a block the engine wrote, which stays English on a French screen. */
+    /**
+     * Marks a block the engine wrote, which stays English on a French screen.
+     * @param {HTMLElement} node
+     */
     function engineText(node) {
         node.setAttribute('lang', 'en');
         node.classList.add('engine-text');
@@ -334,46 +579,56 @@
     /**
      * Under Hub:Auth a lapsed session answers 401 rather than a redirect a fetch
      * cannot follow to the provider. Reloading the page is what signs back in.
+     * @param {Response} response
      */
     function signInOn401(response) {
         if (response.status === 401) location.reload();
         return response;
     }
 
-    function fetchJson(path, method) {
-        const headers = {accept: 'application/json'};
+    /**
+     * @param {string} path
+     * @param {string} method
+     * @param {Record<string, string>} [extra]
+     */
+    async function fetchJson(path, method, extra) {
+        const headers = Object.assign({accept: 'application/json'}, extra || {});
         // A write carries the JSON content type the server's same-origin guard requires.
         if (method !== 'GET') headers['content-type'] = 'application/json';
-        return fetch(path, {
+        const response = signInOn401(await fetch(path, {
             method: method,
             headers: headers
-        }).then(signInOn401).then(function (response) {
-            if (!response.ok) {
-                // The parsed problem rides on the error, so a screen can say it in the shown language.
-                return response.json().catch(function () {
-                    return null;
-                }).then(function (problem) {
-                    const error = new Error(path + ' answered ' + response.status);
-                    error.status = response.status;
-                    error.problem = problem;
-                    throw error;
-                });
-            }
-            return response.json();
-        });
+        }));
+        if (!response.ok) {
+            // The parsed problem rides on the error, so a screen can say it in the shown language.
+            const problem = await response.json().catch(function () {
+                return null;
+            });
+            const error = /** @type {HttpError} */ (new Error(path + ' answered ' + response.status));
+            error.status = response.status;
+            error.problem = problem;
+            throw error;
+        }
+        return response.json();
     }
 
+    /**
+     * @param {string} path
+     */
     function getJson(path) {
         return fetchJson(path, 'GET');
     }
 
-    /** A POST because the route writes: it reads the daemons before it answers. */
+    /**
+     * A POST because the route writes: it reads the daemons before it answers.
+     * @param {string} path
+     */
     function postJson(path) {
         return fetchJson(path, 'POST');
     }
 
-    function loadShell() {
-        return Promise.all([
+    async function loadShell() {
+        const results = await Promise.all([
             getJson('/api/status').catch(function (error) {
                 state.statusError = error.status;
                 return null;
@@ -385,42 +640,40 @@
             getJson('/api/access').catch(function () {
                 return null;
             })
-        ]).then(function (results) {
-            state.status = results[0];
-            state.sourcesError = results[1] === 'error';
-            state.sources = state.sourcesError ? null : results[1];
-            state.access = results[2];
-            state.loading = false;
-            if (state.access) loadTokens();
-            const runnable = runSources();
-            if (runnable.length > 0 && state.form.sourceId === null) {
-                // The one they were on last, if it is still configured. Falling back to
-                // the first reachable one is what a first visit gets.
-                const remembered = rememberedSource();
-                const kept = runnable.find(function (source) {
-                    return source.id === remembered;
-                });
-                const usable = runnable.find(function (source) {
-                    return source.reachable;
-                });
-                state.form.sourceId = (kept || usable || runnable[0]).id;
-            }
-            renderShell();
-            onRoute();
-        });
+        ]);
+        state.status = results[0];
+        state.sourcesError = results[1] === 'error';
+        state.sources = state.sourcesError ? null : results[1];
+        state.access = results[2];
+        state.loading = false;
+        if (state.access) void loadTokens();
+        const runnable = runSources();
+        if (runnable.length > 0 && state.form.sourceId === null) {
+            // The one they were on last, if it is still configured. Falling back to
+            // the first reachable one is what a first visit gets.
+            const remembered = rememberedSource();
+            const kept = runnable.find(function (source) {
+                return source.id === remembered;
+            });
+            const usable = runnable.find(function (source) {
+                return source.reachable;
+            });
+            state.form.sourceId = (kept || usable || runnable[0]).id;
+        }
+        renderShell();
+        onRoute();
     }
 
     /** The terminal tokens the access page lists: the caller's own, or everyone's for an admin. */
-    function loadTokens() {
-        return getJson('/api/tokens').then(function (tokens) {
-            state.tokens = tokens;
+    async function loadTokens() {
+        try {
+            state.tokens = await getJson('/api/tokens');
             state.tokensFailed = false;
-        }).catch(function () {
+        } catch (error) {
             state.tokens = null;
             state.tokensFailed = true;
-        }).then(function () {
-            if (state.screen === 'access' || state.screen === 'coverage') render();
-        });
+        }
+        if (state.screen === 'access' || state.screen === 'coverage') render();
     }
 
     /**
@@ -428,14 +681,14 @@
      * failure is left silent: the incidents that came back are still real, only
      * the read stamps under them stay as they were.
      */
-    function reloadSources() {
-        return getJson('/api/sources').then(function (sources) {
-            state.sources = sources;
+    async function reloadSources() {
+        try {
+            state.sources = await getJson('/api/sources');
             state.sourcesError = false;
             renderSourcesBadge();
-        }).catch(function () {
-            void 0;
-        });
+        } catch (error) {
+            // Left silent, as the comment above says.
+        }
     }
 
     // Folds outlive the page. A reader who opened a row, its settings and two of
@@ -452,19 +705,24 @@
      * once they make one, and until then the one their platform opens with.
      */
     function restoreShell() {
-        let stored = null;
+        let stored;
         try {
             stored = localStorage.getItem(SHELL_STORAGE_KEY);
         } catch (error) {
             stored = null;
         }
-        const platform = (navigator.userAgentData && navigator.userAgentData.platform)
-            || navigator.platform;
+        // userAgentData is Chromium's alone, and navigator.platform, though deprecated, is the only hint
+        // Firefox and Safari give: both are read through this view, which knows that.
+        const agent = /** @type {{userAgentData?: {platform?: string}, platform?: string}} */ (navigator);
+        const platform = (agent.userAgentData && agent.userAgentData.platform) || agent.platform;
         // A stored id that no longer names a shell is worth no more than no id at
         // all, so it falls back to the platform rather than to the first entry.
         state.shell = PSL.knownShell(stored) || PSL.defaultShell(platform);
     }
 
+    /**
+     * @param {string} id
+     */
     function saveShell(id) {
         try {
             localStorage.setItem(SHELL_STORAGE_KEY, id);
@@ -482,6 +740,9 @@
         }
     }
 
+    /**
+     * @param {string} id
+     */
     function saveSource(id) {
         try {
             if (id) localStorage.setItem(SOURCE_STORAGE_KEY, id);
@@ -492,7 +753,7 @@
     }
 
     function restoreFolds() {
-        let stored = null;
+        let stored;
         try {
             stored = JSON.parse(localStorage.getItem(FOLD_STORAGE_KEY) || 'null');
         } catch (error) {
@@ -528,7 +789,8 @@
         // Without a status there is no version to show, and "unknown" read as a broken Hub.
         // A caller no grant reaches gets no tab either: every one of them leads to a refusal.
         document.getElementById('version-chip').hidden = !status;
-        document.querySelector('.shell-tabs').hidden = !status && !!PSL.shellBanner(state.statusError);
+        const tabs = /** @type {HTMLElement} */ (document.querySelector('.shell-tabs'));
+        tabs.hidden = !status && !!PSL.shellBanner(state.statusError);
         document.getElementById('version-hub').textContent = status ? status.version : t('shell.version.unknown');
         document.getElementById('version-engine').textContent =
             status && status.engine_version ? status.engine_version : t('shell.version.none');
@@ -552,12 +814,18 @@
 
         renderFleetSkew();
         renderSourcesBadge();
-        document.querySelector('.shell-tab[data-screen="coverage"]').hidden = !(state.access && state.access.admin);
+        const coverageTab = /** @type {HTMLElement} */ (document.querySelector('.shell-tab[data-screen="coverage"]'));
+        coverageTab.hidden = !(state.access && state.access.admin);
         // On only when the Hub has disclosures on and this caller reads them.
-        document.querySelector('.shell-tab[data-screen="disclosures"]').hidden = !(state.status && state.status.disclosures);
+        const disclosuresTab = /** @type {HTMLElement} */ (document.querySelector('.shell-tab[data-screen="disclosures"]'));
+        disclosuresTab.hidden = !(state.status && state.status.disclosures);
     }
 
-    /** Takes a chip segment out along with the separator that was added for it. */
+    /**
+     * Takes a chip segment out along with the separator that was added for it.
+     * @param {HTMLElement} chip
+     * @param {string} selector
+     */
     function dropSegment(chip, selector) {
         const existing = chip.querySelector(selector);
         if (!existing) return;
@@ -664,6 +932,8 @@
      * Marks a node's text as a live duration. `compute` is re-run every second and
      * its result written back, so a caller passes the same function it used to
      * build the initial text.
+     * @param {HTMLElement} node
+     * @param {(() => string) | null} compute
      */
     function live(node, compute) {
         if (typeof compute === 'function') state.liveDurations.push({node: node, compute: compute});
@@ -716,11 +986,15 @@
      * Swaps in a fresh screen but leaves the shown PDF preview's iframe in the page: an iframe taken out
      * reloads its file and loses the reader's page. Its ancestors stay too, given the fresh ones' attributes
      * and siblings; none of them carries a listener. Any other shape is a plain swap.
+     * @param {HTMLElement} main
+     * @param {HTMLElement} fresh
      */
     function replaceKeepingPdf(main, fresh) {
         const kept = main.querySelector('iframe.card-preview-pdf');
         const slot = fresh.querySelector('iframe.card-preview-pdf');
+        /** @type {Node} */
         let old = kept;
+        /** @type {Node} */
         let now = slot;
         while (old && now && now !== fresh && old.parentNode !== main) {
             old = old.parentNode;
@@ -732,14 +1006,20 @@
             return;
         }
         for (old = kept, now = slot; now !== fresh; old = old.parentNode, now = now.parentNode) {
-            adoptAround(old.parentNode, now.parentNode, old, now);
+            adoptAround(/** @type {Element} */ (old.parentNode), /** @type {Element} */ (now.parentNode), old, now);
         }
         Array.from(main.childNodes).forEach(function (child) {
             if (child !== old) child.remove();
         });
     }
 
-    /** Gives `into` the attributes and children of `model`, with `keep` standing where `place` stands. */
+    /**
+     * Gives `into` the attributes and children of `model`, with `keep` standing where `place` stands.
+     * @param {Element} into
+     * @param {Element} model
+     * @param {Node} keep
+     * @param {Node} place
+     */
     function adoptAround(into, model, keep, place) {
         Array.from(into.attributes).forEach(function (attribute) {
             into.removeAttribute(attribute.name);
@@ -768,7 +1048,7 @@
         // observer's callback, so it would hold that box and its old screen for good.
         if (TEMPLATE_FIT) TEMPLATE_FIT.disconnect();
         state.screen = currentScreen();
-        Array.prototype.forEach.call(document.querySelectorAll('.shell-tab'), function (tab) {
+        Array.prototype.forEach.call(document.querySelectorAll('.shell-tab'), function (/** @type {HTMLElement} */ tab) {
             // A disclosure's own screen sits under the Disclosures tab.
             const screen = state.screen === 'disclosure' ? 'disclosures' : state.screen;
             if (tab.getAttribute('data-screen') === screen) tab.setAttribute('aria-current', 'page');
@@ -815,10 +1095,13 @@
         document.title = heading ? heading.textContent + ' · Perf Sentinel Hub' : 'Perf Sentinel Hub';
     }
 
-    /** A render that would otherwise drop the focus on the body hands it to `selector`. */
+    /**
+     * A render that would otherwise drop the focus on the body hands it to `selector`.
+     * @param {string} selector
+     */
     function renderFocus(selector) {
         render();
-        const target = document.querySelector(selector);
+        const target = /** @type {HTMLElement} */ (document.querySelector(selector));
         if (target) target.focus();
     }
 
@@ -828,7 +1111,7 @@
      * otherwise hears nothing when a tab is followed.
      */
     function announceRoute() {
-        const heading = document.querySelector('#main h1');
+        const heading = /** @type {HTMLElement} */ (document.querySelector('#main h1'));
         if (!state.routed) {
             state.routed = true;
             return;
@@ -838,7 +1121,10 @@
         heading.focus();
     }
 
-    /** The label with a rule running out to its right, as every screen head has. */
+    /**
+     * The label with a rule running out to its right, as every screen head has.
+     * @param {string} text
+     */
     function ruledOverline(text) {
         return el('div', {class: 'overline-ruled'}, [
             el('span', {class: 'overline', text: text}),
@@ -868,6 +1154,8 @@
      * The dashboard's help affordance, same shape and same rule: it sits beside
      * a heading and never inside one, or a screen reader would read the
      * explanation as part of the heading.
+     * @param {string} text
+     * @param {string} topic
      */
     function helpDot(text, topic) {
         // The explanation is the tip's, read as a description while it shows: as
@@ -893,6 +1181,10 @@
         return dot;
     }
 
+    /**
+     * @param {HTMLElement} anchor
+     * @param {string} text
+     */
     function showTip(anchor, text) {
         closeTip();
         const box = proseInto(el('div', {class: 'tipbox', id: 'tipbox', role: 'tooltip'}), text);
@@ -920,6 +1212,8 @@
      * them, and a browser can. An odd number of backticks is left alone rather
      * than guessed at, so a stray one never turns the rest of a sentence into
      * code.
+     * @param {HTMLElement} parent
+     * @param {string} text
      */
     function proseInto(parent, text) {
         const parts = String(text).split('`');
@@ -935,7 +1229,11 @@
         return parent;
     }
 
-    /** A label with its "?" beside it, which is the only place one belongs. */
+    /**
+     * A label with its "?" beside it, which is the only place one belongs.
+     * @param {string} text
+     * @param {string} help
+     */
     function titledOverline(text, help) {
         return el('div', {class: 'title-row'}, [
             el('h2', {class: 'overline', text: text}),
@@ -956,6 +1254,7 @@
      * Every command this product prints runs the engine binary, not the Hub, so
      * it needs one on the machine it is typed into. The link pins the version
      * this Hub runs: that is the one the command above is spelled for.
+     * @param {HTMLElement} parent
      */
     function engineNeed(parent) {
         const version = PSL.ENGINE;
@@ -983,6 +1282,7 @@
      * line to run, in the shell they picked, with their own credential to drop
      * in. Only ever shown for a source whose published address takes a header,
      * so an open backend on an intranet never sees any of this.
+     * @param {Source} source
      */
     function tokenStep(source) {
         const header = source.auth_header_name + ': …';
@@ -992,7 +1292,7 @@
             class: 'code-inline step-line',
             text: PSL.exportLine(state.shell, 'PERF_SENTINEL_SOURCE_TOKEN', header)
         });
-        SPELL.set(line, function (shellId) {
+        SPELL.set(line, function (/** @type {string} */ shellId) {
             return PSL.exportLine(shellId, 'PERF_SENTINEL_SOURCE_TOKEN', header);
         });
         line.setAttribute('data-spell', '');
@@ -1001,7 +1301,10 @@
         return step;
     }
 
-    /** An arrow turning back on itself: put this value where it was. */
+    /**
+     * An arrow turning back on itself: put this value where it was.
+     * @param {number} size
+     */
     function undoGlyph(size) {
         return svg([
             ['polyline', {points: '3 5 3 11 9 11'}],
@@ -1009,7 +1312,10 @@
         ], size);
     }
 
-    /** A circled i, for a block that tells rather than warns. */
+    /**
+     * A circled i, for a block that tells rather than warns.
+     * @param {number} size
+     */
     function infoGlyph(size) {
         return svg([
             ['circle', {cx: '12', cy: '12', r: '9'}],
@@ -1021,9 +1327,10 @@
      * What has to be true before the command above can run, in the order you
      * would do it. Prose that only explains stays prose below: a numbered step
      * is a promise that there is something to go and do.
+     * @param {Array<Node | string | null | false>} steps
      */
     function stepsBlock(steps) {
-        const present = steps.filter(Boolean);
+        const present = /** @type {Array<Node | string>} */ (steps.filter(Boolean));
         return el('div', {class: 'steps-block'}, [
             el('div', {class: 'steps-head'}, [
                 infoGlyph(14),
@@ -1044,9 +1351,11 @@
      * One tab per shell, over a single command line. The quoting and the line
      * continuation differ between them, so this is the same request written
      * three ways rather than a preference about how it looks.
+     * @param {HTMLElement} code
+     * @param {(shellId: string) => string} spell
      */
     function shellTabs(code, spell) {
-        const tabs = PSL.SHELLS.map(function (shell) {
+        const tabs = PSL.SHELLS.map(function (/** @type {{id: string, label: string}} */ shell) {
             const tab = el('button', {
                 type: 'button',
                 class: 'cmd-tab',
@@ -1062,6 +1371,9 @@
             return tab;
         });
 
+        /**
+         * @param {string} id
+         */
         function choose(id) {
             state.shell = id;
             saveShell(id);
@@ -1085,7 +1397,7 @@
             const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
             if (!step) return;
             event.preventDefault();
-            const index = PSL.SHELLS.findIndex(function (shell) {
+            const index = PSL.SHELLS.findIndex(function (/** @type {{id: string, label: string}} */ shell) {
                 return shell.id === state.shell;
             });
             const next = PSL.SHELLS[(index + step + PSL.SHELLS.length) % PSL.SHELLS.length];
@@ -1101,6 +1413,9 @@
     // node rather than rebuilt from the form, which has moved on by then.
     const SPELL = new WeakMap();
 
+    /**
+     * @param {TerminalSpec} spec
+     */
     function terminalBlock(spec) {
         const spell = spec.spell || null;
         const code = el('pre', {
@@ -1192,6 +1507,9 @@
      *
      * The blob is built at click time from the node, like the copy button, so a
      * fragment that changed under the reader is not the one that lands on disk.
+     * @param {HTMLElement} code
+     * @param {string} filename
+     * @param {HTMLElement} status
      */
     function downloadButton(code, filename, status) {
         const button = el('button', {
@@ -1241,6 +1559,7 @@
      * When even that is refused, the selection it made is left in place: the
      * operator finishes with their own keystroke, and the block says so instead
      * of pretending the click worked.
+     * @param {HTMLElement} code
      */
     function writeClipboard(code) {
         const text = code.textContent;
@@ -1257,9 +1576,11 @@
                 });
         }
         const selection = selectNode(code);
-        let copied = false;
+        let copied;
         try {
-            copied = document.execCommand('copy');
+            // execCommand is deprecated, but it is the only copy a page served without a secure context has.
+            const legacy = /** @type {{execCommand: (command: string) => boolean}} */ (document);
+            copied = legacy.execCommand('copy');
         } catch (error) {
             copied = false;
         }
@@ -1267,6 +1588,9 @@
         return Promise.resolve(copied);
     }
 
+    /**
+     * @param {Node} node
+     */
     function selectNode(node) {
         const range = document.createRange();
         range.selectNodeContents(node);
@@ -1293,6 +1617,8 @@
         const screen = currentScreen();
         if (screen !== 'ack') state.ackReturn = null;
         clearTimeout(state.runTimer);
+        // A recap job keeps running on the Hub: only the screen stops asking, and asks again on return.
+        clearTimeout(state.recapPollTimer);
         // The note this timer restores belongs to a panel the next render replaces.
         clearTimeout(state.noteTimer);
         render();
@@ -1301,8 +1627,8 @@
         // Both screens read the runs list: recent renders it, the launcher
         // shows what past runs weighed. Reloaded on every entry, not once, so
         // coming back from a run that just finished shows its weight.
-        if (screen === 'recent' || screen === 'new') loadRuns();
-        else if (screen === 'incidents') loadIncidents();
+        if (screen === 'recent' || screen === 'new') void loadRuns();
+        else if (screen === 'incidents') void loadIncidents();
         else if (screen === 'correlations') {
             // A link to one pair, from Grafana or an incident, reads it over the widest range.
             state.correlationFilter.pair_key = PSL.readCorrelationPair(location.hash);
@@ -1315,7 +1641,7 @@
             // A note and a token belong to the disclosure they were made on.
             if (!state.disclosure || !id || state.disclosure.disclosure.id !== id) {
                 state.disclosureNote = null;
-                state.disclosureLink = null;
+                state.disclosureLink = /** @type {?{id: string, pdfUrl: string, reportUrl: string}} */ (null);
                 state.withdrawOpen = false;
             }
             if (id) loadDisclosure(id);
@@ -1325,7 +1651,7 @@
             const id = currentRunId();
             if (id && (!state.run || state.run.id !== id)) {
                 state.runReadFailures = 0;
-                loadRun(id);
+                void loadRun(id);
             } else if (id) {
                 // The render above already mounted the report frame: a second one would load it twice.
                 if (screen === 'run') render();
@@ -1342,6 +1668,7 @@
      * Pre-fills the form from an incident link: its service, its window as an
      * absolute range. The row it names is added when the incidents screen still
      * holds it, for the banner's wording. Anything else on the form stays.
+     * @param {Handoff | null} handoff
      */
     function applyHandoff(handoff) {
         // A route without the query does not end the handoff: the tab points at
@@ -1352,7 +1679,7 @@
             const kept = state.handoff;
             const intact = kept && state.form.rangeMode === 'absolute' && state.form.fromMs === kept.fromMs
                 && state.form.toMs === kept.toMs && state.form.service === kept.service;
-            if (!intact) state.handoff = null;
+            if (!intact) state.handoff = /** @type {?Handoff} */ (null);
             return;
         }
         state.handoff = handoff;
@@ -1375,18 +1702,19 @@
     /**
      * Puts a trace an episode handed over in the form. A route without one keeps the banner
      * while the form still holds one of the pair's two traces.
+     * @param {TraceHandoff | null} handoff
      */
     function applyTraceHandoff(handoff) {
         if (!handoff) {
             const kept = state.traceHandoff;
             if (kept && state.form.traceId !== kept.traceId && state.form.traceId !== kept.otherTraceId) {
-                state.traceHandoff = null;
+                state.traceHandoff = /** @type {?TraceHandoff} */ (null);
             }
             return;
         }
         state.traceHandoff = handoff;
         // A trace replaces a window handed over before it, banner included.
-        state.handoff = null;
+        state.handoff = /** @type {?Handoff} */ (null);
         state.form.mode = 'trace';
         state.form.traceId = handoff.traceId;
         state.form.service = '';
@@ -1425,6 +1753,9 @@
     // a value sits under the gap beside its own label.
     const SOURCE_COLUMNS_RIGHT = ['last_success', 'down_for', 'producer'];
 
+    /**
+     * @param {Source[]} sources
+     */
     function sourcesTable(sources) {
         const head = el('tr', {}, SOURCE_COLUMNS.map(function (name) {
             return el('th', {
@@ -1436,6 +1767,9 @@
         // PSL.splitByKind keeps each source's original position, which the fold ids
         // are built from, so a grouped row still addresses the source it belongs to.
         const kinds = PSL.splitByKind(sources);
+        /**
+         * @param {Array<{source: Source, index: number}>} group
+         */
         const rows = function (group) {
             return group.flatMap(function (entry) {
                 return sourceRow(entry.source, entry.index);
@@ -1452,12 +1786,19 @@
         ]);
     }
 
+    /**
+     * @param {string} text
+     */
     function tableGroupRow(text) {
         return el('tr', {class: 'table-group'}, [
             el('td', {colspan: String(SOURCE_COLUMNS.length)}, [el('span', {class: 'overline', text: text})])
         ]);
     }
 
+    /**
+     * @param {Source} source
+     * @param {number} index
+     */
     function sourceRow(source, index) {
         const now = Date.now();
         const row = el('tr', source.reachable ? {} : {'data-unreachable': 'true'});
@@ -1511,6 +1852,10 @@
         return [row, detail];
     }
 
+    /**
+     * @param {Source} source
+     * @param {number} now
+     */
     function healthCell(source, now) {
         const health = PSL.sourceHealth(source, now);
         return el('span', {class: 'health', 'data-health': health.tone}, [
@@ -1519,6 +1864,9 @@
         ]);
     }
 
+    /**
+     * @param {Source} source
+     */
     function producerCell(source) {
         if (!source.producer_version) {
             // Two different absences. A backend has no producer at all, and saying
@@ -1570,6 +1918,7 @@
      * it is the one value that claims something about the world rather than
      * about the process.
      */
+    /** @type {Array<[string, string[]]>} */
     const DAEMON_GROUPS = [
         ['declared', ['environment']],
         ['ingestion', ['sampling_rate', 'max_active_traces', 'trace_ttl_ms', 'max_events_per_trace',
@@ -1638,7 +1987,10 @@
         slow_min_occurrences: 'slow_query_min_occurrences'
     };
 
-    /** The sentence for one setting, or none. */
+    /**
+     * The sentence for one setting, or none.
+     * @param {string} name
+     */
     function settingCopy(name) {
         const key = DAEMON_COPY[name] || DETECTION_COPY[DETECT_ALIAS[name] || name];
         return key ? t(key) : null;
@@ -1659,6 +2011,8 @@
     /**
      * A real button and not a clickable row: Enter, Space, the focus ring and the
      * semantics come free, and text stays selectable.
+     * @param {Source} source
+     * @param {number} index
      */
     function daemonNameCell(source, index) {
         const button = el('button', {
@@ -1678,6 +2032,9 @@
      * wrapper and reset its horizontal scroll. Fetched once and kept: a settings
      * snapshot is not a live figure, and refetching on every fold would hit the
      * daemon for a fold rather than for a question.
+     * @param {Source} source
+     * @param {HTMLElement} button
+     * @param {number} index
      */
     function toggleDaemon(source, button, index) {
         const open = button.getAttribute('aria-expanded') !== 'true';
@@ -1686,7 +2043,8 @@
         saveFolds();
         const cell = document.getElementById('daemon-detail-' + index);
         if (!cell) return;
-        cell.parentNode.hidden = !open;
+        const row = /** @type {HTMLElement} */ (cell.parentNode);
+        row.hidden = !open;
         // A folded row is not being read, so it stops costing the daemon anything.
         if (!open) {
             stopTicker(source.id);
@@ -1703,7 +2061,11 @@
         loadDaemon(source, index);
     }
 
-    /** The first read of a daemon row, and the retry after a failed one. */
+    /**
+     * The first read of a daemon row, and the retry after a failed one.
+     * @param {Source} source
+     * @param {number} index
+     */
     function loadDaemon(source, index) {
         state.daemonViews[source.id] = 'loading';
         const cell = document.getElementById('daemon-detail-' + index);
@@ -1717,9 +2079,9 @@
             .catch(function (error) {
                 // The gate's 503 is the Hub being briefly full, not the Hub failing:
                 // it clears in about a second and deserves its own sentence.
-                state.daemonViews[source.id] = {
+                state.daemonViews[source.id] = /** @type {DaemonView} */ ({
                     error_code: /answered 503$/.test(String(error && error.message)) ? 'hub_busy' : 'internal'
-                };
+                });
             })
             .finally(function () {
                 // The table may have been rebuilt while this was in flight, so the
@@ -1734,6 +2096,10 @@
             });
     }
 
+    /**
+     * @param {Source} source
+     * @param {number} index
+     */
     function daemonPanel(source, index) {
         const view = state.daemonViews[source.id];
         if (view === 'loading' || view === undefined) {
@@ -1778,6 +2144,9 @@
     /**
      * A failed read is not a dead end: the row keeps asking on the same interval
      * the healthy rows use, and the first answer replaces this with the daemon.
+     * @param {Source} source
+     * @param {number} index
+     * @param {string} code
      */
     function daemonError(source, index, code) {
         return el('div', {class: 'daemon-panel'}, [
@@ -1811,11 +2180,17 @@
      * What the fold opens on: the verdict, the gauges, and the daemon's own
      * hints beside them rather than under them. The settings are the long part
      * and stay behind one more click.
+     * @param {DaemonGauge | null} gauge
      */
     function pct(gauge) {
         return gauge ? gauge.pct : null;
     }
 
+    /**
+     * @param {Source} source
+     * @param {DaemonView} view
+     * @param {number} index
+     */
     function daemonTopRow(source, view, index) {
         const verdict = DAEMON_VERDICT[view.state] ? view.state : 'unknown';
         // Read once and cleared: the badges belong to the read that produced them,
@@ -1858,7 +2233,7 @@
         } else if (view.warnings.length === 0) {
             side.appendChild(el('p', {class: 'daemon-lead', text: t('daemon.hints.none')}));
         } else {
-            view.warnings.forEach(function (hint) {
+            view.warnings.forEach(function (/** @type {{kind: string, message: string}} */ hint) {
                 side.appendChild(el('div', {class: 'outcome-warning'}, [
                     el('span', {
                         class: 'outcome-warning-kind',
@@ -1904,15 +2279,25 @@
     const REFRESH_SECONDS = [0, 5, 10, 30, 60];
     const DEFAULT_REFRESH_MS = 5000;
 
+    /**
+     * @param {string} sourceId
+     */
     function refreshMs(sourceId) {
         const chosen = state.daemonRefreshMs[sourceId];
         return chosen === undefined ? DEFAULT_REFRESH_MS : chosen;
     }
 
+    /**
+     * @param {string} sourceId
+     */
     function refreshSeconds(sourceId) {
         return refreshMs(sourceId) / 1000;
     }
 
+    /**
+     * @param {Source} source
+     * @param {number} index
+     */
     function refreshControl(source, index) {
         const ms = refreshMs(source.id);
         const select = el('select', {class: 'refresh-select', 'aria-label': t('daemon.refresh.label')});
@@ -1945,7 +2330,10 @@
             }
         });
         const ring = refreshRing();
-        if (ms) ring.querySelector('.refresh-ring-fill').style.setProperty('--cycle', ms + 'ms');
+        if (ms) {
+            const fill = /** @type {HTMLElement} */ (ring.querySelector('.refresh-ring-fill'));
+            fill.style.setProperty('--cycle', ms + 'ms');
+        }
 
         // Its own line under the heading, not squeezed beside it. The ring is
         // decoration, the sentence is the information: under reduced motion the
@@ -1998,6 +2386,8 @@
      * One second, one job: it writes the countdown and fires the read when the
      * time is up. Deriving the deadline from the last read rather than counting
      * down a variable means a slow tab cannot make the interval drift.
+     * @param {Source} source
+     * @param {number} index
      */
     function startTicker(source, index) {
         stopTicker(source.id);
@@ -2014,10 +2404,12 @@
      * a value written every second: a per-second write can only land on whole
      * seconds, so the last slice of the disc never got drawn before the cycle
      * turned over. Restarted only to resynchronise it with a read.
+     * @param {number} index
+     * @param {number} ms
      */
     function restartSweep(index, ms) {
         const host = document.getElementById('refresh-next-' + index);
-        const fill = host && host.parentNode.querySelector('.refresh-ring-fill');
+        const fill = /** @type {HTMLElement} */ (host && host.parentNode.querySelector('.refresh-ring-fill'));
         if (!fill) return;
         if (!ms) {
             fill.style.animation = 'none';
@@ -2029,7 +2421,11 @@
         fill.style.animation = '';
     }
 
-    /** The disc and the countdown clock restart together, from one place. */
+    /**
+     * The disc and the countdown clock restart together, from one place.
+     * @param {Source} source
+     * @param {number} index
+     */
     function restartCycle(source, index) {
         const ms = refreshMs(source.id);
         state.daemonCycleAt[source.id] = Date.now();
@@ -2043,6 +2439,9 @@
         }, ms);
     }
 
+    /**
+     * @param {string} sourceId
+     */
     function stopTicker(sourceId) {
         clearInterval(state.daemonTickers[sourceId]);
         delete state.daemonTickers[sourceId];
@@ -2057,6 +2456,10 @@
             .forEach(stopTicker);
     }
 
+    /**
+     * @param {Source} source
+     * @param {number} index
+     */
     function tickRefresh(source, index) {
         const read = document.getElementById('refresh-read-' + index);
         const next = document.getElementById('refresh-next-' + index);
@@ -2077,8 +2480,7 @@
         // Timing it from the last read would hold the disc at full for however
         // long the request takes, which reads as a stall rather than as a cycle.
         const cycleAt = state.daemonCycleAt[source.id];
-        const ring = next.parentNode.querySelector('.refresh-ring');
-        const fill = ring && ring.querySelector('.refresh-ring-fill');
+        const ring = /** @type {HTMLElement} */ (next.parentNode.querySelector('.refresh-ring'));
         if (!ms) {
             next.textContent = t('daemon.refresh.stopped');
             if (ring) ring.hidden = true;
@@ -2117,6 +2519,10 @@
         return true;
     }
 
+    /**
+     * @param {Source} source
+     * @param {number} index
+     */
     function refreshDaemon(source, index) {
         // A folded row is not being read. The cycle timer can fire in the very gap
         // between the fold clearing it and this call arming the next one, and that
@@ -2132,7 +2538,8 @@
         }
         state.daemonInFlight[source.id] = true;
         restartCycle(source, index);
-        const previous = state.daemonViews[source.id];
+        // Never 'loading' here: a ticker only runs over a row whose first read has landed.
+        const previous = /** @type {DaemonView | undefined} */ (state.daemonViews[source.id]);
         // A light read is only ever an overlay on a full one, so a row with
         // nothing to lay it over asks the cheap question first, and only reads in
         // full once it knows there is something to read.
@@ -2145,7 +2552,7 @@
         const kept = plan === 'light' ? previous : null;
         getJson('/api/sources/' + encodeURIComponent(source.id) + '/daemon'
             + (plan === 'full' ? '' : '?refresh=status'))
-            .then(function (view) {
+            .then(function (/** @type {DaemonView} */ view) {
                 if (plan === 'probe') {
                     // The daemon answers again: only a full read renders it, and that is
                     // the same read this row started with, skeleton and all.
@@ -2192,6 +2599,9 @@
             });
     }
 
+    /**
+     * @param {DaemonGauge | null} gauge
+     */
     function gaugeText(gauge) {
         if (!gauge || gauge.value == null) return t('daemon.unknown');
         if (gauge.capacity == null) return group(gauge.value);
@@ -2202,6 +2612,8 @@
      * The settings, behind one click. They are the long part of the view and the
      * least urgent: an operator opens this row to see whether the daemon is
      * coping, and reads the settings once it is not.
+     * @param {Source} source
+     * @param {DaemonView} view
      */
     function settingsDisclosure(source, view) {
         const open = state.daemonSettingsOpen[source.id] === true;
@@ -2229,8 +2641,7 @@
         return el('div', {class: 'settings-block'}, [button, body]);
     }
 
-    // Fixed, and not measured: the table around this sets min-width: 1090px and
-    // scrolls rather than shrink, so the room here never falls below three.
+    // Fixed, and not measured: a block narrower than three cards stacks them in one column in CSS.
     const SETTINGS_COLUMNS = 3;
 
     /**
@@ -2240,6 +2651,7 @@
      * columns. Here a card only ever moves the cards under it in its own column.
      * Not CSS columns either, which repack by height and so re-shuffled cards
      * sideways under the reader's own click.
+     * @param {HTMLElement[]} cards
      */
     function settingsColumns(cards) {
         // Never more columns than cards: an empty one still takes its share of the
@@ -2249,6 +2661,8 @@
         for (let index = 0; index < count; index++)
             columns.push(el('div', {class: 'settings-col'}));
         cards.forEach(function (card, index) {
+            // Stacked on a narrow screen, the columns dissolve and this order puts the cards back in reading order.
+            card.style.order = String(index);
             columns[index % count].appendChild(card);
         });
         return columns;
@@ -2258,6 +2672,7 @@
      * Why no settings are shown, as prose above the cards rather than dealt into
      * a column as if it were one: a paragraph in a third of the row reads as a
      * card that lost its rows.
+     * @param {DaemonView} view
      */
     function configAbsenceNote(view) {
         const reason = view.config_unavailable_reason;
@@ -2266,6 +2681,10 @@
                 : reason === 'unreadable' ? 'daemon.config.unreadable' : 'daemon.config.unanswered'));
     }
 
+    /**
+     * @param {string} sourceId
+     * @param {DaemonView} view
+     */
     function settingsCards(sourceId, view) {
         const cards = [];
         if (view.config) {
@@ -2304,6 +2723,7 @@
      * binary this Hub embeds, which is the same approximation the daemon's own
      * monitor makes against the binary running it, so the version is named
      * rather than assumed away.
+     * @param {DaemonView} view
      */
     function settingsPreamble(view) {
         const note = proseInto(el('p', {class: 'settings-preamble'}),
@@ -2321,6 +2741,11 @@
      * glance, and the count of departures on each says which one to open. The
      * gloss lives in the body rather than the heading, or the folded list would
      * be as long as the open one.
+     * @param {string} sourceId
+     * @param {string} group
+     * @param {string[]} names
+     * @param {DaemonSettings} config
+     * @param {DaemonSettings | null} defaults
      */
     function settingsCard(sourceId, group, names, config, defaults) {
         const key = sourceId + '|' + group;
@@ -2365,13 +2790,23 @@
         return el('section', {class: 'settings-card'}, [button, body]);
     }
 
-    /** A value that departs from the engine's default, when one is known. */
+    /**
+     * A value that departs from the engine's default, when one is known.
+     * @param {string} name
+     * @param {any} value
+     * @param {DaemonSettings | null} defaults
+     */
     function isChanged(name, value, defaults) {
         if (!defaults) return false;
         const fallback = defaults[name];
         return fallback !== undefined && JSON.stringify(value) !== JSON.stringify(fallback);
     }
 
+    /**
+     * @param {string} name
+     * @param {any} value
+     * @param {DaemonSettings | null} defaults
+     */
     function settingRow(name, value, defaults) {
         const fallback = defaults ? defaults[name] : undefined;
         const changed = isChanged(name, value, defaults);
@@ -2390,6 +2825,11 @@
         return row;
     }
 
+    /**
+     * @param {string} name
+     * @param {any} value
+     * @param {boolean} changed
+     */
     function settingValue(name, value, changed) {
         if (name === 'environment') {
             return el('dd', {class: 'setting-v', 'data-changed': changed ? 'true' : null}, [
@@ -2403,6 +2843,10 @@
         });
     }
 
+    /**
+     * @param {string} name
+     * @param {any} value
+     */
     function daemonValue(name, value) {
         if (value === null) return t('daemon.value.not_set');
         if (name === 'sampling_rate' || name === 'correlation_min_confidence') return share(value);
@@ -2429,6 +2873,7 @@
      * A 0-to-1 share as a percentage, never rounded down to a zero it is not. A
      * sampling rate of 0.0005 is one trace in two thousand, which is very
      * different from none at all.
+     * @param {number} value
      */
     function share(value) {
         if (typeof value !== 'number') return String(value);
@@ -2458,8 +2903,9 @@
         });
     }
 
-    /** Changing source clears both acknowledgements and closes the picker: they
-     were answers about a different source. */
+    /**
+     * @param {string} id
+     */
     function selectSource(id) {
         state.form.sourceId = id;
         saveSource(id);
@@ -2470,6 +2916,9 @@
         render();
     }
 
+    /**
+     * @param {string} mode
+     */
     function setMode(mode) {
         state.form.mode = mode;
         // Switching clears the other field, and a trace ID takes no window at all,
@@ -2487,6 +2936,7 @@
      * Updated in place, never re-rendered. A full render replaces the range and
      * the number field mid-interaction, which drops the browser's pointer
      * capture (the handle stops following the mouse) and the text caret.
+     * @param {number} value
      */
     function setMaxTraces(value) {
         state.form.maxTraces = value;
@@ -2504,8 +2954,8 @@
         const over = band.key === 'over' || band.key === 'invalid';
         const value = String(state.form.maxTraces);
 
-        const number = document.getElementById('traces-number');
-        const slider = document.getElementById('traces-slider');
+        const number = /** @type {HTMLInputElement} */ (document.getElementById('traces-number'));
+        const slider = /** @type {HTMLInputElement} */ (document.getElementById('traces-slider'));
         // Assigned only when it differs, so the element the operator is dragging or
         // typing into is left alone.
         if (number && number.value !== value) number.value = value;
@@ -2618,6 +3068,7 @@
     /**
      * The command, and the file it needs when thresholds were changed. Empty for
      * a daemon, which is read over HTTP and has no command line at all.
+     * @param {Source} source
      */
     function terminalPanels(source) {
         if (!source) return [];
@@ -2676,7 +3127,10 @@
         return panels;
     }
 
-    /** Hub:Access found no grant for this caller: the Hub answers, it reaches nothing. */
+    /**
+     * Hub:Access found no grant for this caller: the Hub answers, it reaches nothing.
+     * @param {string} text
+     */
     function noGrantBanner(text) {
         return el('div', {class: 'banner', 'data-tone': 'warn'}, [el('div', {text: text})]);
     }
@@ -2693,6 +3147,7 @@
      * window is said around the incident, the way the incidents screen says it,
      * otherwise as a length. A daemon takes no window, so under a daemon the
      * banner warns rather than letting the form look ready to run.
+     * @param {Source} source
      */
     function handoffBanner(source) {
         const handoff = state.handoff;
@@ -2725,13 +3180,20 @@
         ]);
     }
 
-    /** Where a trace in the form came from, and the pair's other trace one click away. */
+    /**
+     * Where a trace in the form came from, and the pair's other trace one click away.
+     * @param {Source} source
+     */
     function traceHandoffBanner(source) {
         const handoff = state.traceHandoff;
         if (!handoff) return null;
         const daemon = Boolean(source && source.kind === 'daemon');
         const other = state.form.traceId === handoff.traceId ? handoff.otherTraceId : handoff.traceId;
-        const swap = other ? el('button', {type: 'button', class: 'pill-button pill-sm', text: t('new.trace_handoff.swap')})
+        const swap = other ? el('button', {
+                type: 'button',
+                class: 'pill-button pill-sm',
+                text: t('new.trace_handoff.swap')
+            })
             : null;
         if (swap) {
             swap.addEventListener('click', function () {
@@ -2777,17 +3239,23 @@
         const sources = runSources();
         const kinds = PSL.splitByKind(sources);
         if (!kinds.split) return sources.map(sourceRadio);
+        /**
+         * @param {Array<{source: Source, index: number}>} group
+         */
         const radios = function (group) {
             return group.map(function (entry) {
                 return sourceRadio(entry.source);
             });
         };
-        return [sourceGroupLabel(t('sources.group.daemons'))].concat(
+        return /** @type {HTMLElement[]} */ ([sourceGroupLabel(t('sources.group.daemons'))]).concat(
             radios(kinds.daemons), [sourceGroupLabel(t('sources.group.backends'))], radios(kinds.backends));
     }
 
     // aria-hidden: each row already names its own kind, so the label would only
     // repeat it, and it is not a radio the group should offer.
+    /**
+     * @param {string} text
+     */
     function sourceGroupLabel(text) {
         return el('div', {class: 'source-group', role: 'presentation', 'aria-hidden': 'true'}, [
             el('span', {class: 'overline', text: text}),
@@ -2797,6 +3265,9 @@
 
     let sourceMetaCount = 0;
 
+    /**
+     * @param {Source} source
+     */
     function sourceRadio(source) {
         const selected = source.id === state.form.sourceId;
         const now = Date.now();
@@ -2837,6 +3308,9 @@
         return button;
     }
 
+    /**
+     * @param {Source} source
+     */
     function producerLabel(source) {
         if (source.producer_version) return t('new.source.producer', {version: source.producer_version});
         return source.kind === 'daemon' ? t('new.source.producer_unknown') : t('new.source.no_producer');
@@ -2888,6 +3362,9 @@
         return link;
     }
 
+    /**
+     * @param {Source} source
+     */
     function backendControls(source) {
         const nodes = [modeSwitch()];
         if (state.form.mode === 'trace') {
@@ -2955,9 +3432,11 @@
      * What a radio group owes the keyboard: one tab stop on the checked radio,
      * arrows to move the choice. A choice re-renders the screen, so the focus is
      * put back on the radio at the same place in the new one.
+     * @param {HTMLElement} group
+     * @param {string} name
      */
     function radioKeys(group, name) {
-        const radios = Array.prototype.slice.call(group.querySelectorAll('[role="radio"]'));
+        const radios = /** @type {HTMLElement[]} */ (Array.prototype.slice.call(group.querySelectorAll('[role="radio"]')));
         const checked = radios.findIndex(function (radio) {
             return radio.getAttribute('aria-checked') === 'true';
         });
@@ -2966,13 +3445,14 @@
             radio.tabIndex = index === Math.max(checked, 0) ? 0 : -1;
         });
         group.addEventListener('click', function (event) {
-            const radio = event.target.closest('[role="radio"]');
-            const again = radio && document.querySelector('[data-radio="' + radio.getAttribute('data-radio') + '"]');
+            const target = /** @type {Element} */ (event.target);
+            const radio = target.closest('[role="radio"]');
+            const again = radio && /** @type {HTMLElement} */ (document.querySelector('[data-radio="' + radio.getAttribute('data-radio') + '"]'));
             if (again && again !== radio) again.focus();
         });
         group.addEventListener('keydown', function (event) {
             const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
-            const at = radios.indexOf(event.target);
+            const at = radios.indexOf(/** @type {HTMLElement} */ (event.target));
             if (!step || at < 0) return;
             event.preventDefault();
             radios[(at + step + radios.length) % radios.length].click();
@@ -2986,6 +3466,9 @@
      * A form row. A text control gets a real label, so it is named and a click
      * on the words focuses it. A radio group is named by aria-labelledby. The
      * gloss stays outside the label and describes the control instead.
+     * @param {string} label
+     * @param {HTMLElement} control
+     * @param {string} [gloss]
      */
     function field(label, control, gloss) {
         const id = 'field-' + (++fieldCount);
@@ -3023,6 +3506,9 @@
             : PSL.parseDur(state.form.lookback);
     }
 
+    /**
+     * @param {Source} source
+     */
     function rangeControl(source) {
         const button = el('button', {
             type: 'button',
@@ -3050,7 +3536,7 @@
             state.form.pickerOpen = true;
             button.setAttribute('aria-expanded', 'true');
             row.after(rangePicker());
-            const first = wrap.querySelector('.picker input');
+            const first = /** @type {HTMLInputElement} */ (wrap.querySelector('.picker input'));
             if (first) first.focus();
         });
         if (state.form.pickerOpen) wrap.appendChild(rangePicker());
@@ -3059,7 +3545,10 @@
         return wrap;
     }
 
-    /** Consequences appear under the control, not after the run. */
+    /**
+     * Consequences appear under the control, not after the run.
+     * @param {Source} source
+     */
     function rangeConsequences(source) {
         const notes = [];
         const spanMs = windowSpanMs();
@@ -3078,6 +3567,10 @@
         return notes;
     }
 
+    /**
+     * @param {string} text
+     * @param {string} [tone]
+     */
     function consequence(text, tone) {
         return el('span', {class: 'consequence', 'data-tone': tone || 'muted'}, [
             el('span', {class: 'consequence-dot'}),
@@ -3159,6 +3652,10 @@
         button.focus();
     }
 
+    /**
+     * @param {string} mode
+     * @param {{fromMs?: number, toMs?: number, lookback?: string}} values
+     */
     function applyRange(mode, values) {
         state.form.rangeMode = mode;
         Object.keys(values).forEach(function (key) {
@@ -3168,6 +3665,10 @@
         renderFocus('#range-pill');
     }
 
+    /**
+     * @param {string} label
+     * @param {HTMLElement} control
+     */
     function dateField(label, control) {
         return el('label', {class: 'picker-field'}, [
             el('span', {class: 'picker-field-label', text: label}),
@@ -3182,7 +3683,11 @@
             min: '1',
             value: String(state.form.customQty)
         });
-        const units = el('div', {class: 'segmented segmented-sm', role: 'radiogroup', 'aria-label': t('new.picker.unit')});
+        const units = el('div', {
+            class: 'segmented segmented-sm',
+            role: 'radiogroup',
+            'aria-label': t('new.picker.unit')
+        });
         // The value stays the engine's own unit, only its label follows the language.
         [['m', 'unit.min'], ['h', 'unit.h'], ['d', 'unit.d']].forEach(function (entry) {
             const unit = entry[0];
@@ -3297,7 +3802,13 @@
         return block;
     }
 
-    /** The sink-panel scaffold both info blocks share: head, subtitle, rows. */
+    /**
+     * The sink-panel scaffold both info blocks share: head, subtitle, rows.
+     * @param {string} head
+     * @param {string} sub
+     * @param {string[][]} rows
+     * @param {Fold} [fold]
+     */
     function sinkBlock(head, sub, rows, fold) {
         const body = el('dl', {class: 'sink-rows'}, rows.flatMap(function (row) {
             return [el('dt', {text: row[0]}), el('dd', {text: row[1]})];
@@ -3348,6 +3859,7 @@
         const source = selectedSource();
         if (!source || !state.runs) return null;
         const past = state.runs.filter(function (run) {
+            /** @type {Partial<RunResult>} */
             const result = run.result || {};
             // Trace-id runs are excluded: their weight says nothing about the
             // slider. A missing max_traces on a service run is the server-side
@@ -3370,6 +3882,10 @@
             }));
     }
 
+    /**
+     * @param {{key: import('../types').WeightBand}} band
+     * @param {number} cap
+     */
     function capNote(band, cap) {
         if (band.key === 'invalid') return t('new.traces.at_least');
         if (band.key === 'over') return t('new.traces.over', {cap: cap});
@@ -3381,9 +3897,10 @@
      * its share of the rule. A cap at or below a boundary means that band never
      * occurs: it is dropped rather than drawn at zero width under a label
      * repeating the cap.
+     * @param {number} cap
      */
     function bands(cap) {
-        const inner = [['ok', 500, 'new.band.safe'], ['warn', 1200, 'new.band.heavy']]
+        const inner = /** @type {Array<[string, number, string]>} */ ([['ok', 500, 'new.band.safe'], ['warn', 1200, 'new.band.heavy']])
             .filter(function (band) {
                 return band[1] < cap;
             });
@@ -3406,7 +3923,10 @@
         });
     }
 
-    /** Each label sits at the right edge of its own band, so it marks a boundary. */
+    /**
+     * Each label sits at the right edge of its own band, so it marks a boundary.
+     * @param {number} cap
+     */
     function bandScale(cap) {
         const current = bands(cap);
         const grid = el('div', {class: 'band-scale-grid'}, current.map(function (band) {
@@ -3421,6 +3941,9 @@
         ]);
     }
 
+    /**
+     * @param {number} value
+     */
     function group(value) {
         // Thousands separators on the integer part only: a decimal such as
         // 0.6667 must not come out as 0.6 667.
@@ -3457,14 +3980,17 @@
         // Folded until the reader opens it, like every other fold in the product,
         // and remembered from then on.
         return sinkBlock(t('new.sink.head'), t('new.sink.sub'), rows, {
-                open: state.panelOpen.caps === true,
-                onToggle: function (open) {
-                    state.panelOpen.caps = open;
-                    saveFolds();
-                }
-            });
+            open: state.panelOpen.caps === true,
+            onToggle: function (open) {
+                state.panelOpen.caps = open;
+                saveFolds();
+            }
+        });
     }
 
+    /**
+     * @param {{fg: string, bg: string}} band
+     */
     function bandStyle(band) {
         return 'color:' + band.fg + ';background:' + band.bg;
     }
@@ -3485,6 +4011,8 @@
      * A producer behind the engine is worth saying out loud: perf-sentinel is
      * pre-1.0, so a detector added between minors does not run on the older
      * binary at all, and its absence looks exactly like a clean service.
+     * @param {Source} source
+     * @param {{dir: string, label: string}} skew
      */
     function skewNotice(source, skew) {
         const engine = state.status.engine_version;
@@ -3511,6 +4039,8 @@
      * Where the newer version comes from, which is not the same place for every
      * source. A daemon is upgraded through its chart, so pointing its operator at
      * a binary would be pointing at the wrong artefact.
+     * @param {Source} source
+     * @param {string} engine
      */
     function upgradeLine(source, engine) {
         const line = el('p', {class: 'notice-block-body'}, [
@@ -3539,6 +4069,9 @@
         return line;
     }
 
+    /**
+     * @param {Source} source
+     */
     function unreachableNotice(source) {
         const text = el('div', {class: 'notice-block-text'}, [
             el('p', {
@@ -3576,7 +4109,10 @@
         return el('section', {class: 'notice-block', 'data-tone': 'warn'}, [warningGlyph(17), text]);
     }
 
-    /** The circle-exclamation every crit banner carries, drawn once. */
+    /**
+     * The circle-exclamation every crit banner carries, drawn once.
+     * @param {number} size
+     */
     function critGlyph(size) {
         return svg([
             ['circle', {cx: '12', cy: '12', r: '9'}],
@@ -3584,6 +4120,9 @@
         ], size);
     }
 
+    /**
+     * @param {number} size
+     */
     function warningGlyph(size) {
         return svg([
             ['path', {d: 'M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'}],
@@ -3591,6 +4130,11 @@
         ], size);
     }
 
+    /**
+     * @param {boolean} checked
+     * @param {string} label
+     * @param {(checked: boolean) => void} onChange
+     */
     function checkbox(checked, label, onChange) {
         const input = el('input', {type: 'checkbox'});
         input.checked = checked;
@@ -3706,7 +4250,7 @@
     }
 
     function updateSubmit() {
-        const button = document.getElementById('submit');
+        const button = /** @type {HTMLButtonElement} */ (document.getElementById('submit'));
         const sentence = document.getElementById('submit-sentence');
         if (!button || !sentence) return;
         const blocker = submitBlocker();
@@ -3717,6 +4261,9 @@
         refreshTerminal();
     }
 
+    /**
+     * @param {Source} source
+     */
     function buildRequest(source) {
         if (source.kind === 'daemon') return {};
         if (state.form.mode === 'trace') {
@@ -3738,18 +4285,16 @@
     function submit() {
         const source = selectedSource();
         if (!source || submitBlocker()) return;
-        const button = document.getElementById('submit');
+        const button = /** @type {HTMLButtonElement} */ (document.getElementById('submit'));
         button.disabled = true;
 
         fetch('/api/analyses', {
             method: 'POST',
             headers: {'content-type': 'application/json'},
             body: JSON.stringify({source_id: source.id, request: buildRequest(source)})
-        }).then(signInOn401).then(function (response) {
-            return response.json().then(function (payload) {
-                return {ok: response.ok, payload: payload};
-            });
-        }).then(function (result) {
+        }).then(signInOn401).then(async function (response) {
+            return {ok: response.ok, payload: await response.json()};
+        }).then(function (/** @type {{ok: boolean, payload: {id?: string, detail?: string, code?: string}}} */ result) {
             if (!result.ok) throw new Error(PSL.problemText(result.payload, undefined, t('new.submit.refused')));
             location.hash = '#/run/' + result.payload.id;
         }).catch(function (error) {
@@ -3765,6 +4310,9 @@
 
     // ------------------------------------------------------- screen: one run
 
+    /**
+     * @param {string} id
+     */
     function renderRunScreen(id) {
         const run = state.run;
         const section = el('section', {}, [backLink()]);
@@ -3789,7 +4337,7 @@
         section.appendChild(live(el('p', {class: 'page-sub', text: sub ? sub() : view.sub}), sub));
 
         const left = el('div', {class: 'run-left'}, [eventLog(run, key)]);
-        const outcome = outcomePanel(run, key, view);
+        const outcome = outcomePanel(run, key);
         if (outcome) left.appendChild(outcome);
         section.appendChild(el('div', {class: 'run-grid'}, [left, factsRail(run, key)]));
         return section;
@@ -3807,15 +4355,22 @@
         ]);
     }
 
-    /** Back to the form, filled with what this run asked, to send as it is or change first. */
+    /**
+     * Back to the form, filled with what this run asked, to send as it is or change first.
+     * @param {Run} run
+     */
     function rerun(run) {
         Object.assign(state.form, PSL.formFromRequest(run.request),
             {sourceId: run.source_id, ackUnreachable: false, ackHeavy: false});
-        state.handoff = null;
-        state.traceHandoff = null;
+        state.handoff = /** @type {?Handoff} */ (null);
+        state.traceHandoff = /** @type {?TraceHandoff} */ (null);
         location.hash = '#/new';
     }
 
+    /**
+     * @param {string} label
+     * @param {boolean} filled
+     */
     function rerunAction(label, filled) {
         return {
             label: label, filled: filled, action: function () {
@@ -3831,7 +4386,11 @@
         ]);
     }
 
-    /** Headline and sub-line per state, in the source's own terms. */
+    /**
+     * Headline and sub-line per state, in the source's own terms.
+     * @param {Run} run
+     * @param {string} key
+     */
     function runView(run, key) {
         if (key === 'queued') {
             return {
@@ -3852,6 +4411,7 @@
             };
         }
         if (key === 'succeeded') {
+            /** @type {Partial<RunResult>} */
             const result = run.result || {};
             const caveats = (result.warnings || []).length;
             return {
@@ -3896,6 +4456,8 @@
      * A receipt, not a feed. Every line is a timestamp the Hub wrote: the design
      * calls for a `dequeued` line too, but this service records one instant for
      * dequeue and start, and inventing a second would be interpolation.
+     * @param {Run} run
+     * @param {string} key
      */
     function eventLog(run, key) {
         const rows = [logRow(run.created_at_ms, t('run.log.accepted'), t('run.log.accepted_detail'), 'muted')];
@@ -3931,6 +4493,12 @@
         ]);
     }
 
+    /**
+     * @param {number | null} ms
+     * @param {string} name
+     * @param {string} detail
+     * @param {string} tone
+     */
     function logRow(ms, name, detail, tone) {
         return el('div', {class: 'log-row'}, [
             el('span', {class: 'log-time', text: ms ? PSL.clock(ms) : '…'}),
@@ -3942,18 +4510,26 @@
         ]);
     }
 
+    /**
+     * @param {Run} run
+     * @param {string} key
+     */
     function logClosing(run, key) {
         if (key === 'running' || key === 'queued') return t('run.log.closing_live');
         const instant = run.finished_at_ms && (run.finished_at_ms - run.created_at_ms) < 10000;
         return instant ? t('run.log.closing_instant') : t('run.log.closing');
     }
 
+    /**
+     * @param {Run} run
+     * @param {string} key
+     */
     function factsRail(run, key) {
         const elapsedMs = key === 'queued'
             ? Date.now() - run.created_at_ms
             : (run.finished_at_ms || Date.now()) - (run.started_at_ms || run.created_at_ms);
         const figure = el('div', {class: 'elapsed', 'data-running': key === 'running' ? 'true' : 'false'});
-        PSL.durParts(elapsedMs).forEach(function (part) {
+        PSL.durParts(elapsedMs).forEach(function (/** @type {{n: string, u: string}} */ part) {
             figure.appendChild(el('span', {class: 'elapsed-part'}, [
                 el('span', {class: 'elapsed-n', text: part.n}),
                 el('span', {class: 'elapsed-u', text: part.u})
@@ -3972,6 +4548,9 @@
         return el('aside', {class: 'rail'}, [elapsed, requestCard(run)]);
     }
 
+    /**
+     * @param {number} elapsedMs
+     */
     function ceilingRule(elapsedMs) {
         const ceilingMs = state.status.limits.analysis_timeout_seconds * 1000;
         const fill = el('span', {class: 'ceiling-fill'});
@@ -3980,6 +4559,10 @@
         return el('div', {class: 'ceiling', 'aria-hidden': 'true'}, [fill]);
     }
 
+    /**
+     * @param {string} key
+     * @param {number} elapsedMs
+     */
     function ceilingNote(key, elapsedMs) {
         const seconds = state.status.limits.analysis_timeout_seconds;
         if (key === 'queued') return t('run.ceiling.queued', {seconds: seconds});
@@ -3990,6 +4573,9 @@
             : t('run.ceiling.left', {seconds: seconds, duration: PSL.dur(left)});
     }
 
+    /**
+     * @param {Run} run
+     */
     function requestCard(run) {
         const request = run.request || {};
         const facts = [
@@ -4033,6 +4619,9 @@
         ]);
     }
 
+    /**
+     * @param {Run} run
+     */
     function expiryText(run) {
         if (!run.expires_at_ms) return t('run.expiry.pending');
         const delta = run.expires_at_ms - Date.now();
@@ -4041,7 +4630,11 @@
             : t('sources.ago', {duration: PSL.durPrecise(-delta)});
     }
 
-    function outcomePanel(run, key, _) {
+    /**
+     * @param {Run} run
+     * @param {string} key
+     */
+    function outcomePanel(run, key) {
         if (key === 'running' || key === 'queued') return null;
         const spec = outcomeSpec(run, key);
         const panel = el('section', {class: 'outcome', 'data-tone': spec.tone}, [
@@ -4049,20 +4642,24 @@
             el('p', {class: 'outcome-body', text: spec.body})
         ]);
         if (spec.counts) panel.appendChild(countStrip(spec.counts, {toned: true, filled: 1}));
-        const trimmed = trimNotice(run);
-        if (trimmed) panel.appendChild(trimmed);
-        (spec.warnings || []).forEach(function (warning) {
+        (spec.warnings || []).forEach(function (/** @type {{kind: string, message: string}} */ warning) {
             // A caveat the engine wrote, which stays in the engine's English.
             panel.appendChild(el('div', {class: 'outcome-warning'}, [
                 el('span', {class: 'outcome-warning-kind', text: warning.kind}),
                 engineText(el('span', {class: 'outcome-warning-message', text: warning.message}))
             ]));
         });
-        panel.appendChild(actionRow(run, spec));
+        panel.appendChild(actionRow(spec));
         return panel;
     }
 
+    /**
+     * @param {Run} run
+     * @param {string} key
+     * @returns {OutcomeSpec}
+     */
     function outcomeSpec(run, key) {
+        /** @type {Partial<RunResult>} */
         const result = run.result || {};
         if (key === 'succeeded') {
             return {
@@ -4073,7 +4670,7 @@
                 counts: [
                     [result.quality_gate_passed ? 'PASS' : 'FAIL', t('run.count.gate'),
                         result.quality_gate_passed ? 'ok' : 'crit'],
-                    [String(result.findings), result.kept_findings == null ? t('run.count.findings') : t('run.count.found'),
+                    [String(result.findings), t('run.count.findings'),
                         result.critical > 0 ? 'crit' : result.warning > 0 ? 'warn'
                             : result.info > 0 ? 'info' : 'ok'],
                     [String(result.critical), t('run.count.critical'), 'crit'],
@@ -4121,7 +4718,7 @@
                 body: t('run.outcome.resume_body', {name: run.source_name}),
                 primary: {
                     label: t('run.outcome.resume_button'),
-                    action: function (button) {
+                    action: function (/** @type {HTMLButtonElement} */ button) {
                         resubmit(run, button);
                     },
                     filled: true
@@ -4137,22 +4734,6 @@
         };
     }
 
-    /**
-     * The sink drops findings to fit its budget, and the count on the card is
-     * what the engine found, not what the report holds. Said above the link,
-     * because it changes how the numbers should be read.
-     */
-    function trimNotice(run) {
-        const result = run.result || {};
-        if (result.kept_findings == null || result.kept_findings >= result.findings) return null;
-        return el('div', {class: 'outcome-warning'}, [
-            el('span', {class: 'outcome-warning-kind', text: t('run.trimmed')}),
-            el('span', {
-                class: 'outcome-warning-message',
-                text: t('run.trimmed_body', {found: result.findings, kept: result.kept_findings})
-            })
-        ]);
-    }
 
     /**
      * A cell is [figure, label, tone, move]. `move` stays a number throughout, so
@@ -4164,6 +4745,8 @@
      * as a solid block of its tone, the rest take their own pastel. The daemon
      * gauges pass no options and keep a neutral strip, because their tone means
      * "near a cap", which is not a severity.
+     * @param {Array<[string, string, (string | null)?, number?]>} counts
+     * @param {{toned?: boolean, filled?: number}} [options]
      */
     function countStrip(counts, options) {
         const opts = options || {};
@@ -4185,6 +4768,7 @@
      * How far a gauge moved since the last read. Up is the bad direction here:
      * every one of these counts toward a cap, so a rise is ground lost and a
      * fall is ground won, which is the opposite of the usual reading.
+     * @param {number} move
      */
     function moveBadge(move) {
         const badge = el('span', {
@@ -4202,7 +4786,10 @@
         return badge;
     }
 
-    function actionRow(run, spec) {
+    /**
+     * @param {OutcomeSpec} spec
+     */
+    function actionRow(spec) {
         const row = el('div', {class: 'outcome-actions'}, [actionButton(spec.primary, true)]);
         if (spec.secondary) row.appendChild(actionButton(spec.secondary, false));
         if (spec.note) {
@@ -4212,6 +4799,10 @@
         return row;
     }
 
+    /**
+     * @param {OutcomeAction} spec
+     * @param {boolean} primary
+     */
     function actionButton(spec, primary) {
         const className = 'action' + (primary && spec.filled ? ' action-filled' : '')
             + (primary ? '' : ' action-secondary');
@@ -4223,16 +4814,18 @@
         return button;
     }
 
+    /**
+     * @param {Run} run
+     * @param {HTMLButtonElement} button
+     */
     function resubmit(run, button) {
         fetch('/api/analyses', {
             method: 'POST',
             headers: {'content-type': 'application/json'},
             body: JSON.stringify({source_id: run.source_id, request: run.request || {}})
-        }).then(signInOn401).then(function (response) {
-            return response.json().then(function (payload) {
-                return {ok: response.ok, payload: payload};
-            });
-        }).then(function (result) {
+        }).then(signInOn401).then(async function (response) {
+            return {ok: response.ok, payload: await response.json()};
+        }).then(function (/** @type {{ok: boolean, payload: {id?: string, detail?: string, code?: string}}} */ result) {
             if (!result.ok || !result.payload.id) {
                 throw new Error(PSL.problemText(result.payload, undefined, t('run.resubmit_refused')));
             }
@@ -4241,7 +4834,7 @@
             // Silence here reads as a broken button: the operator clicked and
             // nothing moved. The note carries the run's arguments, so the error
             // borrows the line and hands it back.
-            const note = button.parentNode && button.parentNode.querySelector('.outcome-note');
+            const note = /** @type {HTMLElement} */ (button.parentNode && button.parentNode.querySelector('.outcome-note'));
             if (!note) return;
             // Stashed on the node, not in a closure: a second failure inside the
             // window would otherwise capture the first error as the text to restore
@@ -4258,14 +4851,19 @@
         });
     }
 
-    function loadRun(id) {
-        return getJson('/api/analyses/' + id).then(function (run) {
+    /**
+     * @param {string} id
+     */
+    async function loadRun(id) {
+        try {
+            /** @type {Run} */
+            const run = await getJson('/api/analyses/' + id);
             state.run = run;
             state.runError = false;
             state.runReadFailures = 0;
             render();
             if (run.status === 'pending' || run.status === 'running') scheduleRunPoll(id, 1000);
-        }).catch(function (error) {
+        } catch (error) {
             if (PSL.runReadOutcome(error) === 'unknown') {
                 state.runError = id;
                 state.runReadFailures = 0;
@@ -4277,13 +4875,17 @@
             state.runReadFailures = (state.runReadFailures || 0) + 1;
             render();
             scheduleRunPoll(id, PSL.retryDelay(state.runReadFailures));
-        });
+        }
     }
 
+    /**
+     * @param {string} id
+     * @param {number} delay
+     */
     function scheduleRunPoll(id, delay) {
         clearTimeout(state.runTimer);
         state.runTimer = setTimeout(function () {
-            if (currentRunId() === id) loadRun(id);
+            if (currentRunId() === id) void loadRun(id);
         }, delay);
     }
 
@@ -4317,6 +4919,7 @@
         sanitizer_aware_min_cv: 'detect.sanitizer_aware_min_cv'
     };
 
+    /** @returns {DetectionKnob[]} */
     function detectionKnobs() {
         return (state.status && state.status.detection_knobs) || [];
     }
@@ -4325,6 +4928,11 @@
         return Object.keys(state.form.detection).length;
     }
 
+    /**
+     * @param {string} name
+     * @param {string} raw
+     * @param {DetectionKnob} knob
+     */
     function setDetection(name, raw, knob) {
         // A choice stays the word it is, a threshold becomes the number it reads as.
         const value = knob.kind === 'choice' ? raw : Number(raw);
@@ -4415,6 +5023,9 @@
         return panel;
     }
 
+    /**
+     * @param {DetectionKnob} knob
+     */
     function detectionRow(knob) {
         const current = state.form.detection[knob.name];
         const identifier = 'knob-' + knob.name;
@@ -4498,7 +5109,10 @@
         return Math.min(INCIDENT_PAGE, (limits && limits.max_read_limit) || INCIDENT_PAGE);
     }
 
-    /** The page, then every filter that is set, under the name the route takes it by. */
+    /**
+     * The page, then every filter that is set, under the name the route takes it by.
+     * @param {number} offset
+     */
     function incidentsQuery(offset) {
         const filter = state.incidentFilter;
         return Object.keys(filter).reduce(function (query, key) {
@@ -4506,6 +5120,9 @@
         }, '?limit=' + incidentPage() + '&offset=' + offset);
     }
 
+    /**
+     * @param {number} offset
+     */
     function incidentsPath(offset) {
         return '/api/incidents' + incidentsQuery(offset);
     }
@@ -4518,7 +5135,7 @@
      * round trip, and its own floor per source keeps a reload loop off the
      * daemons. Older pages append from the store, see loadOlderIncidents.
      */
-    function loadIncidents() {
+    async function loadIncidents() {
         state.incidents = null;
         // A re-read may bring episodes pushed since: an unfolded incident asks again, cut again.
         state.incidentCorrelations = {};
@@ -4527,31 +5144,34 @@
         state.incidentsDone = false;
         state.incidentsReading = true;
         render();
-        return postJson('/api/incidents/refresh' + incidentsQuery(0)).then(function (rows) {
-            adoptIncidents(rows, []);
-        }).catch(function () {
+        try {
+            adoptIncidents(await postJson('/api/incidents/refresh' + incidentsQuery(0)), []);
+        } catch (error) {
             // The fleet was not read: refused by the gate while two reads run,
             // or the route failed. The store still holds what the last read
             // left, and showing it beats an empty screen with a red banner.
-            return getJson(incidentsPath(0)).then(function (rows) {
+            try {
+                const rows = await getJson(incidentsPath(0));
                 state.incidentsError = 'stale';
                 adoptIncidents(rows, []);
-            }).catch(function () {
+            } catch (failure) {
                 state.incidentsError = 'unread';
                 state.incidents = [];
-            });
-        }).finally(function () {
+            }
+        } finally {
             state.incidentsReading = false;
             state.incidentsRead = true;
             // The sources carry the read stamps this screen prints under its
             // table, and the read that just ran moved them. Awaited, or the
             // stamps would be one render behind the rows they describe.
-            return reloadSources().then(function () {
-                if (currentScreen() === 'incidents') render();
-            });
-        });
+            await reloadSources();
+            if (currentScreen() === 'incidents') render();
+        }
     }
 
+    /**
+     * @param {HTMLButtonElement} button
+     */
     function loadOlderIncidents(button) {
         button.disabled = true;
         getJson(incidentsPath(state.incidents.length)).then(function (rows) {
@@ -4569,6 +5189,8 @@
      * older page can repeat the row the first one ended on. A row already held
      * is dropped, the end of the listing is still read from the raw page, and
      * the next offset re-reads that boundary row, which this drops again.
+     * @param {Incident[]} rows
+     * @param {Incident[]} previous
      */
     function adoptIncidents(rows, previous) {
         const seen = new Set(previous.map(incidentKey));
@@ -4672,6 +5294,11 @@
     /**
      * One labelled select for the filter line, labelled by the text of `name`. The first
      * option is the whole set, and `options` are [value, text] pairs.
+     * @param {string} name
+     * @param {string} value
+     * @param {string[][]} options
+     * @param {(value: string) => void} onChange
+     * @param {boolean} [disabled]
      */
     function filterSelect(name, value, options, onChange, disabled) {
         const label = t('filter.' + name);
@@ -4695,16 +5322,22 @@
         return pair;
     }
 
-    /** The change handler of one filter: set it, then read the fleet again under it. */
+    /**
+     * The change handler of one filter: set it, then read the fleet again under it.
+     * @param {string} key
+     */
     function setFilter(key) {
-        return function (value) {
+        return function (/** @type {string} */ value) {
             state.incidentFilter[key] = value;
-            loadIncidents();
+            void loadIncidents();
         };
     }
 
     function incidentFilterLine() {
         const filter = state.incidentFilter;
+        /**
+         * @param {string} value
+         */
         const same = function (value) {
             return [value, value];
         };
@@ -4726,7 +5359,7 @@
             el('span', {text: t(state.incidentsReading ? 'incidents.reading' : 'incidents.read_now')})
         ]);
         read.addEventListener('click', function () {
-            loadIncidents();
+            void loadIncidents();
         });
         // Kind and service answer most questions. The other three fold away
         // behind a toggle that says how many of them are set.
@@ -4807,11 +5440,17 @@
         })));
     }
 
+    /**
+     * @param {HTMLElement} section
+     */
     function appendCopyNote(section) {
         const note = incidentCopyNote();
         if (note) section.appendChild(note);
     }
 
+    /**
+     * @param {Incident[]} incidents
+     */
     function incidentsTable(incidents) {
         const head = el('tr', {}, INCIDENT_COLUMNS.map(function (name) {
             return el('th', {
@@ -4826,6 +5465,9 @@
         ]);
     }
 
+    /**
+     * @param {Incident} incident
+     */
     function incidentRow(incident) {
         const capture = PSL.incidentCapture(incident);
         const row = el('tr', {});
@@ -4853,7 +5495,10 @@
             : el('td', {'data-align': 'right'}, [el('span', {class: 'table-muted', text: t('incidents.still_open')})]));
         row.appendChild(el('td', {'data-align': 'right', text: String(incident.finding_count)}));
         row.appendChild(el('td', {title: t(INCIDENT_CAPTURE[capture])}, [
-            el('span', {class: capture === 'empty' ? 'table-muted' : null, text: t('incidents.capture_word.' + capture)})
+            el('span', {
+                class: capture === 'empty' ? 'table-muted' : null,
+                text: t('incidents.capture_word.' + capture)
+            })
         ]));
         row.appendChild(el('td', {}, [
             el('span', {class: 'table-strong', text: incident.source_name || incident.source_id}),
@@ -4875,19 +5520,31 @@
         return [row, detail];
     }
 
+    /**
+     * @param {Incident} incident
+     */
     function startedText(incident) {
         return t('sources.ago', {duration: PSL.dur(Date.now() - incident.at_ms)});
     }
 
-    /** A row is one daemon's capture: two sources fed the same alert list the same id, once each. */
+    /**
+     * A row is one daemon's capture: two sources fed the same alert list the same id, once each.
+     * @param {Incident} incident
+     */
     function incidentKey(incident) {
         return incident.id + '-' + incident.source_id;
     }
 
+    /**
+     * @param {Incident} incident
+     */
     function foldKey(incident) {
         return 'incident:' + incidentKey(incident);
     }
 
+    /**
+     * @param {Incident} incident
+     */
     function incidentNameCell(incident) {
         const button = el('button', {
             type: 'button',
@@ -4904,18 +5561,28 @@
         return el('td', {class: 'table-strong'}, [button]);
     }
 
-    /** Folded in place, like a daemon row, and fetched once: a frozen record does not move. */
+    /**
+     * Folded in place, like a daemon row, and fetched once: a frozen record does not move.
+     * @param {Incident} incident
+     * @param {HTMLButtonElement} button
+     */
     function toggleIncident(incident, button) {
         const open = button.getAttribute('aria-expanded') !== 'true';
         button.setAttribute('aria-expanded', open ? 'true' : 'false');
         state.panelOpen[foldKey(incident)] = open;
         saveFolds();
         const cell = document.getElementById('incident-detail-' + incidentKey(incident));
-        if (cell) cell.parentNode.hidden = !open;
+        if (cell) {
+            const row = /** @type {HTMLElement} */ (cell.parentNode);
+            row.hidden = !open;
+        }
         const detail = state.incidentDetails[incident.id];
         if (open && (detail === undefined || (detail !== 'loading' && detail.error_code))) loadIncident(incident);
     }
 
+    /**
+     * @param {Incident} incident
+     */
     function loadIncident(incident) {
         state.incidentDetails[incident.id] = 'loading';
         const cell = document.getElementById('incident-detail-' + incidentKey(incident));
@@ -4925,9 +5592,9 @@
                 state.incidentDetails[incident.id] = record;
             })
             .catch(function (error) {
-                state.incidentDetails[incident.id] = {
+                state.incidentDetails[incident.id] = /** @type {IncidentDetail} */ ({
                     error_code: /answered 404$/.test(String(error && error.message)) ? 'gone' : 'internal'
-                };
+                });
             })
             .finally(function () {
                 const target = document.getElementById('incident-detail-' + incidentKey(incident));
@@ -4935,6 +5602,9 @@
             });
     }
 
+    /**
+     * @param {Incident} incident
+     */
     function incidentPanel(incident) {
         const detail = state.incidentDetails[incident.id];
         if (detail === 'loading' || detail === undefined) {
@@ -4981,7 +5651,10 @@
         ]);
     }
 
-    /** Narrows the frozen findings in place, on their endpoint or template, without drawing the screen again. */
+    /**
+     * Narrows the frozen findings in place, on their endpoint or template, without drawing the screen again.
+     * @param {Incident} incident
+     */
     function findingsFilter(incident) {
         const key = incidentKey(incident);
         const input = el('input', {
@@ -4993,11 +5666,14 @@
             state.findingQuery[key] = input.value;
             const rows = document.querySelectorAll(`[data-findings="${CSS.escape(key)}"] tbody tr`);
             let shown = 0;
-            Array.prototype.forEach.call(rows, function (row) {
+            Array.prototype.forEach.call(rows, function (/** @type {HTMLElement} */ row) {
                 row.hidden = !PSL.findingMatches(FINDING_ROW.get(row), input.value);
                 if (!row.hidden) shown += 1;
             });
-            count.textContent = input.value.trim() === '' ? '' : t('incidents.filter.shown', {shown: shown, total: rows.length});
+            count.textContent = input.value.trim() === '' ? '' : t('incidents.filter.shown', {
+                shown: shown,
+                total: rows.length
+            });
         };
         input.addEventListener('input', apply);
         // Once the table beside it is in the page, so a query kept across a sort applies again.
@@ -5007,7 +5683,10 @@
         return row;
     }
 
-    /** A severity as a chip reads it: the engine's three in the shown language, any other as sent. */
+    /**
+     * A severity as a chip reads it: the engine's three in the shown language, any other as sent.
+     * @param {string} severity
+     */
     function severityLabel(severity) {
         return severity && PSL.hasText('severity.' + severity) ? t('severity.' + severity) : severity || '?';
     }
@@ -5015,6 +5694,10 @@
     // Each table row's frozen finding, for the filter to test without reading it back from the cells.
     const FINDING_ROW = new WeakMap();
 
+    /**
+     * @param {StoredFindingRow[]} findings
+     * @param {Incident} incident
+     */
     function incidentFindingsTable(findings, incident) {
         // Without a single ack credential in the Hub, every link would open a page that can do nothing.
         const canAck = (state.sources || []).some(function (source) {
@@ -5025,6 +5708,7 @@
             return findingHead(name, incident);
         }));
         const rows = findings.map(function (row) {
+            /** @type {Partial<Finding>} */
             const finding = row.finding || {};
             const phase = PSL.findingPhase(row, incident);
             const template = PSL.findingTemplate(row);
@@ -5080,10 +5764,16 @@
 
     // data-more while text lies below the box's last line: a browser that hides its scrollbar
     // until a scroll (Firefox on macOS) otherwise shows a cut query as a whole one.
+    /**
+     * @param {Element} box
+     */
     function templateMore(box) {
         box.toggleAttribute('data-more', box.scrollTop + box.clientHeight < box.scrollHeight - 1);
     }
 
+    /**
+     * @param {string} template
+     */
     function templateBox(template) {
         const box = el('span', {class: 'findings-template', text: template || '—'});
         if (template && TEMPLATE_FIT) {
@@ -5101,6 +5791,8 @@
     /**
      * A column head that sorts on click. Counts and severity read worst first, the rest A to Z.
      * The impact head keeps the findings dashboard's own name, so the two read the same number the same way.
+     * @param {string} name
+     * @param {Incident} incident
      */
     function findingHead(name, incident) {
         const key = FINDING_SORT_KEY.indexOf(name) >= 0 ? name : null;
@@ -5130,6 +5822,10 @@
         return th;
     }
 
+    /**
+     * @param {Partial<Finding>} finding
+     * @param {Incident} incident
+     */
     function ackLink(finding, incident) {
         const label = PSL.FINDING_TYPE_LABEL[finding.type] || finding.type || t('incidents.ack.finding');
         const link = el('a', {
@@ -5178,16 +5874,16 @@
             getJson('/api/incidents?limit=' + incidentPage() + '&offset=0').catch(function () {
                 return [];
             })
-        ]).then(function (results) {
+        ]).then(function (/** @type {[Episode[], Incident[]]} */ results) {
             state.correlations = results[0];
             state.correlationIncidents = results[1];
             // A link to one pair lands on it unfolded, on every daemon that saw it.
             if (state.correlationFilter.pair_key) {
-                results[0].forEach(function (episode) {
+                results[0].forEach(function (/** @type {Episode} */ episode) {
                     state.panelOpen['pair:' + episode.source_id + ':' + episode.pair_key] = true;
                 });
             }
-            results[0].forEach(function (episode) {
+            results[0].forEach(function (/** @type {Episode} */ episode) {
                 [episode.source.service, episode.target.service].forEach(function (service) {
                     if (state.correlationServices.indexOf(service) < 0) state.correlationServices.push(service);
                 });
@@ -5249,15 +5945,21 @@
 
     function correlationFilterLine() {
         const filter = state.correlationFilter;
+        /**
+         * @param {string} key
+         */
         const set = function (key) {
-            return function (value) {
+            return function (/** @type {string | boolean} */ value) {
                 filter[key] = value;
                 loadCorrelations();
             };
         };
         const range = el('select', {class: 'refresh-select', 'aria-label': t('correlations.range')},
-            PSL.CORRELATION_RANGES.map(function (value) {
-                const option = el('option', {value: value, text: t('correlations.range.option', {span: PSL.humanDur(value)})});
+            PSL.CORRELATION_RANGES.map(function (/** @type {string} */ value) {
+                const option = el('option', {
+                    value: value,
+                    text: t('correlations.range.option', {span: PSL.humanDur(value)})
+                });
                 if (value === filter.range) option.selected = true;
                 return option;
             }));
@@ -5269,7 +5971,10 @@
         });
         // Shown only on a pair link: the way back to every pair is the plain route.
         const pairOnly = filter.pair_key
-            ? el('a', {class: 'pill-button pill-sm', href: '#/correlations'}, [el('span', {text: t('correlations.every_pair')})])
+            ? el('a', {
+                class: 'pill-button pill-sm',
+                href: '#/correlations'
+            }, [el('span', {text: t('correlations.every_pair')})])
             : null;
         return el('div', {class: 'refresh'}, [
             pairOnly,
@@ -5285,20 +5990,31 @@
         ]);
     }
 
+    /**
+     * @param {CorrelationPair[]} pairs
+     */
     function correlationsTable(pairs) {
         const head = el('tr', {}, CORRELATION_COLUMNS.map(function (name) {
             return el('th', {
-                text: t('correlations.col.' + name), scope: 'col', 'data-align': CORRELATION_COLUMNS_RIGHT.indexOf(name) >= 0 ? 'right' : null
+                text: t('correlations.col.' + name),
+                scope: 'col',
+                'data-align': CORRELATION_COLUMNS_RIGHT.indexOf(name) >= 0 ? 'right' : null
             });
         }));
         return el('table', {class: 'table'}, [el('thead', {}, [head]), el('tbody', {}, pairs.flatMap(pairRow))]);
     }
 
-    /** Where an incident's span stops: its end once the alerting sent one, its window's end before. */
+    /**
+     * Where an incident's span stops: its end once the alerting sent one, its window's end before.
+     * @param {Incident} incident
+     */
     function incidentEnd(incident) {
         return incident.ended_at_ms == null ? incident.window_to_ms : incident.ended_at_ms;
     }
 
+    /**
+     * @param {CorrelationPair} pair
+     */
     function pairRow(pair) {
         const fold = 'pair:' + pair.key;
         const id = 'pair-detail-' + pair.key.replace(/[^A-Za-z0-9_-]/g, '-');
@@ -5316,7 +6032,10 @@
             state.panelOpen[fold] = next;
             saveFolds();
             const cell = document.getElementById(id);
-            if (cell) cell.parentNode.hidden = !next;
+            if (cell) {
+                const row = /** @type {HTMLElement} */ (cell.parentNode);
+                row.hidden = !next;
+            }
         });
         const row = el('tr', {}, [
             el('td', {}, [button]),
@@ -5333,11 +6052,18 @@
         return [row, detail];
     }
 
-    /** Both sides of a pair, the one that fires first on top, each template in its tooltip. */
+    /**
+     * Both sides of a pair, the one that fires first on top, each template in its tooltip.
+     * @param {Episode} episode
+     */
     function pairCell(episode) {
         return el('span', {class: 'pair'}, [pairSide(episode.source, null), pairSide(episode.target, t('correlations.then'))]);
     }
 
+    /**
+     * @param {import('../types').EpisodeSide} side
+     * @param {string | null} lead
+     */
     function pairSide(side, lead) {
         return el('span', {class: 'pair-side', title: side.template || null}, [
             lead ? el('span', {class: 'pair-then', text: lead}) : null,
@@ -5350,6 +6076,9 @@
         ]);
     }
 
+    /**
+     * @param {Episode} episode
+     */
     function episodeSpanCell(episode) {
         const cell = el('td', {
             class: 'table-mono',
@@ -5366,6 +6095,9 @@
         return cell;
     }
 
+    /**
+     * @param {CorrelationPair} pair
+     */
     function pairPanel(pair) {
         const toMs = Date.now();
         const fromMs = toMs - PSL.parseDur(state.correlationFilter.range);
@@ -5379,7 +6111,13 @@
         ]);
     }
 
-    /** The range as a strip: each episode in green, the same daemon's incidents in red behind them. */
+    /**
+     * The range as a strip: each episode in green, the same daemon's incidents in red behind them.
+     * @param {Episode[]} episodes
+     * @param {Incident[]} incidents
+     * @param {number} fromMs
+     * @param {number} toMs
+     */
     function timelineStrip(episodes, incidents, fromMs, toMs) {
         const ns = 'http://www.w3.org/2000/svg';
         const strip = document.createElementNS(ns, 'svg');
@@ -5390,6 +6128,12 @@
         strip.setAttribute('aria-label', t('correlations.strip_label', {
             episodes: episodes.length, incidents: incidents.length, span: PSL.humanDur(state.correlationFilter.range)
         }));
+        /**
+         * @param {Array<{x: number, w: number}>} marks
+         * @param {string} className
+         * @param {number} y
+         * @param {number} height
+         */
         const draw = function (marks, className, y, height) {
             marks.forEach(function (mark) {
                 const rect = document.createElementNS(ns, 'rect');
@@ -5417,6 +6161,10 @@
         ]);
     }
 
+    /**
+     * @param {Episode[]} episodes
+     * @param {Incident[]} incidents
+     */
     function episodesTable(episodes, incidents) {
         // Explain asks for a trace ID, which only a trace backend can resolve.
         const traceable = (state.sources || []).some(function (source) {
@@ -5425,7 +6173,9 @@
         const now = Date.now();
         const head = el('tr', {}, EPISODE_COLUMNS.map(function (name) {
             return el('th', {
-                text: name ? t('correlations.col.' + name) : '', scope: 'col', 'data-align': EPISODE_COLUMNS_RIGHT.indexOf(name) >= 0 ? 'right' : null
+                text: name ? t('correlations.col.' + name) : '',
+                scope: 'col',
+                'data-align': EPISODE_COLUMNS_RIGHT.indexOf(name) >= 0 ? 'right' : null
             });
         }));
         const rows = episodes.map(function (episode) {
@@ -5437,7 +6187,11 @@
             return el('tr', {}, [
                 episodeSpanCell(episode),
                 el('td', {'data-align': 'right', class: 'table-mono', text: PSL.dur(end - episode.started_at_ms)}),
-                el('td', {'data-align': 'right', class: 'table-mono', text: PSL.decimal(episode.peak_confidence.toFixed(2))}),
+                el('td', {
+                    'data-align': 'right',
+                    class: 'table-mono',
+                    text: PSL.decimal(episode.peak_confidence.toFixed(2))
+                }),
                 el('td', {'data-align': 'right', class: 'table-mono', text: String(episode.peak_co_occurrences)}),
                 el('td', {}, overlapped.length === 0
                     ? [el('span', {class: 'table-muted', text: t('correlations.no_incident')})]
@@ -5448,6 +6202,10 @@
         return el('table', {class: 'table'}, [el('thead', {}, [head]), el('tbody', {}, rows)]);
     }
 
+    /**
+     * @param {Episode} episode
+     * @param {boolean} traceable
+     */
     function episodeActions(episode, traceable) {
         const traces = traceable ? PSL.pairTraceHash(episode) : null;
         return el('div', {class: 'refresh'}, [
@@ -5458,7 +6216,10 @@
         ]);
     }
 
-    /** An incident an episode overlaps, as a link that opens it unfolded on the incidents screen. */
+    /**
+     * An incident an episode overlaps, as a link that opens it unfolded on the incidents screen.
+     * @param {Incident} incident
+     */
     function incidentChip(incident) {
         const link = el('a', {
             class: 'chip',
@@ -5485,6 +6246,7 @@
      * The episodes of an incident's daemon active during it, read once per unfolded incident.
      * An empty read asks once more whether the daemon pushes any at all, so a daemon without
      * the push never reads as a quiet one.
+     * @param {Incident} incident
      */
     function loadIncidentCorrelations(incident) {
         const key = incidentKey(incident);
@@ -5494,7 +6256,7 @@
         readAllEpisodes(scope + '&from=' + incident.window_from_ms + '&to=' + incidentEnd(incident), 0)
             .then(function (rows) {
                 if (rows.length > 0) return {rows: rows, pushes: true};
-                return getJson(scope + '&limit=1').then(function (any) {
+                return getJson(scope + '&limit=1').then(function (/** @type {Episode[]} */ any) {
                     return {rows: rows, pushes: any.length > 0};
                 });
             })
@@ -5514,15 +6276,21 @@
     // and the panel's "Show all" then counted the cut as the whole.
     const EPISODE_PAGE = 1000;
 
-    function readAllEpisodes(path, offset) {
-        return getJson(path + '&limit=' + EPISODE_PAGE + '&offset=' + offset).then(function (rows) {
-            if (rows.length < EPISODE_PAGE) return rows;
-            return readAllEpisodes(path, offset + EPISODE_PAGE).then(function (rest) {
-                return rows.concat(rest);
-            });
-        });
+    /**
+     * @param {string} path
+     * @param {number} offset
+     * @returns {Promise<Episode[]>}
+     */
+    async function readAllEpisodes(path, offset) {
+        /** @type {Episode[]} */
+        const rows = await getJson(path + '&limit=' + EPISODE_PAGE + '&offset=' + offset);
+        if (rows.length < EPISODE_PAGE) return rows;
+        return rows.concat(await readAllEpisodes(path, offset + EPISODE_PAGE));
     }
 
+    /**
+     * @param {Incident} incident
+     */
     function incidentCorrelationsBlock(incident) {
         const cacheKey = PSL.correlationWindowKey(incidentKey(incident), incident.window_from_ms, incidentEnd(incident));
         const held = state.incidentCorrelations[cacheKey];
@@ -5537,7 +6305,11 @@
             el('p', {class: 'daemon-source-note', text: t('correlations.incident.sub')})
         ]);
         if (held === undefined || held === 'loading') {
-            block.appendChild(el('p', {class: 'daemon-loading', role: 'status', text: t('correlations.incident.reading')}));
+            block.appendChild(el('p', {
+                class: 'daemon-loading',
+                role: 'status',
+                text: t('correlations.incident.reading')
+            }));
         } else if (held === 'error') {
             // Shown once: the next render of this panel, a refold or a re-read, asks again.
             delete state.incidentCorrelations[cacheKey];
@@ -5564,7 +6336,12 @@
 
     const INCIDENT_EPISODES_FIRST = 5;
 
-    /** Opens the whole list in place: the panel is drawn again, not the screen. */
+    /**
+     * Opens the whole list in place: the panel is drawn again, not the screen.
+     * @param {Incident} incident
+     * @param {string} cacheKey
+     * @param {number} count
+     */
     function incidentEpisodesMore(incident, cacheKey, count) {
         const more = el('button', {
             class: 'pill-button pill-sm incident-episodes-more',
@@ -5584,24 +6361,36 @@
         return more;
     }
 
+    /**
+     * @param {Episode[]} episodes
+     */
     function incidentEpisodesTable(episodes) {
         const head = el('tr', {}, ['pair', 'episode', 'peak', ''].map(function (name) {
             return el('th', {
-                text: name ? t('correlations.col.' + name) : '', scope: 'col', 'data-align': name === 'peak' ? 'right' : null
+                text: name ? t('correlations.col.' + name) : '',
+                scope: 'col',
+                'data-align': name === 'peak' ? 'right' : null
             });
         }));
         const rows = episodes.map(function (episode) {
             return el('tr', {}, [
                 el('td', {}, [pairCell(episode)]),
                 episodeSpanCell(episode),
-                el('td', {'data-align': 'right', class: 'table-mono', text: PSL.decimal(episode.peak_confidence.toFixed(2))}),
+                el('td', {
+                    'data-align': 'right',
+                    class: 'table-mono',
+                    text: PSL.decimal(episode.peak_confidence.toFixed(2))
+                }),
                 el('td', {}, [allEpisodesLink(episode)])
             ]);
         });
         return el('table', {class: 'table'}, [el('thead', {}, [head]), el('tbody', {}, rows)]);
     }
 
-    /** Every episode of an episode's pair, through the route the Grafana table links to. */
+    /**
+     * Every episode of an episode's pair, through the route the Grafana table links to.
+     * @param {Episode} episode
+     */
     function allEpisodesLink(episode) {
         return el('a', {
             class: 'pill-button pill-sm',
@@ -5617,6 +6406,7 @@
      * Reads the finding the link names, and the sources again, since they say
      * which daemons relay and how much each one's ack listing is worth. After a
      * submit the form and its result lines stay and the screen is not blanked.
+     * @param {boolean} afterSubmit
      */
     function loadAck(afterSubmit) {
         const route = PSL.readAckRoute(location.hash);
@@ -5630,6 +6420,9 @@
             + '&include_acked=true&limit=1';
         // Matched again here: the page must never offer a finding its link did
         // not name, whatever the Hub made of the filter.
+        /**
+         * @param {FindingEnvelope[]} rows
+         */
         const named = function (rows) {
             return rows.find(function (row) {
                 return row.finding && row.finding.signature === route.signature;
@@ -5703,6 +6496,9 @@
         return section;
     }
 
+    /**
+     * @param {Array<{ok: boolean, text: string}>} lines
+     */
     function ackResultLines(lines) {
         return el('div', {class: 'ack-stack', role: 'status'}, lines.map(function (line) {
             return el('div', {class: 'banner', 'data-tone': line.ok ? 'ok' : 'crit'}, [el('p', {text: line.text})]);
@@ -5713,6 +6509,7 @@
      * The detections of the last seven days, from the windowed read: its
      * finding, null when the window holds no detection the Hub knows, undefined
      * when the read failed.
+     * @param {FindingEnvelope | null | undefined} volume
      */
     function ackDetectionFacts(volume) {
         if (!volume) return [];
@@ -5724,7 +6521,10 @@
         return facts;
     }
 
-    /** One line per source with its count, and what keeps it short. */
+    /**
+     * One line per source with its count, and what keeps it short.
+     * @param {FindingEnvelope | null | undefined} volume
+     */
     function ackDetectionLines(volume) {
         if (volume === undefined) {
             return [el('p', {class: 'field-note', text: t('ack.detections.failed')})];
@@ -5732,7 +6532,7 @@
         if (volume === null) {
             return [el('p', {class: 'field-note', text: t('ack.detections.none')})];
         }
-        return (volume.sources || []).map(function (source) {
+        return (volume.sources || []).map(function (/** @type {FindingSource} */ source) {
             const gaps = (source.detections_gaps || []).map(PSL.gapLabel);
             const io = source.avoidable_io_ops == null ? ''
                 : t('ack.detections.io', {count: PSL.formatDetections(source.avoidable_io_ops, source.detections_complete)});
@@ -5748,7 +6548,12 @@
         });
     }
 
+    /**
+     * @param {FindingEnvelope} envelope
+     * @param {FindingEnvelope | null | undefined} volume
+     */
     function ackFindingCard(envelope, volume) {
+        /** @type {Partial<Finding>} */
         const finding = envelope.finding || {};
         const template = (finding.pattern || {}).template;
         const facts = [
@@ -5775,15 +6580,21 @@
         ].concat(ackDetectionLines(volume)));
     }
 
-    /** What the two buttons would do with the form as it stands. */
+    /**
+     * What the two buttons would do with the form as it stands.
+     * @param {AckRow[]} rows
+     */
     function ackPlanNow(rows) {
         const ack = state.ack;
         return PSL.ackPlan(rows, ack.checked, ack.reason, ack.expiry, Date.now());
     }
 
+    /**
+     * @param {AckRow[]} rows
+     */
     function updateAckButtons(rows) {
-        const acknowledge = document.getElementById('ack-submit');
-        const revoke = document.getElementById('ack-revoke');
+        const acknowledge = /** @type {HTMLButtonElement} */ (document.getElementById('ack-submit'));
+        const revoke = /** @type {HTMLButtonElement} */ (document.getElementById('ack-revoke'));
         const sentence = document.getElementById('ack-sentence');
         if (!acknowledge || !revoke || !sentence) return;
         const busy = state.ack.busy;
@@ -5794,6 +6605,9 @@
         sentence.setAttribute('data-blocked', !busy && plan.blocked ? 'true' : 'false');
     }
 
+    /**
+     * @param {AckRow[]} rows
+     */
     function ackForm(rows) {
         const ack = state.ack;
         const reason = el('input', {
@@ -5866,6 +6680,7 @@
     /**
      * Where the Hub cannot write an ack, the daemon still can: its own command,
      * spelled for the daemon the link named, or the first one carrying the finding.
+     * @param {AckRow[]} rows
      */
     function daemonAckBlock(rows) {
         const route = PSL.readAckRoute(location.hash) || {};
@@ -5893,6 +6708,9 @@
         });
     }
 
+    /**
+     * @param {AckRow[]} rows
+     */
     function ackSourcesTable(rows) {
         const head = el('tr', {}, ['', 'source', 'current', 'can_do'].map(function (name) {
             return el('th', {text: name ? t('ack.col.' + name) : '', scope: 'col'});
@@ -5927,7 +6745,10 @@
         ]);
     }
 
-    /** `at` and `expires_at` are the daemon's own text, shown as it came. */
+    /**
+     * `at` and `expires_at` are the daemon's own text, shown as it came.
+     * @param {import('../types').FindingAck | null} ack
+     */
     function ackCell(ack) {
         if (!ack) return el('td', {}, [el('span', {class: 'table-muted', text: t('ack.cell.none')})]);
         return el('td', {}, [
@@ -5941,27 +6762,39 @@
         ]);
     }
 
-    function relayAck(row, action, body) {
+    /**
+     * @param {AckRow} row
+     * @param {string} action
+     * @param {object} body
+     */
+    async function relayAck(row, action, body) {
         const path = '/api/sources/' + encodeURIComponent(row.id) + (action === 'revoke' ? '/acks/revoke' : '/acks');
-        return fetch(path, {
+        // Built before the try: only the request and its answer fall back to status 0.
+        const request = {
             method: 'POST',
             headers: {'content-type': 'application/json'},
             body: JSON.stringify(body)
-        }).then(signInOn401).then(function (response) {
+        };
+        try {
+            const response = signInOn401(await fetch(path, request));
             // A 204 has no body, and neither have the 413 and a full gate's 503.
-            return response.json().catch(function () {
+            /** @type {{detail?: string, code?: string} | null} */
+            const payload = await response.json().catch(function () {
                 return null;
-            }).then(function (payload) {
-                return {
-                    name: row.name, action: action, status: response.status, detail: payload && payload.detail,
-                    code: payload && payload.code
-                };
             });
-        }).catch(function () {
+            return {
+                name: row.name, action: action, status: response.status, detail: payload && payload.detail,
+                code: payload && payload.code
+            };
+        } catch (error) {
             return {name: row.name, action: action, status: 0};
-        });
+        }
     }
 
+    /**
+     * @param {string} action
+     * @param {AckRow[]} rows
+     */
     function submitAck(action, rows) {
         const ack = state.ack;
         const plan = ackPlanNow(rows);
@@ -5973,12 +6806,10 @@
 
         const outcomes = [];
         // One after the other: the Hub relays two at a time and refuses a third.
-        targets.reduce(function (chain, row) {
-            return chain.then(function () {
-                return relayAck(row, action, body);
-            }).then(function (outcome) {
-                outcomes.push(outcome);
-            });
+        targets.reduce(async function (/** @type {Promise<void>} */ chain, /** @type {AckRow} */ row) {
+            await chain;
+            const outcome = await relayAck(row, action, body);
+            outcomes.push(outcome);
         }, Promise.resolve()).then(function () {
             ack.lines = PSL.ackSummary(outcomes);
             loadAck(true);
@@ -5990,6 +6821,7 @@
     const RECAP_FIRST_PAGE = 10;
     const RECAP_MOVES_FIRST = 5;
     const RECAP_PERIOD_CHOICES = ['day', 'week', 'month'];
+    /** @type {Record<string, GlyphPaths>} */
     const RECAP_STATE_GLYPH = {
         confirmed: [['path', {d: 'M5 12.5l4.5 4.5L19 7.5'}]],
         contradicted: [['path', {d: 'M12 5v9M12 18.5v.01'}]],
@@ -5998,7 +6830,10 @@
     };
     const RECAP_TODO_LABEL = ['todo', 'in_progress', 'done'];
 
-    /** An action status as a row reads it, a status a newer Hub adds as it was sent. */
+    /**
+     * An action status as a row reads it, a status a newer Hub adds as it was sent.
+     * @param {string} status
+     */
     function recapTodo(status) {
         return RECAP_TODO_LABEL.indexOf(status) >= 0 ? t('recap.status.' + status) : status;
     }
@@ -6007,22 +6842,49 @@
         return PSL.readRecapRoute(location.hash);
     }
 
-    /** Writes the route the filters name; the hash change reads the recap again. */
+    /**
+     * Writes the route the filters name; the hash change reads the recap again.
+     * @param {Record<string, string | null>} change
+     */
     function goRecap(change) {
         location.hash = PSL.recapHash(Object.assign({}, recapRoute(), change));
     }
 
     /**
-     * Reads the recap the route names. A write on a row reads it again with `keep`, so the page
-     * stays where it was while the new figures arrive. Only the latest read lands.
+     * Reads the recap the route names, through the Hub's recap job: started, or joined when it already
+     * runs or was computed for these filters, followed to its end, then read in the view shown. A write
+     * on a row reads it again with `keep` and `refresh`, so the page stays where it was while the new
+     * figures are computed; the whole list of a group reads the same job again with moves=all. Only the
+     * latest read lands.
+     * @param {boolean} keep
+     * @param {boolean} [refresh]
      */
-    function loadRecap(keep) {
+    function loadRecap(keep, refresh) {
         const sequence = ++state.recapSeq;
+        const route = recapRoute();
+        const key = PSL.recapJobKey(route);
+        // Carried with the read, so a job started before midnight UTC keeps the key it was started on.
+        route.jobKey = key;
         // Every move when the screen already held them all or a group is being opened whole: a write
         // that lands meanwhile takes over that read instead of racing it, so the click is kept.
         const opening = keep ? state.recapMovesLoading : null;
         const all = Boolean(opening) || (keep && state.recap && !state.recap.movements.counts);
+        const previous = state.recapJob;
+        clearTimeout(state.recapPollTimer);
+        // A job this screen stops following for other filters is let go, so the Hub stops it once nobody
+        // follows it, and the next one starts once the Hub has counted that: one person runs one recap at
+        // a time. A refresh needs no let-go, the Hub moves this caller's follow to the new computation.
+        // Forgotten at once, so a second read before the next job answers does not let it go twice.
+        /** @type {Promise<unknown>} */
+        let released = Promise.resolve();
+        if (previous && previous.status === 'running' && previous.key !== key) released = cancelRecapJob(previous.id);
+        if (previous && previous.status === 'running' && (previous.key !== key || refresh)) state.recapJob = /** @type {?FollowedRecapJob} */ (null);
+        // A start for other filters not answered yet is let go once it answers (startRecapJob): waited
+        // for too, or the Hub would find this caller busy with the job it is about to give up.
+        const starting = state.recapStarting;
+        if (starting && starting.key !== key) released = Promise.all([released, starting.done]);
         if (!keep) {
+            state.recapLoadingSince = Date.now();
             state.recapMovesLoading = null;
             state.recap = null;
             state.recapError = null;
@@ -6034,10 +6896,211 @@
             state.recapMovesFailed = null;
             state.recapReports = null;
             state.recapGenerateError = null;
+            state.recapHubBusy = false;
+            state.recapPollFailures = 0;
             render();
         }
-        const path = PSL.recapPath(recapRoute()) + (all ? '&moves=all' : '');
-        Promise.all([getJson(path), readRecapReports()]).then(function (results) {
+        state.recapRestarts = 0;
+        if (state.recapDirect) {
+            landRecap(sequence, getJson(PSL.recapPath(route) + (all ? '&moves=all' : '')), opening);
+            return;
+        }
+        // The whole list of a group reads the snapshot on screen again, nothing is computed. Any other read
+        // asks the Hub, which answers the same job only while nothing the recap reads was written since.
+        if (keep && previous && previous.key === key && previous.status === 'succeeded' && !refresh) {
+            readRecapResult(sequence, previous, route, all, opening);
+            return;
+        }
+        // Still computing for these filters, after a return or a view switch: followed again, not joined
+        // again, so this screen counts once among its followers and one let-go stops it.
+        if (previous && previous.key === key && previous.status === 'running' && !refresh) {
+            pollRecapJob(sequence, previous.id, route, all, opening);
+            return;
+        }
+        released.then(function () {
+            if (sequence === state.recapSeq) startRecapJob(sequence, route, Boolean(refresh), all, opening);
+        });
+    }
+
+    /**
+     * @param {number} sequence
+     * @param {RecapRoute} route
+     * @param {boolean} refresh
+     * @param {boolean} all
+     * @param {string | null} opening
+     */
+    function startRecapJob(sequence, route, refresh, all, opening) {
+        const start = {key: route.jobKey || PSL.recapJobKey(route), done: null};
+        state.recapStarting = start;
+        start.done = fetchJson(PSL.recapJobPath(route, refresh), 'POST', RECAP_SCREEN_HEADERS).then(function (/** @type {RecapJob} */ job) {
+            if (sequence !== state.recapSeq) {
+                // Started or joined for a read no longer wanted: let go, lest it hold one of the Hub's places.
+                // Kept when a newer read for the same filters follows it too: the Hub counts one follow per
+                // caller, so this let-go would stop the job that read waits on.
+                const wanted = (state.recapJob && state.recapJob.id === job.id) ||
+                    (state.recapStarting && state.recapStarting !== start && state.recapStarting.key === start.key);
+                return job.status === 'running' && !wanted ? cancelRecapJob(job.id) : null;
+            }
+            state.recapHubBusy = false;
+            followRecapJob(sequence, job, route, all, opening);
+        }).catch(function (error) {
+            if (sequence !== state.recapSeq) return;
+            if (error.status === 404 || error.status === 405) {
+                // A Hub without the route, or the site's replay of one: the single read of before.
+                state.recapDirect = true;
+                landRecap(sequence, getJson(PSL.recapPath(route) + (all ? '&moves=all' : '')), opening);
+                return;
+            }
+            if (error.status === 503) {
+                // As many recaps as the Hub runs at once are running: asked again in a few seconds.
+                state.recapHubBusy = true;
+                if (!state.recap && currentScreen() === 'recap') render();
+                state.recapPollTimer = setTimeout(function () {
+                    if (sequence === state.recapSeq && currentScreen() === 'recap')
+                        startRecapJob(sequence, route, refresh, all, opening);
+                }, RECAP_BUSY_RETRY_MS);
+                return;
+            }
+            landRecap(sequence, Promise.reject(error), opening);
+        }).finally(function () {
+            if (state.recapStarting === start) state.recapStarting = /** @type {?{key: string, done: ?Promise<unknown>}} */ (null);
+        });
+    }
+
+    /**
+     * @param {number} sequence
+     * @param {RecapJob} job
+     * @param {RecapRoute} route
+     * @param {boolean} all
+     * @param {string | null} opening
+     */
+    function followRecapJob(sequence, job, route, all, opening) {
+        // When it was read, so the time the Hub counted grows from there on the browser's own clock.
+        state.recapJob = Object.assign({key: route.jobKey || PSL.recapJobKey(route), receivedAt: Date.now()}, job);
+        if (job.status === 'succeeded') {
+            readRecapResult(sequence, state.recapJob, route, all, opening);
+            return;
+        }
+        if (job.status === 'cancelled') {
+            // Stopped with a Hub that restarted: computed again, once, as a forgotten job is.
+            restartRecapJob(sequence, route, all, opening, Object.assign(new Error(job.status), {status: 500}));
+            return;
+        }
+        if (job.status !== 'running') {
+            landRecap(sequence, Promise.reject(Object.assign(new Error(job.status), {status: 500})), opening);
+            return;
+        }
+        showRecapProgress();
+        state.recapPollTimer = setTimeout(function () {
+            pollRecapJob(sequence, job.id, route, all, opening);
+        }, RECAP_POLL_MS);
+    }
+
+    /**
+     * @param {number} sequence
+     * @param {string} id
+     * @param {RecapRoute} route
+     * @param {boolean} all
+     * @param {string | null} opening
+     */
+    function pollRecapJob(sequence, id, route, all, opening) {
+        if (sequence !== state.recapSeq || currentScreen() !== 'recap') return;
+        fetchJson('/api/recap/jobs/' + encodeURIComponent(id), 'GET', RECAP_SCREEN_HEADERS).then(function (job) {
+            if (sequence !== state.recapSeq) return;
+            state.recapPollFailures = 0;
+            followRecapJob(sequence, job, route, all, opening);
+        }).catch(function (error) {
+            if (sequence !== state.recapSeq) return;
+            if (error.status === 404) {
+                // Forgotten by a Hub that restarted: computed again, once, rather than shown as an error.
+                restartRecapJob(sequence, route, all, opening, error);
+                return;
+            }
+            // A refusal, such as a 403 once the access changed, does not pass by asking again: said.
+            if (error.status >= 400 && error.status < 500) {
+                landRecap(sequence, Promise.reject(error), opening);
+                return;
+            }
+            state.recapPollFailures += 1;
+            state.recapPollTimer = setTimeout(function () {
+                pollRecapJob(sequence, id, route, all, opening);
+            }, PSL.retryDelay(state.recapPollFailures));
+        });
+    }
+
+    /**
+     * @param {number} sequence
+     * @param {RecapJob} job
+     * @param {RecapRoute} route
+     * @param {boolean} all
+     * @param {string | null} opening
+     */
+    function readRecapResult(sequence, job, route, all, opening) {
+        getJson(PSL.recapJobResultPath(job.id, route.view, all)).then(function (snapshot) {
+            if (sequence !== state.recapSeq) return;
+            landRecap(sequence, Promise.resolve(snapshot), opening);
+        }).catch(function (error) {
+            if (sequence !== state.recapSeq) return;
+            // Expired or forgotten since: computed again, once.
+            if (error.status === 404 || error.status === 409) {
+                restartRecapJob(sequence, route, all, opening, error);
+                return;
+            }
+            landRecap(sequence, Promise.reject(error), opening);
+        });
+    }
+
+    /**
+     * A job the Hub forgot or stopped is started again once per read; a second time, `error` is said.
+     * @param {number} sequence
+     * @param {RecapRoute} route
+     * @param {boolean} all
+     * @param {string | null} opening
+     * @param {HttpError} error
+     */
+    function restartRecapJob(sequence, route, all, opening, error) {
+        state.recapJob = /** @type {?FollowedRecapJob} */ (null);
+        if (state.recapRestarts > 0) {
+            landRecap(sequence, Promise.reject(error), opening);
+            return;
+        }
+        state.recapRestarts += 1;
+        startRecapJob(sequence, route, false, all, opening);
+    }
+
+    /**
+     * Lets go of a job this screen no longer follows. Its answer changes nothing on screen; the promise
+     * settles either way, so the next job can wait for the Hub to have counted it.
+     * @param {string} id
+     */
+    async function cancelRecapJob(id) {
+        try {
+            return await fetch('/api/recap/jobs/' + encodeURIComponent(id), {
+                method: 'DELETE',
+                headers: Object.assign({'content-type': 'application/json'}, RECAP_SCREEN_HEADERS),
+                keepalive: true
+            });
+        } catch (error) {
+            return null;
+        }
+    }
+
+    /** The bar and the stages follow the job in place, so the status region speaks only when the stage changes. */
+    function showRecapProgress() {
+        if (state.recap || currentScreen() !== 'recap') return;
+        const panel = document.getElementById('recap-progress');
+        if (panel && state.recapJob) patchRecapProgress(panel, state.recapJob);
+        else render();
+    }
+
+    /**
+     * Lands a recap read, with the reports list beside it.
+     * @param {number} sequence
+     * @param {Promise<RecapSnapshot>} read
+     * @param {string | null} opening
+     */
+    function landRecap(sequence, read, opening) {
+        Promise.all([read, readRecapReports()]).then(function (results) {
             if (sequence !== state.recapSeq) return;
             state.recap = results[0];
             state.recapReports = results[1];
@@ -6067,10 +7130,12 @@
     }
 
     /** A 403 is a caller with no right to the reports: null hides the section. */
-    function readRecapReports() {
-        return getJson('/api/recap/reports').catch(function (error) {
+    async function readRecapReports() {
+        try {
+            return await getJson('/api/recap/reports');
+        } catch (error) {
             return error.status === 403 ? null : 'error';
-        });
+        }
     }
 
     function renderRecapScreen() {
@@ -6086,21 +7151,32 @@
             return section;
         }
         if (state.recap === null) {
-            // Built from every finding of the period, so a large database takes minutes: said, lest
-            // the reader leave, and come back to start the same work again.
-            section.appendChild(el('p', {class: 'recap-loading', role: 'status', text: t('recap.loading')}));
+            const job = state.recapJob;
+            if (state.recapHubBusy) section.appendChild(recapHubBusyBanner());
+            // A running job is always the current read's (loadRecap drops one for other filters); its key
+            // is not compared, since past midnight UTC a route with no day names another and the panel
+            // would never draw, leaving showRecapProgress to render the whole screen on every poll.
+            if (job && job.status === 'running') {
+                section.appendChild(recapProgressPanel(job));
+                return section;
+            }
+            if (!state.recapHubBusy) section.appendChild(recapLoadingBanner());
             section.appendChild(el('div', {class: 'card skeleton', style: 'height:220px'}));
             return section;
         }
         const snapshot = state.recap;
         const labels = PSL.RECAP_LABELS[snapshot.view === 'pilotage' ? 'pilotage' : 'tech'];
-        [recapPeriodBlock(snapshot), recapTiles(snapshot, labels), recapPriorities(snapshot, route),
+        [recapFreshnessLine(route), recapPeriodBlock(snapshot), recapTiles(snapshot, labels), recapPriorities(snapshot, route),
             recapMoved(snapshot, labels), recapReportsPanel(route), recapCardPanel(route)].forEach(function (part) {
             if (part) section.appendChild(part);
         });
         return section;
     }
 
+    /**
+     * @param {number} status
+     * @param {'tech' | 'pilotage'} view
+     */
     function recapErrorBanner(status, view) {
         const sentence = PSL.recapErrorText(status, view);
         return el('div', {
@@ -6110,6 +7186,9 @@
         }, [critGlyph(16), el('div', {text: sentence})]);
     }
 
+    /**
+     * @param {RecapRoute} route
+     */
     function recapFilterLine(route) {
         const period = el('select', {class: 'refresh-select', 'aria-label': t('recap.filter.period')},
             RECAP_PERIOD_CHOICES.map(function (kind) {
@@ -6145,7 +7224,12 @@
         ]);
     }
 
-    /** Applied on change, so a name is not searched for a letter at a time. */
+    /**
+     * Applied on change, so a name is not searched for a letter at a time.
+     * @param {string} label
+     * @param {string | null} value
+     * @param {string} key
+     */
     function recapTextFilter(label, value, key) {
         const input = el('input', {
             class: 'recap-input', type: 'text', placeholder: label, value: value || '', 'aria-label': label,
@@ -6157,6 +7241,9 @@
         return input;
     }
 
+    /**
+     * @param {RecapRoute} route
+     */
     function recapViewSwitch(route) {
         const group = el('div', {class: 'segmented', role: 'radiogroup', 'aria-label': t('recap.view.label')});
         ['tech', 'pilotage'].forEach(function (view) {
@@ -6172,7 +7259,14 @@
         return radioKeys(group, 'recap-view');
     }
 
-    /** A heading with its "?" beside it, never inside it, centred on the heading's line. */
+    /**
+     * A heading with its "?" beside it, never inside it, centred on the heading's line.
+     * @param {string} id
+     * @param {string} text
+     * @param {string} hint
+     * @param {string} help
+     * @param {string} topic
+     */
     function recapHeading(id, text, hint, help, topic) {
         return el('div', {class: 'title-row'}, [
             el('h2', {
@@ -6184,14 +7278,24 @@
         ]);
     }
 
+    /**
+     * @param {RecapSnapshot} snapshot
+     * @param {string} key
+     */
     function recapHelp(snapshot, key) {
         return PSL.RECAP_HELP[snapshot.view === 'pilotage' ? 'pilotage' : 'tech'][key];
     }
 
+    /**
+     * @param {string} text
+     */
     function recapNotes(text) {
         return text ? el('p', {class: 'recap-notes', text: text}) : null;
     }
 
+    /**
+     * @param {RecapSnapshot} snapshot
+     */
     function recapPeriodBlock(snapshot) {
         const period = snapshot.period;
         const previous = snapshot.previous;
@@ -6201,7 +7305,7 @@
         const previousReasons = PSL.incompleteText(previous.incomplete, view);
         if (previousReasons) {
             reasons.push(t('recap.incomplete.previous', {
-                reasons: previous.incomplete.map(function (reason) {
+                reasons: previous.incomplete.map(function (/** @type {string} */ reason) {
                     return PSL.gapLabel(reason, view);
                 }).join(', ')
             }));
@@ -6225,11 +7329,23 @@
         return block;
     }
 
-    /** "compared with" or "since" the previous period, worded for a day or for a range of days. */
+    /**
+     * "compared with" or "since" the previous period, worded for a day or for a range of days.
+     * @param {string} prefix
+     * @param {RecapPeriodInfo} previous
+     */
     function recapAgainst(prefix, previous) {
         return t(prefix + (previous.kind === 'day' ? 'day' : 'range'), {period: PSL.periodText(previous)});
     }
 
+    /**
+     * @param {string} label
+     * @param {HTMLElement | null} chip
+     * @param {HTMLElement} value
+     * @param {string[]} subs
+     * @param {string} help
+     * @param {string} topic
+     */
     function recapTile(label, chip, value, subs, help, topic) {
         return el('div', {class: 'disc-figure'}, [
             el('span', {class: 'disc-figure-label'}, [document.createTextNode(label), chip, helpDot(help, topic)]),
@@ -6239,13 +7355,20 @@
         })));
     }
 
+    /**
+     * @param {RecapSnapshot} snapshot
+     */
     function recapProgressChip(snapshot) {
         return snapshot.period.in_progress
             ? el('span', {class: 'chip', 'data-tone': 'progress', text: t('recap.chip.in_progress')})
             : null;
     }
 
-    /** "previous week 168,900", with the days it was cut to when this period is not over. */
+    /**
+     * "previous week 168,900", with the days it was cut to when this period is not over.
+     * @param {RecapSnapshot} snapshot
+     * @param {string | number | null} value
+     */
     function recapPreviousText(snapshot, value) {
         if (value === null || value === undefined) return '';
         const days = snapshot.previous.truncated_to_days;
@@ -6255,11 +7378,17 @@
         });
     }
 
-    /** A count with thousands separators, or null when the Hub has none. */
+    /**
+     * A count with thousands separators, or null when the Hub has none.
+     * @param {number | null} value
+     */
     function recapCount(value) {
         return value === null || value === undefined ? null : PSL.num(value);
     }
 
+    /**
+     * @param {RecapSnapshot} snapshot
+     */
     function recapCo2Tile(snapshot) {
         const tiles = snapshot.tiles;
         const without = tiles.co2_sources_without_coefficient;
@@ -6282,6 +7411,10 @@
         ], recapHelp(snapshot, 'co2'), t('recap.topic.co2'));
     }
 
+    /**
+     * @param {RecapSnapshot} snapshot
+     * @param {Record<string, string>} labels
+     */
     function recapTiles(snapshot, labels) {
         const tiles = snapshot.tiles;
         const actions = tiles.actions;
@@ -6312,6 +7445,10 @@
 
     // ---- the priorities
 
+    /**
+     * @param {RecapSnapshot} snapshot
+     * @param {RecapRoute} route
+     */
     function recapPriorities(snapshot, route) {
         const management = snapshot.view === 'pilotage';
         const all = snapshot.priorities;
@@ -6321,7 +7458,7 @@
             + (snapshot.period.in_progress ? t('recap.prio.hint.closed') : '');
         const max = all.length && all[0].avoidable_io_ops ? all[0].avoidable_io_ops : 0;
         const list = el('ol', {class: 'recap-list'});
-        shown.forEach(function (priority, index) {
+        shown.forEach(function (/** @type {RecapPriority} */ priority, /** @type {number} */ index) {
             if (PSL.dividesBefore(all, index)) {
                 list.appendChild(el('li', {
                     class: 'recap-divider',
@@ -6345,6 +7482,11 @@
         return section;
     }
 
+    /**
+     * @param {RecapSnapshot} snapshot
+     * @param {RecapPriority[]} all
+     * @param {HTMLElement} section
+     */
     function recapPriorityNotes(snapshot, all, section) {
         if (snapshot.view !== 'pilotage' && all.length > RECAP_FIRST_PAGE && !state.recapShowAll) {
             const more = el('button', {
@@ -6369,11 +7511,21 @@
         }
     }
 
-    /** The volume's label inside a sentence: "avoidable I/O", never a capital mid-line. */
+    /**
+     * The volume's label inside a sentence: "avoidable I/O", never a capital mid-line.
+     * @param {RecapSnapshot} snapshot
+     */
     function recapIoLower(snapshot) {
         return t('recap.label.' + (snapshot.view === 'pilotage' ? 'pilotage' : 'tech') + '.io_lower');
     }
 
+    /**
+     * @param {RecapPriority} priority
+     * @param {number} max
+     * @param {RecapSnapshot} snapshot
+     * @param {RecapRoute} route
+     * @param {boolean} namesService
+     */
     function recapRow(priority, max, snapshot, route, namesService) {
         const management = snapshot.view === 'pilotage';
         const kids = [
@@ -6390,6 +7542,9 @@
         return el('li', {class: 'run-card recap-row'}, kids);
     }
 
+    /**
+     * @param {RecapPriority} priority
+     */
     function recapTechWhat(priority) {
         return el('div', {class: 'recap-what'}, [
             priority.label ? el('p', {class: 'recap-label', text: priority.label}) : null,
@@ -6405,7 +7560,10 @@
         ]);
     }
 
-    /** The label when someone named the endpoint, else the sentence and the one technical value left. */
+    /**
+     * The label when someone named the endpoint, else the sentence and the one technical value left.
+     * @param {RecapPriority} item
+     */
     function recapPlainWhat(item) {
         const service = PSL.serviceParts(item.service, item.service_label).name;
         return el('div', {class: 'recap-what'}, [
@@ -6418,7 +7576,10 @@
         ]);
     }
 
-    /** The service by the name a team gave it, the technical one beside it once named. */
+    /**
+     * The service by the name a team gave it, the technical one beside it once named.
+     * @param {RecapPriority} priority
+     */
     function recapServiceHead(priority) {
         const parts = PSL.serviceParts(priority.service, priority.service_label);
         return el('span', {class: 'recap-service'}, [
@@ -6427,6 +7588,9 @@
         ]);
     }
 
+    /**
+     * @param {RecapPriority} item
+     */
     function recapTrend(item) {
         const text = PSL.trendText(item.trend, item.change);
         return text
@@ -6439,11 +7603,20 @@
             : null;
     }
 
+    /**
+     * @param {RecapPriority} priority
+     * @param {number} max
+     * @param {boolean} lower
+     * @param {boolean} management
+     */
     function recapFigure(priority, max, lower, management) {
         if (!PSL.hasAvoidableVolume(priority)) {
             return el('div', {class: 'recap-figure'}, [
                 el('span', {class: 'recap-figure-n', text: '—'}),
-                el('span', {class: 'recap-figure-u', text: t(management ? 'recap.figure.none' : 'recap.co2.no_avoidable_io')}),
+                el('span', {
+                    class: 'recap-figure-u',
+                    text: t(management ? 'recap.figure.none' : 'recap.co2.no_avoidable_io')
+                }),
                 recapTrend(priority)
             ]);
         }
@@ -6458,6 +7631,9 @@
 
     // ---- the folded technical detail (Engineering)
 
+    /**
+     * @param {RecapPriority} priority
+     */
     function recapDetail(priority) {
         const key = 'recap:' + priority.signature;
         const open = state.panelOpen[key] === undefined ? priority.rank === 1 : state.panelOpen[key] === true;
@@ -6478,6 +7654,9 @@
         return details;
     }
 
+    /**
+     * @param {SuggestedFix} fix
+     */
     function recapFix(fix) {
         if (!fix) return null;
         const url = PSL.httpUrl(fix.reference_url);
@@ -6497,7 +7676,10 @@
         ]);
     }
 
-    /** The function on one line and `path:line` on the next, as a stack trace reads. */
+    /**
+     * The function on one line and `path:line` on the next, as a stack trace reads.
+     * @param {CodeLocation} location
+     */
     function recapCodeLocation(location) {
         if (!location) return null;
         const at = [location.filepath, location.lineno].filter(function (part) {
@@ -6511,6 +7693,9 @@
         }), el('pre', {class: 'recap-code', text: lines})]);
     }
 
+    /**
+     * @param {RecapPriority} priority
+     */
     function recapFacts(priority) {
         const rows = [
             [t('recap.fact.detections'), priority.detections === null || priority.detections === undefined
@@ -6527,12 +7712,15 @@
         return list;
     }
 
-    /** Every change of the action, newest last, in the reader's own time. */
+    /**
+     * Every change of the action, newest last, in the reader's own time.
+     * @param {RecapAction} action
+     */
     function recapEvents(action) {
         if (!action || !action.events || !action.events.length) return null;
         return el('div', {}, [
             el('div', {class: 'recap-fix-head', text: t('recap.events.title')}),
-            el('ul', {class: 'recap-events'}, action.events.map(function (event) {
+            el('ul', {class: 'recap-events'}, action.events.map(function (/** @type {import('../types').RecapActionEvent} */ event) {
                 const owner = PSL.ownerLabel(event.owner, event.owner_display);
                 return el('li', {}, [
                     el('time', {
@@ -6550,6 +7738,10 @@
 
     // ---- actions, names and the foot of a row
 
+    /**
+     * @param {string} kind
+     * @param {string} text
+     */
     function recapStateChip(kind, text) {
         return el('span', {class: 'recap-state', 'data-state': kind}, [
             RECAP_STATE_GLYPH[kind] ? svg(RECAP_STATE_GLYPH[kind], 12) : null,
@@ -6557,6 +7749,9 @@
         ]);
     }
 
+    /**
+     * @param {RecapAction} action
+     */
     function recapWhen(action) {
         const done = action.status === 'done' && action.done_at_ms;
         const at = done ? action.done_at_ms : action.updated_at_ms;
@@ -6566,12 +7761,18 @@
         });
     }
 
+    /**
+     * @param {RecapAction} action
+     */
     function recapOwner(action) {
         const owner = PSL.ownerLabel(action.owner, action.owner_display);
         return owner.text ? el('span', {class: 'recap-owner', title: owner.title, text: owner.text}) : null;
     }
 
-    /** Management reads an action and cannot change it. */
+    /**
+     * Management reads an action and cannot change it.
+     * @param {RecapAction} action
+     */
     function recapActionReadOnly(action) {
         if (!action) return [recapStateChip('none', t('recap.state.not_taken'))];
         if (action.status !== 'done') {
@@ -6585,6 +7786,10 @@
             recapOwner(action), recapWhen(action)];
     }
 
+    /**
+     * @param {RecapPriority} priority
+     * @param {RecapRoute} route
+     */
     function recapActionControls(priority, route) {
         const action = priority.action;
         const busy = state.recapBusy[priority.signature] === true;
@@ -6628,7 +7833,13 @@
             confirmation ? recapStateChip(action.confirmation, confirmation) : null, recapWhen(action), ack];
     }
 
-    /** `namesService` puts the service button on the first card of a service only, beside "Name this". */
+    /**
+     * `namesService` puts the service button on the first card of a service only, beside "Name this".
+     * @param {RecapPriority} priority
+     * @param {boolean} management
+     * @param {RecapRoute} route
+     * @param {boolean} namesService
+     */
     function recapFoot(priority, management, route, namesService) {
         const kids = [];
         if (!management) {
@@ -6652,24 +7863,35 @@
     /**
      * Sends a write on a row and reads the recap again, whatever it answered. A refusal keeps the
      * Hub's own sentence in the row: it names why (no identity, no permission).
+     * @param {string} method
+     * @param {string} path
+     * @param {object} body
      */
-    function recapSend(method, path, body) {
-        return fetch(path, {
+    async function recapSend(method, path, body) {
+        // Built before the try: only the request and its answer fall back to the failed sentence.
+        const request = {
             method: method,
             headers: {'content-type': 'application/json', accept: 'application/json'},
             body: JSON.stringify(body)
-        }).then(signInOn401).then(function (response) {
+        };
+        try {
+            const response = signInOn401(await fetch(path, request));
             if (response.ok) return null;
-            return response.json().catch(function () {
+            const payload = await response.json().catch(function () {
                 return null;
-            }).then(function (payload) {
-                return PSL.problemText(payload, response.status);
             });
-        }).catch(function () {
+            return PSL.problemText(payload, response.status);
+        } catch (error) {
             return t('recap.send.failed');
-        });
+        }
     }
 
+    /**
+     * @param {string} signature
+     * @param {string} method
+     * @param {string} path
+     * @param {object} body
+     */
     function recapWrite(signature, method, path, body) {
         if (state.recapBusy[signature]) return;
         state.recapBusy[signature] = true;
@@ -6678,13 +7900,17 @@
             delete state.recapBusy[signature];
             if (failure) state.recapRowError[signature] = failure;
             else delete state.recapRowError[signature];
-            loadRecap(true);
+            // A write that landed changes the recap: computed again. A refused one changed nothing.
+            loadRecap(true, !failure);
         });
     }
 
     /**
      * What the inline editor names on a row: its endpoint, or its whole service. One key per target, so
      * the two editors of a row never open together; a refusal lands on the row either way.
+     * @param {RecapPriority} priority
+     * @param {string} kind
+     * @returns {NameTarget}
      */
     function recapNameTarget(priority, kind) {
         if (kind === 'service') {
@@ -6713,7 +7939,10 @@
         };
     }
 
-    /** The target whose editor is open on this row, if any. */
+    /**
+     * The target whose editor is open on this row, if any.
+     * @param {RecapPriority} priority
+     */
     function recapNamingTarget(priority) {
         return ['endpoint', 'service'].map(function (kind) {
             return recapNameTarget(priority, kind);
@@ -6722,6 +7951,9 @@
         }) || null;
     }
 
+    /**
+     * @param {NameTarget} target
+     */
     function recapNameButton(target) {
         const button = el('button', {
             class: 'recap-link', type: 'button', text: target.label ? target.rename : target.name,
@@ -6735,7 +7967,10 @@
         return button;
     }
 
-    /** A business name, in a line of its own under the row. Enter saves, an empty name removes it. */
+    /**
+     * A business name, in a line of its own under the row. Enter saves, an empty name removes it.
+     * @param {NameTarget} target
+     */
     function recapNameEditor(target) {
         const input = el('input', {
             class: 'recap-input recap-name-input',
@@ -6761,6 +7996,10 @@
         return form;
     }
 
+    /**
+     * @param {NameTarget} target
+     * @param {string | null} label
+     */
     function recapNameSave(target, label) {
         recapSend('PUT', target.path, Object.assign({}, target.body, {label: label}))
             .then(function (failure) {
@@ -6773,7 +8012,7 @@
                 delete state.recapRowError[target.row];
                 state.recapNaming = null;
                 state.recapNameDraft = null;
-                loadRecap(true);
+                loadRecap(true, true);
             });
     }
 
@@ -6782,6 +8021,7 @@
      * (see PSL.breakParts), so a line ends at `repository.` or `{id}/` rather than mid-word;
      * overflow-wrap still breaks what is left. A <wbr> carries no text, so a copy reads the
      * name whole.
+     * @param {string} text
      */
     function codeChip(text) {
         const chip = el('code', {class: 'code-inline'});
@@ -6789,9 +8029,12 @@
         return chip;
     }
 
+    /**
+     * @param {string} text
+     */
     function breakable(text) {
         const fragment = document.createDocumentFragment();
-        PSL.breakParts(text).forEach(function (part, index) {
+        PSL.breakParts(text).forEach(function (/** @type {string} */ part, /** @type {number} */ index) {
             if (index > 0) fragment.appendChild(document.createElement('wbr'));
             fragment.appendChild(document.createTextNode(part));
         });
@@ -6800,7 +8043,10 @@
 
     // ---- what moved
 
-    /** The sentence in a line, led by the label when the endpoint has one. */
+    /**
+     * The sentence in a line, led by the label when the endpoint has one.
+     * @param {RecapPriority} item
+     */
     function recapMoveWho(item) {
         const service = PSL.serviceParts(item.service, item.service_label).name;
         const where = item.label || !item.endpoint
@@ -6818,6 +8064,11 @@
 
     // A line keeps its own trend pill only when it says more than the group's title pill: a change
     // figure, or a trend other than the group's, as under Came back.
+    /**
+     * @param {RecapPriority} item
+     * @param {boolean} management
+     * @param {string} group
+     */
     function recapMoveItem(item, management, group) {
         const who = management
             ? recapMoveWho(item)
@@ -6833,6 +8084,10 @@
         return el('li', {}, [who, repeats ? null : recapTrend(item)]);
     }
 
+    /**
+     * @param {RecapSnapshot} snapshot
+     * @param {Record<string, string>} labels
+     */
     function recapMoved(snapshot, labels) {
         const management = snapshot.view === 'pilotage';
         const moves = snapshot.movements;
@@ -6886,12 +8141,22 @@
         return section;
     }
 
-    /** A list's whole length: the Hub cuts each list and counts it in `counts`, absent before it did. */
+    /**
+     * A list's whole length: the Hub cuts each list and counts it in `counts`, absent before it did.
+     * @param {RecapMovements} moves
+     * @param {RecapPriority[]} items
+     * @param {string} key
+     */
     function recapMovesTotal(moves, items, key) {
         return moves.counts ? moves.counts[key] : items.length;
     }
 
-    /** A whole list that could not be read says so, and how much the Hub did not send. */
+    /**
+     * A whole list that could not be read says so, and how much the Hub did not send.
+     * @param {RecapMovements} moves
+     * @param {RecapPriority[]} items
+     * @param {string} key
+     */
     function recapMovesRest(moves, items, key) {
         const rest = recapMovesTotal(moves, items, key) - items.length;
         if (rest <= 0 || state.recapMovesFailed !== key) return null;
@@ -6903,6 +8168,10 @@
         });
     }
 
+    /**
+     * @param {RecapPriority[]} items
+     * @param {string} key
+     */
     function recapMovesShown(items, key) {
         return state.recapMovesOpen[key] ? items : items.slice(0, RECAP_MOVES_FIRST);
     }
@@ -6911,6 +8180,9 @@
      * A long group stops at its first few lines: the whole list made the section run for screens.
      * The button opens all of it, reading it again with moves=all when the Hub cut it, so nothing a
      * reader wants to dig into stays out of reach.
+     * @param {RecapMovements} moves
+     * @param {RecapPriority[]} items
+     * @param {string} key
      */
     function recapMovesMore(moves, items, key) {
         const total = recapMovesTotal(moves, items, key);
@@ -6934,7 +8206,8 @@
                 focusFirstNewMove(key);
                 return;
             }
-            // The whole snapshot again with every move: the screen then reads one snapshot, not two.
+            // The whole snapshot again with every move, from the job already computed: the screen then
+            // reads one snapshot, not two, and nothing is computed again.
             state.recapMovesLoading = key;
             state.recapMovesFailed = null;
             renderFocus('[data-moves="' + key + '"]');
@@ -6943,9 +8216,12 @@
         return more;
     }
 
-    /** On the first move the button had hidden, where the reader was headed, as an incident does. */
+    /**
+     * On the first move the button had hidden, where the reader was headed, as an incident does.
+     * @param {string} key
+     */
     function focusFirstNewMove(key) {
-        const move = document.querySelectorAll('[data-moves-group="' + key + '"] li')[RECAP_MOVES_FIRST];
+        const move = /** @type {HTMLElement} */ (document.querySelectorAll('[data-moves-group="' + key + '"] li')[RECAP_MOVES_FIRST]);
         if (!move) return;
         move.setAttribute('tabindex', '-1');
         move.focus();
@@ -6954,10 +8230,159 @@
     /**
      * The first day of a period has no closed day to compare, which is not the same as nothing
      * having moved: the server's `nothing_moved` is true there only because every list is empty.
+     * @param {RecapSnapshot} snapshot
      */
     function recapMovedNote(snapshot) {
         if (snapshot.previous.truncated_to_days === 0) return t('recap.moves.none_closed');
         return snapshot.nothing_moved ? t('recap.moves.nothing') : '';
+    }
+
+    const RECAP_POLL_MS = 1000;
+    // This page among the screens that follow a recap job on the Hub, drawn once per load: two tabs
+    // follow a job apart, and a let-go from one never stops the computation the other waits on.
+    const RECAP_SCREEN_HEADERS = {'x-recap-screen': PSL.screenId()};
+    const RECAP_BUSY_RETRY_MS = 5000;
+
+    /**
+     * Built from every finding of the period, so a large database takes minutes: said in a banner
+     * while the Hub answers the job, or for as long as a Hub without jobs computes, with the time spent
+     * so far so the page reads as working. Leaving restarts that older read, not a job, and the banner
+     * says which. The counter sits outside the status region, which would announce it every second.
+     */
+    function recapLoadingBanner() {
+        const since = state.recapLoadingSince || Date.now();
+        const elapsed = function () {
+            return t('recap.loading_elapsed', {elapsed: PSL.durPrecise(Date.now() - since)});
+        };
+        return el('div', {class: 'banner recap-loading', 'data-tone': 'info'}, [
+            infoGlyph(16),
+            el('div', {}, [
+                el('div', {role: 'status'}, [
+                    el('p', {class: 'recap-loading-title', text: t('recap.loading_title')}),
+                    el('p', {text: t(state.recapDirect ? 'recap.loading' : 'recap.job.body')})
+                ]),
+                live(el('p', {class: 'recap-loading-elapsed', text: elapsed()}), elapsed)
+            ])
+        ]);
+    }
+
+    /**
+     * Where the Hub's computation of this recap is: the share of the work behind it as a bar, each
+     * stage done, running, still to come or not needed on this day, and the time since it started,
+     * counted from the Hub's start so a reader who comes back sees the whole of it.
+     * @param {FollowedRecapJob} job
+     */
+    function recapProgressPanel(job) {
+        // The Hub's count when the job was read, grown on this clock since: a browser whose clock is
+        // off from the Hub's still counts right.
+        const counted = job.elapsed_ms != null ? job.elapsed_ms : Date.now() - job.started_at_ms;
+        const since = job.receivedAt || Date.now();
+        const elapsed = function () {
+            return t('recap.loading_elapsed', {elapsed: PSL.durPrecise(counted + Date.now() - since)});
+        };
+        const percent = PSL.recapJobPercent(job);
+        const fill = el('div', {class: 'recap-progress-fill'});
+        fill.style.width = percent + '%';
+        return el('div', {class: 'banner recap-loading', 'data-tone': 'info', id: 'recap-progress'}, [
+            infoGlyph(16),
+            el('div', {class: 'recap-progress'}, [
+                el('div', {role: 'status'}, [
+                    el('p', {class: 'recap-loading-title', text: t('recap.loading_title')}),
+                    el('p', {text: t('recap.job.body')}),
+                    el('p', {class: 'recap-progress-stage', text: recapStageLine(job)})
+                ]),
+                el('div', {
+                    class: 'recap-progress-track',
+                    role: 'progressbar',
+                    'aria-valuemin': '0',
+                    'aria-valuemax': '100',
+                    'aria-valuenow': String(percent),
+                    'aria-valuetext': recapStageLine(job),
+                    'aria-label': t('recap.job.progress_label')
+                }, [fill]),
+                recapStageList(job),
+                live(el('p', {class: 'recap-loading-elapsed', text: elapsed()}), elapsed)
+            ])
+        ]);
+    }
+
+    /**
+     * @param {HTMLElement} panel
+     * @param {RecapJob} job
+     */
+    function patchRecapProgress(panel, job) {
+        const percent = PSL.recapJobPercent(job);
+        const track = panel.querySelector('.recap-progress-track');
+        const line = panel.querySelector('.recap-progress-stage');
+        const list = panel.querySelector('.recap-stages');
+        if (!track || !line || !list) {
+            render();
+            return;
+        }
+        track.setAttribute('aria-valuenow', String(percent));
+        track.setAttribute('aria-valuetext', recapStageLine(job));
+        const bar = /** @type {HTMLElement} */ (track.firstChild);
+        bar.style.width = percent + '%';
+        // Rewritten only when it changes, so the status region speaks once per stage.
+        const text = recapStageLine(job);
+        if (line.textContent !== text) line.textContent = text;
+        list.replaceWith(recapStageList(job));
+    }
+
+    /**
+     * @param {RecapJob} job
+     */
+    function recapStageLine(job) {
+        return t('recap.job.progress_text', {
+            percent: PSL.recapJobPercent(job),
+            stage: job.stage ? t('recap.job.stage.' + job.stage) : t('recap.job.starting')
+        });
+    }
+
+    /**
+     * @param {RecapJob} job
+     */
+    function recapStageList(job) {
+        return el('ol', {class: 'recap-stages'}, (job.stages || []).map(function (/** @type {import('../types').RecapJobStage} */ stage) {
+            let time = '';
+            if (stage.state === 'done' && stage.ms != null) time = PSL.durPrecise(stage.ms);
+            else if (stage.state === 'running') time = t('recap.job.stage_running');
+            else if (stage.state === 'skipped') time = t('recap.job.stage_skipped');
+            return el('li', {class: 'recap-stage', 'data-state': stage.state}, [
+                el('span', {class: 'recap-stage-dot', 'aria-hidden': 'true'}),
+                el('span', {class: 'recap-stage-name', text: t('recap.job.stage.' + stage.name)}),
+                // A step still to come says so to a screen reader only: on screen its hollow dot does.
+                stage.state === 'pending'
+                    ? el('span', {class: 'visually-hidden', text: t('recap.job.stage_pending')})
+                    : el('span', {class: 'recap-stage-time', text: time})
+            ]);
+        }));
+    }
+
+    function recapHubBusyBanner() {
+        return el('div', {class: 'banner recap-loading', 'data-tone': 'info', role: 'status'}, [
+            infoGlyph(16),
+            el('div', {text: t('recap.job.busy')})
+        ]);
+    }
+
+    /**
+     * When the recap on screen was computed, until when the Hub reuses it, and a way to compute it now.
+     * @param {RecapRoute} route
+     */
+    function recapFreshnessLine(route) {
+        const job = state.recapJob;
+        if (state.recapDirect || !job || job.status !== 'succeeded' || job.key !== PSL.recapJobKey(route)) return null;
+        const fresh = PSL.recapFreshness(job, Date.now());
+        if (!fresh) return null;
+        const again = el('button', {type: 'button', class: 'pill-button pill-sm', text: t('recap.job.recompute')});
+        again.addEventListener('click', function () {
+            loadRecap(false, true);
+        });
+        return el('div', {class: 'recap-freshness'}, [
+            el('span', {class: 'recap-freshness-text', text: t('recap.job.fresh', fresh)}),
+            again
+        ]);
     }
 
     // ---- the frozen reports
@@ -6965,7 +8390,10 @@
     const RECAP_REPORT_VIEWS = ['pilotage', 'tech'];
     const RECAP_DELIVERY_STATUS = {delivered: 'succeeded', failed: 'failed'};
 
-    /** The list under What moved; null (no right to read it) leaves the section out. */
+    /**
+     * The list under What moved; null (no right to read it) leaves the section out.
+     * @param {RecapRoute} route
+     */
     function recapReportsPanel(route) {
         const reports = state.recapReports;
         if (reports === null) return null;
@@ -6992,6 +8420,9 @@
         return section;
     }
 
+    /**
+     * @param {RecapRoute} route
+     */
     function recapGenerateBar(route) {
         const button = el('button', {
             class: 'pill-button pill-sm recap-generate-button',
@@ -7008,6 +8439,9 @@
         ]);
     }
 
+    /**
+     * @param {RecapRoute} route
+     */
     function recapGenerate(route) {
         if (state.recapGenerating) return;
         const sequence = state.recapSeq;
@@ -7029,6 +8463,9 @@
         });
     }
 
+    /**
+     * @param {RecapReport} report
+     */
     function recapReportRow(report) {
         const status = PSL.recapReportStatus(report);
         const links = RECAP_REPORT_VIEWS.filter(function (view) {
@@ -7036,8 +8473,11 @@
         }).map(function (view) {
             const name = t('recap.view.' + view);
             return el('a', {
-                class: 'recap-link', href: '/recaps/' + report.id + '/' + view + '.html', download: '',
-                text: name, 'aria-label': t('recap.report.view_aria', {view: name, report: PSL.recapReportLabel(report)})
+                class: 'recap-link',
+                href: '/recaps/' + report.id + '/' + view + '.html',
+                download: '',
+                text: name,
+                'aria-label': t('recap.report.view_aria', {view: name, report: PSL.recapReportLabel(report)})
             });
         });
         return el('li', {class: 'run-card recap-report'}, [
@@ -7051,7 +8491,7 @@
                     text: t('recap.report.generated', {time: PSL.localTime(report.generated_at_ms)})
                 }),
                 status ? el('span', {class: 'recap-report-status', text: status}) : null
-            ].concat(report.deliveries.map(function (delivery) {
+            ].concat(report.deliveries.map(function (/** @type {import('../types').RecapDelivery} */ delivery) {
                 return el('span', {
                     class: 'status-pill', 'data-status': RECAP_DELIVERY_STATUS[delivery.state] || 'queued',
                     text: PSL.recapDeliveryText(delivery)
@@ -7064,6 +8504,7 @@
 
     const CARD_LANG_KEY = 'perf-sentinel:card-lang';
     const CARD_FIX_PAGE = 5;
+    /** @type {Array<[string, number]>} */
     const CARD_FREE = [['title', 48], ['team', 48]];
 
     /** The card form and its answers. It outlives a recap read: the filters above only move its scope. */
@@ -7092,7 +8533,11 @@
         return new Date().toISOString().slice(0, 10);
     }
 
-    /** The picked period, or the recap filter's when it is closed for this kind, else the last closed one. */
+    /**
+     * The picked period, or the recap filter's when it is closed for this kind, else the last closed one.
+     * @param {ShareCard} card
+     * @param {RecapRoute} route
+     */
     function cardPeriodFrom(card, route) {
         if (card.from) return card.from;
         const last = PSL.lastClosedPeriod(card.kind, cardToday());
@@ -7100,26 +8545,39 @@
         return filtered && filtered <= last ? filtered : last;
     }
 
+    /**
+     * @param {ShareCard} card
+     */
     function cardOptionsReady(card) {
         return card.options && card.options !== 'loading' && !card.options.error ? card.options : null;
     }
 
-    /** The fix a story tells: the one picked when the period still lists it, else the default. */
+    /**
+     * The fix a story tells: the one picked when the period still lists it, else the default.
+     * @param {ShareCard} card
+     */
     function cardFix(card) {
         const options = cardOptionsReady(card);
         if (!options) return null;
-        return options.fixes.find(function (fix) {
+        return options.fixes.find(function (/** @type {CardFix} */ fix) {
             return fix.signature === card.signature;
-        }) || options.fixes.find(function (fix) {
+        }) || options.fixes.find(function (/** @type {CardFix} */ fix) {
             return fix.signature === options.default_signature;
         }) || options.fixes[0] || null;
     }
 
+    /**
+     * @param {ShareCard} card
+     */
     function cardLabel(card) {
         const fix = cardFix(card);
         return card.label !== null ? card.label : (fix && fix.label) || '';
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {RecapRoute} route
+     */
     function cardForm(card, route) {
         const fix = cardFix(card);
         return {
@@ -7130,17 +8588,27 @@
         };
     }
 
-    /** The Hub's equivalence country, once the options are read. */
+    /**
+     * The Hub's equivalence country, once the options are read.
+     * @param {ShareCard} card
+     */
     function cardHubCountry(card) {
         const options = cardOptionsReady(card);
         return options ? options.equivalence_country : undefined;
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {RecapRoute} route
+     */
     function cardFileName(card, route) {
         return 'perf-sentinel-card-' + card.kind + '-' + cardPeriodFrom(card, route) + '.' + card.format;
     }
 
-    /** The curve's own refusal, from its last render: the period before is not whole. */
+    /**
+     * The curve's own refusal, from its last render: the period before is not whole.
+     * @param {ShareCard} card
+     */
     function cardCurveRefusal(card) {
         const refusal = card.angle === 'curve' && card.curveRefusal && card.curveRefusal.path === card.optionsPath
             ? card.curveRefusal : null;
@@ -7149,7 +8617,10 @@
         return refusal.code && options ? PSL.cardRefusalText(refusal.code, card.kind, options.period.from) : refusal.text;
     }
 
-    /** Why no card can be made with these choices, before any field: null when one can. */
+    /**
+     * Why no card can be made with these choices, before any field: null when one can.
+     * @param {ShareCard} card
+     */
     function cardBlocked(card) {
         const options = cardOptionsReady(card);
         if (!options) return 'options';
@@ -7160,26 +8631,44 @@
         return cardCurveRefusal(card) ? 'previous' : null;
     }
 
-    /** The free fields this angle shows, by their card.json name. */
+    /**
+     * The free fields this angle shows, by their card.json name.
+     * @param {ShareCard} card
+     */
     function cardFields(card) {
         return card.angle === 'story' && cardFix(card) && !cardBlocked(card) ? ['label', 'title', 'team'] : ['title', 'team'];
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {string} field
+     */
     function cardFieldValue(card, field) {
         return field === 'label' ? cardLabel(card) : card[field];
     }
 
-    /** The error under a free field: the browser's own check first, then the engine's 422. */
+    /**
+     * The error under a free field: the browser's own check first, then the engine's 422.
+     * @param {ShareCard} card
+     * @param {string} field
+     */
     function cardFieldError(card, field) {
         return PSL.cardFieldProblem(cardFieldValue(card, field)) || card.fieldErrors[field] || null;
     }
 
+    /**
+     * @param {ShareCard} card
+     */
     function cardInvalid(card) {
         return cardFields(card).some(function (field) {
             return cardFieldError(card, field) !== null;
         });
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {boolean} management
+     */
     function cardPlace(card, management) {
         const fix = cardFix(card);
         return management || !fix ? t('card.place.this_action') : fix.endpoint;
@@ -7187,22 +8676,29 @@
 
     /** A render that keeps the focus, and the caret, on the control that had them. */
     function cardRender() {
-        const active = document.activeElement;
+        // An input or a textarea when there is a caret to keep; selectionStart tells.
+        const active = /** @type {HTMLInputElement} */ (document.activeElement);
         const id = active && active.id;
         const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
         render();
-        const again = id ? document.getElementById(id) : null;
+        const again = /** @type {HTMLInputElement} */ (id ? document.getElementById(id) : null);
         if (!again) return;
         again.focus({preventScroll: true});
         if (caret) again.setSelectionRange(caret[0], caret[1]);
     }
 
-    /** A choice that changes the card: a shown preview no longer matches it. */
+    /**
+     * A choice that changes the card: a shown preview no longer matches it.
+     * @param {ShareCard} card
+     */
     function cardMarkStale(card) {
         if (card.preview) card.stale = true;
         card.renderError = null;
     }
 
+    /**
+     * @param {Partial<ShareCard>} change
+     */
     function cardPick(change) {
         const card = cardState();
         Object.assign(card, change);
@@ -7210,7 +8706,10 @@
         cardRender();
     }
 
-    /** A format whose preview renders the same file, PNG and JPEG XL, leaves the preview current. */
+    /**
+     * A format whose preview renders the same file, PNG and JPEG XL, leaves the preview current.
+     * @param {string} format
+     */
     function cardPickFormat(format) {
         const card = cardState();
         const same = PSL.previewFormat(card.format) === PSL.previewFormat(format);
@@ -7220,18 +8719,25 @@
         cardRender();
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {string} path
+     */
     function loadCardOptions(card, path) {
         card.optionsPath = path;
         card.options = 'loading';
         getJson(path).then(function (options) {
             if (card.optionsPath === path) card.options = options;
         }).catch(function (error) {
-            if (card.optionsPath === path) card.options = {error: error.status || 0};
+            if (card.optionsPath === path) card.options = /** @type {CardOptions & {error: number}} */ ({error: error.status || 0});
         }).finally(function () {
             if (card.optionsPath === path && currentScreen() === 'recap') cardRender();
         });
     }
 
+    /**
+     * @param {ShareCard} card
+     */
     function loadCardKeys(card) {
         card.keys = 'loading';
         getJson('/api/cards/keys').then(function (keys) {
@@ -7244,7 +8750,10 @@
         });
     }
 
-    /** The section under the reports: shown when this Hub signs cards, a banner when its engine cannot. */
+    /**
+     * The section under the reports: shown when this Hub signs cards, a banner when its engine cannot.
+     * @param {RecapRoute} route
+     */
     function recapCardPanel(route) {
         const cards = state.status && state.status.cards;
         if (cards !== true && cards !== false) return null;
@@ -7299,6 +8808,13 @@
         ], 14);
     }
 
+    /**
+     * @param {string} label
+     * @param {string} name
+     * @param {string[][]} choices
+     * @param {string} current
+     * @param {(value: string) => void} onPick
+     */
     function cardSegmented(label, name, choices, current, onPick) {
         const group = el('div', {class: 'segmented segmented-sm', role: 'radiogroup', 'aria-label': label},
             choices.map(function (choice) {
@@ -7314,15 +8830,22 @@
         return radioKeys(group, 'card-' + name);
     }
 
+    /**
+     * @param {string} text
+     * @param {string} [small]
+     */
     function cardLegend(text, small) {
         return el('legend', {class: 'share-legend'}, [document.createTextNode(text),
             small ? el('small', {text: small}) : null]);
     }
 
+    /**
+     * @param {ShareCard} card
+     */
     function cardAngleGroup(card) {
         return el('fieldset', {class: 'share-group'}, [
             cardLegend(t('card.legend.angle')),
-            el('div', {class: 'choice-list'}, PSL.CARD_ANGLES.map(function (angle) {
+            el('div', {class: 'choice-list'}, PSL.CARD_ANGLES.map(function (/** @type {string} */ angle) {
                 const input = el('input', {
                     type: 'radio', name: 'card-angle', id: 'card-angle-' + angle, value: angle,
                     'aria-describedby': 'card-angle-line-' + angle
@@ -7333,11 +8856,21 @@
                 });
                 return el('label', {class: 'choice'}, [input,
                     el('span', {class: 'choice-name', text: PSL.CARD_ANGLE_NAMES[angle]}),
-                    el('span', {class: 'choice-line', id: 'card-angle-line-' + angle, text: PSL.CARD_ANGLE_LINES[angle]})]);
+                    el('span', {
+                        class: 'choice-line',
+                        id: 'card-angle-line-' + angle,
+                        text: PSL.CARD_ANGLE_LINES[angle]
+                    })]);
             }))
         ]);
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {string} from
+     * @param {number} delta
+     * @param {boolean} enabled
+     */
     function cardStepButton(card, from, delta, enabled) {
         const button = el('button', {
             type: 'button', id: delta < 0 ? 'card-period-back' : 'card-period-next',
@@ -7350,6 +8883,11 @@
         return button;
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {RecapRoute} route
+     * @param {boolean} management
+     */
     function cardPeriodGroup(card, route, management) {
         const from = cardPeriodFrom(card, route);
         const name = PSL.cardPeriodName(card.kind, from);
@@ -7357,7 +8895,7 @@
         const group = el('fieldset', {class: 'share-group'}, [
             cardLegend(t('card.legend.period'), t('card.legend.period.small')),
             el('div', {class: 'period-row'}, [
-                cardSegmented(t('card.length'), 'kind', PSL.CARD_PERIODS.map(function (kind) {
+                cardSegmented(t('card.length'), 'kind', PSL.CARD_PERIODS.map(function (/** @type {string} */ kind) {
                     return [kind, PSL.CARD_PERIOD_LABELS[kind]];
                 }), card.kind, function (kind) {
                     cardPick({kind: kind, from: null});
@@ -7399,7 +8937,11 @@
             story.addEventListener('click', function () {
                 cardPick({angle: 'story'});
             });
-            const collective = el('button', {class: 'pill-button pill-sm', type: 'button', text: t('card.make.collective')});
+            const collective = el('button', {
+                class: 'pill-button pill-sm',
+                type: 'button',
+                text: t('card.make.collective')
+            });
             collective.addEventListener('click', function () {
                 cardPick({angle: 'collective'});
             });
@@ -7412,11 +8954,22 @@
         return group;
     }
 
+    /**
+     * @param {Child[]} children
+     */
     function cardWarn(children) {
-        return el('div', {class: 'banner', 'data-tone': 'warn', role: 'alert'}, [warningGlyph(16), el('div', {}, children)]);
+        return el('div', {
+            class: 'banner',
+            'data-tone': 'warn',
+            role: 'alert'
+        }, [warningGlyph(16), el('div', {}, children)]);
     }
 
-    /** The environment in mono, as the recap filter names it. */
+    /**
+     * The environment in mono, as the recap filter names it.
+     * @param {string | null} environment
+     * @param {boolean} management
+     */
     function cardEnvironmentLine(environment, management) {
         const text = PSL.cardEnvironmentLine(environment, management ? 'pilotage' : 'tech');
         if (!environment) return el('p', {class: 'period-env', text: text});
@@ -7425,12 +8978,23 @@
             el('b', {text: environment}), document.createTextNode(text.slice(at + environment.length))]);
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {CardOptions} options
+     * @param {string} previous
+     */
     function cardPeriodFacts(card, options, previous) {
         const days = Math.round((Date.parse(options.period.to) - Date.parse(options.period.from)) / 86400000) + 1;
         const where = options.sources.length > 1
-            ? t('card.list', {items: options.sources.slice(0, -1).join(', '), last: options.sources[options.sources.length - 1]})
+            ? t('card.list', {
+                items: options.sources.slice(0, -1).join(', '),
+                last: options.sources[options.sources.length - 1]
+            })
             : options.sources[0];
-        const facts = [['ok', where ? t('card.facts.recorded.at', {days: days, where: where}) : t('card.facts.recorded', {days: days})]];
+        const facts = [['ok', where ? t('card.facts.recorded.at', {
+            days: days,
+            where: where
+        }) : t('card.facts.recorded', {days: days})]];
         const before = {previous: previous.charAt(0).toUpperCase() + previous.slice(1)};
         if (card.angle === 'collective' && !options.previous_whole) {
             facts.push(['info', t('card.facts.previous.not_whole', before)]);
@@ -7454,6 +9018,10 @@
         }));
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {boolean} management
+     */
     function cardFixGroup(card, management) {
         const options = cardOptionsReady(card);
         const group = el('fieldset', {class: 'share-group'}, [cardLegend(t('card.legend.fix'), options
@@ -7469,12 +9037,14 @@
         const chosen = cardFix(card);
         const at = options.fixes.indexOf(chosen);
         const shown = card.showAllFixes || at >= CARD_FIX_PAGE ? options.fixes : options.fixes.slice(0, CARD_FIX_PAGE);
-        group.appendChild(el('ul', {class: 'fix-list'}, shown.map(function (fix, index) {
+        group.appendChild(el('ul', {class: 'fix-list'}, shown.map(function (/** @type {CardFix} */ fix, /** @type {number} */ index) {
             return el('li', {}, [cardFixRow(card, fix, index, fix === chosen, options, management)]);
         })));
         if (shown.length < options.fixes.length) {
             const more = el('button', {
-                class: 'pill-button pill-sm fix-more', type: 'button', text: t('card.fix.all', {count: options.fixes.length})
+                class: 'pill-button pill-sm fix-more',
+                type: 'button',
+                text: t('card.fix.all', {count: options.fixes.length})
             });
             more.addEventListener('click', function () {
                 card.showAllFixes = true;
@@ -7490,6 +9060,14 @@
             [infoGlyph(16), el('div', {text: PSL.CARD_COPY.noFix})]);
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {CardFix} fix
+     * @param {number} index
+     * @param {boolean} checked
+     * @param {CardOptions} options
+     * @param {boolean} management
+     */
     function cardFixRow(card, fix, index, checked, options, management) {
         const input = el('input', {type: 'radio', name: 'card-fix', id: 'card-fix-' + index, value: fix.signature});
         input.checked = checked;
@@ -7521,7 +9099,14 @@
         ]);
     }
 
-    /** Typing redraws only when what the screen says changes: an error, the stale state, the remember box. */
+    /**
+     * Typing redraws only when what the screen says changes: an error, the stale state, the remember box.
+     * @param {ShareCard} card
+     * @param {string} field
+     * @param {string} value
+     * @param {HTMLElement} count
+     * @param {number} max
+     */
     function cardTyped(card, field, value, count, max) {
         const view = function () {
             const fix = cardFix(card);
@@ -7538,6 +9123,15 @@
         else count.textContent = value.length + ' / ' + max;
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {string} field
+     * @param {string} label
+     * @param {number} max
+     * @param {string} placeholder
+     * @param {HTMLElement[]} notes
+     * @param {boolean} wide
+     */
     function cardTextField(card, field, label, max, placeholder, notes, wide) {
         const id = 'card-' + field;
         const value = cardFieldValue(card, field);
@@ -7554,13 +9148,17 @@
         input.addEventListener('input', function () {
             cardTyped(card, field, input.value, count, max);
         });
-        return el('div', {class: 'tfield' + (wide ? ' wide' : '')}, [
+        return el('div', {class: 'tfield' + (wide ? ' wide' : '')}, /** @type {Child[]} */ ([
             el('label', {class: 'tfield-label', for: id}, [el('span', {text: label}), count]),
             input,
             error ? el('p', {class: 'tfield-error', id: id + '-error', text: error}) : null
-        ].concat(notes));
+        ]).concat(notes));
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {boolean} management
+     */
     function cardWordsGroup(card, management) {
         const grid = el('div', {class: 'free-grid'});
         if (cardFields(card).indexOf('label') >= 0) grid.appendChild(cardLabelField(card, management));
@@ -7575,6 +9173,10 @@
         ]);
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {boolean} management
+     */
     function cardLabelField(card, management) {
         const fix = cardFix(card);
         const place = cardPlace(card, management);
@@ -7598,7 +9200,11 @@
         });
         field.appendChild(el('label', {class: 'checkbox'}, [box, el('span', {text: remember.text})]));
         if (!allowed) {
-            field.appendChild(el('p', {class: 'tfield-note', id: 'card-remember-why', text: PSL.CARD_COPY.rememberDenied}));
+            field.appendChild(el('p', {
+                class: 'tfield-note',
+                id: 'card-remember-why',
+                text: PSL.CARD_COPY.rememberDenied
+            }));
         }
         if (card.rememberError) {
             field.appendChild(el('p', {class: 'tfield-error', role: 'alert', text: card.rememberError}));
@@ -7606,6 +9212,9 @@
         return field;
     }
 
+    /**
+     * @param {ShareCard} card
+     */
     function cardFormatGroup(card) {
         const country = PSL.cardCountry(card.country, cardHubCountry(card));
         return el('fieldset', {class: 'share-group'}, [
@@ -7617,12 +9226,18 @@
                             store('localStorage', CARD_LANG_KEY, lang);
                             cardPick({lang: lang});
                         })]),
-                el('div', {class: 'card-opt card-opt-format'}, [el('span', {class: 'card-opt-label', text: t('card.format_label')}),
-                    cardSegmented(t('card.format_label'), 'format', PSL.CARD_FORMATS.map(function (format) {
+                el('div', {class: 'card-opt card-opt-format'}, [el('span', {
+                    class: 'card-opt-label',
+                    text: t('card.format_label')
+                }),
+                    cardSegmented(t('card.format_label'), 'format', PSL.CARD_FORMATS.map(function (/** @type {string} */ format) {
                         return [format, PSL.CARD_FORMAT_LABELS[format]];
                     }), card.format, cardPickFormat)]),
-                el('div', {class: 'card-opt card-opt-country'}, [el('span', {class: 'card-opt-label', text: t('card.country')}),
-                    cardSegmented(t('card.country'), 'country', PSL.CARD_COUNTRIES.map(function (country) {
+                el('div', {class: 'card-opt card-opt-country'}, [el('span', {
+                    class: 'card-opt-label',
+                    text: t('card.country')
+                }),
+                    cardSegmented(t('card.country'), 'country', PSL.CARD_COUNTRIES.map(function (/** @type {string} */ country) {
                         return [country, t('card.country.' + country)];
                     }), country, function (picked) {
                         cardPick({country: picked});
@@ -7635,16 +9250,25 @@
         ]);
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {RecapRoute} route
+     */
     function cardActions(card, route) {
         const invalid = cardInvalid(card);
         const off = cardBlocked(card) || invalid || card.busy ? 'disabled' : null;
-        const preview = el('button', {class: 'pill-button pill-primary', type: 'button', id: 'card-preview', disabled: off},
+        const preview = el('button', {
+                class: 'pill-button pill-primary',
+                type: 'button',
+                id: 'card-preview',
+                disabled: off
+            },
             [svg([['path', {d: 'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z'}],
                 ['circle', {cx: '12', cy: '12', r: '2.8'}]], 14),
-            el('span', {
-                text: t(card.busy === 'preview' ? 'card.action.rendering'
-                    : card.stale && !cardBlocked(card) ? 'card.action.preview_again' : 'card.action.preview')
-            })]);
+                el('span', {
+                    text: t(card.busy === 'preview' ? 'card.action.rendering'
+                        : card.stale && !cardBlocked(card) ? 'card.action.preview_again' : 'card.action.preview')
+                })]);
         preview.addEventListener('click', function () {
             cardPreview(route);
         });
@@ -7665,6 +9289,12 @@
         ]);
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {RecapRoute} route
+     * @param {boolean} management
+     * @param {boolean} admin
+     */
     function cardPreviewAside(card, route, management, admin) {
         const blocked = cardBlocked(card);
         const format = card.preview ? card.preview.format : card.format;
@@ -7688,11 +9318,20 @@
         return aside;
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {string | null} blocked
+     */
     function cardPreviewShown(card, blocked) {
         return !!card.preview && !blocked && card.busy !== 'preview';
     }
 
-    /** The frame holds one of three things: the render in progress, the card, or why there is none yet. */
+    /**
+     * The frame holds one of three things: the render in progress, the card, or why there is none yet.
+     * @param {ShareCard} card
+     * @param {string | null} blocked
+     * @param {boolean} pdf
+     */
     function cardPreviewFrame(card, blocked, pdf) {
         const frame = el('div', {class: 'preview-frame'});
         if (card.busy === 'preview') {
@@ -7706,12 +9345,19 @@
         return frame;
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {boolean} pdf
+     */
     function cardPreviewCard(card, pdf) {
         return pdf
             ? el('iframe', {class: 'card-preview-pdf', src: card.preview.url, title: t('card.preview.pdf_title')})
             : el('img', {class: 'card-preview', src: card.preview.url, alt: t('card.preview.image_alt')});
     }
 
+    /**
+     * @param {string | null} blocked
+     */
     function cardPreviewEmpty(blocked) {
         const slim = blocked && blocked !== 'options';
         return el('div', {class: 'preview-empty' + (slim ? ' slim' : '')}, [
@@ -7720,7 +9366,12 @@
         ]);
     }
 
-    /** What the shown card carries: the note on the file, and the level its proof reaches. */
+    /**
+     * What the shown card carries: the note on the file, and the level its proof reaches.
+     * @param {ShareCard} card
+     * @param {string} format
+     * @param {string} domain
+     */
     function cardPreviewProof(card, format, domain) {
         const attached = !!(card.attach && card.attach.result && card.attach.result.integrity === 'ok'
             && card.attach.result.content !== 'modified' && card.attach.result.level === 2);
@@ -7732,6 +9383,13 @@
         ];
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {RecapRoute} route
+     * @param {string} domain
+     * @param {boolean} management
+     * @param {boolean} admin
+     */
     function cardAttachBlock(card, route, domain, management, admin) {
         if (!domain) return el('div', {class: 'attach'}, [el('p', {class: 'muted', text: PSL.CARD_COPY.noDomain})]);
         const button = el('button', {
@@ -7743,7 +9401,10 @@
             cardCheckAttachment(route);
         });
         const box = el('div', {class: 'attach'}, [
-            el('div', {class: 'attach-head'}, [el('p', {class: 'attach-title', text: t('card.attach.title', {domain: domain})}), button]),
+            el('div', {class: 'attach-head'}, [el('p', {
+                class: 'attach-title',
+                text: t('card.attach.title', {domain: domain})
+            }), button]),
             el('p', {class: 'attach-contact', text: PSL.cardContactText(domain, management ? 'pilotage' : 'tech')}),
             cardBusyNote(card.attachNote)
         ]);
@@ -7769,7 +9430,10 @@
         return box;
     }
 
-    /** The figures as signed, exact, for the person to hold against the preview before sharing. */
+    /**
+     * The figures as signed, exact, for the person to hold against the preview before sharing.
+     * @param {Array<{label: string, value: string}>} figures
+     */
     function cardSignedFigures(figures) {
         return el('section', {class: 'card-signed', 'aria-labelledby': 'card-signed-title'}, [
             el('p', {class: 'card-signed-title', id: 'card-signed-title', text: t('card.signed.title')}),
@@ -7780,7 +9444,10 @@
         ]);
     }
 
-    /** Under the button that waits: another card holds the engine, the Hub asks again by itself. */
+    /**
+     * Under the button that waits: another card holds the engine, the Hub asks again by itself.
+     * @param {string} text
+     */
     function cardBusyNote(text) {
         return text ? el('div', {class: 'banner card-busy', 'data-tone': 'info', role: 'status'},
             [infoGlyph(16), el('div', {text: text})]) : null;
@@ -7789,49 +9456,58 @@
     /**
      * A POST of the card form; a file comes back as a Blob, a refusal as the Hub's own detail. A busy render
      * gate is told through onWait and asked once more after its Retry-After; that second answer stands.
+     * @param {string} path
+     * @param {CardBody} body
+     * @param {'blob' | 'json'} read
+     * @param {(text: string) => void} onWait
+     * @returns {Promise<CardAnswer>}
      */
-    function cardPost(path, body, read, onWait) {
-        const send = function () {
-            return fetch(path, {
-                method: 'POST',
-                headers: {
-                    'content-type': 'application/json',
-                    accept: 'application/json, image/png, image/svg+xml, image/jxl, application/pdf'
-                },
-                body: JSON.stringify(body)
-            }).then(signInOn401);
+    async function cardPost(path, body, read, onWait) {
+        // Built before the try: only the requests and their answers fall back to no answer.
+        const request = {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                accept: 'application/json, image/png, image/svg+xml, image/jxl, application/pdf'
+            },
+            body: JSON.stringify(body)
         };
-        return send().then(function (response) {
+        const send = async function () {
+            return signInOn401(await fetch(path, request));
+        };
+        try {
+            let response = await send();
             const busy = onWait ? PSL.cardBusy(response.status, response.headers.get('Retry-After')) : null;
-            if (!busy) return response;
-            onWait(busy.text);
-            return new Promise(function (resolve) {
-                setTimeout(resolve, busy.delayMs);
-            }).then(send);
-        }).then(function (response) {
-            if (response.ok) {
-                return read === 'blob' ? response.blob().then(function (blob) {
-                    return {blob: blob};
-                }) : response.json().then(function (result) {
-                    return {result: result};
+            if (busy) {
+                onWait(busy.text);
+                await new Promise(function (resolve) {
+                    setTimeout(resolve, busy.delayMs);
                 });
+                response = await send();
             }
-            return response.json().catch(function () {
+            if (response.ok) {
+                return read === 'blob' ? {blob: await response.blob()} : {result: await response.json()};
+            }
+            /** @type {{field?: string, code?: string, detail?: string} | null} */
+            const payload = await response.json().catch(function () {
                 return null;
-            }).then(function (payload) {
-                return {
-                    status: response.status,
-                    field: payload && typeof payload.field === 'string' ? payload.field : null,
-                    code: payload && typeof payload.code === 'string' ? payload.code : null,
-                    detail: PSL.problemText(payload, response.status, t('card.refused_status', {status: response.status}))
-                };
             });
-        }).catch(function () {
+            return {
+                status: response.status,
+                field: payload && typeof payload.field === 'string' ? payload.field : null,
+                code: payload && typeof payload.code === 'string' ? payload.code : null,
+                detail: PSL.problemText(payload, response.status, t('card.refused_status', {status: response.status}))
+            };
+        } catch (error) {
             return {status: 0, field: null, detail: t('card.no_answer')};
-        });
+        }
     }
 
-    /** A refusal lands where it belongs: under its field, on the curve's period, or under the buttons. */
+    /**
+     * A refusal lands where it belongs: under its field, on the curve's period, or under the buttons.
+     * @param {ShareCard} card
+     * @param {CardAnswer} failure
+     */
     function cardFailure(card, failure) {
         if (failure.field) card.fieldErrors[failure.field] = failure.detail;
         else if (failure.status === 422 && card.angle === 'curve' && PSL.isPreviousRefusal(failure.detail, failure.code)) {
@@ -7839,23 +9515,29 @@
         } else card.renderError = failure.detail;
     }
 
-    /** Remembers the typed name for the fix's endpoint first, when the box asks for it. */
-    function cardRememberLabel(card) {
+    /**
+     * Remembers the typed name for the fix's endpoint first, when the box asks for it.
+     * @param {ShareCard} card
+     */
+    async function cardRememberLabel(card) {
         const fix = cardFix(card);
         const label = cardLabel(card).trim();
         if (card.angle !== 'story' || !card.remember || !fix || !PSL.rememberState(label, fix.label, '').enabled) {
-            return Promise.resolve();
+            return;
         }
-        return recapSend('PUT', '/api/labels', {service: fix.service, endpoint: fix.endpoint, label: label})
-            .then(function (failure) {
-                card.rememberError = failure;
-                if (failure) return;
-                fix.label = label;
-                card.label = null;
-                card.remember = false;
-            });
+        const failure = await recapSend('PUT', '/api/labels', {service: fix.service, endpoint: fix.endpoint, label: label});
+        card.rememberError = failure;
+        if (failure) return;
+        fix.label = label;
+        card.label = null;
+        card.remember = false;
     }
 
+    /**
+     * @param {RecapRoute} route
+     * @param {string} busy
+     * @param {(card: ShareCard, blob: Blob, body: CardBody) => void} then
+     */
     function cardMake(route, busy, then) {
         const card = cardState();
         if (card.busy) return;
@@ -7878,14 +9560,17 @@
         });
     }
 
-    /** Preview renders the form as it is, a JPEG XL as its PNG; a phone then scrolls to the card. */
+    /**
+     * Preview renders the form as it is, a JPEG XL as its PNG; a phone then scrolls to the card.
+     * @param {RecapRoute} route
+     */
     function cardPreview(route) {
         cardMake(route, 'preview', function (card, blob, body) {
             if (card.preview) URL.revokeObjectURL(card.preview.url);
             card.preview = {url: URL.createObjectURL(blob), format: body.format};
             card.stale = false;
             setTimeout(function () {
-                const aside = document.querySelector('.share-preview');
+                const aside = /** @type {HTMLElement} */ (document.querySelector('.share-preview'));
                 if (!aside || !matchMedia('(max-width: 900px)').matches) return;
                 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
                 aside.scrollIntoView({behavior: still ? 'auto' : 'smooth', block: 'start'});
@@ -7894,14 +9579,20 @@
         });
     }
 
-    /** Download renders the card again from the form, never from the preview on screen. */
+    /**
+     * Download renders the card again from the form, never from the preview on screen.
+     * @param {RecapRoute} route
+     */
     function cardDownload(route) {
         const name = cardFileName(cardState(), route);
-        cardMake(route, 'download', function (card, blob) {
+        cardMake(route, 'download', function (_, blob) {
             PSL.saveBlob(blob, name);
         });
     }
 
+    /**
+     * @param {RecapRoute} route
+     */
     function cardCheckAttachment(route) {
         const card = cardState();
         if (card.attachBusy) return;
@@ -7921,6 +9612,9 @@
 
     // ---- the signing key, for administrators
 
+    /**
+     * @param {ShareCard} card
+     */
     function cardKeysPanel(card) {
         const panel = el('details', {class: 'key-panel'}, [
             el('summary', {}, [svg([['path', {d: 'M9 6l6 6-6 6'}]], 12),
@@ -7936,6 +9630,10 @@
         return panel;
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {HTMLElement} body
+     */
     function cardKeysFill(card, body) {
         if (card.keys === 'loading') {
             body.appendChild(el('p', {class: 'key-p', role: 'status', text: t('card.keys.reading')}));
@@ -7968,17 +9666,23 @@
                 cardCopyLine(card.keys.record_name, card.keys.record_name, t('card.keys.copy_record'))
             ]));
         }
-        body.appendChild(el('ul', {class: 'key-list'}, card.keys.keys.map(function (key) {
+        body.appendChild(el('ul', {class: 'key-list'}, card.keys.keys.map(function (/** @type {CardKey} */ key) {
             return cardKeyRow(card, key, domain);
         })));
         if (domain) body.appendChild(cardKeysFile(card, domain));
         body.appendChild(cardKeyRotate(card));
     }
 
+    /**
+     * @param {ShareCard} card
+     */
     function cardKeyRotate(card) {
         const rotate = el('button', {
-            class: 'pill-button pill-sm', type: 'button', id: 'card-rotate',
-            disabled: card.keysBusy ? 'disabled' : null, text: t(card.keysBusy ? 'card.keys.working' : 'card.keys.rotate')
+            class: 'pill-button pill-sm',
+            type: 'button',
+            id: 'card-rotate',
+            disabled: card.keysBusy ? 'disabled' : null,
+            text: t(card.keysBusy ? 'card.keys.working' : 'card.keys.rotate')
         });
         rotate.addEventListener('click', function () {
             cardKeyWrite('/api/cards/keys/rotate', {});
@@ -7986,11 +9690,16 @@
         return el('div', {class: 'key-rotate'}, [rotate, el('p', {text: PSL.CARD_COPY.rotate})]);
     }
 
-    /** The .well-known file, indented on screen when it parses and copied as served. */
+    /**
+     * The .well-known file, indented on screen when it parses and copied as served.
+     * @param {ShareCard} card
+     * @param {string} domain
+     */
     function cardKeysFile(card, domain) {
-        let shown = card.keys.well_known;
+        // Only drawn once the keys have been read.
+        let shown = /** @type {CardKeys} */ (card.keys).well_known;
         try {
-            shown = JSON.stringify(JSON.parse(card.keys.well_known), null, 2);
+            shown = JSON.stringify(JSON.parse(/** @type {CardKeys} */ (card.keys).well_known), null, 2);
         } catch (error) {
             // Shown as served.
         }
@@ -8000,11 +9709,16 @@
             el('p', {class: 'key-p'}, [document.createTextNode(at[0]),
                 el('code', {text: 'https://' + domain + '/.well-known/perf-sentinel-key'}),
                 document.createTextNode(at[1] + ' ' + PSL.CARD_COPY.keysFile)]),
-            cardCopyLine(shown, card.keys.well_known, t('card.keys.copy_file'))
+            cardCopyLine(shown, /** @type {CardKeys} */ (card.keys).well_known, t('card.keys.copy_file'))
         ]);
     }
 
-    /** A line to paste: shown as `text`, copied as `raw`, the .well-known file indented only on screen. */
+    /**
+     * A line to paste: shown as `text`, copied as `raw`, the .well-known file indented only on screen.
+     * @param {string} text
+     * @param {string} raw
+     * @param {string} label
+     */
     function cardCopyLine(text, raw, label) {
         const code = el('pre', {class: 'terminal-code', tabindex: '0', text: text});
         const word = el('span', {text: t('card.copy')});
@@ -8029,6 +9743,11 @@
         return el('div', {class: 'copy-line'}, [code, button]);
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {CardKey} key
+     * @param {string} domain
+     */
     function cardKeyRow(card, key, domain) {
         let stateName = 'retired';
         if (key.revoked) stateName = 'revoked';
@@ -8050,9 +9769,16 @@
         return row;
     }
 
+    /**
+     * @param {ShareCard} card
+     * @param {CardKey} key
+     */
     function cardRevokeOpen(card, key) {
         const open = el('button', {
-            class: 'pill-button pill-sm pill-crit', type: 'button', id: 'card-revoke-' + key.fingerprint, text: t('card.revoke')
+            class: 'pill-button pill-sm pill-crit',
+            type: 'button',
+            id: 'card-revoke-' + key.fingerprint,
+            text: t('card.revoke')
         });
         open.addEventListener('click', function () {
             card.revoking = key.fingerprint;
@@ -8062,7 +9788,12 @@
         return el('div', {class: 'key-revoke'}, [el('span', {text: t('card.revoke.leaked')}), open]);
     }
 
-    /** No default date: it is published as the first day the key may have leaked. */
+    /**
+     * No default date: it is published as the first day the key may have leaked.
+     * @param {ShareCard} card
+     * @param {CardKey} key
+     * @param {string} domain
+     */
     function cardRevokeConfirm(card, key, domain) {
         const date = el('input', {
             class: 'recap-input', id: 'card-leak-date', type: 'date', required: '', min: key.from, max: cardToday()
@@ -8093,6 +9824,10 @@
         ]);
     }
 
+    /**
+     * @param {string} path
+     * @param {object} body
+     */
     function cardKeyWrite(path, body) {
         const card = cardState();
         if (card.keysBusy) return;
@@ -8152,7 +9887,10 @@
         });
     }
 
-    /** The detail, and the report itself for what the API leaves to it: applications, method, disclaimers. */
+    /**
+     * The detail, and the report itself for what the API leaves to it: applications, method, disclaimers.
+     * @param {string} id
+     */
     function loadDisclosure(id) {
         if (!state.disclosure || state.disclosure.disclosure.id !== id) {
             state.disclosure = null;
@@ -8180,26 +9918,38 @@
         });
     }
 
+    /**
+     * @param {string} path
+     * @param {string} method
+     * @param {object} [body]
+     * @returns {Promise<DisclosureOutcome>}
+     */
     function sendDisclosure(path, method, body) {
         return fetch(path, {
             method: method,
             headers: {'content-type': 'application/json', accept: 'application/json'},
             body: JSON.stringify(body || {})
-        }).then(signInOn401).then(function (response) {
-            return response.json().catch(function () {
+        }).then(signInOn401).then(async function (response) {
+            /** @type {DisclosureAnswer | null} */
+            const payload = await response.json().catch(function () {
                 return null;
-            }).then(function (payload) {
-                return {ok: response.ok, status: response.status, payload: payload};
             });
+            return {ok: response.ok, status: response.status, payload: payload};
         }, function () {
             return {ok: false, status: 0, payload: null};
         });
     }
 
+    /**
+     * @param {{from: string, to: string}} period
+     */
     function periodDays(period) {
         return Math.round((Date.parse(period.to) - Date.parse(period.from)) / 86400000) + 1;
     }
 
+    /**
+     * @param {string} hash
+     */
     function shortHash(hash) {
         const value = String(hash);
         return value.length > 20 ? value.slice(0, 11) + '…' + value.slice(-4) : value;
@@ -8209,22 +9959,39 @@
         return svg([['path', {d: 'M5 12.5l4.2 4.2L19 7'}]], 11);
     }
 
-    /** A code the Hub or the report sends (intent, delivery state, refusal) in the shown language, else as sent. */
+    /**
+     * A code the Hub or the report sends (intent, delivery state, refusal) in the shown language, else as sent.
+     * @param {string} kind
+     * @param {string} value
+     */
     function enumWord(kind, value) {
         const key = 'disc.' + kind + '.' + value;
         return PSL.hasText(key) ? t(key) : value;
     }
 
+    /**
+     * @param {string} level
+     */
     function levelLabel(level) {
         return LEVEL_LABELS[level] ? t(LEVEL_LABELS[level]) : level;
     }
 
-    /** What the report declares about itself, dashed: the Hub cannot check it. */
+    /**
+     * What the report declares about itself, dashed: the Hub cannot check it.
+     * @param {string} level
+     */
     function levelChip(level) {
-        return el('span', {class: 'chip chip-declared disc-level', text: levelLabel(level) || t('disc.level.undeclared')});
+        return el('span', {
+            class: 'chip chip-declared disc-level',
+            text: levelLabel(level) || t('disc.level.undeclared')
+        });
     }
 
-    /** What this Hub recomputed, solid. Anything it did not check reads as muted text, never a mark. */
+    /**
+     * What this Hub recomputed, solid. Anything it did not check reads as muted text, never a mark.
+     * @param {string} label
+     * @param {string} outcome
+     */
     function checkChip(label, outcome) {
         if (outcome === 'checked') return el('span', {class: 'chip disc-checked'}, [el('span', {text: label}), checkGlyph()]);
         if (outcome === 'declared') return el('span', {
@@ -8237,6 +10004,9 @@
         });
     }
 
+    /**
+     * @param {Disclosure} item
+     */
     function disclosureChips(item) {
         const chips = [
             el('span', {class: 'chip', text: enumWord('intent', item.intent)}),
@@ -8256,6 +10026,12 @@
         return chips;
     }
 
+    /**
+     * @param {string} label
+     * @param {string} value
+     * @param {string} unit
+     * @param {string} sub
+     */
     function figure(label, value, unit, sub) {
         return el('div', {class: 'disc-figure'}, [
             el('span', {class: 'disc-figure-label', text: label}),
@@ -8267,11 +10043,18 @@
         ]);
     }
 
+    /**
+     * @param {number} value
+     * @param {number} digits
+     */
     function fixed(value, digits) {
         return value == null ? t('unit.na') : PSL.decimal(Number(value).toFixed(digits));
     }
 
-    /** Runtime coverage on a track, with the official 75 % as a notch and the fill orange under it. */
+    /**
+     * Runtime coverage on a track, with the official 75 % as a notch and the fill orange under it.
+     * @param {number | null | undefined} coverage
+     */
     function coverageBar(coverage) {
         const notch = PSL.coverageNotch(coverage);
         if (!notch) return el('span', {class: 'disc-figure-sub', text: t('disc.coverage.not_reported')});
@@ -8287,14 +10070,21 @@
         ]);
     }
 
+    /**
+     * @param {DisclosureFigures | null} figures
+     */
     function disclosureFigures(figures) {
+        /** @type {Partial<DisclosureFigures>} */
         const f = figures || {};
         const coverage = PSL.coverageNotch(f.coverage);
         return el('div', {class: 'disc-figures'}, [
             figure(t('disc.figure.energy'), fixed(f.energy_kwh, 2), 'kWh', null),
             figure(t('disc.figure.carbon'), fixed(f.carbon_kgco2eq, 2), 'kgCO₂eq',
                 f.carbon_kgco2eq == null ? null
-                    : t('disc.figure.bracket', {low: fixed(f.carbon_kgco2eq / 2, 2), high: fixed(f.carbon_kgco2eq * 2, 2)})),
+                    : t('disc.figure.bracket', {
+                        low: fixed(f.carbon_kgco2eq / 2, 2),
+                        high: fixed(f.carbon_kgco2eq * 2, 2)
+                    })),
             figure(t('disc.figure.avoidable'), f.avoidable_ratio == null ? t('unit.na') : Math.round(f.avoidable_ratio * 100),
                 t('disc.figure.avoidable.unit'), null),
             el('div', {class: 'disc-figure'}, [
@@ -8308,6 +10098,10 @@
         ]);
     }
 
+    /**
+     * @param {string} label
+     * @param {string} value
+     */
     function fact(label, value) {
         return el('span', {class: 'disc-fact'}, [
             el('span', {class: 'disc-fact-label', text: label}),
@@ -8315,10 +10109,16 @@
         ]);
     }
 
+    /**
+     * @param {number} ms
+     */
     function ago(ms) {
         return t('disc.ago', {duration: PSL.dur(Date.now() - ms)});
     }
 
+    /**
+     * @param {Disclosure} item
+     */
     function disclosureFacts(item) {
         return el('div', {class: 'disc-facts'}, [
             fact(t('disc.fact.published'), ago(item.published_at_ms)),
@@ -8328,12 +10128,18 @@
         ]);
     }
 
+    /**
+     * @param {string} id
+     * @param {string} name
+     * @param {boolean} primary
+     * @param {HTMLElement} status
+     */
     function disclosureFileButton(id, name, primary, status) {
         const button = el('button', {type: 'button', class: 'pill-button pill-sm' + (primary ? ' pill-primary' : '')},
             [primary ? downloadGlyph() : null, el('span', {text: primary ? t('disc.download_pdf') : name})]);
         button.addEventListener('click', function () {
             button.disabled = true;
-            PSL.downloadAs('/api/disclosures/' + id + '/files/' + name, name).then(function (saved) {
+            PSL.downloadAs('/api/disclosures/' + id + '/files/' + name, name).then(function (/** @type {boolean} */ saved) {
                 button.disabled = false;
                 if (status) status.textContent = t(saved ? 'disc.download.sent' : 'disc.download.missing', {name: name});
             });
@@ -8341,6 +10147,9 @@
         return button;
     }
 
+    /**
+     * @param {Disclosure} item
+     */
     function disclosureBanners(item) {
         const banners = [];
         if (item.withdrawn) {
@@ -8371,6 +10180,9 @@
         return banners;
     }
 
+    /**
+     * @param {Disclosure} item
+     */
     function disclosureCard(item) {
         const status = el('span', {class: 'terminal-status', role: 'status'});
         const actions = [
@@ -8391,8 +10203,11 @@
                 ]),
                 el('span', {
                     class: 'disc-dates',
-                    text: t('disc.card.dates', {from: PSL.day(item.period.from, {withYear: true}), to: PSL.day(item.period.to, {withYear: true}),
-                        days: periodDays(item.period)})
+                    text: t('disc.card.dates', {
+                        from: PSL.day(item.period.from, {withYear: true}),
+                        to: PSL.day(item.period.to, {withYear: true}),
+                        days: periodDays(item.period)
+                    })
                 }),
                 el('span', {class: 'disc-chips'}, disclosureChips(item))
             ]),
@@ -8401,10 +10216,13 @@
         ]);
     }
 
+    /**
+     * @param {Disclosure[]} list
+     */
     function railView(list) {
         const rail = PSL.periodRail(list, Date.now());
         if (rail.length === 0) return null;
-        return el('ol', {class: 'disc-rail', 'aria-label': t('disc.rail.label')}, rail.map(function (cell) {
+        return el('ol', {class: 'disc-rail', 'aria-label': t('disc.rail.label')}, rail.map(function (/** @type {{label: string, state: string, level: string | null, id: string | null, daysLeft: number | null}} */ cell) {
             const caption = cell.state === 'published' ? levelLabel(cell.level)
                 : cell.state === 'current' ? t('disc.rail.closes', {days: cell.daysLeft})
                     : t('disc.rail.' + cell.state);
@@ -8477,15 +10295,25 @@
 
     // -------------------------------------------- screen: one disclosure
 
+    /**
+     * @param {string} head
+     * @param {string} sub
+     * @param {Child[]} children
+     */
     function detailPanel(head, sub, children) {
-        return el('section', {class: 'card disc-panel'}, [
+        return el('section', {class: 'card disc-panel'}, /** @type {Child[]} */ ([
             el('div', {class: 'disc-panel-head'}, [
                 el('h2', {class: 'overline', text: head}),
                 sub ? el('p', {class: 'disc-panel-sub', text: sub}) : null
             ])
-        ].concat(children));
+        ]).concat(children));
     }
 
+    /**
+     * @param {string[]} columns
+     * @param {HTMLElement[]} rows
+     * @param {string[]} [right]
+     */
     function simpleTable(columns, rows, right) {
         return el('div', {class: 'sources-wrap'}, [el('table', {class: 'table'}, [
             el('thead', {}, [el('tr', {}, columns.map(function (name) {
@@ -8499,14 +10327,21 @@
         ])]);
     }
 
-    /** The carbon figure on a log scale between half and twice itself: the ~2× bracket the method states. */
+    /**
+     * The carbon figure on a log scale between half and twice itself: the ~2× bracket the method states.
+     * @param {number} carbon
+     */
     function carbonBracket(carbon) {
         if (carbon == null || carbon <= 0) return null;
         return el('div', {class: 'disc-bracket'}, [
             el('span', {class: 'disc-figure-label', text: t('disc.bracket.label')}),
             el('div', {
                 class: 'disc-bracket-track', role: 'img',
-                'aria-label': t('disc.bracket.aria', {value: fixed(carbon, 2), low: fixed(carbon / 2, 2), high: fixed(carbon * 2, 2)})
+                'aria-label': t('disc.bracket.aria', {
+                    value: fixed(carbon, 2),
+                    low: fixed(carbon / 2, 2),
+                    high: fixed(carbon * 2, 2)
+                })
             }, [
                 el('span', {class: 'disc-bracket-band'}),
                 el('span', {class: 'disc-bracket-dot'})
@@ -8519,7 +10354,12 @@
         ]);
     }
 
+    /**
+     * @param {DisclosureReport | null} report
+     * @param {DisclosureFigures | null} figures
+     */
     function applicationsPanel(report, figures) {
+        /** @type {import('../types').ReportApplication[]} */
         const applications = report && Array.isArray(report.applications) ? report.applications : [];
         const hosts = PSL.hostRows(report);
         if (applications.length === 0 && hosts.length === 0) return null;
@@ -8527,12 +10367,15 @@
         // application carries, and energy no service was attributed. The rows only stand in
         // for a report without one.
         const reported = Number(report.aggregate && report.aggregate.total_energy_kwh);
-        const total = reported > 0 ? reported : applications.reduce(function (sum, app) {
+        const total = reported > 0 ? reported : applications.reduce(function (/** @type {number} */ sum, app) {
             return sum + (Number(app.energy_kwh) || 0);
-        }, 0) + hosts.reduce(function (sum, host) {
+        }, 0) + hosts.reduce(function (/** @type {number} */ sum, /** @type {HostRow} */ host) {
             return sum + host.energy_kwh;
         }, 0);
 
+        /**
+         * @param {number | null} kwh
+         */
         function shareCell(kwh) {
             const share = total > 0 ? (Number(kwh) || 0) / total : 0;
             const bar = el('span', {class: 'disc-share-fill'});
@@ -8559,7 +10402,7 @@
                 })
             ]);
         });
-        hosts.forEach(function (host) {
+        hosts.forEach(function (/** @type {HostRow} */ host) {
             rows.push(el('tr', {}, [
                 el('td', {class: 'table-strong'}, [document.createTextNode(host.label),
                     host.partial ? document.createTextNode(' ') : null,
@@ -8576,7 +10419,7 @@
         });
         const excluded = report.scope_manifest && Array.isArray(report.scope_manifest.applications_excluded)
             ? report.scope_manifest.applications_excluded : [];
-        excluded.forEach(function (app) {
+        excluded.forEach(function (/** @type {{service_name?: string, name?: string, reason?: string}} */ app) {
             const reason = app && app.reason;
             rows.push(el('tr', {}, [
                 el('td', {}, [el('span', {
@@ -8602,10 +10445,16 @@
             [simpleTable(heads, rows, [heads[1], heads[3], heads[4], heads[5]])]);
     }
 
+    /**
+     * @param {DisclosureDetail} detail
+     */
     function integrityPanel(detail) {
-        const rows = PSL.checkRows(detail).map(function (row) {
+        const rows = PSL.checkRows(detail).map(function (/** @type {{claim: string, by: string, outcome: string}} */ row) {
             const outcome = row.outcome === 'checked' ? checkChip(t('disc.outcome.checked'), 'checked')
-                : row.outcome === 'declared' ? el('span', {class: 'chip chip-declared disc-level', text: t('disc.outcome.declared')})
+                : row.outcome === 'declared' ? el('span', {
+                        class: 'chip chip-declared disc-level',
+                        text: t('disc.outcome.declared')
+                    })
                     : el('span', {
                         class: 'chip disc-unchecked',
                         text: PSL.hasText('disc.outcome.' + row.outcome) ? t('disc.outcome.' + row.outcome) : row.outcome
@@ -8639,6 +10488,9 @@
             ]);
     }
 
+    /**
+     * @param {Disclosure} item
+     */
     function filesPanel(item) {
         const status = el('span', {class: 'terminal-status', role: 'status'});
         const rows = DISCLOSURE_FILES.filter(function (file) {
@@ -8654,15 +10506,22 @@
             [simpleTable([t('disc.files.col.file'), t('disc.files.col.role'), ''], rows), status]);
     }
 
+    /**
+     * @param {ShareLink} link
+     */
     function linkState(link) {
         return link.state === 'active' ? t('disc.link.active', {duration: PSL.dur(link.expires_at_ms - Date.now())})
             : link.state === 'revoked' ? t('disc.link.revoked', {by: link.revoked_by})
                 : link.state === 'withdrawn' ? t('disc.link.withdrawn') : t('disc.link.expired');
     }
 
+    /**
+     * @param {DisclosureDetail} detail
+     * @param {boolean} manage
+     */
     function shareLinksPanel(detail, manage) {
         const item = detail.disclosure;
-        const rows = detail.share_links.map(function (link) {
+        const rows = detail.share_links.map(function (/** @type {ShareLink} */ link) {
             const revoke = manage && link.state === 'active'
                 ? disclosureActionButton(t('disc.links.revoke'), function () {
                     return sendDisclosure('/api/disclosures/' + item.id + '/share-links/' + link.id, 'DELETE');
@@ -8699,10 +10558,14 @@
         return detailPanel(t('disc.links.head'), t('disc.links.sub'), children);
     }
 
+    /**
+     * @param {DisclosureDetail} detail
+     * @param {boolean} manage
+     */
     function deliveriesPanel(detail, manage) {
         if (detail.deliveries.length === 0) return null;
         const item = detail.disclosure;
-        const rows = detail.deliveries.map(function (delivery) {
+        const rows = detail.deliveries.map(function (/** @type {import('../types').DisclosureDelivery} */ delivery) {
             const retry = manage && delivery.state !== 'delivered'
                 ? disclosureActionButton(t('disc.deliveries.retry'), function () {
                     return sendDisclosure('/api/disclosures/' + item.id + '/deliveries/' + delivery.id + '/retry', 'POST');
@@ -8733,6 +10596,9 @@
         return detailPanel(t('disc.deliveries.head'), t('disc.deliveries.sub'), [simpleTable(heads.concat(['']), rows)]);
     }
 
+    /**
+     * @param {DisclosureReport | null} report
+     */
     function methodPanel(report) {
         if (!report) return null;
         const methodology = report.methodology || {};
@@ -8747,16 +10613,25 @@
         });
         return detailPanel(t('disc.method.head'), t('disc.method.sub'), [
             el('dl', {class: 'disc-defs'}, defs.flatMap(function (pair) {
-                return [el('dt', {text: t('disc.method.' + pair[0])}), el('dd', {class: 'table-mono', text: String(pair[1])})];
+                return [el('dt', {text: t('disc.method.' + pair[0])}), el('dd', {
+                    class: 'table-mono',
+                    text: String(pair[1])
+                })];
             })),
             // Copied verbatim from the report: engine text, as the engine wrote it.
-            disclaimers.length ? engineText(el('ol', {class: 'disc-disclaimers'}, disclaimers.map(function (text) {
+            disclaimers.length ? engineText(el('ol', {class: 'disc-disclaimers'}, disclaimers.map(function (/** @type {string} */ text) {
                 return el('li', {text: String(text)});
             }))) : null
         ]);
     }
 
-    /** A button that runs one write, says what came of it, and reloads the detail. */
+    /**
+     * A button that runs one write, says what came of it, and reloads the detail.
+     * @param {string} label
+     * @param {() => Promise<DisclosureOutcome>} run
+     * @param {string} done
+     * @param {boolean} [primary]
+     */
     function disclosureActionButton(label, run, done, primary) {
         const button = el('button', {
             type: 'button', class: 'pill-button pill-sm' + (primary ? ' pill-primary' : ''),
@@ -8778,6 +10653,9 @@
         return button;
     }
 
+    /**
+     * @param {Disclosure} item
+     */
     function withdrawForm(item) {
         const reason = el('textarea', {
             class: 'disc-reason', rows: '2', maxlength: '500', 'aria-label': t('disc.withdraw.reason.label'),
@@ -8798,23 +10676,27 @@
         ]);
     }
 
+    /**
+     * @param {DisclosureDetail} detail
+     * @param {boolean} manage
+     */
     function detailActions(detail, manage) {
         const item = detail.disclosure;
         const status = el('span', {class: 'terminal-status', role: 'status'});
+        /** @type {HTMLElement[]} */
         const buttons = [item.files.pdf ? disclosureFileButton(item.id, 'report.pdf', true, status) : null];
         if (manage && !item.withdrawn && item.confidentiality !== 'internal') {
-            buttons.push(disclosureActionButton(t('disc.action.new_link'), function () {
-                return sendDisclosure('/api/disclosures/' + item.id + '/share-links', 'POST', {}).then(function (outcome) {
-                    if (outcome.ok) {
-                        const base = location.origin + outcome.payload.path;
-                        state.disclosureLink = {
-                            id: item.id,
-                            pdfUrl: base + 'report.pdf',
-                            reportUrl: base + 'report.json'
-                        };
-                    }
-                    return outcome;
-                });
+            buttons.push(disclosureActionButton(t('disc.action.new_link'), async function () {
+                const outcome = await sendDisclosure('/api/disclosures/' + item.id + '/share-links', 'POST', {});
+                if (outcome.ok) {
+                    const base = location.origin + outcome.payload.path;
+                    state.disclosureLink = {
+                        id: item.id,
+                        pdfUrl: base + 'report.pdf',
+                        reportUrl: base + 'report.json'
+                    };
+                }
+                return outcome;
             }, t('disc.action.new_link.done')));
         }
         if (manage && item.pdf !== 'rendered') {
@@ -8860,11 +10742,14 @@
         [
             ruledOverline(t('disc.detail.overline', {period: PSL.periodLabel(item.period)})),
             el('h1', {
-                class: 'page-title', text: t('disc.detail.title', {organisation: item.organisation,
-                    from: PSL.day(item.period.from, {withYear: true}), to: PSL.day(item.period.to, {withYear: true})})
+                class: 'page-title', text: t('disc.detail.title', {
+                    organisation: item.organisation,
+                    from: PSL.day(item.period.from, {withYear: true}), to: PSL.day(item.period.to, {withYear: true})
+                })
             }),
             el('p', {
-                class: 'page-sub', text: t(item.pdf === 'rendered' ? 'disc.detail.sub.rendered' : 'disc.detail.sub.kept', {
+                class: 'page-sub',
+                text: t(item.pdf === 'rendered' ? 'disc.detail.sub.rendered' : 'disc.detail.sub.kept', {
                     intent: PSL.hasText(intent) ? t(intent)
                         : t('disc.detail.intent.other', {intent: item.intent.charAt(0).toUpperCase() + item.intent.slice(1)}),
                     confidentiality: enumWord('confidentiality', item.confidentiality),
@@ -8902,6 +10787,7 @@
      * chip. Read-only but for revoking their own terminal tokens: rights live in the Hub's
      * configuration alone. `banner` is the no-grant text when /api/status refused the
      * caller, who then gets what to send an administrator instead of an empty reach.
+     * @param {string | null} banner
      */
     function renderAccessScreen(banner) {
         const access = state.access;
@@ -8924,7 +10810,10 @@
         section.appendChild(accessCard(t('access.card.groups'), [
             access.groups.length === 0
                 ? el('p', {class: 'access-muted', text: t('access.groups.none')})
-                : el('ul', {class: 'access-chips', 'aria-label': t('access.groups.label')}, access.groups.map(function (group) {
+                : el('ul', {
+                    class: 'access-chips',
+                    'aria-label': t('access.groups.label')
+                }, access.groups.map(function (/** @type {{name: string, origin: string}} */ group) {
                     return el('li', {
                         class: 'chip',
                         'data-origin': group.origin,
@@ -8947,13 +10836,13 @@
                     ? el('p', {text: PSL.ACCESS_NO_REACH})
                     : accessTable(t('access.reach.caption'),
                         [t('access.col.project'), t('access.col.group'), t('access.col.role'), t('access.col.permissions')],
-                        reach.map(function (row) {
+                        reach.map(function (/** @type {{project: string, group: string, role: string, permissions: string}} */ row) {
                             return [row.project, row.group, row.role, row.permissions];
                         }))
             ]));
         }
         if (state.tokens || state.tokensFailed) {
-            section.appendChild(tokensCard((state.tokens || []).filter(function (token) {
+            section.appendChild(tokensCard((state.tokens || []).filter(function (/** @type {TerminalToken} */ token) {
                 return token.subject === access.subject;
             }), t('access.card.own_tokens'), 'tokens-own'));
         }
@@ -8998,17 +10887,27 @@
         return section;
     }
 
-    /** A card whose title is a heading, the slashes kept for the eye and hidden from a reader. */
+    /**
+     * A card whose title is a heading, the slashes kept for the eye and hidden from a reader.
+     * @param {string} title
+     * @param {Child[]} children
+     * @param {string} [headingId]
+     */
     function accessCard(title, children, headingId) {
-        return el('section', {class: 'card access-card'}, [
+        return el('section', {class: 'card access-card'}, /** @type {Child[]} */ ([
             el('h2', {class: 'overline access-card-title', id: headingId, tabindex: headingId ? '-1' : null}, [
                 el('span', {'aria-hidden': 'true', text: '// '}),
                 el('span', {text: title})
             ])
-        ].concat(children));
+        ]).concat(children));
     }
 
-    /** Every cell a text node. `rows` holds strings, or arrays of strings for one line each. */
+    /**
+     * Every cell a text node. `rows` holds strings, or arrays of strings for one line each.
+     * @param {string} caption
+     * @param {string[]} headings
+     * @param {Array<Array<string | string[] | Node>>} rows
+     */
     function accessTable(caption, headings, rows) {
         return el('div', {class: 'sources-wrap'}, [
             el('table', {class: 'table access-table'}, [
@@ -9030,7 +10929,10 @@
         ]);
     }
 
-    /** A source's display name, its id when the Hub no longer lists it. */
+    /**
+     * A source's display name, its id when the Hub no longer lists it.
+     * @param {string} id
+     */
     function sourceName(id) {
         const source = (state.sources || []).find(function (candidate) {
             return candidate.id === id;
@@ -9042,6 +10944,9 @@
      * The terminal tokens `perf-sentinel login` obtained, each with a Revoke that asks once
      * more before it acts. Revoking takes effect on the token's next request, and the
      * outcome is announced in the card, which takes the focus once the list is redrawn.
+     * @param {TerminalToken[]} tokens
+     * @param {string} title
+     * @param {string} headingId
      */
     function tokensCard(tokens, title, headingId) {
         const rows = PSL.tokenRows(tokens);
@@ -9059,16 +10964,25 @@
                 : rows.length === 0
                     ? el('p', {class: 'access-muted', text: t('access.tokens.none')})
                     : accessTable(t('access.tokens.caption'), [t('access.col.owner'), t('access.col.requested_from'),
-                        t('access.col.created'), t('access.col.expires'), t('access.col.last_used'), ''],
-                        rows.map(function (row) {
+                            t('access.col.created'), t('access.col.expires'), t('access.col.last_used'), ''],
+                        rows.map(function (/** @type {{id: string, owner: string, from: string, created: string, expires: string, lastUsed: string}} */ row) {
                             return [row.owner, row.from, row.created, row.expires, row.lastUsed, revokeButton(row, headingId)];
                         }))
         ], headingId);
     }
 
+    /**
+     * @param {{id: string, owner: string, from: string, created: string, expires: string, lastUsed: string}} row
+     * @param {string} card
+     */
     function revokeButton(row, card) {
         const label = t('access.revoke.label', {owner: row.owner, created: row.created});
-        const button = el('button', {type: 'button', class: 'pill-button', text: t('ack.button.revoke'), 'aria-label': label});
+        const button = el('button', {
+            type: 'button',
+            class: 'pill-button',
+            text: t('ack.button.revoke'),
+            'aria-label': label
+        });
         let armed = false;
         const disarm = function () {
             armed = false;
@@ -9106,6 +11020,9 @@
         return button;
     }
 
+    /**
+     * @param {import('../types').AccessProject[]} projects
+     */
     function projectsTable(projects) {
         return accessTable(t('access.projects.caption'), [t('access.col.project'), t('access.col.patterns')],
             projects.map(function (project) {
@@ -9113,7 +11030,12 @@
             }));
     }
 
-    /** One folded part of the configuration, its count in the summary so a closed fold still says something. */
+    /**
+     * One folded part of the configuration, its count in the summary so a closed fold still says something.
+     * @param {string} title
+     * @param {number} count
+     * @param {HTMLElement} body
+     */
     function configurationPart(title, count, body) {
         return el('details', {class: 'access-part'}, [
             el('summary', {}, [
@@ -9124,8 +11046,17 @@
         ]);
     }
 
+    /**
+     * @param {import('../types').AccessConfiguration} configuration
+     */
     function configurationCard(configuration) {
         const now = Date.now();
+        /**
+         * @param {string} name
+         * @param {number} count
+         * @param {string[]} headings
+         * @param {Array<Array<string | string[] | Node>>} rows
+         */
         const part = function (name, count, headings, rows) {
             const title = t('access.config.' + name);
             return configurationPart(title, count, accessTable(title, headings.map(function (heading) {
@@ -9137,14 +11068,14 @@
             el('p', {class: 'access-muted', text: t('access.config.loaded')}),
             configurationPart(t('access.config.projects'), configuration.projects.length,
                 projectsTable(configuration.projects)),
-            part('roles', configuration.roles.length, ['role', 'permissions'], configuration.roles.map(function (role) {
+            part('roles', configuration.roles.length, ['role', 'permissions'], configuration.roles.map(function (/** @type {AccessConfiguration['roles'][number]} */ role) {
                 return [role.built_in ? role.name + ' ' + t('access.config.built_in') : role.name, role.permissions.join(', ')];
             })),
-            part('grants', configuration.grants.length, ['group', 'project', 'role'], configuration.grants.map(function (grant) {
+            part('grants', configuration.grants.length, ['group', 'project', 'role'], configuration.grants.map(function (/** @type {AccessConfiguration['grants'][number]} */ grant) {
                 return [grant.group, grant.project, grant.role];
             })),
             part('internal_groups', configuration.internal_groups.length, ['internal_group', 'members'],
-                configuration.internal_groups.map(function (group) {
+                configuration.internal_groups.map(function (/** @type {{name: string, members: string[]}} */ group) {
                     return ['internal:' + group.name, group.members.length === 0 ? t('access.config.no_member') : group.members];
                 })),
             configurationPart(t('access.config.admins'), configuration.admins.length + configuration.admin_groups.length,
@@ -9155,17 +11086,20 @@
                     el('dd', {text: configuration.admin_groups.length === 0 ? none : configuration.admin_groups.join(', ')})
                 ])),
             part('machine_tokens', configuration.machine_tokens.length, ['machine_token', 'group', 'expires'],
-                configuration.machine_tokens.map(function (token) {
+                configuration.machine_tokens.map(function (/** @type {AccessConfiguration['machine_tokens'][number]} */ token) {
                     return [token.name, token.group, PSL.accessExpiry(token.expires_at_ms, now)];
                 })),
             part('local_accounts', configuration.local_accounts.length, ['local_account', 'signs_in_as'],
-                configuration.local_accounts.map(function (name) {
+                configuration.local_accounts.map(function (/** @type {string} */ name) {
                     return [name, 'local:' + name];
                 }))
         ]);
     }
 
-    /** What no project covers, the one part of the screen that asks for a change. */
+    /**
+     * What no project covers, the one part of the screen that asks for a change.
+     * @param {import('../types').AccessUnmatched} unmatched
+     */
     function attentionCard(unmatched) {
         const count = unmatched.services.length + unmatched.attributes.length + unmatched.sources.length;
         if (count === 0) {
@@ -9175,20 +11109,20 @@
         if (unmatched.services.length > 0) {
             parts.push(accessTable(t('coverage.services.caption'),
                 [t('access.col.service'), t('access.col.seen_at'), t('access.col.findings')],
-                unmatched.services.map(function (row) {
+                unmatched.services.map(function (/** @type {AccessUnmatched['services'][number]} */ row) {
                     return [row.service == null ? t('coverage.no_service') : row.service,
                         row.source_ids.map(sourceName).join(', '), String(row.findings)];
                 })));
         }
         if (unmatched.attributes.length > 0) {
             parts.push(accessTable(t('coverage.attributes.caption'), [t('access.col.attribute'), t('access.col.findings')],
-                unmatched.attributes.map(function (row) {
+                unmatched.attributes.map(function (/** @type {AccessUnmatched['attributes'][number]} */ row) {
                     return [row.key + '=' + row.value, String(row.findings)];
                 })));
         }
         if (unmatched.sources.length > 0) {
             parts.push(accessTable(t('coverage.sources.caption'), [t('access.col.unnamed_source'), t('access.col.findings')],
-                unmatched.sources.map(function (row) {
+                unmatched.sources.map(function (/** @type {AccessUnmatched['sources'][number]} */ row) {
                     // A trace backend stores no finding of its own: its runs are read live.
                     return [sourceName(row.source_id), row.findings == null ? t('coverage.backend') : String(row.findings)];
                 })));
@@ -9199,6 +11133,9 @@
         return accessCard(t('coverage.attention.title'), parts);
     }
 
+    /**
+     * @param {import('../types').AccessConflicts} conflicts
+     */
     function conflictsCard(conflicts) {
         return accessCard(t('coverage.conflicts.title'), [
             el('p', {text: t('coverage.conflicts.body')}),
@@ -9208,7 +11145,7 @@
                     ['source', 'signature', 'service', 'key', 'values', 'missing_key'].map(function (heading) {
                         return t('access.col.' + heading);
                     }),
-                    conflicts.copies.map(function (row) {
+                    conflicts.copies.map(function (/** @type {import('../types').AccessConflicts['copies'][number]} */ row) {
                         return [sourceName(row.source_id), row.signature, row.service || t('coverage.no_service'), row.key,
                             row.values.join(', '), String(row.identities_without_key)];
                     })),
@@ -9230,7 +11167,8 @@
         if (state.runs.length === 0) {
             section.appendChild(el('div', {class: 'empty-state'}, [
                 el('p', {
-                    class: 'empty-title', text: t('recent.empty.title', {hours: state.status.limits.report_retention_hours})
+                    class: 'empty-title',
+                    text: t('recent.empty.title', {hours: state.status.limits.report_retention_hours})
                 }),
                 el('p', {text: t('recent.empty.body', {hours: state.status.limits.report_retention_hours})}),
                 el('div', {class: 'outcome-actions empty-actions'}, [
@@ -9248,7 +11186,12 @@
             section.appendChild(el('div', {class: 'banner', 'data-tone': 'warn'}, [
                 svg([['path', {d: 'M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'}],
                     ['path', {d: 'M12 9v4M12 17h.01'}]], 16),
-                el('p', {text: t('recent.binaries', {versions: binaries.join(t('recent.and')), count: binaries.length})})
+                el('p', {
+                    text: t('recent.binaries', {
+                        versions: binaries.join(t('recent.and')),
+                        count: binaries.length
+                    })
+                })
             ]));
         }
 
@@ -9266,12 +11209,19 @@
         return section;
     }
 
+    /**
+     * @param {Run} run
+     */
     function runCard(run) {
         const key = PSL.statusKey(run);
         const card = el('a', {class: 'run-card', 'data-status': key, href: '#/run/' + run.id});
 
         card.appendChild(el('span', {class: 'run-card-line'}, [
-            el('span', {class: 'status-pill', 'data-status': key, text: t(key === 'empty' ? 'recent.status.empty' : 'status.' + key)}),
+            el('span', {
+                class: 'status-pill',
+                'data-status': key,
+                text: t(key === 'empty' ? 'recent.status.empty' : 'status.' + key)
+            }),
             el('span', {class: 'run-card-name', text: run.source_name}),
             el('span', {class: 'chip', text: PSL.KIND_LABEL[run.kind] || run.kind}),
             el('span', {
@@ -9292,7 +11242,11 @@
         return card;
     }
 
-    /** Durations relative to now, the way an operator reads a list: "3 s", not a clock. */
+    /**
+     * Durations relative to now, the way an operator reads a list: "3 s", not a clock.
+     * @param {Run} run
+     * @param {string} key
+     */
     function cardFacts(run, key) {
         const now = Date.now();
         const started = run.started_at_ms || run.created_at_ms;
@@ -9317,17 +11271,17 @@
         return facts;
     }
 
-    function loadRuns() {
+    async function loadRuns() {
         // limit=500 rather than the API's 50 default: the weight history
         // filters per source, and on a busy multi-source Hub the newest 50
         // can all belong to someone else.
-        return getJson('/api/analyses?limit=500').then(function (runs) {
-            state.runs = runs;
+        try {
+            state.runs = await getJson('/api/analyses?limit=500');
             applyRuns();
-        }).catch(function () {
+        } catch (error) {
             state.runs = [];
             applyRuns();
-        });
+        }
     }
 
     /**
@@ -9375,6 +11329,7 @@
      * The report is served byte for byte as the engine produced it, in a frame of
      * its own. The surface changes visibly so the operator knows they left the
      * launcher, and the single return is always present.
+     * @param {string} id
      */
     function renderReportScreen(id) {
         const run = state.run && state.run.id === id ? state.run : null;
@@ -9398,7 +11353,11 @@
             stage.appendChild(reportGone(run, key));
             return shell;
         }
-        const frame = el('iframe', {class: 'report-frame', src: '/reports/' + id + '.html', title: t('report.frame_title')});
+        const frame = el('iframe', {
+            class: 'report-frame',
+            src: '/reports/' + id + '.html',
+            title: t('report.frame_title')
+        });
         frame.addEventListener('load', function () {
             loading.remove();
             // A report deleted under a run that still reads succeeded comes back as
@@ -9412,6 +11371,10 @@
         return shell;
     }
 
+    /**
+     * @param {string} id
+     * @param {Run} run
+     */
     function reportBar(id, run) {
         const lifetime = live(el('span', {class: 'report-engine', text: reportLifetime(id)}),
             function () {
@@ -9429,7 +11392,11 @@
         ]);
     }
 
-    /** Why a report link opens on nothing, and the way on from there. */
+    /**
+     * Why a report link opens on nothing, and the way on from there.
+     * @param {Run} run
+     * @param {string} key
+     */
     function reportGone(run, key) {
         const view = ['queued', 'running', 'failed', 'interrupted', 'expired'].indexOf(key) >= 0 ? key : 'other';
         const finished = key !== 'queued' && key !== 'running';
@@ -9444,6 +11411,9 @@
         ]);
     }
 
+    /**
+     * @param {string} id
+     */
     function reportLifetime(id) {
         const run = state.run && state.run.id === id ? state.run : null;
         const version = state.status && state.status.engine_version;
@@ -9481,6 +11451,6 @@
         if (state.form.pickerOpen) closePicker();
     });
     render();
-    loadShell();
+    void loadShell();
     globalThis.addEventListener('hashchange', onRoute);
 })();

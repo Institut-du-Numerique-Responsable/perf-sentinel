@@ -1363,6 +1363,8 @@ a.shell-identity[aria-current="page"] {
     gap: 8px;
     height: 34px;
     padding: 0 14px;
+    /* The height is fixed, so a label that wrapped would spill over the border: the row wraps instead. */
+    white-space: nowrap;
     border: 1px solid var(--btn-bd);
     border-radius: 999px;
     background: var(--surface-2);
@@ -3767,6 +3769,7 @@ section > .banner + .banner,
 .settings-block {
     border-top: 1px solid var(--border);
     padding-top: 14px;
+    container: settings / inline-size;
 }
 
 .settings-more,
@@ -3806,6 +3809,19 @@ section > .banner + .banner,
     display: flex;
     flex-direction: column;
     gap: 12px;
+}
+
+/* Three columns squeeze a phone's row until keys break letter by letter: one column there, the
+   cards back in their reading order, which each card's order carries. */
+@container settings (max-width: 640px) {
+    .settings-cards {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .settings-col {
+        display: contents;
+    }
 }
 
 .settings-card {
@@ -5330,7 +5346,114 @@ a.chip {
 
 .recap-loading {
     margin: 0 0 12px;
-    font-size: 13px;
+}
+
+.recap-loading p {
+    margin: 0;
+}
+
+.recap-loading-title {
+    font-weight: 600;
+}
+
+.recap-loading .recap-loading-elapsed {
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+/* The whole width the banner gives, so the bar reads as the share it is. */
+.recap-progress {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.recap-loading .recap-progress-stage {
+    margin-top: 10px;
+    font-weight: 600;
+}
+
+/* The disclosure coverage bar's shape, in the banner's own ink: a neutral track vanishes on the
+   info ground and the brand green falls under 3:1 on it, where the info ink holds in both themes. */
+.recap-progress-track {
+    position: relative;
+    height: 6px;
+    margin: 8px 0 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, currentColor 18%, transparent);
+    overflow: hidden;
+}
+
+.recap-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: currentColor;
+    transition: width .2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .recap-progress-fill {
+        transition: none;
+    }
+}
+
+.recap-stages {
+    display: grid;
+    gap: 4px;
+    /* Each duration stays within reach of its step instead of across the banner's whole width. */
+    max-width: 36rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12.5px;
+}
+
+.recap-stage {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Hollow to come, filled once done, ringed while running: the shape carries the state, so the text
+   keeps the banner's full ink and its contrast. */
+.recap-stage-dot {
+    width: 7px;
+    height: 7px;
+    justify-self: center;
+    border: 1.5px solid currentColor;
+    border-radius: 999px;
+}
+
+.recap-stage[data-state="done"] .recap-stage-dot {
+    background: currentColor;
+}
+
+.recap-stage[data-state="running"] .recap-stage-dot {
+    background: currentColor;
+    box-shadow: 0 0 0 2px var(--info-bg), 0 0 0 3.5px currentColor;
+}
+
+.recap-stage[data-state="skipped"] .recap-stage-dot {
+    border-style: dashed;
+}
+
+.recap-stage[data-state="running"] .recap-stage-name {
+    font-weight: 600;
+}
+
+.recap-stage-time {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+}
+
+.recap-freshness {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    margin: 0 0 12px;
+    font-size: 12.5px;
     color: var(--text-2);
 }
 

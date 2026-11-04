@@ -4,6 +4,8 @@
 (function () {
     'use strict';
 
+    const PSL = globalThis.PSL;
+
     // The launcher's theme, resolved before the first paint: tokens.css has no palette
     // without the attribute. This page allows no inline script, so it lives here.
     let stored = null;
@@ -19,6 +21,11 @@
     // The page's language, not a choice: storing it would override the launcher's own.
     PSL.setLang(document.documentElement.lang, false);
 
+    /**
+     * @param {string} path
+     * @param {Record<string, unknown>} body
+     * @returns {Promise<{status: number, payload: any}>}
+     */
     async function send(path, body) {
         const response = await fetch(path, {
             method: 'POST',
@@ -35,7 +42,7 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         const form = document.getElementById('device-form');
-        const input = document.getElementById('device-code');
+        const input = /** @type {HTMLInputElement} */ (document.getElementById('device-code'));
         const details = document.getElementById('device-details');
         const networkAlert = document.getElementById('device-alert');
         const approve = document.getElementById('device-approve');
@@ -46,6 +53,10 @@
 
         // The live region stays in the page and only its content changes: a region shown and
         // filled in the same moment is not announced by every screen reader.
+        /**
+         * @param {string} text
+         * @param {string} tone
+         */
         function say(text, tone) {
             const banner = document.createElement('div');
             banner.className = 'banner';
@@ -54,11 +65,13 @@
             result.replaceChildren(banner);
         }
 
+        /** @param {{status: number, payload: any}} answer */
         function refused(answer) {
             say(PSL.problemText(answer.payload, answer.status, PSL.t('device.answered', {status: answer.status})), 'crit');
         }
 
         // No answer (network down, Hub restarting) or one the page could not use: never silent.
+        /** @param {*} error whatever the promise rejected with */
         function failed(error) {
             say(PSL.t('device.failed', {error: String(error?.message || error)}), 'crit');
         }
@@ -91,6 +104,7 @@
             }).catch(failed);
         });
 
+        /** @param {boolean} approved */
         function decide(approved) {
             send('/api/device/approve', {user_code: verified.user_code, approve: approved}).then(function (answer) {
                 if (answer.status !== 204) return refused(answer);
