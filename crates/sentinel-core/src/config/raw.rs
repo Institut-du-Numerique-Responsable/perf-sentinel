@@ -405,6 +405,7 @@ struct DaemonIncidentsSection {
     service_label: Option<String>,
     kind_label: Option<String>,
     namespace_label: Option<String>,
+    ignored_kinds: Option<Vec<String>>,
     archive_path: Option<String>,
 }
 
@@ -762,6 +763,11 @@ impl From<RawConfig> for Config {
                         .incidents
                         .namespace_label
                         .unwrap_or_else(|| "namespace".to_string()),
+                    ignored_kinds: raw.daemon.incidents.ignored_kinds.unwrap_or_else(|| {
+                        crate::config::DEFAULT_IGNORED_INCIDENT_KINDS
+                            .map(str::to_string)
+                            .to_vec()
+                    }),
                     archive_path: raw.daemon.incidents.archive_path,
                 },
                 cors: DaemonCorsConfig {

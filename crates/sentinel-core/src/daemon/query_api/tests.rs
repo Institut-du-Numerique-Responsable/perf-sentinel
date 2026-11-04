@@ -44,7 +44,14 @@ fn make_state_with_correlator(
         ack_store: None,
         toml_acks: Arc::new(crate::daemon::ack_toml_state::AckTomlState::default()),
         ack_api_key: None,
-        daemon_config: crate::config::DaemonConfig::default(),
+        // Every kind recorded, so the intake tests read the freeze; the default list is tested apart.
+        daemon_config: crate::config::DaemonConfig {
+            incidents: crate::config::DaemonIncidentsConfig {
+                ignored_kinds: Vec::new(),
+                ..crate::config::DaemonIncidentsConfig::default()
+            },
+            ..crate::config::DaemonConfig::default()
+        },
         thresholds: crate::config::ThresholdsConfig::default(),
         energy_backends: EnergyBackendsConfigured::default(),
         detection_ledger: Some(Arc::new(DetectionLedger::new(
@@ -899,6 +906,90 @@ async fn the_settle_pass_merges_the_traces_live_at_the_incident() {
         MAX_SETTLES_IN_FLIGHT,
         "the pass released its permit"
     );
+}
+
+#[tokio::test]
+async fn deploy_and_restart_alerts_are_ignored_by_default_and_never_recorded() {
+    let mut defaults = make_state().clone_for_test();
+    defaults.daemon_config.incidents = crate::config::DaemonIncidentsConfig::default();
+    let state = Arc::new(defaults);
+    let alert = |kind: &str, status: &str| {
+        serde_json::json!({
+            "status": status,
+            "labels": {"service": "cart-svc", "perf_sentinel_kind": kind},
+            "startsAt": "2026-09-01T14:03:00Z",
+            "endsAt": if status == "resolved" { "2026-09-01T14:10:00Z" } else { "0001-01-01T00:00:00Z" }
+        })
+    };
+    let body = serde_json::json!([
+        alert("deploy", "firing"),
+        alert("restart", "firing"),
+        alert("restart", "resolved"),
+        alert("oom_kill", "firing")
+    ]);
+
+    let resp = query_api_router(Arc::clone(&state))
+        .oneshot(post_incidents_request(&body))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let intake: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(intake["recorded"], 1);
+    assert_eq!(intake["ignored"], 3);
+    assert_eq!(intake["repeated"], 0);
+    let ignored = |kind: &str| {
+        state
+            .metrics
+            .incidents_ignored_total
+            .with_label_values(&[kind])
+            .get()
+    };
+    assert_eq!(ignored("deploy"), 1);
+    assert_eq!(ignored("restart"), 2);
+    assert_eq!(ignored("oom_kill"), 0);
+    let kept = state
+        .incident_store
+        .as_ref()
+        .unwrap()
+        .list(None, None, 0, 100)
+        .await;
+    assert_eq!(
+        kept.iter()
+            .map(|incident| incident.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["oom_kill"]
+    );
+}
+
+#[tokio::test]
+async fn an_empty_ignored_kinds_records_deploys_and_restarts() {
+    let state = make_state();
+    let body = serde_json::json!([{
+        "status": "firing",
+        "labels": {"service": "cart-svc", "perf_sentinel_kind": "deploy"},
+        "startsAt": "2026-09-01T14:03:00Z",
+        "endsAt": "0001-01-01T00:00:00Z"
+    }]);
+
+    let resp = query_api_router(Arc::clone(&state))
+        .oneshot(post_incidents_request(&body))
+        .await
+        .unwrap();
+
+    let intake: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(intake["recorded"], 1);
+    assert_eq!(intake["ignored"], 0);
 }
 
 #[tokio::test]

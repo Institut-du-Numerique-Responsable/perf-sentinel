@@ -5373,6 +5373,46 @@ enabled = true
 }
 
 #[test]
+fn daemon_incidents_ignore_deploys_and_restarts_unless_told_otherwise() {
+    let defaults = load_from_str(
+        "
+[daemon.incidents]
+enabled = true
+api_key = \"a-long-random-string\"
+",
+    )
+    .unwrap();
+    assert_eq!(
+        defaults.daemon.incidents.ignored_kinds,
+        ["deploy", "restart"]
+    );
+
+    let every = load_from_str(
+        "
+[daemon.incidents]
+enabled = true
+api_key = \"a-long-random-string\"
+ignored_kinds = []
+",
+    )
+    .unwrap();
+    assert_eq!(every.daemon.incidents.ignored_kinds, Vec::<String>::new());
+
+    let unknown = "
+[daemon.incidents]
+enabled = true
+api_key = \"a-long-random-string\"
+ignored_kinds = [\"deploy\", \"crash\"]
+";
+    let msg = format!("{}", load_from_str(unknown).unwrap_err());
+    assert!(msg.contains("ignored_kinds: unknown kind `crash`"), "{msg}");
+    assert!(
+        msg.contains("oom_kill, memory_saturation, restart, deploy, other"),
+        "{msg}"
+    );
+}
+
+#[test]
 fn validate_daemon_incidents_bounds_the_ring_and_the_lookback() {
     let over = "
 [daemon.incidents]

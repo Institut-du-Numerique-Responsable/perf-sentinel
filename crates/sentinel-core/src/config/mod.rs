@@ -456,6 +456,21 @@ pub struct DaemonAckConfig {
     pub toml_path: Option<String>,
 }
 
+/// The incident kinds an alert can declare, as `[daemon.incidents] ignored_kinds` names them.
+/// The daemon's `IncidentKind` carries the same five.
+pub const INCIDENT_KINDS: [&str; 5] = [
+    "oom_kill",
+    "memory_saturation",
+    "restart",
+    "deploy",
+    "other",
+];
+
+/// The kinds `[daemon.incidents]` ignores unless told otherwise: a rollout or a restart
+/// fires them for every service it touches, and each one recorded freezes a window of
+/// findings that the Hub then stores, for little a post-mortem reads.
+pub const DEFAULT_IGNORED_INCIDENT_KINDS: [&str; 2] = ["deploy", "restart"];
+
 /// Inbound incident webhook config, `[daemon.incidents]`.
 ///
 /// perf-sentinel does not detect a crash and cannot see an observed
@@ -494,6 +509,11 @@ pub struct DaemonIncidentsConfig {
     /// all the same, frozen by service alone, and the label is never a
     /// Prometheus label here.
     pub namespace_label: String,
+    /// Kinds whose alerts are acknowledged and dropped: neither frozen, nor
+    /// kept in the ring or the archive, nor pushed to the Hub. Default
+    /// [`DEFAULT_IGNORED_INCIDENT_KINDS`]; `[]` records every kind. Each must
+    /// be one of [`INCIDENT_KINDS`].
+    pub ignored_kinds: Vec<String>,
     /// Optional newline-delimited JSON file every new incident, close and
     /// settle is appended to, opened at startup and read back into the
     /// ring. Absent means the ring is the only record, and the ring dies
@@ -512,6 +532,7 @@ impl Default for DaemonIncidentsConfig {
             service_label: "service".to_string(),
             kind_label: "perf_sentinel_kind".to_string(),
             namespace_label: "namespace".to_string(),
+            ignored_kinds: DEFAULT_IGNORED_INCIDENT_KINDS.map(str::to_string).to_vec(),
             archive_path: None,
         }
     }

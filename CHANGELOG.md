@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Changed
+
+- `[daemon.incidents] ignored_kinds` names the incident kinds the daemon acknowledges and drops, `["deploy", "restart"]` by default. A rollout or a restart fires one alert per service it touches, and each one recorded froze a window of findings that the incident ring, the archive and PerfSentinelHub then kept, for little a post-mortem reads: on a busy fleet they filled the Hub's database. An alert of an ignored kind, firing or resolved, is now answered `200` and counted in the intake body's new `ignored` field and in `perf_sentinel_incidents_ignored_total{kind}`, and nothing is frozen, kept, archived or pushed for it. `ignored_kinds = []` records every kind as before; a value outside `oom_kill`, `memory_saturation`, `restart`, `deploy` and `other` fails the config load. Incidents already in the ring or the archive stay. `docs/CONFIGURATION.md`, `docs/QUERY-API.md`, `docs/METRICS.md`, their French mirrors and `examples/perf-sentinel.toml` describe it.
+
 ## [0.41.0] - 2026-11-02
 
 ### Security

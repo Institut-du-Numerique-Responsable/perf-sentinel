@@ -1173,6 +1173,7 @@ Three labels are read, all configurable:
 | `[daemon.incidents] service_label`   | `service`            | The Perf Sentinel service name. This is the join key to the findings, so an alert without it is refused                                                                                                                                |
 | `[daemon.incidents] kind_label`      | `perf_sentinel_kind` | One of `oom_kill`, `memory_saturation`, `restart`, `deploy`, `other`. Anything else is `other`                                                                                                                                         |
 | `[daemon.incidents] namespace_label` | `namespace`          | Optional. Its value is carried on the incident as `namespace`, narrows the freeze to that namespace's findings (see below) and is what the `namespace` parameter of `GET /api/incidents` filters on. Never a reason to refuse an alert |
+| `[daemon.incidents] ignored_kinds`   | `["deploy", "restart"]` | Not a label: the kinds whose alerts are acknowledged and dropped, never frozen nor kept. `[]` records every kind |
 
 **An incident with a namespace freezes that namespace's findings.** A
 rollout of one service across tenants fires one alert per namespace, and
@@ -1207,12 +1208,15 @@ rule:
 shows up as a body rather than as silence.
 
 ```json
-{ "recorded": 1, "repeated": 0, "rejected_no_service": 0,
+{ "recorded": 1, "repeated": 0, "ignored": 0, "rejected_no_service": 0,
   "rejected_unparsable_time": 0, "rejected_overflow": 0 }
 ```
 
 `recorded` counts new incidents, `repeated` deliveries of an incident
-already held, whether they closed it or changed nothing. One delivery
+already held, whether they closed it or changed nothing. `ignored` counts
+the alerts of a kind `[daemon.incidents] ignored_kinds` drops, `deploy` and
+`restart` by default, firing or resolved: nothing is frozen or kept for
+them, and `perf_sentinel_incidents_ignored_total{kind}` counts them too. One delivery
 carries several alerts and one bad alert must not lose the others, so
 each is counted rather than failing the request. The status is `200` even
 when every alert was refused, which is also what Alertmanager needs to

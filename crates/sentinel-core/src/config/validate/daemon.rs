@@ -270,6 +270,17 @@ impl Config {
             &1,
             &1_000,
         )?;
+        if let Some(kind) = incidents
+            .ignored_kinds
+            .iter()
+            .find(|kind| !crate::config::INCIDENT_KINDS.contains(&kind.as_str()))
+        {
+            return Err(format!(
+                "[daemon.incidents] ignored_kinds: unknown kind `{}`, expected one of {}",
+                crate::text_safety::sanitize_for_terminal(kind),
+                crate::config::INCIDENT_KINDS.join(", ")
+            ));
+        }
         let required = [
             ("service_label", &incidents.service_label),
             ("kind_label", &incidents.kind_label),
