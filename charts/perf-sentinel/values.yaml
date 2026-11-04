@@ -413,7 +413,9 @@ config:
     # enabled = true at the end of this file. Pass its write key through a
     # Secret entry named PERF_SENTINEL_INCIDENTS_API_KEY. An enabled table
     # without its key stops the daemon at startup, so create the Secret first,
-    # and put archive_path on the PVC so the record outlives a restart. See
+    # and put archive_path on the PVC so the record outlives a restart. Since
+    # 0.42.0 deploy and restart alerts are dropped unless the table sets
+    # ignored_kinds = []: a rollout fires one per service it touches. See
     # docs/QUERY-API.md and docs/CONFIGURATION.md.
     # Reject OTLP ingest when cgroup v2 memory crosses this percent of the
     # container limit, bounding RSS against OOM. 0 disables (default), 6 is the

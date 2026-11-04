@@ -387,6 +387,11 @@ pub struct MetricsState {
     /// ingest meters. Pre-warmed at zero for the five kinds.
     #[cfg(feature = "daemon")]
     pub incidents_total: IntCounterVec,
+    /// Alerts of a kind `[daemon.incidents] ignored_kinds` drops, by kind,
+    /// counted per alert, firing or resolved. Pre-warmed at zero for the
+    /// five kinds.
+    #[cfg(feature = "daemon")]
+    pub incidents_ignored_total: IntCounterVec,
     /// Incident records the archive did not keep, on a full writer
     /// channel or a failed write. The ring still holds the incident, so
     /// this counts durability lost, not data lost.
@@ -1112,6 +1117,17 @@ impl MetricsState {
             let _ = incidents_total.with_label_values(&[kind.as_str()]);
         }
         #[cfg(feature = "daemon")]
+        let incidents_ignored_total = register_int_counter_vec(
+            &registry,
+            "perf_sentinel_incidents_ignored_total",
+            "Incident alerts the daemon dropped for their kind, by kind",
+            &["kind"],
+        );
+        #[cfg(feature = "daemon")]
+        for kind in crate::daemon::incidents::IncidentKind::ALL {
+            let _ = incidents_ignored_total.with_label_values(&[kind.as_str()]);
+        }
+        #[cfg(feature = "daemon")]
         let incidents_archive_failed_total = IntCounter::new(
             "perf_sentinel_incidents_archive_failed_total",
             "Incident records the archive writer dropped or failed to write",
@@ -1368,6 +1384,8 @@ impl MetricsState {
             otlp_spans_filtered_total,
             #[cfg(feature = "daemon")]
             incidents_total,
+            #[cfg(feature = "daemon")]
+            incidents_ignored_total,
             #[cfg(feature = "daemon")]
             incidents_archive_failed_total,
             #[cfg(feature = "daemon")]

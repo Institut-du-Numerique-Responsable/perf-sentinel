@@ -1489,11 +1489,13 @@ const SETTLE_TTLS: u64 = 2;
 
 /// What one webhook delivery did, so a misconfigured `service_label`
 /// shows up as a body rather than as silence. `recorded` counts new
-/// incidents, `repeated` deliveries of a known one, closing or not.
+/// incidents, `repeated` deliveries of a known one, closing or not,
+/// `ignored` the alerts of a kind `[daemon.incidents] ignored_kinds` drops.
 #[derive(Debug, Serialize)]
 struct IncidentIntake {
     recorded: usize,
     repeated: usize,
+    ignored: usize,
     rejected_no_service: usize,
     rejected_unparsable_time: usize,
     rejected_overflow: usize,
@@ -1718,6 +1720,7 @@ async fn handle_post_incidents(
     let mut intake = IncidentIntake {
         recorded: 0,
         repeated: 0,
+        ignored: 0,
         rejected_no_service: 0,
         rejected_unparsable_time: 0,
         rejected_overflow: body.alerts.len().saturating_sub(MAX_ALERTS_PER_DELIVERY),
@@ -1740,6 +1743,22 @@ async fn handle_post_incidents(
                 continue;
             }
         };
+        // Before the freeze, so an ignored kind costs no fold, and before the
+        // ring, so it reaches neither the archive nor the Hub. A resolved
+        // delivery of one is ignored the same way: there is nothing to close.
+        if cfg
+            .ignored_kinds
+            .iter()
+            .any(|kind| kind == req.kind.as_str())
+        {
+            intake.ignored += 1;
+            state
+                .metrics
+                .incidents_ignored_total
+                .with_label_values(&[req.kind.as_str()])
+                .inc();
+            continue;
+        }
         // Cheap path for the common repeat, before paying a fold. `record`
         // below is the authoritative gate for the race two deliveries of
         // one new alert can run.

@@ -396,6 +396,9 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 #                                                  # whose k8s.namespace.name grouping attribute names another
 #                                                  # is left out, so it needs k8s.namespace.name among
 #                                                  # [detection] grouping_attributes
+# ignored_kinds = ["deploy", "restart"]            # default. Alerts of these kinds are acknowledged and dropped:
+#                                                  # not frozen, kept, archived nor pushed to the Hub. A rollout
+#                                                  # fires one per service it touches. [] records every kind
 # archive_path = "/var/lib/perf-sentinel/incidents.ndjson"  # default unset: the ring is the only record, and
 #                                                  # it dies with the daemon. A node-level memory event that
 #                                                  # kills the observed service often takes a co-located

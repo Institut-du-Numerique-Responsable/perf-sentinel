@@ -770,3 +770,15 @@ v0.39.0	5c1d26a	2026-10-30	PASS
 # scenarios, verify-all-scenarios and validate-findings.
 v0.40.0	46fa190	2026-10-31	PASS
 v0.41.0	ebbfdf8	2026-11-02	PASS
+# v0.42.0: targeted pass on [daemon.incidents] ignored_kinds, cluster rebuilt
+# (up-cni, seed-services, seed-tracegen), daemon image built from release/0.42.0
+# (129604e4), Hub v0.13.0. Scenarios run: incident-window-capture (local
+# binary, legs A-I, I new: with no ignored_kinds set, a deploy and a restart
+# alert are answered 200, ignored=2, recorded=0, none listed, and counted in
+# perf_sentinel_incidents_ignored_total{kind} as deploy=1 restart=1 oom_kill=0),
+# incident-namespace-scope, incident-alerting-chain, hub-incidents-mirror
+# (discriminator kind moved from deploy to other), hub-incidents-push,
+# hub-correlations-push, daemon-security-hardening as a regression check, and
+# validate-findings (12/12 finding types). All PASS. Not run:
+# verify-all-scenarios.
+v0.42.0	b71f715	2026-11-04	PASS

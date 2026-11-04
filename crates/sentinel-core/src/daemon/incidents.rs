@@ -1435,4 +1435,12 @@ mod tests {
             Incident::compute_id("svc", None, IncidentKind::OomKill, 1001)
         );
     }
+
+    #[test]
+    fn the_config_names_the_same_five_kinds() {
+        assert_eq!(
+            IncidentKind::ALL.map(IncidentKind::as_str),
+            crate::config::INCIDENT_KINDS
+        );
+    }
 }

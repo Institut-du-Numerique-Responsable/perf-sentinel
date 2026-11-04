@@ -1214,6 +1214,7 @@ Trois libellés sont lus, tous configurables :
 | `[daemon.incidents] service_label`   | `service`            | Le nom de service Perf Sentinel. C'est la clé de jointure avec les findings, une alerte qui ne le porte pas est refusée                                                                                                                 |
 | `[daemon.incidents] kind_label`      | `perf_sentinel_kind` | L'un de `oom_kill`, `memory_saturation`, `restart`, `deploy`, `other`. Tout le reste vaut `other`                                                                                                                                       |
 | `[daemon.incidents] namespace_label` | `namespace`          | Optionnel. Sa valeur est portée sur l'incident comme `namespace`, restreint le gel aux findings de ce namespace (voir plus bas) et c'est sur elle que filtre le paramètre `namespace` de `GET /api/incidents`. Jamais un motif de refus |
+| `[daemon.incidents] ignored_kinds`   | `["deploy", "restart"]` | Pas un libellé : les genres dont les alertes sont acquittées puis écartées, jamais gelées ni gardées. `[]` enregistre tous les genres |
 
 **Un incident avec un namespace fige les findings de ce namespace.** Un
 déploiement d'un même service sur plusieurs tenants déclenche une alerte
@@ -1248,12 +1249,16 @@ personne ne verrait échouer, donc un opérateur qui veut un genre précis
 configuré se voie dans un corps plutôt que dans le silence.
 
 ```json
-{ "recorded": 1, "repeated": 0, "rejected_no_service": 0,
+{ "recorded": 1, "repeated": 0, "ignored": 0, "rejected_no_service": 0,
   "rejected_unparsable_time": 0, "rejected_overflow": 0 }
 ```
 
 `recorded` compte les nouveaux incidents, `repeated` les livraisons d'un
-incident déjà détenu, qu'elles l'aient fermé ou n'aient rien changé. Une
+incident déjà détenu, qu'elles l'aient fermé ou n'aient rien changé.
+`ignored` compte les alertes d'un genre que `[daemon.incidents]
+ignored_kinds` écarte, `deploy` et `restart` par défaut, actives ou
+résolues : rien n'est gelé ni gardé pour elles, et
+`perf_sentinel_incidents_ignored_total{kind}` les compte aussi. Une
 livraison porte plusieurs alertes et une mauvaise alerte ne doit pas
 faire perdre les autres, donc chacune est comptée plutôt que de faire
 échouer la requête. Le statut est `200` même quand toutes ont été
