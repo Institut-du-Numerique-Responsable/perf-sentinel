@@ -11,7 +11,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "The Prometheus instance scraping the daemon's /metrics. It feeds the Grouping and Service variables alone, from the labels of perf_sentinel_findings_total, the same ones the overview dashboard filters on; every table reads the daemon through DS_INFINITY.",
+      "description": "The Prometheus instance scraping the daemon's /metrics. It feeds the Grouping and Service variables alone, from the labels of perf_sentinel_findings_total, the same ones the overview dashboard filters on. Every table reads the daemon through DS_INFINITY.",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
@@ -116,7 +116,7 @@
         },
         "options": [],
         "hide": 0,
-        "description": "Effective grouping of the analysed traffic: the first attribute present from [detection] grouping_attributes (k8s.namespace.name, then service.namespace, by default), so on Kubernetes the namespace the workloads run in. Listed from the grouping label of perf_sentinel_findings_total, so it offers exactly what the overview dashboard filters on. Sent to the API, and to the Hub's for the History (Hub) row, as an exact match. All sends a single space, which the API reads as no filter: Grafana ignores an empty allValue, so a blank is the only value that reaches the request. The Prometheus datasource serves this list and the Service list, nothing else. grouping=\"_other\" is the metrics' fold bucket for pairs past the per-run caps, not a value a finding carries: picking it yields an empty table, the rows it stands for sit under their real grouping."
+        "description": "Effective grouping of the analysed traffic: the first attribute present from [detection] grouping_attributes (k8s.namespace.name, then service.namespace, by default), so on Kubernetes the namespace the workloads run in. Listed from the grouping label of perf_sentinel_findings_total, so it offers exactly what the overview dashboard filters on. Sent to the API, and to the Hub's for the History (Hub) row, as an exact match. All sends a single space, which the API reads as no filter: Grafana ignores an empty allValue, so a blank is the only value that reaches the request. The Prometheus datasource serves only this list and the Service list. grouping=\"_other\" is the metrics' fold bucket for pairs past the per-run caps, not a value a finding carries: picking it yields an empty table, the rows it stands for sit under their real grouping."
       },
       {
         "name": "service",
@@ -328,7 +328,7 @@
         "hide": 0,
         "includeAll": false,
         "multi": false,
-        "description": "The API's offset: folded rows skipped before the page starts, so a listing past the 1000-row cap is read in slices. Add Max rows each time: 0, then 200, 400 at the default, or 0, 1000, 2000 at the cap. The ring keeps moving between two requests, so a row can cross a slice boundary; narrowing with Grouping and Service first is what makes most pages fit under the cap."
+        "description": "The API's offset: folded rows skipped before the page starts, so a listing past the 1000-row cap is read in slices. Add Max rows each time: 0, then 200, 400 at the default, or 0, 1000, 2000 at the cap. The ring keeps moving between two requests, so a row can cross a slice boundary. Narrow with Grouping and Service first to fit most pages under the cap."
       },
       {
         "name": "include_acked",
@@ -664,7 +664,7 @@
         "current": {},
         "options": [],
         "hide": 2,
-        "description": "UTC epoch day of the Detections today table, read from the daemon's own clock on GET /api/status (detection_ledger.current_day), so it is the day the daemon is counting. Hidden, nothing to set by hand. Empty when the detection ledger is disabled."
+        "description": "UTC epoch day of the Detections today table, read from the daemon's own clock on GET /api/status (detection_ledger.current_day), so it is the day the daemon is counting. The variable is hidden and needs no input. Empty when the detection ledger is disabled."
       }
     ]
   },
@@ -672,7 +672,7 @@
     {
       "type": "stat",
       "title": "Compatibility",
-      "description": "Whether the daemon answering the query API is recent enough for this dashboard. It reads `version` from `GET /api/status`, which every daemon since 0.4.0 returns.\n\nBelow 0.21.0 this dashboard misreads rather than degrades. `grouping` and `offset` did not exist as query parameters, and the API ignores what it does not know, so the Grouping pill names one tenant while the table lists every one of them and 'Skip rows' returns the same page at every value. The 'All' option sends a single space, which such a daemon takes as an exact match and answers with nothing.\n\nEmpty columns on a current daemon are configuration, not age: `[daemon.correlation]` off empties Correlations, no `[daemon.incidents]` answers 503 on both incident panels, and green scoring off empties 'Ops/trace'.",
+      "description": "Whether the daemon answering the query API is recent enough for this dashboard. It reads `version` from `GET /api/status`, which every daemon since 0.4.0 returns.\n\nBelow 0.21.0 this dashboard shows wrong data. `grouping` and `offset` did not exist as query parameters, and the API ignores what it does not know, so the Grouping pill names one tenant while the table lists every one of them and 'Skip rows' returns the same page at every value. The 'All' option sends a single space, which such a daemon takes as an exact match and answers with nothing.\n\nOn a current daemon, empty columns come from configuration: `[daemon.correlation]` off empties Correlations, no `[daemon.incidents]` answers 503 on both incident panels, and green scoring off empties 'Ops/trace'.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "${DS_INFINITY}"
@@ -869,7 +869,7 @@
     {
       "type": "table",
       "title": "Findings",
-      "description": "One row per distinct problem, folded by the signature acknowledgments use. Filter with the column headers.\n\n'Retained' counts the detections the daemon still holds for the problem: it falls as they age out of the ring and resets on restart, so it is not the volume, Detections today is. 'Occurrences' is the repeats inside the trace shown. 'Est. impact (ops)' is Retained x Ops/trace, the avoidable I/O to rank by, 0 for the types that waste none.\n\n'Suggestion' is the fix for the framework or broker inferred from the trace when there is one, the generic hint otherwise, and 'Fix for' names that technology, blank when the hint is generic. 'Code' is the call site from the span's code.* attributes, the function then file:line as the CLI prints them, either one alone when the other is missing, blank when the instrumentation sends none.\n\n'Acked via' needs Include acked true: toml is the CI baseline file, daemon the runtime store. Grouping, Service and Finding type narrow the request, so a tenant is complete up to Max rows, and Skip rows reads on.",
+      "description": "One row per distinct problem, folded by the signature acknowledgments use. Filter with the column headers.\n\n'Retained' counts the detections the daemon still holds for the problem: it falls as they age out of the ring and resets on restart, so read the volume from Detections today. 'Occurrences' is the repeats inside the trace shown. 'Est. impact (ops)' is Retained x Ops/trace, the avoidable I/O to rank by, 0 for the types that waste none.\n\n'Suggestion' is the fix for the framework or broker inferred from the trace when there is one, the generic hint otherwise, and 'Fix for' names that technology, blank when the hint is generic. 'Code' is the call site from the span's code.* attributes, the function then file:line as the CLI prints them, either one alone when the other is missing, blank when the instrumentation sends none.\n\n'Acked via' needs Include acked true: toml is the CI baseline file, daemon the runtime store. Grouping, Service and Finding type narrow the request, so a tenant is complete up to Max rows, and Skip rows reads on.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "${DS_INFINITY}"

@@ -1167,7 +1167,7 @@ install it first and pin its version where you provision it):
   the runtime acknowledgments, the energy backends' health and, since
   0.20.0, the incidents your alerting posted with the findings frozen for
   each. A `Compatibility` badge beside the status line turns red below
-  0.21.0, where this dashboard misreads rather than degrades. `grouping`
+  0.21.0, where this dashboard shows wrong data. `grouping`
   and `offset` did not exist as query parameters, and the API ignores what
   it does not know, so the `Grouping` pill names one deployment while the
   table lists every one of them and `Skip rows` returns the same page at

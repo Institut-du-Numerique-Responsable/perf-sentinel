@@ -887,7 +887,7 @@ installez-le d'abord et épinglez sa version là où vous le provisionnez) :
   des backends énergie et, depuis la 0.20.0, les incidents postés par
   votre alerting avec les findings gelés pour chacun. Une pastille
   `Compatibility` à côté de la ligne d'état passe au rouge sous la
-  0.21.0, où ce tableau de bord se trompe au lieu de se dégrader.
+  0.21.0, où ce tableau de bord affiche des données fausses.
   `grouping` et `offset` n'existaient pas comme paramètres de requête, et
   l'API ignore ce qu'elle ne connaît pas, si bien que le sélecteur
   `Grouping` nomme un déploiement pendant que la table les liste tous et
