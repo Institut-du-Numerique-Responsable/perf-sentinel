@@ -10,6 +10,17 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [Unreleased]
+
+### Changed
+
+- `PerfSentinelMemoryPressureRejecting` reads
+  `max_over_time(perf_sentinel_ingest_memory_pressure[2m]) == 1` instead of
+  the raw gauge. The daemon now releases its memory guard after 60 seconds
+  inside the hysteresis band, so a daemon stuck against its mark flips the
+  gauge back to `0` once a minute, and each flip reset the rule's
+  5-minute `for`: the alert would never fire while most spans were refused.
+
 ## [0.42.0]
 
 ### Changed

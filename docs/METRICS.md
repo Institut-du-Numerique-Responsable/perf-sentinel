@@ -107,9 +107,13 @@ sibling Pod cannot read the daemon's process state freely.
   working set crossed the `[daemon] memory_high_water_pct` high-water
   mark. Ingest is then rejected (HTTP 503, gRPC `UNAVAILABLE`, both
   retryable) to bound RSS independently of queue depth, until usage
-  falls 5 percentage points back below the mark (hysteresis). The live
-  on/off state is on the `perf_sentinel_ingest_memory_pressure` gauge
-  (`1` while rejecting), which is what the Helm alert keys on. These
+  falls 5 percentage points back below the mark (hysteresis), or for at
+  most 60 seconds while usage stays inside that band, after which ingest
+  is admitted again until the next crossing. The live on/off state is on
+  the `perf_sentinel_ingest_memory_pressure` gauge (`1` while rejecting),
+  which is what the Helm alert keys on, over a 2-minute `max_over_time`
+  so the brief releases of a daemon cycling against its mark do not
+  reset the alert. These
   rejections happen before the request is decoded, so
   `perf_sentinel_otlp_spans_received_total` does not advance during an
   episode (the span counts are unknowable). The counter tallies
@@ -557,7 +561,7 @@ groups:
         for: 15m
         labels: { severity: warning }
       - alert: PerfSentinelMemoryPressureRejecting
-        expr: perf_sentinel_ingest_memory_pressure == 1
+        expr: max_over_time(perf_sentinel_ingest_memory_pressure[2m]) == 1
         for: 5m
         labels: { severity: warning }
       - alert: PerfSentinelAnalysisShedding

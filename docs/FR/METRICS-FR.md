@@ -111,9 +111,13 @@ Valeurs du label `reason` :
   L'ingest est alors rejeté (HTTP 503, gRPC `UNAVAILABLE`, les deux
   rejouables) pour borner la RSS indépendamment de la profondeur de
   file, jusqu'à ce que l'usage retombe 5 points de pourcentage sous le
-  seuil (hystérésis). L'état on/off vit sur la gauge
+  seuil (hystérésis), ou au plus 60 secondes tant que l'usage reste dans
+  cette bande, après quoi l'ingest est de nouveau admis jusqu'au
+  franchissement suivant. L'état on/off vit sur la gauge
   `perf_sentinel_ingest_memory_pressure` (`1` pendant le rejet), c'est
-  elle que l'alerte Helm surveille. Ces rejets précèdent le décodage,
+  elle que l'alerte Helm surveille, sur un `max_over_time` de 2 minutes
+  pour que les brèves reprises d'un daemon qui oscille contre son seuil
+  ne remettent pas l'alerte à zéro. Ces rejets précèdent le décodage,
   donc `perf_sentinel_otlp_spans_received_total` n'avance pas pendant
   un épisode (le nombre de spans est inconnaissable). Le compteur
   compte des requêtes, pas des spans. Ne se déclenche jamais quand le
@@ -589,7 +593,7 @@ groups:
         for: 15m
         labels: { severity: warning }
       - alert: PerfSentinelMemoryPressureRejecting
-        expr: perf_sentinel_ingest_memory_pressure == 1
+        expr: max_over_time(perf_sentinel_ingest_memory_pressure[2m]) == 1
         for: 5m
         labels: { severity: warning }
       - alert: PerfSentinelAnalysisShedding

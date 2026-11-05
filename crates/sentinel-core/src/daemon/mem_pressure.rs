@@ -40,8 +40,9 @@ pub(crate) const HYSTERESIS_PCT: f64 = 5.0;
 /// cache of the files it wrote. A working set that settles inside the band
 /// never reaches the clear condition, and ingest stays shut for good while
 /// nothing reports an error. Past this hold the flag clears, so the daemon
-/// admits again and the next crossing of the mark sets it anew: at most one
-/// on/off cycle per minute, still no flapping around the boundary.
+/// admits again and the next crossing of the mark sets it anew. The hold
+/// adds at most one release a minute; a ratio swinging across the whole
+/// band still cycles as it did before.
 const MAX_BAND_HOLD_POLLS: u32 = 60;
 
 /// Extract the `inactive_file` byte count from a cgroup v2 `memory.stat`

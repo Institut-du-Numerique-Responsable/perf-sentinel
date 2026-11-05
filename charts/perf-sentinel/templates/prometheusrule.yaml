@@ -37,7 +37,7 @@ spec:
             summary: "perf-sentinel is dropping OTLP requests, the ingest channel is saturated"
             description: "Spans the daemon accepted and then dropped, so the findings that follow are incomplete with no marker saying so. Raise daemon.ingest_queue_capacity or limits.cpu."
         - alert: PerfSentinelMemoryPressureRejecting
-          expr: perf_sentinel_ingest_memory_pressure == 1
+          expr: max_over_time(perf_sentinel_ingest_memory_pressure[2m]) == 1
           for: 5m
           labels:
             severity: warning
