@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-11-05
+
+### Fixed
+
+- The `[daemon] memory_high_water_pct` guard no longer keeps ingest shut for good when the working set settles inside its 5-point hysteresis band. A daemon that stops admitting spans stops allocating but frees little: the findings ring, the retained traces, the allocator's arenas and the active page cache of the files it wrote all stay. On a production daemon with an 85% mark on a 1 GiB limit, the working set parked at 80.7%, above the 80% resume point, and every span was refused for 16 hours until a rollout restarted the pod, with `perf_sentinel_ingest_memory_pressure` reading `1` the whole time and nothing else failing; the incidents recorded meanwhile froze empty windows. The flag now clears after 60 seconds inside the band, or one `trace_ttl_ms` when that is longer since usage can still drain through TTL eviction until then, with a warning naming the ratio, and the next crossing of the mark sets it again, so the guard still bounds RSS and a parked working set adds at most one release per hold. The count survives a crossing of the mark, so a ratio oscillating around it releases too. A working set that stays at or above the mark keeps ingest rejected, as before. The `PerfSentinelMemoryPressureRejecting` rule of the chart now reads `avg_over_time(perf_sentinel_ingest_memory_pressure[15m]) > 0.15 and present_over_time(perf_sentinel_ingest_memory_pressure[2m])`, since a daemon cycling against its mark would otherwise reset the rule's 5-minute `for` on every release and never fire. It fires 8 minutes into a continuous rejection instead of 5, on a single rejection of 3 minutes, and on a cycle that rejects 20% of the time, and resolves about 13 minutes after rejection stops, or 2 minutes after the pod is replaced. `docs/CONFIGURATION.md`, `docs/METRICS.md`, `docs/RUNBOOK.md` and their French mirrors describe it.
+
 ## [0.42.0] - 2026-11-04
 
 ### Changed

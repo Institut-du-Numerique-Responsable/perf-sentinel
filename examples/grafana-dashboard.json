@@ -115,7 +115,7 @@
     },
     {
       "title": "Compatibility",
-      "description": "Whether the daemon feeding this dashboard is recent enough for its panels. It reads the presence of three metrics the panels depend on rather than a version number, because no perf-sentinel metric carries one.\n\n`perf_sentinel_scored_energy_kwh_total` arrived in 0.32.0, `perf_sentinel_incidents_total` in 0.20.0 and `perf_sentinel_analysis_service_overflow_total` in 0.18.0. All three are published from daemon start whatever the configuration, so their absence dates the binary. Dropping any one in a scrape relabel rule reads here as an old daemon.\n\nPartly compatible means Average power, Carbon per hour and the two range totals stay empty (before 0.32.0), and 'Service silence' too (before 0.20.0). Not compatible means the Service and Grouping pickers offer names the findings panels cannot honour, so a filtered view reads as a clean service.\n\nEmpty panels on a current daemon are configuration, not age: `[green] enabled = false` silences the waste ratio and the avoidable counters, and `[daemon] per_service_labels = false` or `per_grouping_labels = false` empty the two pickers.",
+      "description": "Whether the daemon feeding this dashboard is recent enough for its panels. It reads the presence of three metrics the panels depend on rather than a version number, because no perf-sentinel metric carries one.\n\n`perf_sentinel_scored_energy_kwh_total` arrived in 0.32.0, `perf_sentinel_incidents_total` in 0.20.0 and `perf_sentinel_analysis_service_overflow_total` in 0.18.0. All three are published from daemon start whatever the configuration, so their absence dates the binary. Dropping any one in a scrape relabel rule reads here as an old daemon.\n\nPartly compatible means Average power, Carbon per hour and the two range totals stay empty (before 0.32.0), and 'Service silence' too (before 0.20.0). Not compatible means the Service and Grouping pickers offer names the findings panels cannot honour, so a filtered view reads as a clean service.\n\nOn a current daemon, empty panels come from configuration: `[green] enabled = false` silences the waste ratio and the avoidable counters, and `[daemon] per_service_labels = false` or `per_grouping_labels = false` empty the two pickers.",
       "type": "stat",
       "gridPos": {
         "h": 8,
@@ -388,7 +388,7 @@
     },
     {
       "title": "Slow span duration distribution",
-      "description": "Heatmap of slow span buckets over time, complementing the global p95 panel with the full duration distribution. Hot bands above the p95 line indicate tail latency drift.",
+      "description": "Heatmap of slow span buckets over time: the full duration distribution behind the global p95 panel. Hot bands above the p95 line indicate tail latency drift.",
       "type": "heatmap",
       "gridPos": {
         "h": 8,
@@ -469,7 +469,7 @@
     },
     {
       "title": "Critical findings",
-      "description": "Findings rated critical over the selected time range. Severity measures how far the pattern exceeds its detection threshold, not user impact: a strong optimisation candidate, not an outage.\n\nShows 0 rather than 'no data' when none were emitted, so a flat zero means healthy, unless the selected service was folded past the 128-service analysis cap into service=\"_other\", or its (service, grouping) pair past the 512-pair cap into grouping=\"_other\".",
+      "description": "Findings rated critical over the selected time range. Severity measures how far the pattern exceeds its detection threshold and says nothing about user impact, so a critical finding is a strong optimisation candidate and does not signal an outage.\n\nShows 0 rather than 'no data' when none were emitted, so a flat zero means healthy, unless the selected service was folded past the 128-service analysis cap into service=\"_other\", or its (service, grouping) pair past the 512-pair cap into grouping=\"_other\".",
       "type": "stat",
       "gridPos": {
         "h": 8,
@@ -508,7 +508,7 @@
     },
     {
       "title": "Findings distribution by type",
-      "description": "The same findings as the ranking panel, shown as a share of the whole. A single type dominating usually points at one framework or one query pattern rather than at a broad problem.\n\nA type missing from the legend had no increase over the range, which is not the same as never emitted.",
+      "description": "The same findings as the ranking panel, shown as a share of the whole. A single type dominating usually points at one framework or one query pattern.\n\nA type missing from the legend had no increase over the range and may still have been emitted earlier.",
       "type": "piechart",
       "gridPos": {
         "h": 8,
@@ -616,7 +616,7 @@
     },
     {
       "title": "Total findings (cumulative)",
-      "description": "Findings emitted since daemon start for the selected services (the grand total with All selected), summed across all types and severities. Pairs with the per-type / per-severity panels to give a single at-a-glance number.",
+      "description": "Findings emitted since daemon start for the selected services (the grand total with All selected), summed across all types and severities.",
       "type": "stat",
       "gridPos": {
         "h": 4,
@@ -693,7 +693,7 @@
     },
     {
       "title": "Avoidable I/O ops rate",
-      "description": "Operations per second the analyzer marked as avoidable, meaning the same result could have been obtained with fewer calls, read from `perf_sentinel_service_avoidable_io_ops_total`. Unlike the cumulative waste ratio it reacts immediately, so an optimisation PR landing shows here.\n\nFed by N+1 SQL, N+1 HTTP, N+1 messaging, Redundant SQL and Redundant HTTP, one avoidable operation per repeat beyond the first call.\n\nA rise under a flat findings rate means an existing pattern grew, more repeats per trace, not that a new one appeared.",
+      "description": "Operations per second the analyzer marked as avoidable, meaning the same result could have been obtained with fewer calls, read from `perf_sentinel_service_avoidable_io_ops_total`. Unlike the cumulative waste ratio it reacts immediately, so an optimisation PR landing shows here.\n\nFed by N+1 SQL, N+1 HTTP, N+1 messaging, Redundant SQL and Redundant HTTP, one avoidable operation per repeat beyond the first call.\n\nA rise under a flat findings rate means an existing pattern grew, with more repeats per trace.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -936,7 +936,7 @@
     },
     {
       "title": "Service silence (time since last span)",
-      "description": "Seconds since the daemon last received a span for each service, from `perf_sentinel_service_last_span_timestamp_seconds`.\n\nA traffic signal, not a liveness one: a crash, a scale to zero, a rolling deploy and a quiet cron all look the same, so alert on it with a `for:` longer than the service's normal idle gap.\n\nRising beside a flat findings rate is the shape of a service that stopped, and the window to hand to `/api/findings?since_ms=&until_ms=`.",
+      "description": "Seconds since the daemon last received a span for each service, from `perf_sentinel_service_last_span_timestamp_seconds`.\n\nThis measures traffic and cannot tell you why it stopped: a crash, a scale to zero, a rolling deploy and a quiet cron all look the same, so alert on it with a `for:` longer than the service's normal idle gap.\n\nRising beside a flat findings rate means the service stopped, and gives the window to hand to `/api/findings?since_ms=&until_ms=`.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1041,7 +1041,7 @@
     },
     {
       "title": "Traces analyzed (cumulative)",
-      "description": "Traces that completed analysis since daemon start. Trace-level cadence, where 'events processed' is span-level. The ratio between the two gives the average trace size, which is a useful sanity check on your instrumentation coverage.",
+      "description": "Traces that completed analysis since daemon start. Trace-level cadence, where 'events processed' is span-level. The ratio between the two gives the average trace size, a check on your instrumentation coverage.",
       "type": "stat",
       "gridPos": {
         "h": 4,
@@ -1112,7 +1112,7 @@
     },
     {
       "title": "Ingest memory pressure",
-      "description": "`perf_sentinel_ingest_memory_pressure`, 1 while the cgroup admission guard refuses ingest (HTTP 503, gRPC UNAVAILABLE, both retryable) to keep RSS under the memory limit. `PerfSentinelMemoryPressureRejecting` fires after 5 minutes of it.\n\nRefused requests count on the OTLP intake panel under reason=\"memory_pressure\", as requests rather than spans.\n\nAlso 0 when the guard is off (`[daemon] memory_high_water_pct = 0`, the default) or without a cgroup v2 memory limit, so OK does not mean the guard is armed, `/api/config` does. The area behind the value is the state over the selected range.",
+      "description": "`perf_sentinel_ingest_memory_pressure`, 1 while the cgroup admission guard refuses ingest (HTTP 503, gRPC UNAVAILABLE, both retryable) to keep RSS under the memory limit. `PerfSentinelMemoryPressureRejecting` fires when the guard rejected for over 15% of the last 15 minutes, 5 minutes in a row, so it can fire while this panel reads OK.\n\nRefused requests count on the OTLP intake panel under reason=\"memory_pressure\", as requests rather than spans.\n\nAlso 0 when the guard is off (`[daemon] memory_high_water_pct = 0`, the default) or without a cgroup v2 memory limit, so OK does not mean the guard is armed: read that in `/api/config`. The area behind the value is the state over the selected range.",
       "type": "stat",
       "gridPos": {
         "h": 4,
@@ -2008,7 +2008,7 @@
         },
         "options": [],
         "hide": 0,
-        "description": "Grouping of the analysed traffic: the first attribute present from [detection] grouping_attributes (k8s.namespace.name, then service.namespace, by default), so on Kubernetes the namespace the workloads run in. Filters the Analysis row and narrows the Service list. The value alone is the label: two attributes with the same value share one entry. grouping=\"_other\" is the fold bucket for (service, grouping) pairs past the per-run pair caps (512 on findings and the analysis-side I/O counters, 256 on the slow-span histogram, 4096 on the ingest counter); a folded pair keeps its service. A span that carried none of the configured attributes has an empty value, which Prometheus stores as no label at all: those series are only visible with All selected."
+        "description": "Grouping of the analysed traffic: the first attribute present from [detection] grouping_attributes (k8s.namespace.name, then service.namespace, by default), so on Kubernetes the namespace the workloads run in. Filters the Analysis row and narrows the Service list. The value alone is the label: two attributes with the same value share one entry. grouping=\"_other\" is the fold bucket for (service, grouping) pairs past the per-run pair caps (512 on findings and the analysis-side I/O counters, 256 on the slow-span histogram, 4096 on the ingest counter). A folded pair keeps its service. A span that carried none of the configured attributes has an empty value, which Prometheus stores as no label at all: those series are only visible with All selected."
       },
       {
         "name": "service",

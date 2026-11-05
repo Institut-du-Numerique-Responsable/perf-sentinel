@@ -515,8 +515,8 @@ impl Config {
         )?;
         // 0 disables the memory-pressure admission guard. Otherwise the
         // percentage must clear the 5-point hysteresis band, else the
-        // flag's low-water bound would sit at or below zero and the
-        // guard could never un-reject once tripped.
+        // flag's low-water bound would sit at or below zero and only the
+        // timed band release could un-reject once tripped.
         if self.daemon.memory_high_water_pct != 0 {
             check_range(
                 "memory_high_water_pct",

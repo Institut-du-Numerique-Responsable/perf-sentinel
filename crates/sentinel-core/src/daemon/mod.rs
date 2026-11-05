@@ -290,8 +290,11 @@ pub async fn run(config: Config) -> Result<(), DaemonError> {
     // the flag the ingest listeners read. `None` when disabled. The guard
     // aborts the watcher on drop, covering the early `?` returns below
     // (listener bind, archive open) as well as the normal exit.
-    let _memory_watch =
-        mem_pressure::spawn_if_enabled(&metrics, config.daemon.memory_high_water_pct);
+    let _memory_watch = mem_pressure::spawn_if_enabled(
+        &metrics,
+        config.daemon.memory_high_water_pct,
+        config.daemon.trace_ttl_ms,
+    );
     let findings_store = Arc::new(findings_store::FindingsStore::new(
         config.daemon.max_retained_findings,
     ));

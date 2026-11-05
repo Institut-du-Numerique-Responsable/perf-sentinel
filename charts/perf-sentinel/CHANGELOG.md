@@ -10,6 +10,25 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.42.1]
+
+### Changed
+
+- **`appVersion` moves to `0.42.1`.** The daemon now releases its memory guard
+  after 60 seconds inside the hysteresis band, or one `trace_ttl_ms` when that
+  is longer, so a working set parked below the mark no longer refuses every
+  span until a restart. A working set that stays at or above the mark keeps
+  ingest rejected.
+- `PerfSentinelMemoryPressureRejecting` reads
+  `avg_over_time(perf_sentinel_ingest_memory_pressure[15m]) > 0.15
+  and present_over_time(perf_sentinel_ingest_memory_pressure[2m])` instead of
+  the raw gauge. A daemon cycling against its mark flips the gauge back to `0`
+  on each release, and each flip would reset the rule's 5-minute `for`, so the
+  alert would never fire while spans were refused. It now fires 8 minutes into
+  a continuous rejection instead of 5, on a single rejection of 3 minutes and
+  on a cycle that rejects 20% of the time, and resolves about 13 minutes after
+  rejection stops, or 2 minutes after the pod is replaced.
+
 ## [0.42.0]
 
 ### Changed

@@ -11,7 +11,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "L'instance Prometheus qui scrape le /metrics du daemon. Elle n'alimente que les variables Namespace des services et Service, depuis les labels de perf_sentinel_findings_total, les mêmes que filtre le dashboard d'aperçu ; tous les tableaux lisent le daemon via DS_INFINITY.",
+      "description": "L'instance Prometheus qui scrape le /metrics du daemon. Elle n'alimente que les variables Namespace des services et Service, depuis les labels de perf_sentinel_findings_total, les mêmes que filtre le dashboard d'aperçu. Tous les tableaux lisent le daemon via DS_INFINITY.",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
@@ -328,7 +328,7 @@
         "hide": 0,
         "includeAll": false,
         "multi": false,
-        "description": "L'offset de l'API : lignes regroupées sautées avant le début de la page, pour lire en tranches une liste qui dépasse le plafond de 1000 lignes. Ajouter Lignes max à chaque fois : 0, puis 200, 400 au défaut, ou 0, 1000, 2000 au plafond. Le tampon circulaire bouge entre deux requêtes, donc une ligne peut passer d'une tranche à l'autre ; restreindre d'abord avec Namespace des services et Service est ce qui fait tenir la plupart des pages sous le plafond."
+        "description": "L'offset de l'API : lignes regroupées sautées avant le début de la page, pour lire en tranches une liste qui dépasse le plafond de 1000 lignes. Ajouter Lignes max à chaque fois : 0, puis 200, 400 au défaut, ou 0, 1000, 2000 au plafond. Le tampon circulaire bouge entre deux requêtes, donc une ligne peut passer d'une tranche à l'autre. Restreignez d'abord avec Namespace des services et Service pour faire tenir la plupart des pages sous le plafond."
       },
       {
         "name": "include_acked",
@@ -664,7 +664,7 @@
         "current": {},
         "options": [],
         "hide": 2,
-        "description": "Jour epoch UTC du tableau Détections du jour, lu sur l'horloge du daemon par GET /api/status (detection_ledger.current_day), donc c'est le jour que le daemon est en train de compter. Masquée, rien à régler à la main. Vide quand le registre de détections est désactivé."
+        "description": "Jour epoch UTC du tableau Détections du jour, lu sur l'horloge du daemon par GET /api/status (detection_ledger.current_day), donc c'est le jour que le daemon est en train de compter. La variable est masquée et ne demande aucune saisie. Vide quand le registre de détections est désactivé."
       }
     ]
   },
@@ -672,7 +672,7 @@
     {
       "type": "stat",
       "title": "Compatibilité",
-      "description": "Indique si le daemon derrière l'API de requêtage est assez récent pour ce dashboard. Le panneau lit `version` dans `GET /api/status`, que tous les daemons renvoient depuis la 0.4.0.\n\nAvant la 0.21.0, ce dashboard se trompe au lieu de se dégrader. `grouping` et `offset` n'existaient pas comme paramètres de requête, et l'API ignore ce qu'elle ne connaît pas : le sélecteur Namespace des services désigne donc un seul tenant alors que le tableau les liste tous, et 'Lignes à sauter' renvoie la même page quelle que soit la valeur. L'option 'All' envoie une simple espace, qu'un tel daemon prend pour une correspondance exacte, et il ne renvoie alors rien.\n\nSur un daemon à jour, des colonnes vides viennent de la configuration et non de l'ancienneté : `[daemon.correlation]` coupé laisse Corrélations vide, sans `[daemon.incidents]` l'API répond 503 sur les deux panneaux d'incidents, et le scoring green coupé laisse 'Ops/trace' vide.",
+      "description": "Indique si le daemon derrière l'API de requêtage est assez récent pour ce dashboard. Le panneau lit `version` dans `GET /api/status`, que tous les daemons renvoient depuis la 0.4.0.\n\nAvant la 0.21.0, ce dashboard affiche des données fausses. `grouping` et `offset` n'existaient pas comme paramètres de requête, et l'API ignore ce qu'elle ne connaît pas : le sélecteur Namespace des services désigne donc un seul tenant alors que le tableau les liste tous, et 'Lignes à sauter' renvoie la même page quelle que soit la valeur. L'option 'All' envoie une simple espace, qu'un tel daemon prend pour une correspondance exacte, et il ne renvoie alors rien.\n\nSur un daemon à jour, des colonnes vides viennent de la configuration : `[daemon.correlation]` coupé laisse Corrélations vide, sans `[daemon.incidents]` l'API répond 503 sur les deux panneaux d'incidents, et le scoring green coupé laisse 'Ops/trace' vide.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "${DS_INFINITY}"
@@ -869,7 +869,7 @@
     {
       "type": "table",
       "title": "Findings",
-      "description": "Une ligne par problème distinct, regroupée sur la signature qu'utilisent les acquittements. Filtrer avec les en-têtes de colonnes.\n\n'Retenues' compte les détections que le daemon garde encore pour ce problème : il baisse à mesure qu'elles sortent du tampon et repart de zéro au redémarrage, donc ce n'est pas le volume, c'est Détections du jour. 'Occurrences' est le nombre de répétitions à l'intérieur de la trace affichée. 'Impact est. (ops)' vaut Retenues x Ops/trace, soit les I/O évitables sur lesquelles trier, et 0 pour les types qui n'en gaspillent aucune.\n\n'Suggestion' est le correctif pour le framework ou le broker déduit de la trace quand il y en a un, sinon le conseil générique, et 'Correctif pour' nomme cette technologie, vide quand le conseil est générique. 'Code' est l'emplacement de l'appel lu dans les attributs code.* du span : la fonction puis fichier:ligne, comme les affiche la CLI, l'un des deux seul quand l'autre manque, vide quand l'instrumentation n'envoie rien.\n\n'Acquitté via' ne se remplit que si Inclure les acquittés vaut true : toml est le fichier de référence de la CI, daemon le stock d'exécution. Namespace des services, Service et Type de finding restreignent la requête, donc un tenant est complet jusqu'à Lignes max, et Lignes à sauter lit la suite.",
+      "description": "Une ligne par problème distinct, regroupée sur la signature qu'utilisent les acquittements. Filtrer avec les en-têtes de colonnes.\n\n'Retenues' compte les détections que le daemon garde encore pour ce problème : il baisse à mesure qu'elles sortent du tampon et repart de zéro au redémarrage, donc lisez le volume dans Détections du jour. 'Occurrences' est le nombre de répétitions à l'intérieur de la trace affichée. 'Impact est. (ops)' vaut Retenues x Ops/trace, soit les I/O évitables sur lesquelles trier, et 0 pour les types qui n'en gaspillent aucune.\n\n'Suggestion' est le correctif pour le framework ou le broker déduit de la trace quand il y en a un, sinon le conseil générique, et 'Correctif pour' nomme cette technologie, vide quand le conseil est générique. 'Code' est l'emplacement de l'appel lu dans les attributs code.* du span : la fonction puis fichier:ligne, comme les affiche la CLI, l'un des deux seul quand l'autre manque, vide quand l'instrumentation n'envoie rien.\n\n'Acquitté via' ne se remplit que si Inclure les acquittés vaut true : toml est le fichier de référence de la CI, daemon le stock d'exécution. Namespace des services, Service et Type de finding restreignent la requête, donc un tenant est complet jusqu'à Lignes max, et Lignes à sauter lit la suite.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "${DS_INFINITY}"

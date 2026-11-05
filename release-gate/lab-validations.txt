@@ -782,3 +782,11 @@ v0.41.0	ebbfdf8	2026-11-02	PASS
 # validate-findings (12/12 finding types). All PASS. Not run:
 # verify-all-scenarios.
 v0.42.0	b71f715	2026-11-04	PASS
+# v0.42.1 targeted pass on a local image built from c3085282 (the wording-only
+# dashboard commit above it changes no code): memory-guard-band-release, new, run
+# against 0.42.1 (14/14) and against 0.42.0 as a control (B1, B2, B3, O1, T1, T2
+# fail, the export still answers 503 inside the band),
+# daemon-security-hardening as a regression check, chart-prometheusrule-pdb
+# (admission step skipped, no Prometheus-Operator CRD). All PASS. Not run:
+# validate-findings, verify-all-scenarios.
+v0.42.1	0823d2e	2026-11-05	PASS

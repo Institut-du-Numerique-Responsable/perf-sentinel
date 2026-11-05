@@ -247,9 +247,12 @@ let worker = tokio::spawn(run_analysis_worker(work_rx, ctx));
   and flips a shared flag (with hysteresis) once usage crosses the mark. The OTLP handlers
   read the flag and reject ingest with a retryable status
   (`perf_sentinel_otlp_rejected_total{reason="memory_pressure"}`), halting growth at the
-  source so TTL eviction drains the window and RSS recedes. All three ingest doors honor
-  the flag (OTLP gRPC via a pre-decode interceptor, OTLP HTTP via a pre-buffer middleware,
-  the Unix JSON socket by dropping batches). cgroup v2 / Linux only, inert
+  source so TTL eviction drains the window and RSS recedes. A working set that stays inside
+  the 5-point band for 60 seconds, or one `trace_ttl_ms` when that is longer, clears the
+  flag anyway, since retained state and active page cache may never recede, and the next
+  crossing sets it again. Above the mark the flag stays set. All three ingest
+  doors honor the flag (OTLP gRPC via a pre-decode interceptor, OTLP HTTP via a pre-buffer
+  middleware, the Unix JSON socket by dropping batches). cgroup v2 / Linux only, inert
   and zero-overhead when disabled or unsupported.
 - **CarbonContext sampled at eviction time.** The per-batch `CarbonContext` (energy
   scraper snapshots + grid intensity) is built on the loop side when the batch is
