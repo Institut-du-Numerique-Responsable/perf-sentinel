@@ -249,6 +249,10 @@ let worker = tokio::spawn(run_analysis_worker(work_rx, ctx));
   handlers OTLP lisent ce flag et rejettent l'ingestion avec un statut qui invite à
   réessayer (`perf_sentinel_otlp_rejected_total{reason="memory_pressure"}`), stoppant la
   croissance à la source pour que l'éviction TTL vide la fenêtre et que la RSS reflue.
+  Un working set qui reste 60 secondes dans la bande de 5 points, ou un `trace_ttl_ms`
+  s'il est plus long, efface quand même le flag, car l'état retenu et le page cache actif
+  peuvent ne jamais refluer, et le franchissement suivant le repositionne. Au-dessus du
+  seuil, le flag reste positionné.
   Les trois portes d'ingestion respectent ce flag (OTLP gRPC via un intercepteur avant
   décodage, OTLP HTTP via un middleware avant mise en tampon, le socket JSON Unix en
   abandonnant les lots). cgroup v2 / Linux uniquement, inerte et sans surcoût quand

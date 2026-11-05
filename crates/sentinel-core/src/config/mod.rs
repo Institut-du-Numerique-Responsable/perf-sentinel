@@ -351,12 +351,14 @@ pub struct DaemonConfig {
     /// findings in the query API, the archive and the Hub export only.
     pub findings_stdout: bool,
     /// Memory-pressure admission control, as a percentage of the cgroup v2
-    /// memory limit (1-100). When the pod's `memory.current / memory.max`
-    /// crosses this high-water mark, OTLP ingest is rejected with a
-    /// retryable status (counted on `perf_sentinel_otlp_rejected_total`
-    /// `{reason="memory_pressure"}`) until usage falls back below the mark,
-    /// so RSS is bounded independently of queue depth. `0` disables the
-    /// guard (default). Linux/cgroup-v2 only, inert elsewhere.
+    /// memory limit (6-100). When the pod's working set (`memory.current`
+    /// minus `inactive_file`) over `memory.max` crosses this high-water
+    /// mark, OTLP ingest is rejected with a retryable status (counted on
+    /// `perf_sentinel_otlp_rejected_total` `{reason="memory_pressure"}`)
+    /// until usage falls 5 points below the mark or has spent 60 seconds
+    /// (or one `trace_ttl_ms` when longer) inside that band, so RSS is
+    /// bounded independently of queue depth. `0` disables the guard
+    /// (default). Linux/cgroup-v2 only, inert elsewhere.
     pub memory_high_water_pct: u8,
     pub api_enabled: bool,
     /// Read-only key for the GETs a write key gates, `GET /api/acks` and
