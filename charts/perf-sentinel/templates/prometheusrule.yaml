@@ -36,14 +36,16 @@ spec:
           annotations:
             summary: "perf-sentinel is dropping OTLP requests, the ingest channel is saturated"
             description: "Spans the daemon accepted and then dropped, so the findings that follow are incomplete with no marker saying so. Raise daemon.ingest_queue_capacity or limits.cpu."
+        # present_over_time: avg_over_time weighs the samples left in its range, so
+        # the last samples of a replaced pod would otherwise fire and hold the rule.
         - alert: PerfSentinelMemoryPressureRejecting
-          expr: max_over_time(perf_sentinel_ingest_memory_pressure[2m]) == 1
+          expr: avg_over_time(perf_sentinel_ingest_memory_pressure[15m]) > 0.15 and present_over_time(perf_sentinel_ingest_memory_pressure[2m])
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: "perf-sentinel is rejecting ingest under memory pressure"
-            description: "The daemon is refusing ingest to keep RSS under the cgroup limit, so it never OOMKills and no cluster rule reports it. State-based, so it stays firing even after exporters stop retrying: raise resources.limits.memory or add replicas."
+            description: "The daemon is refusing ingest to keep RSS under the cgroup limit, so it never OOMKills and no cluster rule reports it. Reads the share of the last 15 minutes spent rejecting, so it stays firing after exporters stop retrying and catches a daemon cycling against its mark while the gauge reads 0 between rejections: raise resources.limits.memory or add replicas."
         - alert: PerfSentinelAnalysisShedding
           expr: rate(perf_sentinel_analysis_shed_traces_total[10m]) > 1
           for: 15m

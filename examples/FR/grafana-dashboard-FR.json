@@ -1112,7 +1112,7 @@
     },
     {
       "title": "Pression mémoire à l'ingestion",
-      "description": "`perf_sentinel_ingest_memory_pressure`, à 1 tant que le garde-fou d'admission cgroup refuse l'ingestion (HTTP 503, gRPC UNAVAILABLE, tous deux rejouables) pour tenir la RSS sous la limite mémoire. `PerfSentinelMemoryPressureRejecting` se déclenche au bout de 5 minutes dans cet état.\n\nLes requêtes refusées sont comptées sur le panneau d'admission OTLP sous reason=\"memory_pressure\", en requêtes et non en spans.\n\nVaut 0 aussi quand le garde-fou est coupé (`[daemon] memory_high_water_pct = 0`, la valeur par défaut) ou sans limite mémoire cgroup v2 : OK ne dit donc pas que le garde-fou est armé, `/api/config` le dit. La zone derrière la valeur est l'état sur la plage sélectionnée.",
+      "description": "`perf_sentinel_ingest_memory_pressure`, à 1 tant que le garde-fou d'admission cgroup refuse l'ingestion (HTTP 503, gRPC UNAVAILABLE, tous deux rejouables) pour tenir la RSS sous la limite mémoire. `PerfSentinelMemoryPressureRejecting` se déclenche quand le garde-fou a refusé plus de 15 % des 15 dernières minutes, 5 minutes de suite : l'alerte peut donc se déclencher alors que ce panneau affiche OK.\n\nLes requêtes refusées sont comptées sur le panneau d'admission OTLP sous reason=\"memory_pressure\", en requêtes et non en spans.\n\nVaut 0 aussi quand le garde-fou est coupé (`[daemon] memory_high_water_pct = 0`, la valeur par défaut) ou sans limite mémoire cgroup v2 : OK ne dit donc pas que le garde-fou est armé, `/api/config` le dit. La zone derrière la valeur est l'état sur la plage sélectionnée.",
       "type": "stat",
       "gridPos": {
         "h": 4,

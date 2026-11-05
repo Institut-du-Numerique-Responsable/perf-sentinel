@@ -108,12 +108,17 @@ sibling Pod cannot read the daemon's process state freely.
   mark. Ingest is then rejected (HTTP 503, gRPC `UNAVAILABLE`, both
   retryable) to bound RSS independently of queue depth, until usage
   falls 5 percentage points back below the mark (hysteresis), or for at
-  most 60 seconds while usage stays inside that band, after which ingest
-  is admitted again until the next crossing. The live on/off state is on
+  most 60 seconds inside that band (one `trace_ttl_ms` when that is
+  longer), after which ingest is admitted again until the next crossing.
+  Usage that stays at or above the mark keeps ingest rejected. The live on/off state is on
   the `perf_sentinel_ingest_memory_pressure` gauge (`1` while rejecting),
-  which is what the Helm alert keys on, over a 2-minute `max_over_time`
-  so the brief releases of a daemon cycling against its mark do not
-  reset the alert. These
+  which is what the Helm alert keys on. It fires when the gauge averages
+  above 0.15 over 15 minutes for 5 minutes in a row: 8 minutes into a
+  continuous rejection, on a single rejection of 3 minutes, and on a daemon
+  cycling against its mark that rejects 20% of the time. A pod younger than
+  15 minutes has fewer samples to average, so a shorter rejection can fire
+  it. It resolves about 13 minutes after rejection stops, or 2 minutes
+  after the pod is replaced. These
   rejections happen before the request is decoded, so
   `perf_sentinel_otlp_spans_received_total` does not advance during an
   episode (the span counts are unknowable). The counter tallies
@@ -561,7 +566,7 @@ groups:
         for: 15m
         labels: { severity: warning }
       - alert: PerfSentinelMemoryPressureRejecting
-        expr: max_over_time(perf_sentinel_ingest_memory_pressure[2m]) == 1
+        expr: avg_over_time(perf_sentinel_ingest_memory_pressure[15m]) > 0.15 and present_over_time(perf_sentinel_ingest_memory_pressure[2m])
         for: 5m
         labels: { severity: warning }
       - alert: PerfSentinelAnalysisShedding

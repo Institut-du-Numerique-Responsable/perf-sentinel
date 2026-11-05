@@ -111,13 +111,18 @@ Valeurs du label `reason` :
   L'ingest est alors rejeté (HTTP 503, gRPC `UNAVAILABLE`, les deux
   rejouables) pour borner la RSS indépendamment de la profondeur de
   file, jusqu'à ce que l'usage retombe 5 points de pourcentage sous le
-  seuil (hystérésis), ou au plus 60 secondes tant que l'usage reste dans
-  cette bande, après quoi l'ingest est de nouveau admis jusqu'au
-  franchissement suivant. L'état on/off vit sur la gauge
+  seuil (hystérésis), ou au plus 60 secondes dans cette bande (un
+  `trace_ttl_ms` s'il est plus long), après quoi l'ingest est de nouveau
+  admis jusqu'au franchissement suivant. Un usage qui reste au seuil ou
+  au-dessus garde l'ingest rejeté. L'état on/off vit sur la gauge
   `perf_sentinel_ingest_memory_pressure` (`1` pendant le rejet), c'est
-  elle que l'alerte Helm surveille, sur un `max_over_time` de 2 minutes
-  pour que les brèves reprises d'un daemon qui oscille contre son seuil
-  ne remettent pas l'alerte à zéro. Ces rejets précèdent le décodage,
+  elle que l'alerte Helm surveille. L'alerte se déclenche quand la gauge
+  dépasse 0,15 en moyenne sur 15 minutes, 5 minutes de suite : 8 minutes
+  après le début d'un rejet continu, sur un rejet unique de 3 minutes, et
+  sur un daemon qui oscille contre son seuil et rejette 20 % du temps. Un
+  pod de moins de 15 minutes a moins d'échantillons à moyenner, donc un
+  rejet plus court peut la déclencher. Elle se résout environ 13 minutes
+  après la fin du rejet, ou 2 minutes après le remplacement du pod. Ces rejets précèdent le décodage,
   donc `perf_sentinel_otlp_spans_received_total` n'avance pas pendant
   un épisode (le nombre de spans est inconnaissable). Le compteur
   compte des requêtes, pas des spans. Ne se déclenche jamais quand le
@@ -593,7 +598,7 @@ groups:
         for: 15m
         labels: { severity: warning }
       - alert: PerfSentinelMemoryPressureRejecting
-        expr: max_over_time(perf_sentinel_ingest_memory_pressure[2m]) == 1
+        expr: avg_over_time(perf_sentinel_ingest_memory_pressure[15m]) > 0.15 and present_over_time(perf_sentinel_ingest_memory_pressure[2m])
         for: 5m
         labels: { severity: warning }
       - alert: PerfSentinelAnalysisShedding

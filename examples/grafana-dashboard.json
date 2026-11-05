@@ -1112,7 +1112,7 @@
     },
     {
       "title": "Ingest memory pressure",
-      "description": "`perf_sentinel_ingest_memory_pressure`, 1 while the cgroup admission guard refuses ingest (HTTP 503, gRPC UNAVAILABLE, both retryable) to keep RSS under the memory limit. `PerfSentinelMemoryPressureRejecting` fires after 5 minutes of it.\n\nRefused requests count on the OTLP intake panel under reason=\"memory_pressure\", as requests rather than spans.\n\nAlso 0 when the guard is off (`[daemon] memory_high_water_pct = 0`, the default) or without a cgroup v2 memory limit, so OK does not mean the guard is armed, `/api/config` does. The area behind the value is the state over the selected range.",
+      "description": "`perf_sentinel_ingest_memory_pressure`, 1 while the cgroup admission guard refuses ingest (HTTP 503, gRPC UNAVAILABLE, both retryable) to keep RSS under the memory limit. `PerfSentinelMemoryPressureRejecting` fires when the guard rejected for over 15% of the last 15 minutes, 5 minutes in a row, so it can fire while this panel reads OK.\n\nRefused requests count on the OTLP intake panel under reason=\"memory_pressure\", as requests rather than spans.\n\nAlso 0 when the guard is off (`[daemon] memory_high_water_pct = 0`, the default) or without a cgroup v2 memory limit, so OK does not mean the guard is armed, `/api/config` does. The area behind the value is the state over the selected range.",
       "type": "stat",
       "gridPos": {
         "h": 4,
