@@ -11,7 +11,10 @@ const MAX_FILE = 16 * 1024 * 1024;
 
 const $ = (s) => document.querySelector(s);
 const result = $('#verifier-result');
+const intro = $('.vf-intro');
 const dropZone = $('#verifier-drop');
+const dropLabel = $('#verifier-drop strong');
+const dropDefault = [...dropLabel.childNodes];
 const input = $('#verifier-file');
 const phone = $('#verifier-phone');
 const limits = $('#verifier-limits');
@@ -36,6 +39,10 @@ function show(state, ...nodes) {
   result.dataset.state = state;
   result.replaceChildren(...nodes.filter(Boolean)); // an absent block is null, never the text "null"
   const loaded = state !== 'empty';
+  intro.textContent = loaded ? T.introResult : T.intro;
+  // Only a QR card still has something for the original file to add.
+  const [before, action, after] = T.dropQr;
+  dropLabel.replaceChildren(...(result.querySelector('#verifier-compact-note') ? [before, el('u', null, action), after] : dropDefault));
   dropZone.toggleAttribute('data-compact', loaded);
   phone.hidden = loaded;
 }

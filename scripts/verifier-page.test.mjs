@@ -150,6 +150,8 @@ test('the empty page explains both ways in', async () => {
   assert.equal(await text(page, '#verifier-drop small'), COPY.en.dropSub);
   assert.equal(await visible(page, '#verifier-phone'), true);
   assert.equal(await text(page, '#verifier-phone'), COPY.en.phone);
+  assert.equal(await text(page, '.vf-intro'), COPY.en.intro);
+  assert.equal(await text(page, '#verifier-drop strong'), COPY.en.drop);
   assert.deepEqual(external, []);
   await close();
 });
@@ -162,6 +164,31 @@ test('a loaded card comes before the drop zone', async () => {
   assert.equal(before, true);
   assert.equal(await page.getAttribute('#verifier-drop', 'data-compact'), '');
   assert.equal((await pageText(page)).includes(COPY.en.phone), false);
+  await close();
+});
+
+test('the short intro and the optional file line follow a QR card, and a file keeps the plain line', async () => {
+  let { page, close } = await open(link('story'));
+  await waitState(page, 'level1');
+  assert.equal(await text(page, '.vf-intro'), COPY.en.introResult);
+  assert.equal(await text(page, '#verifier-drop strong'), COPY.en.dropQr.join(''));
+  assert.equal(await text(page, '#verifier-drop u'), COPY.en.dropQr[1]);
+  await page.evaluate(() => { location.hash = ''; });
+  await waitState(page, 'empty');
+  assert.equal(await text(page, '.vf-intro'), COPY.en.intro);
+  assert.equal(await text(page, '#verifier-drop strong'), COPY.en.drop);
+  await close();
+
+  ({ page, close } = await open(link('story').replace('/verifier', '/fr/verifier')));
+  await waitState(page, 'level1');
+  assert.equal(await text(page, '.vf-intro'), COPY.fr.introResult);
+  assert.equal(await text(page, '#verifier-drop strong'), COPY.fr.dropQr.join(''));
+  await close();
+
+  ({ page, close } = await openFile('story.png', fixture('story.png')));
+  await waitState(page, 'level1');
+  assert.equal(await text(page, '.vf-intro'), COPY.en.introResult);
+  assert.equal(await text(page, '#verifier-drop strong'), COPY.en.drop);
   await close();
 });
 

@@ -249,7 +249,7 @@ const verifierCss = `<style>${['shield-check', 'shield-alert', 'link-2-off', 'ci
   `.vf-drop [data-ico]{width:26px;height:26px;color:var(--text-2)}` +
   `.vf-drop[data-over] [data-ico]{color:var(--accent-strong)}` +
   `.vf-drop strong{font-size:15.5px;font-weight:600;color:var(--text)}` +
-  `.vf-drop strong u{text-underline-offset:2px}` +
+  `.vf-drop strong u{text-underline-offset:2px;white-space:nowrap}` +
   `.vf-drop small{display:block;margin-top:8px;font-size:13.5px;color:var(--text-2)}` +
   `.vf-drop[data-compact]{flex-direction:row;align-items:center;gap:14px;margin-top:20px;padding:14px 18px;text-align:left}` +
   `.vf-drop[data-compact] [data-ico]{flex:none;width:20px;height:20px}` +
