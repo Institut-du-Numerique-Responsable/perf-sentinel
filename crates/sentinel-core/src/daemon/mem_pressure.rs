@@ -33,6 +33,17 @@ const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// reachable clear condition.
 pub(crate) const HYSTERESIS_PCT: f64 = 5.0;
 
+/// Longest the flag holds while usage sits inside the hysteresis band,
+/// in polls (one per second). A daemon that stops admitting spans stops
+/// allocating, but it frees little either: the findings ring, the retained
+/// traces and the allocator's arenas stay, and so does the active page
+/// cache of the files it wrote. A working set that settles inside the band
+/// never reaches the clear condition, and ingest stays shut for good while
+/// nothing reports an error. Past this hold the flag clears, so the daemon
+/// admits again and the next crossing of the mark sets it anew: at most one
+/// on/off cycle per minute, still no flapping around the boundary.
+const MAX_BAND_HOLD_POLLS: u32 = 60;
+
 /// Extract the `inactive_file` byte count from a cgroup v2 `memory.stat`
 /// dump. Reclaimable page cache: `memory.current` includes it, but the
 /// kernel drops it under pressure, so counting it would latch the guard
@@ -77,16 +88,19 @@ fn read_cgroup_usage_ratio() -> Option<f64> {
     parse_ratio(&current, &max, inactive_file)
 }
 
-/// Next flag state given the previous one, the current ratio, and the
-/// high/low thresholds (fractions in `[0, 1]`). Pure hysteresis: set at or
-/// above `high`, clear below `low`, hold in between.
-fn next_high_water(prev: bool, ratio: f64, high: f64, low: f64) -> bool {
+/// Next flag state and band-hold count given the previous flag, the polls
+/// it has already held inside the band, the current ratio, and the high/low
+/// thresholds (fractions in `[0, 1]`). Hysteresis: set at or above `high`,
+/// clear below `low`, hold in between for at most [`MAX_BAND_HOLD_POLLS`].
+fn next_high_water(prev: bool, held: u32, ratio: f64, high: f64, low: f64) -> (bool, u32) {
     if ratio >= high {
-        true
-    } else if ratio < low {
-        false
+        (true, 0)
+    } else if ratio < low || !prev {
+        (false, 0)
+    } else if held + 1 < MAX_BAND_HOLD_POLLS {
+        (true, held + 1)
     } else {
-        prev
+        (false, 0)
     }
 }
 
@@ -110,11 +124,20 @@ pub(super) fn spawn_if_enabled(
     Some(super::task_guard::AbortOnDrop(tokio::spawn(async move {
         let mut ticker = tokio::time::interval(POLL_INTERVAL);
         let mut flag = false;
+        let mut held = 0;
         let mut unreadable_warned = false;
         loop {
             ticker.tick().await;
             if let Some(ratio) = read_cgroup_usage_ratio() {
-                flag = next_high_water(flag, ratio, high, low);
+                let (next, next_held) = next_high_water(flag, held, ratio, high, low);
+                if flag && !next && ratio >= low {
+                    tracing::warn!(
+                        "memory working set held at {:.0}% of the limit for {MAX_BAND_HOLD_POLLS}s \
+                         without falling below the resume mark; admitting ingest again",
+                        ratio * 100.0
+                    );
+                }
+                (flag, held) = (next, next_held);
                 metrics.set_memory_high_water(flag);
             } else {
                 // Fail open: a cgroup that becomes unreadable or
@@ -123,6 +146,7 @@ pub(super) fn spawn_if_enabled(
                 // not leave ingest latched shut.
                 if flag {
                     flag = false;
+                    held = 0;
                     metrics.set_memory_high_water(false);
                 }
                 if !unreadable_warned {
@@ -139,7 +163,7 @@ pub(super) fn spawn_if_enabled(
 
 #[cfg(test)]
 mod tests {
-    use super::{next_high_water, parse_inactive_file, parse_ratio};
+    use super::{MAX_BAND_HOLD_POLLS, next_high_water, parse_inactive_file, parse_ratio};
 
     #[test]
     fn parse_ratio_handles_unlimited_and_bad_input() {
@@ -183,19 +207,29 @@ mod tests {
     #[test]
     fn next_high_water_has_hysteresis() {
         // high = 0.80, low = 0.75.
-        assert!(!next_high_water(false, 0.70, 0.80, 0.75), "below both: off");
-        assert!(
-            !next_high_water(false, 0.78, 0.80, 0.75),
-            "in band from off: hold off"
-        );
-        assert!(
-            next_high_water(false, 0.82, 0.80, 0.75),
-            "at/above high: on"
-        );
-        assert!(
-            next_high_water(true, 0.78, 0.80, 0.75),
-            "in band from on: hold on"
-        );
-        assert!(!next_high_water(true, 0.74, 0.80, 0.75), "below low: off");
+        let step = |prev, ratio| next_high_water(prev, 0, ratio, 0.80, 0.75).0;
+        assert!(!step(false, 0.70), "below both: off");
+        assert!(!step(false, 0.78), "in band from off: hold off");
+        assert!(step(false, 0.82), "at/above high: on");
+        assert!(step(true, 0.78), "in band from on: hold on");
+        assert!(!step(true, 0.74), "below low: off");
+    }
+
+    #[test]
+    fn next_high_water_releases_a_working_set_parked_in_the_band() {
+        // The daemon that stopped admitting settles at 80.7% of its limit,
+        // above the 80% resume mark of an 85% guard, and never moves again.
+        let (high, low, parked) = (0.85, 0.80, 0.807);
+        let (mut flag, mut held) = next_high_water(false, 0, 0.86, high, low);
+        let mut polls = 0;
+        while flag {
+            (flag, held) = next_high_water(flag, held, parked, high, low);
+            polls += 1;
+            assert!(polls <= MAX_BAND_HOLD_POLLS, "the guard never released");
+        }
+        assert_eq!(polls, MAX_BAND_HOLD_POLLS);
+        // Crossing the mark again sets the flag and restarts the hold.
+        assert_eq!(next_high_water(false, 0, 0.86, high, low), (true, 0));
+        assert_eq!(next_high_water(true, 30, 0.86, high, low), (true, 0));
     }
 }
