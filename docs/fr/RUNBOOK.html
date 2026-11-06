@@ -429,7 +429,7 @@
 <p class="ps-p">Pour le workflow d'ack complet, voir <a href="/docs/fr/ACKNOWLEDGMENTS">Acquittements</a>.</p>
 <hr class="ps-hr">
 <h2 id="perf-sentinel-tempo-renvoie-404-ou-timeout" class="ps-h2"><code class="ps-ic">perf-sentinel tempo</code> renvoie 404 ou timeout</h2>
-<p class="ps-p"><strong>Symptôme.</strong> Soit chaque invocation échoue avec <code class="ps-ic">Tempo returned HTTP 404 for https://.../api/search?...</code>, soit l'étape de recherche réussit mais la boucle de récupération par trace finit avec <code class="ps-ic">Tempo fetch completed with failures counts={"timeout": N}</code> et renvoie un résultat partiel ou, quand toutes les récupérations ont échoué, l'erreur <code class="ps-ic">the search matched N trace(s) but every fetch failed</code>.</p>
+<p class="ps-p"><strong>Symptôme.</strong> Soit chaque invocation échoue avec <code class="ps-ic">Tempo returned HTTP 404 for https://.../api/search?...</code>, soit l'étape de recherche réussit mais la boucle de récupération par trace finit avec <code class="ps-ic">Tempo fetch completed with failures counts={"timeout": N}</code> et renvoie un résultat partiel ou, quand les lectures en échec sont plus nombreuses que les traces qui ont répondu, l'erreur <code class="ps-ic">the search matched N trace(s) but most fetches failed</code>.</p>
 <p class="ps-p"><strong>Premiers contrôles.</strong></p>
 <div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--term-comment)"># Vérifier que l'endpoint est bien une query-frontend Tempo, pas Grafana</span>
 <span style="color:var(--term-comment)"># ou un composant interne de Tempo. 200 = OK, 404 = mauvais endpoint.</span>

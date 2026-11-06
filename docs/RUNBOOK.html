@@ -426,7 +426,7 @@
 <p class="ps-p">For the full ack workflow, see <a href="/docs/ACKNOWLEDGMENTS">Acknowledgments</a>.</p>
 <hr class="ps-hr">
 <h2 id="perf-sentinel-tempo-returns-404-or-times-out" class="ps-h2"><code class="ps-ic">perf-sentinel tempo</code> returns 404 or times out</h2>
-<p class="ps-p"><strong>Symptom.</strong> Either every invocation fails with <code class="ps-ic">Tempo returned HTTP 404 for https://.../api/search?...</code>, or the search step succeeds but the per-trace fetch loop finishes with <code class="ps-ic">Tempo fetch completed with failures counts={"timeout": N}</code> and returns a partial result, or, when every fetch failed, the error <code class="ps-ic">the search matched N trace(s) but every fetch failed</code>.</p>
+<p class="ps-p"><strong>Symptom.</strong> Either every invocation fails with <code class="ps-ic">Tempo returned HTTP 404 for https://.../api/search?...</code>, or the search step succeeds but the per-trace fetch loop finishes with <code class="ps-ic">Tempo fetch completed with failures counts={"timeout": N}</code> and returns a partial result, or, when failed reads outnumber the traces that answered, the error <code class="ps-ic">the search matched N trace(s) but most fetches failed</code>.</p>
 <p class="ps-p"><strong>First checks.</strong></p>
 <div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--term-comment)"># Confirm the endpoint is actually a Tempo query-frontend, not Grafana or</span>
 <span style="color:var(--term-comment)"># an internal Tempo component. 200 = good, 404 = wrong endpoint.</span>
