@@ -36,9 +36,9 @@ const PAGES = [
     file: 'index.html', path: '/', frFile: 'fr/index.html',
     enUrl: ORIGIN + '/', frUrl: ORIGIN + '/fr',
     fr: {
-      title: "Perf Sentinel : détection d'anti-patterns d'I/O, chiffrée en carbone",
+      title: "Perf Sentinel : apps web plus rapides, moins de gaspillages énergétiques et d'émissions carbone",
       desc: "Binaire auto-hébergeable qui détecte les anti-patterns d'I/O (N+1, appels redondants, requêtes lentes, fanout) dans vos traces OpenTelemetry et les chiffre en énergie et en CO₂.",
-      ogDesc: "Repérez les I/O gaspillées (N+1, appels redondants, requêtes lentes, fanout) dans vos traces OpenTelemetry, chiffrées en énergie et en carbone.",
+      ogDesc: "Perf Sentinel repère ce qui ralentit vos applications pour rien et chiffre ce que ça gaspille en énergie et en carbone.",
     },
   },
   {
