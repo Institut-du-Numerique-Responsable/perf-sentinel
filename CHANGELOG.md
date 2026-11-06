@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.43.2] - 2026-11-06
+
 ### Fixed
 
 - `perf-sentinel tempo` says in its report when it analyzed fewer traces than its search matched. A run whose reads partly failed or came back 404 carries a `partial_fetch` entry in `warning_details` with the counts, so a report over 60 of 100 traces no longer reads as a report over all of them. It used to appear in the logs only, and a tool reading the report saw nothing.
