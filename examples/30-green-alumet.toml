@@ -34,6 +34,9 @@ label_key = "name"   # no default, required
 energy_interval_secs = 1.0   # default 1.0
 # Map each service name to the label value carrying its energy.
 service_mappings = { "account-svc" = "account-pod", "game-svc" = "game-pod" }   # default empty
+# Credentials belong in PERF_SENTINEL_ALUMET_AUTH_HEADER rather than here.
+# It takes precedence over this file.
+# auth_header = "Authorization: Bearer TOKEN"   # default unset
 
 # Optional: attribute the database cgroup too, which turns the estimated
 # database waste figure into a measured one.
