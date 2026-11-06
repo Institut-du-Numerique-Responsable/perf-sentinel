@@ -34,6 +34,7 @@ mod hash_bake;
 #[cfg(feature = "daemon")]
 mod hub;
 mod limits;
+mod memory_limit;
 #[cfg(all(feature = "daemon", feature = "tui"))]
 mod monitor;
 mod mysql_stat;
@@ -97,7 +98,9 @@ async fn main() {
         )
         .init();
 
-    dispatch_command(Cli::parse().command).await;
+    let cli = Cli::parse();
+    memory_limit::apply(cli.memory_limit_mib);
+    dispatch_command(cli.command).await;
 }
 
 /// Render the root man page plus one page per subcommand to `out`, so

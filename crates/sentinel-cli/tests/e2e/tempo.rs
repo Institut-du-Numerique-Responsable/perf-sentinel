@@ -802,3 +802,83 @@ fn cli_tempo_report_stays_silent_when_every_read_answers() {
         "{report}"
     );
 }
+
+#[test]
+fn cli_rejects_a_memory_limit_below_the_floor() {
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["--memory-limit-mib", "63", "tempo", "--service", "stub"])
+        .output()
+        .expect("run the binary");
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
+#[test]
+fn cli_tempo_runs_under_a_generous_memory_limit() {
+    let search = format!(r#"{{"traces":[{{"traceID":"{STUB_TRACE_ID_HEX}"}}]}}"#);
+    let port = spawn_tempo_stub(search, otlp_trace_body());
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "tempo",
+            "--service",
+            "stub",
+            "--no-acknowledgments",
+            "--format",
+            "json",
+        ])
+        .args(["--memory-limit-mib", "2048", "--endpoint"])
+        .arg(format!("http://127.0.0.1:{port}"))
+        .output()
+        .expect("run the binary");
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// Eight 60 MiB bodies in flight cannot fit in 128 MiB: the process fails on
+/// its own allocation, which is the point of the flag.
+#[cfg(target_os = "linux")]
+#[test]
+fn cli_tempo_aborts_on_its_own_past_the_memory_limit() {
+    const TRACES: usize = 8;
+    let ids: Vec<String> = (0..TRACES)
+        .map(|n| format!(r#"{{"traceID":"{n:032x}"}}"#))
+        .collect();
+    let search_body = format!(r#"{{"traces":[{}]}}"#, ids.join(","));
+    let trace_body = Arc::new(vec![0_u8; 60 * 1024 * 1024]);
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    thread::spawn(move || {
+        while let Ok((mut stream, _)) = listener.accept() {
+            let search_body = search_body.clone();
+            let trace_body = Arc::clone(&trace_body);
+            thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+                let mut request_line = String::new();
+                let _ = reader.read_line(&mut request_line);
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                    line.clear();
+                }
+                let body: &[u8] = if request_line.contains("/api/search") {
+                    search_body.as_bytes()
+                } else {
+                    &trace_body
+                };
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(body);
+            });
+        }
+    });
+
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["--memory-limit-mib", "128", "tempo", "--service", "stub"])
+        .args(["--no-acknowledgments", "--format", "json", "--endpoint"])
+        .arg(format!("http://127.0.0.1:{port}"))
+        .output()
+        .expect("run the binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("memory allocation"), "{stderr}");
+}
