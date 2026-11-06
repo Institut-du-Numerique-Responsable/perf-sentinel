@@ -249,9 +249,19 @@ async fn dispatch_command(command: Commands) {
             no_acknowledgments,
         ),
         #[cfg(feature = "tempo")]
-        Commands::Tempo { endpoint, query } => {
-            backend_cmd::run_backend_query(backend_cmd::QueryBackend::Tempo, &endpoint, query)
-                .await;
+        Commands::Tempo {
+            endpoint,
+            fetch_concurrency,
+            query,
+        } => {
+            backend_cmd::run_backend_query(
+                backend_cmd::QueryBackend::Tempo {
+                    fetch_concurrency: fetch_concurrency.map(|n| n as usize),
+                },
+                &endpoint,
+                query,
+            )
+            .await;
         }
         #[cfg(feature = "jaeger-query")]
         Commands::JaegerQuery { endpoint, query } => {

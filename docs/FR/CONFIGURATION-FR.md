@@ -8,7 +8,7 @@ Perf Sentinel se configure via un fichier `.perf-sentinel.toml`. Tous les champs
 
 - [Fragments de configuration](#fragments-de-configuration) : chargement multi-fichier déterministe.
 - [Sous-commandes](#sous-commandes) : quelles sous-commandes lisent `.perf-sentinel.toml`.
-- [Sections](#sections) : référence complète par section (`[thresholds]`, `[detection]`, `[green]`, `[daemon]`, `[reporting]`).
+- [Sections](#sections) : référence complète par section (`[thresholds]`, `[detection]`, `[green]`, `[tempo]`, `[daemon]`, `[reporting]`).
 - [Configuration minimale](#configuration-minimale) : le `.perf-sentinel.toml` le plus court utile.
 - [Exemple de configuration complète](#exemple-de-configuration-complète) : chaque section remplie avec des valeurs d'exemple.
 - [Migration depuis 0.5.x](#migration-depuis-05x) : les 8 clés top-level legacy retirées en 0.6.0 et comment migrer.
@@ -821,9 +821,15 @@ calibration_file = ".perf-sentinel-calibration.toml"
 
 **Limites de taille d'entrée pour `perf-sentinel calibrate`.** Les deux entrées sont plafonnées pour éviter une consommation mémoire incontrôlée : le fichier `--traces` est plafonné à 1 Gio (plafond batch fixe depuis 0.8.7, identique à `analyze`) et le CSV `--measured-energy` est plafonné à 64 Mio. Calibrate termine avec une erreur claire si l'un des fichiers dépasse sa limite. 64 Mio est généreux pour des milliers d'échantillons RAPL par minute. Si vous avez besoin de plus, ouvrez une issue décrivant la charge de travail.
 
-#### `perf-sentinel tempo` (pas de section de config)
+### `[tempo]`
 
-La sous-commande `tempo` s'exécute en mode batch (pas daemon), récupère les traces depuis l'API HTTP d'un Grafana Tempo et les passe dans le pipeline d'analyse standard. Ses réglages propres sont des flags CLI uniquement, il n'existe pas de section `[tempo]` : `--endpoint` est obligatoire, `--max-traces` vaut `100` par défaut et est borné à 1..=10000 (le plafond de lecture du client, pas celui de Tempo), aux côtés de `--trace-id`, `--service`, `--lookback`, `--from`/`--to`, `--sort` et `--auth-header`. Lancez `perf-sentinel tempo --help` pour la liste à jour. Une table `[tempo]` écrite dans le fichier de config fait échouer le chargement depuis la 0.12.0, comme toute table racine inconnue. Le fichier `--config` s'applique quand même pour le reste, les seuils et la détection en particulier, puisque les traces récupérées passent par le même pipeline.
+La sous-commande `tempo` s'exécute en mode batch (pas daemon), récupère les traces depuis l'API HTTP d'un Grafana Tempo et les passe dans le pipeline d'analyse standard. Cette section contient un seul réglage. Aucune autre sous-commande ne l'utilise, mais toutes le valident : une valeur hors de l'intervalle fait aussi échouer leur chargement.
+
+| Champ               | Type   | Défaut | Description                                                                                                                                                                                                                                                       |
+|---------------------|--------|--------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `fetch_concurrency` | entier | `16`   | Corps de traces lus à la fois après la recherche, de 1 à 64. Une valeur hors de cet intervalle fait échouer le chargement. Baissez-la quand un petit querier manque de mémoire, voir [Intégration Tempo](./INTEGRATION-FR.md#intégration-tempo). `--fetch-concurrency` la remplace le temps d'une exécution |
+
+Ses autres réglages sont des flags CLI : `--endpoint` est obligatoire, `--max-traces` vaut `100` par défaut et est borné à 1..=10000 (le plafond de lecture du client, pas celui de Tempo), aux côtés de `--trace-id`, `--service`, `--lookback`, `--from`/`--to`, `--sort` et `--auth-header`. Lancez `perf-sentinel tempo --help` pour la liste à jour. Les binaires jusqu'à la 0.42.1 refusent une table `[tempo]`, comme toute table racine inconnue. Le fichier `--config` s'applique aussi pour le reste, les seuils et la détection en particulier, puisque les traces récupérées passent par le même pipeline.
 
 ### `[daemon]`
 
@@ -1329,6 +1335,10 @@ memory_high_water_pct = 0
 # enabled = true
 # retained_days = 8
 # max_signatures_per_day = 10000
+
+# Optionnel : corps de traces lus à la fois par `perf-sentinel tempo` (de 1 à 64)
+# [tempo]
+# fetch_concurrency = 16
 ```
 
 ## Migration depuis 0.5.x

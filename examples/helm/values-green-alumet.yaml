@@ -64,6 +64,8 @@ config:
       # Map each service name to the label value carrying its energy. Under
       # the k8s plugin that label value is usually the pod name.
       service_mappings = { "account-svc" = "account-pod", "game-svc" = "game-pod" }   # default empty
+      # Credentials belong in PERF_SENTINEL_ALUMET_AUTH_HEADER, see below.
+      # auth_header = "Authorization: Bearer TOKEN"   # default unset
 
       # Optional: attribute the database cgroup too, which turns the estimated
       # database waste figure into a measured one.

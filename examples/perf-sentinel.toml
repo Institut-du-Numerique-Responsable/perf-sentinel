@@ -126,6 +126,18 @@ sanitizer_aware_min_cv = 0.5   # default 0.5, range (0, 10]
 grouping_attributes = ["k8s.namespace.name", "service.namespace"]
 
 # ---------------------------------------------------------------------------
+# `perf-sentinel tempo`
+#
+# Used by that subcommand only, though every subcommand validates it. Its
+# other settings are CLI flags.
+# ---------------------------------------------------------------------------
+[tempo]
+# Trace bodies read at once after the search. Each read costs the Tempo querier
+# memory, so lower it when a small querier runs out of memory.
+# `--fetch-concurrency` overrides it for one run.
+fetch_concurrency = 16   # default 16, bounds 1..64
+
+# ---------------------------------------------------------------------------
 # GreenOps / carbon scoring
 #
 # On by default with the embedded reference data, no network access. The
@@ -612,6 +624,13 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # nodes = 2                      # hosts, readers and standbys included
 # instance_type = "db.r6i.large" # an embedded row or a managed class, an unknown type fails the load
 # region = "eu-west-3"           # else [green.alumet.database] region, else [green] default_region, one is required
+# Priced from CPU instead of the nodes x P_max ceiling, which needs
+# [green.cloud]: a query returning the hosts' average CPU as a percent, in one
+# series.
+# # cpu_query = 'avg(aws_rds_cpuutilization_average{dbinstance_identifier=~"orders-db-.*"})'
+# A database pod on an application node instead: placement = "shared" with the
+# pod's own cpu_query and shared_with, as [green.broker_static] below shows.
+# # shared_with = ["custom"]
 # Hosts of different sizes, such as a writer and a smaller reader, or one
 # cluster per tenant: one [[green.database_static.hosts]] entry per group of
 # identical hosts, each with its own nodes, instance_type and optional

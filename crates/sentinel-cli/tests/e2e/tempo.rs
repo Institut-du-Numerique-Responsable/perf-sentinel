@@ -6,7 +6,10 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
+use std::time::Duration;
 
 /// The id the stub search hands back and the stub trace carries. Hex
 /// only, so the fetch's own trace-id validation accepts it.
@@ -518,6 +521,128 @@ fn cli_tempo_max_traces_at_the_ceiling_reaches_the_fetch() {
         output.status.code(),
         Some(75),
         "a fetch/network failure must exit EXIT_TOOLING_ERROR (75), not a clap usage error"
+    );
+}
+
+/// `tempo` against a closed port with this `--fetch-concurrency`.
+fn tempo_with_fetch_concurrency(value: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "tempo",
+            "--endpoint",
+            "http://127.0.0.1:1",
+            "--service",
+            "svc",
+            "--fetch-concurrency",
+            value,
+        ])
+        .output()
+        .expect("failed to execute perf-sentinel")
+}
+
+#[test]
+fn cli_tempo_rejects_fetch_concurrency_outside_its_range() {
+    // The core clamps silently, so only this refusal tells the operator.
+    for value in ["0", "65"] {
+        let output = tempo_with_fetch_concurrency(value);
+
+        assert_eq!(output.status.code(), Some(2), "clap usage error on {value}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("--fetch-concurrency") && stderr.contains("1..=64"),
+            "the refusal names the flag and the range, got: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn cli_tempo_fetch_concurrency_at_its_bounds_reaches_the_fetch() {
+    // Nothing listens on port 1, so failing on the connection proves the
+    // validator let the value through.
+    for value in ["1", "64"] {
+        let output = tempo_with_fetch_concurrency(value);
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Error fetching traces from Tempo"),
+            "an in-range --fetch-concurrency must reach the fetch, got: {stderr}"
+        );
+        assert_eq!(output.status.code(), Some(75), "tooling error on {value}");
+    }
+}
+
+/// Answer every connection on its own thread and report the most hops held
+/// at once. A hop leaves the count before its response goes out, so a client
+/// fetching one at a time can never read as two. Returns the port and the peak.
+fn spawn_tempo_peak_stub(search_body: String, trace_body: Vec<u8>) -> (u16, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let peak_out = Arc::clone(&peak);
+
+    thread::spawn(move || {
+        while let Ok((mut stream, _)) = listener.accept() {
+            let (in_flight, peak) = (Arc::clone(&in_flight), Arc::clone(&peak));
+            let (search_body, trace_body) = (search_body.clone(), trace_body.clone());
+            thread::spawn(move || {
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                thread::sleep(Duration::from_millis(300));
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                serve_one_hop(&mut stream, &search_body, &trace_body);
+            });
+        }
+    });
+
+    (port, peak_out)
+}
+
+/// Run a three-trace search with `[tempo] fetch_concurrency = 1` in the config
+/// and `extra_args` on the command line, and return the peak the stub saw.
+fn peak_with_config_cap_of_one(extra_args: &[&str]) -> usize {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = dir.path().join("perf-sentinel.toml");
+    std::fs::write(&config, "[tempo]\nfetch_concurrency = 1\n").expect("write config");
+    let search = r#"{"traces":[{"traceID":"a1"},{"traceID":"b2"},{"traceID":"c3"}]}"#;
+    let (port, peak) = spawn_tempo_peak_stub(search.to_string(), otlp_trace_body());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "tempo",
+            "--endpoint",
+            &format!("http://127.0.0.1:{port}"),
+            "--service",
+            "order-svc",
+            "--no-acknowledgments",
+            "--format",
+            "json",
+            "--config",
+        ])
+        .arg(&config)
+        .args(extra_args)
+        .output()
+        .expect("failed to execute perf-sentinel");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    peak.load(Ordering::SeqCst)
+}
+
+#[test]
+fn cli_tempo_reads_fetch_concurrency_from_the_config() {
+    assert_eq!(peak_with_config_cap_of_one(&[]), 1);
+}
+
+#[test]
+fn cli_tempo_fetch_concurrency_flag_overrides_the_config() {
+    let peak = peak_with_config_cap_of_one(&["--fetch-concurrency", "3"]);
+    assert!(
+        peak > 1,
+        "the flag must win over the config, peak was {peak}"
     );
 }
 

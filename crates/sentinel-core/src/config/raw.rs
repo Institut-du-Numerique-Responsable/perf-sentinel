@@ -19,10 +19,10 @@ use crate::score::carbon::DEFAULT_EMBODIED_CARBON_PER_REQUEST_GCO2;
 
 use super::validate::has_control_char;
 use super::{
-    Config, DEFAULT_FULCIO_URL, DEFAULT_REKOR_URL, DaemonAckConfig, DaemonArchiveConfig,
-    DaemonConfig, DaemonCorsConfig, DaemonDetectionsConfig, DaemonEnvironment,
+    Config, DEFAULT_FETCH_CONCURRENCY, DEFAULT_FULCIO_URL, DEFAULT_REKOR_URL, DaemonAckConfig,
+    DaemonArchiveConfig, DaemonConfig, DaemonCorsConfig, DaemonDetectionsConfig, DaemonEnvironment,
     DaemonHubExportConfig, DaemonIncidentsConfig, DaemonTlsConfig, DetectionConfig, GreenConfig,
-    ReportingConfig, SigstoreConfig, ThresholdsConfig,
+    ReportingConfig, SigstoreConfig, TempoConfig, ThresholdsConfig,
 };
 
 #[derive(Deserialize, Default)]
@@ -33,6 +33,13 @@ pub(super) struct RawConfig {
     pub(super) green: GreenSection,
     pub(super) daemon: DaemonSection,
     reporting: ReportingSection,
+    tempo: TempoSection,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct TempoSection {
+    fetch_concurrency: Option<usize>,
 }
 
 #[derive(Deserialize, Default)]
@@ -862,6 +869,12 @@ impl From<RawConfig> for Config {
                         .fulcio_url
                         .unwrap_or_else(|| DEFAULT_FULCIO_URL.to_string()),
                 },
+            },
+            tempo: TempoConfig {
+                fetch_concurrency: raw
+                    .tempo
+                    .fetch_concurrency
+                    .unwrap_or(DEFAULT_FETCH_CONCURRENCY),
             },
         }
     }

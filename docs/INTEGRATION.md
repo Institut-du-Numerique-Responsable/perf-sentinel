@@ -599,6 +599,8 @@ perf-sentinel tempo --endpoint http://tempo-query-frontend:3200 \
 
 A 404 from a wrong endpoint surfaces as `Tempo returned HTTP 404 for https://.../api/search?...` (the failing URL is included in the message), so this misconfiguration is diagnosable at a glance.
 
+After the search, the CLI reads each trace by ID, 16 at a time by default. The query-frontend splits every read into `trace_by_id.query_shards` jobs (50 by default), so 16 reads queue hundreds of jobs for the queriers. A querier with a small memory limit can be killed for running out of memory under that load, and the query-frontend can restart with it. Lower `--fetch-concurrency` for one run, or `[tempo] fetch_concurrency` for every run (1 to 64), on such a deployment. Tempo-side, `querier.max_concurrent_queries` and a `GOMEMLIMIT` near the querier's memory limit protect it from any client.
+
 ### Alternative: Tempo generic forwarding
 
 Instead of querying Tempo, you can configure Tempo to forward a copy of traces to Perf Sentinel via [generic forwarding](https://grafana.com/docs/tempo/latest/operations/manage-advanced-systems/generic_forwarding/). It works in real-time with `perf-sentinel watch`.

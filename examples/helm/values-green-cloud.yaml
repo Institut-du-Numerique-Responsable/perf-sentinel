@@ -46,6 +46,7 @@ config:
       # cpu_metric = "aws_ec2_cpuutilization_average"   # default unset
       # Credentials belong in PERF_SENTINEL_CLOUD_AUTH_HEADER rather than here.
       # It takes precedence over this file.
+      # auth_header = "Authorization: Bearer TOKEN"   # default unset
 
       # Per service, either an instance type looked up in the embedded SPECpower
       # table, or the two watt figures when your hardware is not in it. Use the

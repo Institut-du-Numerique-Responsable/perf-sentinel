@@ -420,7 +420,7 @@ The `report` subcommand exposes the same capability via `--pg-stat-prometheus UR
 
 ### Parallel fetch with concurrency cap
 
-The per-trace fetch loop is parallelized via `tokio::task::JoinSet` guarded by an `Arc<Semaphore>` capped at `FETCH_CONCURRENCY = 16` permits. Each spawned task acquires a permit through `acquire_owned` before the HTTP call and releases it on drop (RAII). The cap was picked empirically to saturate a remote-Tempo connection over a WAN link (observed ~10-20s for 100 traces vs. ~2m30s in the prior sequential loop) without overwhelming a single query-frontend replica, and is currently hardcoded rather than user-configurable. The pattern mirrors `score::cloud_energy::scraper`, which parallelizes per-service Prometheus CPU queries the same way.
+The per-trace fetch loop is parallelized via `tokio::task::JoinSet` guarded by an `Arc<Semaphore>` capped at `fetch_concurrency` permits (`DEFAULT_FETCH_CONCURRENCY = 16`, `--fetch-concurrency` or `[tempo] fetch_concurrency` from 1 to 64). Each spawned task acquires a permit through `acquire_owned` before the HTTP call and releases it on drop (RAII). The cap was picked empirically to saturate a remote-Tempo connection over a WAN link (observed ~10-20s for 100 traces vs. ~2m30s in the prior sequential loop) without overwhelming a single query-frontend replica. A querier with a small memory limit can still run out of memory at 16, since the query-frontend splits each read into many jobs, hence the setting. The pattern mirrors `score::cloud_energy::scraper`, which parallelizes per-service Prometheus CPU queries the same way.
 
 ### Timeout split
 
@@ -431,6 +431,8 @@ Search and trace fetch use two dedicated constants instead of a single value. `S
 The drain loop is driven by `tokio::select!` with `biased` branch ordering: `tokio::signal::ctrl_c()` is polled before `set.join_next()` so a pending interrupt is not starved by a flood of completions. On signal, `set.abort_all()` flags every in-flight task for cancellation. Already-completed traces are preserved. Aborted tasks resolve to `JoinError::is_cancelled()` and are silently skipped. The dedicated `TempoError::Interrupted` variant is returned only when zero traces had completed before the signal, so CI quality-gate paths can distinguish an operator abort from a run that found no traces (`NoTracesFound`).
 
 Per-trace failures log at `debug`, not `error`. A single classified summary line (`emit_fetch_summary`) is emitted at the end of the loop, bucketed by error kind (`timeout`, `transport`, `http_status`, `protobuf_decode`, `body_read`, `json_parse`, `task_panic`). Downstream tooling (Loki, CloudWatch) can then alert on the right signal without parsing 50 individual `ERROR` lines on a degraded Tempo. Summary severity tracks the worst class seen: `warn` if only `TraceNotFound` skips occurred (expected occasional condition, e.g. a trace rolled out of retention between search and fetch), `error` otherwise. A unit test (`classify_fetch_error_buckets_every_hard_failure_variant`) acts as a drift guard so a future variant added to `TempoError` does not silently fall through to `"other"`.
+
+A run whose fetches all failed returns `TempoError::FetchesFailed` rather than `NoTracesFound`, unless every failure is a `TraceNotFound` skip: the search did match, and widening it would only add load.
 
 ## Jaeger Query API ingestion
 

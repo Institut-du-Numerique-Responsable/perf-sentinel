@@ -562,6 +562,149 @@ async fn ingest_from_tempo_search_then_fetch_aggregates_events() {
     server.await.unwrap();
 }
 
+/// Runs a three-trace search-then-fetch at `cap` and returns the most trace
+/// bodies the mock saw in flight at once.
+async fn peak_fetches_in_flight(cap: usize) -> usize {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let search_resp =
+        http_200_json(r#"{"traces":[{"traceID":"aa"},{"traceID":"bb"},{"traceID":"cc"}]}"#);
+    let mut proto_buf = Vec::new();
+    ExportTraceServiceRequest {
+        resource_spans: vec![],
+    }
+    .encode(&mut proto_buf)
+    .unwrap();
+    let trace_resp = http_200_proto(&proto_buf);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let fetched = Arc::new(AtomicUsize::new(0));
+
+    let (in_flight_srv, peak_srv, fetched_srv) = (
+        Arc::clone(&in_flight),
+        Arc::clone(&peak),
+        Arc::clone(&fetched),
+    );
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (search_resp, trace_resp) = (search_resp.clone(), trace_resp.clone());
+            let (in_flight, peak, fetched) = (
+                Arc::clone(&in_flight_srv),
+                Arc::clone(&peak_srv),
+                Arc::clone(&fetched_srv),
+            );
+            tokio::spawn(async move {
+                let mut rbuf = [0u8; 4096];
+                let n = socket.read(&mut rbuf).await.unwrap_or(0);
+                if String::from_utf8_lossy(&rbuf[..n]).contains("/api/search") {
+                    let _ = socket.write_all(&search_resp).await;
+                } else {
+                    fetched.fetch_add(1, Ordering::SeqCst);
+                    let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    let _ = socket.write_all(&trace_resp).await;
+                }
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+
+    let err = tokio::time::timeout(
+        Duration::from_secs(10),
+        ingest_from_tempo_with_grouping(
+            &endpoint,
+            Some("foo-svc"),
+            None,
+            SearchWindow::Lookback(Duration::from_mins(5)),
+            5,
+            None,
+            Vec::new(),
+            cap,
+        ),
+    )
+    .await
+    .expect("the fetches must not hang")
+    .expect_err("empty traces end in NoTracesFound");
+    assert_matches!(err, TempoError::NoTracesFound);
+    // NoTracesFound also ends a run mixing failed and empty fetches.
+    assert_eq!(fetched.load(Ordering::SeqCst), 3);
+    server.abort();
+    peak.load(Ordering::SeqCst)
+}
+
+/// A zero cap is clamped to one, not a semaphore that never grants a permit,
+/// and one permit means one trace body in flight at a time.
+#[tokio::test]
+async fn ingest_from_tempo_fetch_concurrency_zero_fetches_one_at_a_time() {
+    assert_eq!(peak_fetches_in_flight(0).await, 1);
+}
+
+/// `Semaphore::new` panics past `MAX_PERMITS`, so this needs the ceiling. The
+/// overlap also proves the mock can see more than one fetch in flight.
+#[tokio::test]
+async fn ingest_from_tempo_fetch_concurrency_past_the_ceiling_still_overlaps() {
+    assert!(peak_fetches_in_flight(usize::MAX).await > 1);
+}
+
+/// Serves a two-trace search, answers every fetch with `fetch_resp` and
+/// returns the error the run ends on.
+async fn error_when_every_fetch_answers(fetch_resp: Vec<u8>) -> TempoError {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let search_resp = http_200_json(r#"{"traces":[{"traceID":"aa"},{"traceID":"bb"}]}"#);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut rbuf = [0u8; 4096];
+            let n = socket.read(&mut rbuf).await.unwrap_or(0);
+            let is_search = String::from_utf8_lossy(&rbuf[..n]).contains("/api/search");
+            let resp = if is_search { &search_resp } else { &fetch_resp };
+            let _ = socket.write_all(resp).await;
+            let _ = socket.shutdown().await;
+        }
+    });
+
+    let err = ingest_from_tempo(
+        &endpoint,
+        Some("foo-svc"),
+        None,
+        SearchWindow::Lookback(Duration::from_mins(5)),
+        5,
+        None,
+    )
+    .await
+    .expect_err("no fetch yields an event");
+    server.abort();
+    err
+}
+
+/// A querier killed mid-run fails every read. Saying no trace matched would
+/// send the operator widening a search that did match, adding load.
+#[tokio::test]
+async fn every_fetch_failing_is_not_reported_as_an_empty_search() {
+    let err = error_when_every_fetch_answers(http_status(500, "Internal")).await;
+    assert!(err.to_string().contains("--fetch-concurrency"), "{err}");
+    assert_matches!(err, TempoError::FetchesFailed { traces: 2 });
+}
+
+/// Traces rolled out of retention between the search and the fetch.
+#[tokio::test]
+async fn every_fetch_answering_404_stays_no_traces_found() {
+    let err = error_when_every_fetch_answers(http_status(404, "Not Found")).await;
+    assert_matches!(err, TempoError::NoTracesFound);
+}
+
 // --- Error display ---
 
 #[test]

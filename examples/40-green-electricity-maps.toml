@@ -27,6 +27,7 @@ default_region = "eu-west-3"
 # precedence over this file. There is no "env:VAR" indirection: a value in
 # that shape is used literally.
 api_key = "your-api-key"   # no default, required
+# endpoint = "https://api.electricitymaps.com/v4"   # default https://api.electricitymaps.com/v4
 # Default 300. Size it to your plan's quota: one zone polled every 3600 s
 # spends about 720 requests a month. The free tier is for non-commercial use only.
 poll_interval_secs = 3600   # default 300, bounds 60..86400
@@ -35,3 +36,4 @@ region_map = { "eu-west-3" = "FR", "us-east-1" = "US-MIDA-PJM", "ap-southeast-1"
 # "lifecycle" (default) includes construction and fuel supply chain,
 # "direct" counts combustion only.
 emission_factor_type = "lifecycle"   # default "lifecycle", or "direct"
+# temporal_granularity = "hourly"   # default "hourly", or "5_minutes" / "15_minutes"
