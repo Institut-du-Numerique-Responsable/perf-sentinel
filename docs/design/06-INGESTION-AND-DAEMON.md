@@ -424,7 +424,7 @@ The per-trace fetch loop is parallelized via `tokio::task::JoinSet` guarded by a
 
 ### Timeout split
 
-Search and trace fetch use two dedicated constants instead of a single value. `SEARCH_TIMEOUT = 5s` applies to `/api/search`: the response is a small list of trace IDs, and a tight timeout fails fast on a broken endpoint. `FETCH_TRACE_TIMEOUT = 30s` applies to `/api/traces/{id}`: trace bodies can legitimately be many MiB on a wide fanout request, and the query-frontend has to gather spans from ingesters + long-term storage. A single 5 s cap was empirically dropping tens of traces per 100-trace batch on long lookback windows. The 30 s value matches the Grafana Tempo datasource default. Both timeouts are parameters of the shared `fetch_raw` helper rather than a single module-level constant, so search and fetch-trace paths can never drift apart.
+Search and trace fetch use two dedicated constants instead of a single value. `SEARCH_TIMEOUT = 5s` applies to `/api/search`: the response is a small list of trace IDs, and a tight timeout fails fast on a broken endpoint. `FETCH_TRACE_TIMEOUT = 30s` applies to `/api/traces/{id}`: trace bodies can legitimately be many MiB on a wide fanout request, and the query-frontend has to gather spans from ingesters + long-term storage. A single 5 s cap was empirically dropping tens of traces per 100-trace batch on long lookback windows. The 30 s value matches the Grafana Tempo datasource default. Both timeouts are parameters of the shared `fetch_raw` helper rather than a single module-level constant, so search and fetch-trace paths can never drift apart. Each one bounds the headers and the body together, so a querier that stalls mid-body fails its fetch instead of hanging the run.
 
 ### Ctrl-C and error aggregation
 
@@ -432,7 +432,7 @@ The drain loop is driven by `tokio::select!` with `biased` branch ordering: `tok
 
 Per-trace failures log at `debug`, not `error`. A single classified summary line (`emit_fetch_summary`) is emitted at the end of the loop, bucketed by error kind (`timeout`, `transport`, `http_status`, `protobuf_decode`, `body_read`, `json_parse`, `task_panic`). Downstream tooling (Loki, CloudWatch) can then alert on the right signal without parsing 50 individual `ERROR` lines on a degraded Tempo. Summary severity tracks the worst class seen: `warn` if only `TraceNotFound` skips occurred (expected occasional condition, e.g. a trace rolled out of retention between search and fetch), `error` otherwise. A unit test (`classify_fetch_error_buckets_every_hard_failure_variant`) acts as a drift guard so a future variant added to `TempoError` does not silently fall through to `"other"`.
 
-A run whose fetches all failed returns `TempoError::FetchesFailed` rather than `NoTracesFound`, unless every failure is a `TraceNotFound` skip: the search did match, and widening it would only add load.
+A run that collects no event returns `TempoError::FetchesFailed` when its failures outnumber the traces that answered, `TraceNotFound` skips aside: the search did match, and widening it would only add load. Below that, what the answering traces say decides: `NoConvertibleSpans` if they carried spans, `NoTracesFound` if not.
 
 ## Jaeger Query API ingestion
 

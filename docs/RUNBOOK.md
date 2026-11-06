@@ -544,7 +544,7 @@ For the full ack workflow, see [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md).
 
 ## `perf-sentinel tempo` returns 404 or times out
 
-**Symptom.** Either every invocation fails with `Tempo returned HTTP 404 for https://.../api/search?...`, or the search step succeeds but the per-trace fetch loop finishes with `Tempo fetch completed with failures counts={"timeout": N}` and returns a partial result, or, when every fetch failed, the error `the search matched N trace(s) but every fetch failed`.
+**Symptom.** Either every invocation fails with `Tempo returned HTTP 404 for https://.../api/search?...`, or the search step succeeds but the per-trace fetch loop finishes with `Tempo fetch completed with failures counts={"timeout": N}` and returns a partial result, or, when failed reads outnumber the traces that answered, the error `the search matched N trace(s) but most fetches failed`.
 
 **First checks.**
 

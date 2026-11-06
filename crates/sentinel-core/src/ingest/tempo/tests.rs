@@ -705,6 +705,99 @@ async fn every_fetch_answering_404_stays_no_traces_found() {
     assert_matches!(err, TempoError::NoTracesFound);
 }
 
+fn empty_run(received: u64, fail_counts: &[(&'static str, usize)]) -> FetchLoopOutcome {
+    FetchLoopOutcome {
+        events: Vec::new(),
+        received,
+        fail_counts: fail_counts.iter().copied().collect(),
+        interrupted: false,
+    }
+}
+
+/// One answering trace must not hide a backend failing the other reads.
+#[test]
+fn failures_outnumbering_answers_blame_the_backend() {
+    let empty_answer = empty_run(0, &[("http_status", 99)]);
+    assert_matches!(
+        empty_run_error(&empty_answer, 100),
+        TempoError::FetchesFailed { traces: 100 }
+    );
+    let spans_without_io = empty_run(3, &[("timeout", 99)]);
+    assert_matches!(
+        empty_run_error(&spans_without_io, 100),
+        TempoError::FetchesFailed { traces: 100 }
+    );
+}
+
+/// A stray failure does not outweigh what most traces say.
+#[test]
+fn answers_outnumbering_failures_keep_their_diagnosis() {
+    let spans_without_io = empty_run(40, &[("timeout", 1)]);
+    assert_matches!(
+        empty_run_error(&spans_without_io, 100),
+        TempoError::NoConvertibleSpans { traces: 99 }
+    );
+    assert_matches!(
+        empty_run_error(&empty_run(0, &[("timeout", 1)]), 100),
+        TempoError::NoTracesFound
+    );
+}
+
+/// 404s are traces gone from retention: they never count against the backend.
+#[test]
+fn not_found_is_not_a_backend_failure() {
+    let retention = empty_run(5, &[(NOT_FOUND, 99)]);
+    assert_matches!(
+        empty_run_error(&retention, 100),
+        TempoError::NoConvertibleSpans { traces: 1 }
+    );
+    let one_real_failure = empty_run(0, &[(NOT_FOUND, 1), ("http_status", 1)]);
+    assert_matches!(
+        empty_run_error(&one_real_failure, 2),
+        TempoError::FetchesFailed { traces: 2 }
+    );
+}
+
+/// A peer that answers its headers then stalls would otherwise keep the drain
+/// loop waiting forever, and the run would never report its failures.
+#[tokio::test]
+async fn the_fetch_deadline_covers_a_stalled_body() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let uri: hyper::Uri = format!("http://{}/api/traces/aa", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut rbuf = [0u8; 4096];
+        let _ = socket.read(&mut rbuf).await;
+        let _ = socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1024\r\n\r\npartial")
+            .await;
+        std::future::pending::<()>().await;
+    });
+
+    let client = http_client::build_client();
+    let fetch = fetch_raw(
+        &client,
+        uri,
+        "application/protobuf",
+        4096,
+        true,
+        Duration::from_millis(100),
+        None,
+        "unused",
+    );
+    let err = tokio::time::timeout(Duration::from_secs(5), fetch)
+        .await
+        .expect("the stalled body must hit the fetch deadline")
+        .expect_err("a body that never completes is not a success");
+    assert_matches!(err, TempoError::Timeout);
+    server.abort();
+}
+
 // --- Error display ---
 
 #[test]
