@@ -6114,10 +6114,8 @@ fn shipped_cloud_examples_share_no_query_across_envelopes() {
 
 #[test]
 fn tempo_fetch_concurrency_defaults_parses_and_is_bounded() {
-    assert_eq!(
-        load_from_str("").unwrap().tempo.fetch_concurrency,
-        DEFAULT_FETCH_CONCURRENCY
-    );
+    assert_eq!(load_from_str("").unwrap().tempo.fetch_concurrency, 16);
+    assert_eq!(Config::default().tempo.fetch_concurrency, 16);
     for value in [1, MAX_FETCH_CONCURRENCY] {
         let toml = format!("[tempo]\nfetch_concurrency = {value}\n");
         assert_eq!(load_from_str(&toml).unwrap().tempo.fetch_concurrency, value);

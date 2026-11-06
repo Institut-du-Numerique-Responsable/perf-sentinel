@@ -524,22 +524,27 @@ fn cli_tempo_max_traces_at_the_ceiling_reaches_the_fetch() {
     );
 }
 
+/// `tempo` against a closed port with this `--fetch-concurrency`.
+fn tempo_with_fetch_concurrency(value: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "tempo",
+            "--endpoint",
+            "http://127.0.0.1:1",
+            "--service",
+            "svc",
+            "--fetch-concurrency",
+            value,
+        ])
+        .output()
+        .expect("failed to execute perf-sentinel")
+}
+
 #[test]
 fn cli_tempo_rejects_fetch_concurrency_outside_its_range() {
     // The core clamps silently, so only this refusal tells the operator.
     for value in ["0", "65"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
-            .args([
-                "tempo",
-                "--endpoint",
-                "http://127.0.0.1:1",
-                "--service",
-                "svc",
-                "--fetch-concurrency",
-                value,
-            ])
-            .output()
-            .expect("failed to execute perf-sentinel");
+        let output = tempo_with_fetch_concurrency(value);
 
         assert_eq!(output.status.code(), Some(2), "clap usage error on {value}");
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -555,18 +560,7 @@ fn cli_tempo_fetch_concurrency_at_its_bounds_reaches_the_fetch() {
     // Nothing listens on port 1, so failing on the connection proves the
     // validator let the value through.
     for value in ["1", "64"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
-            .args([
-                "tempo",
-                "--endpoint",
-                "http://127.0.0.1:1",
-                "--service",
-                "svc",
-                "--fetch-concurrency",
-                value,
-            ])
-            .output()
-            .expect("failed to execute perf-sentinel");
+        let output = tempo_with_fetch_concurrency(value);
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
