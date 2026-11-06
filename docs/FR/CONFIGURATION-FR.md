@@ -823,7 +823,7 @@ calibration_file = ".perf-sentinel-calibration.toml"
 
 ### `[tempo]`
 
-La sous-commande `tempo` s'exécute en mode batch (pas daemon), récupère les traces depuis l'API HTTP d'un Grafana Tempo et les passe dans le pipeline d'analyse standard. Cette section contient un seul réglage. Aucune autre sous-commande ne l'utilise, mais toutes le valident : une valeur hors de l'intervalle fait aussi échouer leur chargement.
+La sous-commande `tempo` s'exécute en mode batch (pas daemon), récupère les traces depuis l'API HTTP d'un Grafana Tempo et les passe dans le pipeline d'analyse standard. Cette section contient un seul réglage. Aucune autre sous-commande ne l'utilise, mais celles qui chargent la configuration le valident : une valeur hors de l'intervalle fait aussi échouer leur chargement.
 
 | Champ               | Type   | Défaut | Description                                                                                                                                                                                                                                                       |
 |---------------------|--------|--------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

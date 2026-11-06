@@ -97,7 +97,7 @@ pub enum TempoError {
     /// Split from [`Self::NoTracesFound`] because the search did match:
     /// widening it would only add load to a backend already failing the reads.
     #[error(
-        "the search matched {traces} trace(s) but every fetch failed, see the \
+        "the search matched {traces} trace(s) but most fetches failed, see the \
          failure counts logged above. If Tempo is running out of memory, lower \
          --fetch-concurrency"
     )]
@@ -164,8 +164,8 @@ const FETCH_TRACE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Fetch raw bytes from a Tempo endpoint with size limit and timeout.
 ///
 /// Shared implementation behind `fetch_bytes` (protobuf) and `fetch_json`.
-/// Builds the request, applies the timeout, checks the HTTP status, and
-/// reads the limited body. When `map_404` is true, 404 responses return
+/// Builds the request, checks the HTTP status and reads the limited body,
+/// all under one timeout. When `map_404` is true, 404 responses return
 /// `TempoError::TraceNotFound` instead of the generic `HttpStatus`.
 #[allow(clippy::too_many_arguments)]
 async fn fetch_raw(
@@ -190,35 +190,40 @@ async fn fetch_raw(
         .body(http_body_util::Empty::<bytes::Bytes>::new())
         .map_err(|e| TempoError::Transport(e.to_string()))?;
 
-    let resp = tokio::time::timeout(timeout, client.request(req))
+    // One deadline for the headers and the body, as in `http_client` and the
+    // Jaeger twin: a querier stalling mid-body must not hang the whole run.
+    let exchange = async {
+        let resp = client
+            .request(req)
+            .await
+            .map_err(|e| TempoError::Transport(e.to_string()))?;
+
+        let status = resp.status().as_u16();
+        if map_404 && status == 404 {
+            return Err(TempoError::TraceNotFound(http_client::redact_endpoint(
+                &uri,
+            )));
+        }
+        if status != 200 {
+            // Include the redacted URL so operators pointing at a wrong Tempo
+            // component (e.g. `tempo-querier` instead of `tempo-query-frontend`
+            // in a microservices deployment) see which endpoint 404'd without
+            // having to re-derive it from the CLI flags.
+            return Err(TempoError::HttpStatus {
+                status,
+                url: http_client::redact_endpoint(&uri),
+            });
+        }
+
+        let limited = http_body_util::Limited::new(resp.into_body(), max_bytes);
+        http_body_util::BodyExt::collect(limited)
+            .await
+            .map(http_body_util::Collected::to_bytes)
+            .map_err(|e| classify_body_error(&*e, max_bytes, overrun_remedy))
+    };
+    tokio::time::timeout(timeout, exchange)
         .await
         .map_err(|_| TempoError::Timeout)?
-        .map_err(|e| TempoError::Transport(e.to_string()))?;
-
-    let status = resp.status().as_u16();
-    if map_404 && status == 404 {
-        return Err(TempoError::TraceNotFound(http_client::redact_endpoint(
-            &uri,
-        )));
-    }
-    if status != 200 {
-        // Include the redacted URL so operators pointing at a wrong Tempo
-        // component (e.g. `tempo-querier` instead of `tempo-query-frontend`
-        // in a microservices deployment) see which endpoint 404'd without
-        // having to re-derive it from the CLI flags.
-        return Err(TempoError::HttpStatus {
-            status,
-            url: http_client::redact_endpoint(&uri),
-        });
-    }
-
-    let limited = http_body_util::Limited::new(resp.into_body(), max_bytes);
-    let body = http_body_util::BodyExt::collect(limited)
-        .await
-        .map_err(|e| classify_body_error(&*e, max_bytes, overrun_remedy))?
-        .to_bytes();
-
-    Ok(body)
 }
 
 /// Tell a body that outgrew its cap apart from a transfer that broke for
@@ -382,6 +387,10 @@ async fn fetch_trace_with_grouping(
     Ok((events, stats.received))
 }
 
+/// Summary bucket of a `TraceNotFound` fetch, the one failure that does not
+/// point at a failing backend.
+const NOT_FOUND: &str = "not_found";
+
 /// Classify a per-trace fetch failure into a short category tag used for the
 /// aggregate summary counts. Returning `&'static str` keeps the hashmap key
 /// allocation-free. `TraceNotFound` is handled separately by the caller
@@ -420,7 +429,7 @@ fn emit_fetch_summary(
 ) {
     if !fail_counts.is_empty() {
         let total_failures: usize = fail_counts.values().sum();
-        let only_not_found = fail_counts.keys().all(|k| *k == "not_found");
+        let only_not_found = fail_counts.keys().all(|k| *k == NOT_FOUND);
         if only_not_found {
             tracing::warn!(
                 total_failures,
@@ -640,17 +649,20 @@ fn empty_run_error(drained: &FetchLoopOutcome, total: usize) -> TempoError {
         return TempoError::Interrupted;
     }
     let failures: usize = drained.fail_counts.values().sum();
-    // Keyed on the spans Tempo returned: a batch where every fetch
-    // errored, or where the traces came back empty, is not an
-    // instrumentation problem and must not read like one.
+    let not_found = drained.fail_counts.get(NOT_FOUND).copied().unwrap_or(0);
+    // A failing backend outweighs what the traces that did answer say: one
+    // span-less trace among 99 failures must not blame the instrumentation,
+    // nor one empty answer read as an empty search. 404s are traces gone from
+    // retention, not a failing backend.
+    if failures - not_found > total.saturating_sub(failures) {
+        return TempoError::FetchesFailed { traces: total };
+    }
+    // Keyed on the spans Tempo returned: a batch whose traces came back empty
+    // is not an instrumentation problem and must not read like one.
     if drained.received > 0 {
         return TempoError::NoConvertibleSpans {
             traces: total.saturating_sub(failures).max(1),
         };
-    }
-    // Nothing but 404s is traces gone from retention, not a failing backend.
-    if failures == total && drained.fail_counts.keys().any(|kind| *kind != "not_found") {
-        return TempoError::FetchesFailed { traces: total };
     }
     TempoError::NoTracesFound
 }
@@ -743,7 +755,7 @@ async fn drain_fetch_set(
                     }
                     Some(Ok((tid, Err(TempoError::TraceNotFound(_))))) => {
                         done += 1;
-                        *fail_counts.entry("not_found").or_insert(0) += 1;
+                        *fail_counts.entry(NOT_FOUND).or_insert(0) += 1;
                         tracing::debug!(trace_id = %tid, "Trace not found, skipping");
                     }
                     Some(Ok((tid, Err(e)))) => {
