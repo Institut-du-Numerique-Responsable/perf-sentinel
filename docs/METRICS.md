@@ -467,7 +467,7 @@ other than `Chassis`, counts as `path_missing`.
 
 ## Warning kinds: transient vs sticky
 
-`Report.warning_details` (since 0.5.19) has five stable kinds today,
+`Report.warning_details` (since 0.5.19) has six stable kinds today,
 each with a different lifecycle. For monitoring, a transient warning
 self-resolves, a sticky one persists until the daemon restarts.
 
@@ -484,6 +484,7 @@ structured entries sit right beside it.
 | `tuning`                   | Mixed     | A lifetime counter shows a config knob undersized for the observed load, or `sampling_rate` is below 1.0 (see below)                                                           | Daemon restart for counter-driven rules, load drop for the trace-window rule, a config change for the `sampling_rate` rule |
 | `unmatched_acknowledgment` | Per-run   | An active acknowledgment suppressed nothing in this analysis                                                                                                                   | The next run where its finding reappears, or removing the acknowledgment                                                   |
 | `snapshot_scope`           | Always    | Every `/api/export/report` response past cold start: the green figures describe one batch, and a second entry appears when the store holds more findings than the export ships | Never, it describes the payload rather than a fault. The cold-start envelope and batch output carry neither entry          |
+| `partial_fetch`            | Per-run   | A `tempo` run read fewer traces than its search matched: reads failed, answered 404 or were cancelled by a signal                                                              | The next run where every read answers                                                                                      |
 
 `cold_start` is a state warning: "the snapshot is not meaningful right
 now". `ingestion_drops` is an audit warning: "at some point since

@@ -10,6 +10,14 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.43.2]
+
+### Changed
+
+- **`appVersion` moves to `0.43.2`.** `perf-sentinel tempo` says in its report when
+  reads failed and it covers fewer traces than its search matched. The daemon does
+  not run this path. No chart value or template changes.
+
 ## [0.43.1]
 
 ### Changed

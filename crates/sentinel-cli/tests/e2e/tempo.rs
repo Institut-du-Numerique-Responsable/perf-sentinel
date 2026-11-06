@@ -5,7 +5,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
@@ -710,4 +710,227 @@ fn cli_tempo_help_mentions_sort() {
     assert!(output.status.success());
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("--sort"), "help mentions --sort");
+}
+
+/// Serves `reads` from the search and answers the trace reads as it says: the
+/// real body for an id it maps to true, a 500 otherwise.
+fn tempo_report_with_reads(reads: &'static [(&'static str, bool)]) -> serde_json::Value {
+    let ids: Vec<String> = reads
+        .iter()
+        .map(|(id, _)| format!(r#"{{"traceID":"{id}"}}"#))
+        .collect();
+    let search_body = format!(r#"{{"traces":[{}]}}"#, ids.join(","));
+    let trace_body = otlp_trace_body();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    thread::spawn(move || {
+        while let Ok((mut stream, _)) = listener.accept() {
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut request_line = String::new();
+            let _ = reader.read_line(&mut request_line);
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            let answers = reads
+                .iter()
+                .any(|(id, ok)| *ok && request_line.contains(&format!("/api/traces/{id}")));
+            let (status, body): (&str, &[u8]) = if request_line.contains("/api/search") {
+                ("200 OK", search_body.as_bytes())
+            } else if answers {
+                ("200 OK", &trace_body)
+            } else {
+                ("500 Internal", b"")
+            };
+            let head = format!(
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body);
+        }
+    });
+
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "tempo",
+            "--service",
+            "stub",
+            "--no-acknowledgments",
+            "--format",
+            "json",
+            "--endpoint",
+        ])
+        .arg(format!("http://127.0.0.1:{port}"))
+        .output()
+        .expect("run the binary");
+    assert!(output.status.success(), "{output:?}");
+    serde_json::from_slice(&output.stdout).expect("a JSON report")
+}
+
+#[test]
+fn cli_tempo_report_says_when_a_read_failed() {
+    let report = tempo_report_with_reads(&[
+        (STUB_TRACE_ID_HEX, true),
+        ("b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", false),
+    ]);
+    let partial: Vec<_> = report["warning_details"]
+        .as_array()
+        .expect("warning_details")
+        .iter()
+        .filter(|warning| warning["kind"] == "partial_fetch")
+        .collect();
+    assert_eq!(partial.len(), 1, "{report}");
+    let message = partial[0]["message"].as_str().expect("message");
+    assert!(
+        message.starts_with("1 of 2 trace reads failed"),
+        "{message}"
+    );
+}
+
+#[test]
+fn cli_tempo_report_stays_silent_when_every_read_answers() {
+    let report = tempo_report_with_reads(&[(STUB_TRACE_ID_HEX, true)]);
+    let details = report["warning_details"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        details
+            .iter()
+            .all(|warning| warning["kind"] != "partial_fetch"),
+        "{report}"
+    );
+}
+
+#[test]
+fn cli_rejects_a_memory_limit_below_the_floor() {
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["--memory-limit-mib", "63", "tempo", "--service", "stub"])
+        // `--endpoint` is required: without it clap exits 2 whatever the floor.
+        .args(["--endpoint", "http://127.0.0.1:1"])
+        .output()
+        .expect("run the binary");
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
+/// A hostname takes a resolver thread, and a released binary's allocator
+/// reserves 1 GiB at startup: both have to fit under a cap well below that.
+#[test]
+fn cli_tempo_resolves_a_hostname_under_a_memory_limit() {
+    let search = format!(r#"{{"traces":[{{"traceID":"{STUB_TRACE_ID_HEX}"}}]}}"#);
+    let port = spawn_tempo_stub(search, otlp_trace_body());
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "tempo",
+            "--service",
+            "stub",
+            "--no-acknowledgments",
+            "--format",
+            "json",
+        ])
+        .args(["--memory-limit-mib", "512", "--endpoint"])
+        .arg(format!("http://localhost:{port}"))
+        .output()
+        .expect("run the binary");
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// Eight 60 MiB bodies in flight cannot fit in 128 MiB: the process fails on
+/// its own allocation, which is the point of the flag.
+#[cfg(target_os = "linux")]
+#[test]
+fn cli_tempo_aborts_on_its_own_past_the_memory_limit() {
+    const TRACES: usize = 8;
+    let ids: Vec<String> = (0..TRACES)
+        .map(|n| format!(r#"{{"traceID":"{n:032x}"}}"#))
+        .collect();
+    let search_body = format!(r#"{{"traces":[{}]}}"#, ids.join(","));
+    let trace_body = Arc::new(vec![0_u8; 60 * 1024 * 1024]);
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    thread::spawn(move || {
+        while let Ok((mut stream, _)) = listener.accept() {
+            let search_body = search_body.clone();
+            let trace_body = Arc::clone(&trace_body);
+            thread::spawn(move || serve_one_hop(&mut stream, &search_body, &trace_body));
+        }
+    });
+
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["--memory-limit-mib", "128", "tempo", "--service", "stub"])
+        .args(["--no-acknowledgments", "--format", "json", "--endpoint"])
+        .arg(format!("http://127.0.0.1:{port}"))
+        .output()
+        .expect("run the binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("memory allocation"), "{stderr}");
+}
+
+/// A signal mid-run keeps what already answered, and the report has to say the
+/// rest was never read. The stub answers one trace and holds the other open,
+/// and the child's debug log says when the first one landed.
+#[cfg(unix)]
+#[test]
+fn cli_tempo_report_says_when_a_signal_cut_the_reads() {
+    const HELD: &str = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
+    let search_body =
+        format!(r#"{{"traces":[{{"traceID":"{STUB_TRACE_ID_HEX}"}},{{"traceID":"{HELD}"}}]}}"#);
+    let trace_body = otlp_trace_body();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    thread::spawn(move || {
+        while let Ok((mut stream, _)) = listener.accept() {
+            let mut peek = [0_u8; 256];
+            let read = stream.peek(&mut peek).unwrap_or(0);
+            if String::from_utf8_lossy(&peek[..read]).contains(HELD) {
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_secs(60));
+                    drop(stream);
+                });
+                continue;
+            }
+            serve_one_hop(&mut stream, &search_body, &trace_body);
+        }
+    });
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args(["tempo", "--service", "stub", "--no-acknowledgments"])
+        .args(["--format", "json", "--endpoint"])
+        .arg(format!("http://127.0.0.1:{port}"))
+        .env("RUST_LOG", "sentinel_core::ingest::tempo=debug")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run the binary");
+    // Held open to the end: a closed pipe would make the child's next log line
+    // panic, which is not what this test is about.
+    let mut stderr = BufReader::new(child.stderr.take().expect("stderr")).lines();
+    let fetched = stderr
+        .by_ref()
+        .map_while(Result::ok)
+        .any(|line| line.contains("Fetched trace"));
+    assert!(fetched, "the first trace never landed");
+
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .expect("run kill");
+    assert!(killed.success());
+    let output = child.wait_with_output().expect("wait");
+    assert!(output.status.success(), "{output:?}");
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("a JSON report");
+    let partial = report["warning_details"]
+        .as_array()
+        .expect("warning_details")
+        .iter()
+        .find(|warning| warning["kind"] == "partial_fetch")
+        .expect("a partial_fetch warning");
+    let message = partial["message"].as_str().expect("message");
+    assert!(
+        message.starts_with("A shutdown signal cancelled 1 of 2"),
+        "{message}"
+    );
 }

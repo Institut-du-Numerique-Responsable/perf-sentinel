@@ -432,7 +432,7 @@ The drain loop is driven by `tokio::select!` with `biased` branch ordering: `tok
 
 Per-trace failures log at `debug`, not `error`. A single classified summary line (`emit_fetch_summary`) is emitted at the end of the loop, bucketed by error kind (`timeout`, `transport`, `http_status`, `protobuf_decode`, `body_read`, `json_parse`, `task_panic`). Downstream tooling (Loki, CloudWatch) can then alert on the right signal without parsing 50 individual `ERROR` lines on a degraded Tempo. Summary severity tracks the worst class seen: `warn` if only `TraceNotFound` skips occurred (expected occasional condition, e.g. a trace rolled out of retention between search and fetch), `error` otherwise. A unit test (`classify_fetch_error_buckets_every_hard_failure_variant`) acts as a drift guard so a future variant added to `TempoError` does not silently fall through to `"other"`.
 
-A run that collects no event returns `TempoError::FetchesFailed` when its failures outnumber the traces that answered, `TraceNotFound` skips aside: the search did match, and widening it would only add load. Below that, what the answering traces say decides: `NoConvertibleSpans` if they carried spans, `NoTracesFound` if not.
+A run that collects no event returns `TempoError::FetchesFailed` when its failures outnumber the traces that answered, `TraceNotFound` skips aside: the search did match, and widening it would only add load. Below that, what the answering traces say decides: `NoConvertibleSpans` if they carried spans, `NoTracesFound` if not. A run that does collect events reports its unread traces through `TempoIngest::partial_warning`, which the CLI adds to `warning_details` as `partial_fetch`, since the summary line only reaches the logs.
 
 ## Jaeger Query API ingestion
 

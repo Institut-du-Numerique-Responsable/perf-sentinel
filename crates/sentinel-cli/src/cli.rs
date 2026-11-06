@@ -20,6 +20,19 @@ use std::path::PathBuf;
 )]
 #[command(version)]
 pub(crate) struct Cli {
+    /// Cap this process's address space, in MiB (Linux only). Past the cap an
+    /// allocation fails and the process aborts, instead of the kernel's OOM
+    /// killer choosing a victim in the container. Address space runs above
+    /// resident memory, so leave a margin. Commands it starts inherit the cap:
+    /// the one `capture` wraps, `cosign` and `gh` under `verify-hash`.
+    #[arg(
+        long,
+        global = true,
+        value_name = "MIB",
+        value_parser = clap::value_parser!(u64).range(64..=1_048_576)
+    )]
+    pub(crate) memory_limit_mib: Option<u64>,
+
     #[command(subcommand)]
     pub(crate) command: Commands,
 }

@@ -4,6 +4,17 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.43.2] - 2026-11-06
+
+### Added
+
+- `--memory-limit-mib <64..=1048576>`, on every subcommand, caps the process's address space on Linux. Past the cap an allocation fails, the process aborts with `memory allocation of N bytes failed`, and whatever shares its container keeps running, where the kernel's OOM killer could take the whole container. A caller such as the Hub can then give each run its own share. Address space runs above resident memory, so leave a margin: on a musl release build, a run peaking at about 300 MiB of resident memory passed under 448 MiB and failed under 384 MiB, and one at about 444 MiB passed under 768 MiB and failed under 512 MiB. Commands the process starts inherit the cap: the one `capture` wraps, `cosign` and `gh` under `verify-hash`. On other platforms the flag warns and does nothing.
+- `perf-sentinel-core` gains `ingest_from_tempo_counted`, `TempoIngest` and the `report::warnings::PARTIAL_FETCH` kind. Existing functions keep their signatures.
+
+### Fixed
+
+- `perf-sentinel tempo` says in its report when it analyzed fewer traces than its search matched. A run whose reads partly failed, came back 404 or were cut by Ctrl-C or SIGTERM carries a `partial_fetch` entry in `warning_details` with the counts, so a report over 60 of 100 traces no longer reads as a report over all of them. It used to appear in the logs only, and a tool reading the report saw nothing.
+
 ## [0.43.1] - 2026-11-06
 
 ### Fixed
