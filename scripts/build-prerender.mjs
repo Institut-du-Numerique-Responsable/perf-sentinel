@@ -38,7 +38,7 @@ const PAGES = [
     fr: {
       title: "Perf Sentinel : apps web plus rapides, moins de gaspillages énergétiques et d'émissions carbone",
       desc: "Binaire auto-hébergeable qui détecte les anti-patterns d'I/O (N+1, appels redondants, requêtes lentes, fanout) dans vos traces OpenTelemetry et les chiffre en énergie et en CO₂.",
-      ogDesc: "Perf Sentinel repère ce qui ralentit vos applications pour rien et chiffre ce que ça gaspille en énergie et en carbone.",
+      ogDesc: "Perf Sentinel repère ce qui ralentit inutilement vos applications et chiffre ce que ça gaspille en énergie et en carbone.",
     },
   },
   {
