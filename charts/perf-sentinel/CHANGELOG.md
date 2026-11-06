@@ -10,6 +10,15 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.43.1]
+
+### Changed
+
+- **`appVersion` moves to `0.43.1`.** `perf-sentinel tempo` applies its deadlines
+  to the response body as well as the headers, and reports `most fetches failed`
+  as soon as failed reads outnumber the traces that answered. The daemon does not
+  run this path. No chart value or template changes.
+
 ## [0.43.0]
 
 ### Changed
@@ -17,7 +26,7 @@ the chart version, to know which daemon image ships.
 - **`appVersion` moves to `0.43.0`.** `perf-sentinel tempo` gains
   `--fetch-concurrency` and a `[tempo] fetch_concurrency` key, 16 by default as
   before. The daemon does not use the key, but it validates it at load like
-  every subcommand, so a value outside 1 to 64 in a shared config stops it from
+  every subcommand that loads the config, so a value outside 1 to 64 in a shared config stops it from
   starting. No chart value or template changes.
 
 ## [0.42.1]

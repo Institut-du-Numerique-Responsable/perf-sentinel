@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-11-06
+
 ### Fixed
 
 - `perf-sentinel tempo` applies its deadlines to the response body as well as the headers, 5 s for the search and 30 s per trace, as `jaeger-query` already did. A querier that answered its headers and then stalled used to hang the run until Ctrl-C. A response that takes longer than its deadline to arrive in full now counts as a `timeout` failure.
