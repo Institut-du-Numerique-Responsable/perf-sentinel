@@ -867,8 +867,9 @@ valeurs dynamiques telles que des compteurs.
 
 - `partial_fetch` (**par exécution**, `perf-sentinel tempo` seulement) :
   l'exécution a analysé moins de traces que sa recherche n'en a trouvé,
-  parce que des lectures ont échoué ou ont répondu 404. Le message donne
-  les nombres, et les chiffres décrivent les traces qui ont répondu.
+  parce que des lectures ont échoué, ont répondu 404 ou ont été annulées
+  par Ctrl-C ou SIGTERM. Le message donne les nombres, et les chiffres
+  décrivent les traces qui ont répondu.
   Baisser `--fetch-concurrency` si les échecs viennent d'un querier à
   court de mémoire. Un 404 seul veut dire que les traces ont quitté la
   rétention depuis la recherche.

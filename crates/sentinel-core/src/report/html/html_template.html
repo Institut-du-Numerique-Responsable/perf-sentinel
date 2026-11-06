@@ -5116,7 +5116,7 @@
     var b = document.getElementById("report-warnings");
     b.style.display = "";
     // Only lost data earns the warn tone. The other kinds are advisory.
-    var lostData = rows.some(function (w) { return w.kind === "ingestion_drops"; });
+    var lostData = rows.some(function (w) { return w.kind === "ingestion_drops" || w.kind === "partial_fetch"; });
     setAttr(b, "data-tone", lostData ? "warn" : "info");
     rows.forEach(function (w) {
       var row = el("div", null, null);

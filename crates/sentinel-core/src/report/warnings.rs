@@ -28,8 +28,9 @@ pub const COLD_START: &str = "cold_start";
 pub const INGESTION_DROPS: &str = "ingestion_drops";
 
 /// Stable kind for a Tempo run that analyzed fewer traces than its search
-/// matched, because some reads failed or came back 404. The figures of such a
-/// report describe the traces that answered, not the whole search.
+/// matched, because some reads failed, came back 404 or were cancelled by a
+/// shutdown signal. The figures of such a report describe the traces that
+/// answered, not the whole search.
 pub const PARTIAL_FETCH: &str = "partial_fetch";
 
 /// Stable kind for configuration tuning hints. Emitted by the daemon
@@ -135,5 +136,6 @@ mod tests {
         assert_eq!(TUNING, "tuning");
         assert_eq!(UNMATCHED_ACKNOWLEDGMENT, "unmatched_acknowledgment");
         assert_eq!(SNAPSHOT_SCOPE, "snapshot_scope");
+        assert_eq!(PARTIAL_FETCH, "partial_fetch");
     }
 }

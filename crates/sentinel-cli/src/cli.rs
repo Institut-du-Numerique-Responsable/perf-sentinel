@@ -23,7 +23,8 @@ pub(crate) struct Cli {
     /// Cap this process's address space, in MiB (Linux only). Past the cap an
     /// allocation fails and the process aborts, instead of the kernel's OOM
     /// killer choosing a victim in the container. Address space runs above
-    /// resident memory, so leave a margin.
+    /// resident memory, so leave a margin. Commands it starts inherit the cap:
+    /// the one `capture` wraps, `cosign` and `gh` under `verify-hash`.
     #[arg(
         long,
         global = true,

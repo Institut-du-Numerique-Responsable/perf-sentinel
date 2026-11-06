@@ -711,6 +711,7 @@ fn empty_run(received: u64, fail_counts: &[(&'static str, usize)]) -> FetchLoopO
         received,
         fail_counts: fail_counts.iter().copied().collect(),
         interrupted: false,
+        cancelled: 0,
     }
 }
 
@@ -796,6 +797,23 @@ fn failed_and_gone_traces_are_both_counted() {
             .message
             .starts_with("2 of 10 trace reads failed and 3 more")
     );
+}
+
+/// Cancelled reads are not a Tempo in trouble either: no advice to lower the cap.
+#[test]
+fn reads_a_shutdown_cancelled_carry_a_caveat() {
+    let ingest = TempoIngest {
+        attempted: 10,
+        cancelled: 4,
+        ..TempoIngest::default()
+    };
+    let warning = ingest.partial_warning().expect("caveat");
+    assert!(
+        warning
+            .message
+            .starts_with("A shutdown signal cancelled 4 of 10")
+    );
+    assert!(!warning.message.contains("--fetch-concurrency"));
 }
 
 /// A peer that answers its headers then stalls would otherwise keep the drain

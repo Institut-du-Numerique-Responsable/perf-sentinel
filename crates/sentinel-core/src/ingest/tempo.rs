@@ -463,12 +463,14 @@ fn emit_fetch_summary(
 #[non_exhaustive]
 pub struct TempoIngest {
     pub events: Vec<SpanEvent>,
-    /// Traces the run tried to read.
+    /// Traces the run set out to read.
     pub attempted: usize,
     /// Reads that failed, 404s aside.
     pub failed: usize,
     /// Reads that answered 404: traces gone from retention since the search.
     pub not_found: usize,
+    /// Reads a shutdown signal cancelled before they finished.
+    pub cancelled: usize,
 }
 
 impl TempoIngest {
@@ -477,7 +479,13 @@ impl TempoIngest {
     #[must_use]
     pub fn partial_warning(&self) -> Option<Warning> {
         let (attempted, failed, not_found) = (self.attempted, self.failed, self.not_found);
+        let cancelled = self.cancelled;
         let message = match (failed, not_found) {
+            _ if cancelled > 0 => format!(
+                "A shutdown signal cancelled {cancelled} of {attempted} trace reads before they \
+                 finished ({failed} failed, {not_found} were gone from Tempo), so this report \
+                 only covers the traces that answered."
+            ),
             (0, 0) => return None,
             (0, _) => format!(
                 "{not_found} of {attempted} traces were gone from Tempo by the time they were \
@@ -486,12 +494,12 @@ impl TempoIngest {
             (_, 0) => format!(
                 "{failed} of {attempted} trace reads failed, so this report only covers the \
                  traces that answered. If Tempo is running out of memory, lower \
-                 --fetch-concurrency."
+                 `--fetch-concurrency`."
             ),
             _ => format!(
                 "{failed} of {attempted} trace reads failed and {not_found} more traces were \
                  gone from Tempo, so this report only covers the traces that answered. If \
-                 Tempo is running out of memory, lower --fetch-concurrency."
+                 Tempo is running out of memory, lower `--fetch-concurrency`."
             ),
         };
         Some(Warning::new(PARTIAL_FETCH, message))
@@ -713,13 +721,13 @@ async fn ingest_from_tempo_impl(
         return Err(empty_run_error(&drained, total));
     }
 
-    let not_found = drained.fail_counts.get(NOT_FOUND).copied().unwrap_or(0);
-    let failures: usize = drained.fail_counts.values().sum();
+    let (failed, not_found) = drained.failed_and_not_found();
     Ok(TempoIngest {
         events: drained.events,
         attempted: total,
-        failed: failures - not_found,
+        failed,
         not_found,
+        cancelled: drained.cancelled,
     })
 }
 
@@ -734,13 +742,13 @@ fn empty_run_error(drained: &FetchLoopOutcome, total: usize) -> TempoError {
     if drained.interrupted {
         return TempoError::Interrupted;
     }
-    let failures: usize = drained.fail_counts.values().sum();
-    let not_found = drained.fail_counts.get(NOT_FOUND).copied().unwrap_or(0);
+    let (failed, not_found) = drained.failed_and_not_found();
+    let failures = failed + not_found;
     // A failing backend outweighs what the traces that did answer say: one
     // span-less trace among 99 failures must not blame the instrumentation,
     // nor one empty answer read as an empty search. 404s are traces gone from
     // retention, not a failing backend.
-    if failures - not_found > total.saturating_sub(failures) {
+    if failed > total.saturating_sub(failures) {
         return TempoError::FetchesFailed { traces: total };
     }
     // Keyed on the spans Tempo returned: a batch whose traces came back empty
@@ -786,6 +794,17 @@ struct FetchLoopOutcome {
     received: u64,
     fail_counts: std::collections::HashMap<&'static str, usize>,
     interrupted: bool,
+    /// Tasks the shutdown branch aborted before they finished.
+    cancelled: usize,
+}
+
+impl FetchLoopOutcome {
+    /// Reads that failed, 404s aside, then reads that answered 404.
+    fn failed_and_not_found(&self) -> (usize, usize) {
+        let failures: usize = self.fail_counts.values().sum();
+        let not_found = self.fail_counts.get(NOT_FOUND).copied().unwrap_or(0);
+        (failures - not_found, not_found)
+    }
 }
 
 /// Drive the per-trace fetch `JoinSet` to completion, handle shutdown
@@ -809,6 +828,7 @@ async fn drain_fetch_set(
     let mut fail_counts: std::collections::HashMap<&'static str, usize> =
         std::collections::HashMap::new();
     let mut interrupted = false;
+    let mut cancelled: usize = 0;
 
     loop {
         tokio::select! {
@@ -856,6 +876,7 @@ async fn drain_fetch_set(
                     Some(Err(e)) if e.is_cancelled() => {
                         // Aborted after Ctrl-C. The shutdown branch above
                         // already emitted the user-facing warn.
+                        cancelled += 1;
                     }
                     Some(Err(e)) => {
                         done += 1;
@@ -872,6 +893,7 @@ async fn drain_fetch_set(
         received,
         fail_counts,
         interrupted,
+        cancelled,
     }
 }
 

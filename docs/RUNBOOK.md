@@ -846,11 +846,11 @@ values such as counts.
   hint stays gone under the same load.
 
 - `partial_fetch` (**per run**, `perf-sentinel tempo` only): the run
-  analyzed fewer traces than its search matched, because reads failed or
-  came back 404. The message gives the counts, and the figures describe
-  the traces that answered. Lower `--fetch-concurrency` if the failures
-  are a querier running out of memory. A 404 alone means the traces left
-  retention since the search.
+  analyzed fewer traces than its search matched, because reads failed,
+  came back 404 or were cancelled by Ctrl-C or SIGTERM. The message gives
+  the counts, and the figures describe the traces that answered. Lower
+  `--fetch-concurrency` if the failures are a querier running out of
+  memory. A 404 alone means the traces left retention since the search.
 
 The legacy `Report.warnings: Vec<String>` field (0.5.16+) still ships
 for backward compatibility. CLI and HTML renderers prefer
