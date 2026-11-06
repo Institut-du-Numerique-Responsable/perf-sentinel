@@ -150,7 +150,10 @@ const MAX_TRACE_BODY_BYTES: usize = 64 * 1024 * 1024;
 // § "Tempo ingestion".
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(5);
 const FETCH_TRACE_TIMEOUT: Duration = Duration::from_secs(30);
-const FETCH_CONCURRENCY: usize = 16;
+/// Trace bodies fetched at once when the caller does not say.
+pub const DEFAULT_FETCH_CONCURRENCY: usize = 16;
+/// Ceiling on `fetch_concurrency`: past it a single run is a load test.
+pub const MAX_FETCH_CONCURRENCY: usize = 64;
 
 /// Fetch raw bytes from a Tempo endpoint with size limit and timeout.
 ///
@@ -459,15 +462,20 @@ pub async fn ingest_from_tempo(
         max_traces,
         auth_header,
         None,
+        DEFAULT_FETCH_CONCURRENCY,
     )
     .await
 }
 
 /// Ingest traces using the operator-configured grouping attributes.
 ///
+/// `fetch_concurrency` caps the trace bodies fetched at once, clamped to
+/// `1..=MAX_FETCH_CONCURRENCY`.
+///
 /// # Errors
 ///
 /// Returns `TempoError` on API failures.
+#[allow(clippy::too_many_arguments)]
 pub async fn ingest_from_tempo_with_grouping(
     endpoint: &str,
     service: Option<&str>,
@@ -476,6 +484,7 @@ pub async fn ingest_from_tempo_with_grouping(
     max_traces: usize,
     auth_header: Option<&str>,
     grouping_attributes: Vec<Arc<str>>,
+    fetch_concurrency: usize,
 ) -> Result<Vec<SpanEvent>, TempoError> {
     ingest_from_tempo_impl(
         endpoint,
@@ -485,6 +494,7 @@ pub async fn ingest_from_tempo_with_grouping(
         max_traces,
         auth_header,
         Some(grouping_attributes.into()),
+        fetch_concurrency,
     )
     .await
 }
@@ -498,6 +508,7 @@ async fn ingest_from_tempo_impl(
     max_traces: usize,
     auth_header: Option<&str>,
     grouping_attributes: Option<Arc<[Arc<str>]>>,
+    fetch_concurrency: usize,
 ) -> Result<Vec<SpanEvent>, TempoError> {
     // Endpoint validation (http(s) scheme, no credentials in the
     // authority) lives in `crate::ingest::url_enc` and is shared with
@@ -560,13 +571,16 @@ async fn ingest_from_tempo_impl(
     tracing::info!(count = total, "Found traces, fetching...");
 
     // Parallelize per-trace fetches via a `JoinSet`, capped at
-    // `FETCH_CONCURRENCY` in-flight requests to avoid flooding Tempo's
-    // query-frontend. Mirrors the pattern used by
+    // `fetch_concurrency` in-flight requests to avoid flooding Tempo's
+    // query-frontend. Each fetch by ID costs the querier memory, so a
+    // small querier needs a lower cap than the default. Mirrors the pattern used by
     // `score::cloud_energy::scraper` for per-service Prometheus CPU queries.
     // The hyper client holds an `Arc` internally, so `.clone()` is cheap.
     // The endpoint and the parsed auth header are cloned per task so
     // each owned future is `'static` as required by `spawn`.
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(FETCH_CONCURRENCY));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(
+        fetch_concurrency.clamp(1, MAX_FETCH_CONCURRENCY),
+    ));
     let mut set: tokio::task::JoinSet<FetchOutcome> = tokio::task::JoinSet::new();
     for tid in trace_ids {
         let client_clone = client.clone();

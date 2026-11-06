@@ -562,6 +562,73 @@ async fn ingest_from_tempo_search_then_fetch_aggregates_events() {
     server.await.unwrap();
 }
 
+/// A zero cap is clamped to one, not a semaphore that never grants a permit,
+/// and one permit means one trace body in flight at a time.
+#[tokio::test]
+async fn ingest_from_tempo_fetch_concurrency_zero_fetches_one_at_a_time() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let search_resp =
+        http_200_json(r#"{"traces":[{"traceID":"aa"},{"traceID":"bb"},{"traceID":"cc"}]}"#);
+    let mut proto_buf = Vec::new();
+    ExportTraceServiceRequest {
+        resource_spans: vec![],
+    }
+    .encode(&mut proto_buf)
+    .unwrap();
+    let trace_resp = http_200_proto(&proto_buf);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+
+    let (in_flight_srv, peak_srv) = (Arc::clone(&in_flight), Arc::clone(&peak));
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (search_resp, trace_resp) = (search_resp.clone(), trace_resp.clone());
+            let (in_flight, peak) = (Arc::clone(&in_flight_srv), Arc::clone(&peak_srv));
+            tokio::spawn(async move {
+                let mut rbuf = [0u8; 4096];
+                let n = socket.read(&mut rbuf).await.unwrap_or(0);
+                if String::from_utf8_lossy(&rbuf[..n]).contains("/api/search") {
+                    let _ = socket.write_all(&search_resp).await;
+                } else {
+                    let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    let _ = socket.write_all(&trace_resp).await;
+                }
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+
+    let err = tokio::time::timeout(
+        Duration::from_secs(10),
+        ingest_from_tempo_with_grouping(
+            &endpoint,
+            Some("foo-svc"),
+            None,
+            SearchWindow::Lookback(Duration::from_mins(5)),
+            5,
+            None,
+            Vec::new(),
+            0,
+        ),
+    )
+    .await
+    .expect("a zero cap must not hang")
+    .expect_err("empty traces end in NoTracesFound");
+    assert_matches!(err, TempoError::NoTracesFound);
+    assert_eq!(peak.load(Ordering::SeqCst), 1);
+    server.abort();
+}
+
 // --- Error display ---
 
 #[test]

@@ -601,6 +601,8 @@ perf-sentinel tempo --endpoint http://tempo-query-frontend:3200 \
 
 Un 404 dû à un endpoint erroné remonte comme `Tempo returned HTTP 404 for https://.../api/search?...` (l'URL qui a échoué est incluse dans le message) pour rendre la mauvaise configuration diagnostiquable immédiatement.
 
+Après la recherche, la CLI lit chaque trace par son identifiant, 16 à la fois par défaut. Le query-frontend découpe chaque lecture en `trace_by_id.query_shards` morceaux (50 par défaut), donc 16 lectures mettent des centaines de morceaux en file pour les queriers. Un querier avec une petite limite mémoire peut être tué par manque de mémoire sous cette charge, et le query-frontend redémarre avec lui. Baissez `--fetch-concurrency` (de 1 à 64) pour un tel déploiement. Côté Tempo, `querier.max_concurrent_queries` et un `GOMEMLIMIT` proche de la limite mémoire du querier le protègent de n'importe quel client.
+
 ### Alternative : forwarding générique Tempo
 
 Au lieu d'interroger Tempo, vous pouvez configurer Tempo pour qu'il transmette une copie des traces vers Perf Sentinel via [son mécanisme de generic forwarding](https://grafana.com/docs/tempo/latest/operations/manage-advanced-systems/generic_forwarding/). Cela fonctionne en temps réel avec `perf-sentinel watch`.

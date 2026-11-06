@@ -425,7 +425,7 @@ La sous-commande `report` expose la même capacité via `--pg-stat-prometheus UR
 
 ### Fetch parallèle avec cap de concurrence
 
-La boucle de récupération par trace est parallélisée via `tokio::task::JoinSet`, protégée par un `Arc<Semaphore>` plafonné à `FETCH_CONCURRENCY = 16` jetons. Chaque tâche lancée acquiert un jeton via `acquire_owned` avant l'appel HTTP et le libère à sa destruction (RAII). Le plafond a été choisi empiriquement pour saturer une connexion Tempo distante sur lien WAN (observé ~10-20s pour 100 traces contre ~2m30s avec la boucle séquentielle précédente) sans mettre à genoux une seule réplique de query-frontend. Il est codé en dur aujourd'hui, pas exposé en configuration utilisateur. Ce procédé reprend celui de `score::cloud_energy::scraper`, qui parallélise de la même façon les requêtes CPU Prometheus par service.
+La boucle de récupération par trace est parallélisée via `tokio::task::JoinSet`, protégée par un `Arc<Semaphore>` plafonné à `fetch_concurrency` jetons (`DEFAULT_FETCH_CONCURRENCY = 16`, `--fetch-concurrency` de 1 à 64). Chaque tâche lancée acquiert un jeton via `acquire_owned` avant l'appel HTTP et le libère à sa destruction (RAII). Le plafond a été choisi empiriquement pour saturer une connexion Tempo distante sur lien WAN (observé ~10-20s pour 100 traces contre ~2m30s avec la boucle séquentielle précédente) sans mettre à genoux une seule réplique de query-frontend. Un querier avec une petite limite mémoire peut malgré tout en manquer à 16, puisque le query-frontend découpe chaque lecture en nombreux morceaux, d'où le flag. Ce procédé reprend celui de `score::cloud_energy::scraper`, qui parallélise de la même façon les requêtes CPU Prometheus par service.
 
 ### Séparation des timeouts
 

@@ -381,6 +381,16 @@ pub(crate) enum Commands {
         /// Tempo HTTP API endpoint (e.g. `http://localhost:3200`).
         #[arg(long)]
         endpoint: String,
+        /// Trace bodies fetched at once after the search (1..=64). Each
+        /// fetch by ID costs the Tempo querier memory: lower it when a
+        /// small querier runs out of memory under the default.
+        #[arg(
+            long,
+            default_value_t = sentinel_core::ingest::tempo::DEFAULT_FETCH_CONCURRENCY as u32,
+            value_parser = clap::value_parser!(u32)
+                .range(1..=sentinel_core::ingest::tempo::MAX_FETCH_CONCURRENCY as i64)
+        )]
+        fetch_concurrency: u32,
         #[command(flatten)]
         query: BackendQueryArgs,
     },

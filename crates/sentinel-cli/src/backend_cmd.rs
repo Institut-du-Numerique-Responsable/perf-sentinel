@@ -17,7 +17,7 @@ use crate::{OutputFormat, apply_acknowledgments_or_exit, grouping_keys, load_con
 #[derive(Clone, Copy)]
 pub(crate) enum QueryBackend {
     #[cfg(feature = "tempo")]
-    Tempo,
+    Tempo { fetch_concurrency: usize },
     #[cfg(feature = "jaeger-query")]
     JaegerQuery,
 }
@@ -27,7 +27,7 @@ impl QueryBackend {
     fn label(self) -> &'static str {
         match self {
             #[cfg(feature = "tempo")]
-            Self::Tempo => "tempo",
+            Self::Tempo { .. } => "tempo",
             #[cfg(feature = "jaeger-query")]
             Self::JaegerQuery => "jaeger-query",
         }
@@ -37,7 +37,7 @@ impl QueryBackend {
     fn display(self) -> &'static str {
         match self {
             #[cfg(feature = "tempo")]
-            Self::Tempo => "Tempo",
+            Self::Tempo { .. } => "Tempo",
             #[cfg(feature = "jaeger-query")]
             Self::JaegerQuery => "Jaeger query API",
         }
@@ -111,17 +111,20 @@ pub(crate) async fn cmd_backend_query(
     // enum nothing would match on.
     let fetched = match backend {
         #[cfg(feature = "tempo")]
-        QueryBackend::Tempo => sentinel_core::ingest::tempo::ingest_from_tempo_with_grouping(
-            endpoint,
-            service,
-            trace_id,
-            window,
-            max_traces,
-            auth_header,
-            grouping,
-        )
-        .await
-        .map_err(|e| e.to_string()),
+        QueryBackend::Tempo { fetch_concurrency } => {
+            sentinel_core::ingest::tempo::ingest_from_tempo_with_grouping(
+                endpoint,
+                service,
+                trace_id,
+                window,
+                max_traces,
+                auth_header,
+                grouping,
+                fetch_concurrency,
+            )
+            .await
+            .map_err(|e| e.to_string())
+        }
         #[cfg(feature = "jaeger-query")]
         QueryBackend::JaegerQuery => {
             sentinel_core::ingest::jaeger_query::ingest_from_jaeger_query_with_grouping(

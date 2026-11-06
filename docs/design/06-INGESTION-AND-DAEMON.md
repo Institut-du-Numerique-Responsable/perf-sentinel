@@ -420,7 +420,7 @@ The `report` subcommand exposes the same capability via `--pg-stat-prometheus UR
 
 ### Parallel fetch with concurrency cap
 
-The per-trace fetch loop is parallelized via `tokio::task::JoinSet` guarded by an `Arc<Semaphore>` capped at `FETCH_CONCURRENCY = 16` permits. Each spawned task acquires a permit through `acquire_owned` before the HTTP call and releases it on drop (RAII). The cap was picked empirically to saturate a remote-Tempo connection over a WAN link (observed ~10-20s for 100 traces vs. ~2m30s in the prior sequential loop) without overwhelming a single query-frontend replica, and is currently hardcoded rather than user-configurable. The pattern mirrors `score::cloud_energy::scraper`, which parallelizes per-service Prometheus CPU queries the same way.
+The per-trace fetch loop is parallelized via `tokio::task::JoinSet` guarded by an `Arc<Semaphore>` capped at `fetch_concurrency` permits (`DEFAULT_FETCH_CONCURRENCY = 16`, `--fetch-concurrency` from 1 to 64). Each spawned task acquires a permit through `acquire_owned` before the HTTP call and releases it on drop (RAII). The cap was picked empirically to saturate a remote-Tempo connection over a WAN link (observed ~10-20s for 100 traces vs. ~2m30s in the prior sequential loop) without overwhelming a single query-frontend replica. A querier with a small memory limit can still run out of memory at 16, since the query-frontend splits each read into many jobs, hence the flag. The pattern mirrors `score::cloud_energy::scraper`, which parallelizes per-service Prometheus CPU queries the same way.
 
 ### Timeout split
 
