@@ -21,8 +21,9 @@ use crate::score::scaphandre::ScaphandreConfig;
 
 /// Top-level configuration for perf-sentinel.
 ///
-/// Mirrors the four `.perf-sentinel.toml` sections (`[thresholds]`,
-/// `[detection]`, `[green]`, `[daemon]`) into typed sub-structs so a
+/// Mirrors the `.perf-sentinel.toml` sections (`[thresholds]`,
+/// `[detection]`, `[green]`, `[daemon]`, `[reporting]`, `[tempo]`) into
+/// typed sub-structs so a
 /// consumer that touches only thresholds does not pull a daemon-shaped
 /// import surface. The 0.5.x flat layout was unfolded in 0.6.0. See
 /// `docs/CONFIGURATION.md` for the rename matrix.
@@ -51,7 +52,7 @@ pub const DEFAULT_FETCH_CONCURRENCY: usize = 16;
 /// Ceiling on `fetch_concurrency`: past it a single run is a load test.
 pub const MAX_FETCH_CONCURRENCY: usize = 64;
 
-/// `[tempo]` settings, read by the `tempo` subcommand only.
+/// `[tempo]` settings, used by the `tempo` subcommand only.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct TempoConfig {

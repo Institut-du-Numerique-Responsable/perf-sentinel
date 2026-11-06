@@ -808,7 +808,7 @@ calibration_file = ".perf-sentinel-calibration.toml"
 
 ### `[tempo]`
 
-The `tempo` subcommand runs in batch mode (not daemon), fetches traces from a Grafana Tempo HTTP API and pipes them through the standard analysis pipeline. This section holds one setting, and no other subcommand reads it.
+The `tempo` subcommand runs in batch mode (not daemon), fetches traces from a Grafana Tempo HTTP API and pipes them through the standard analysis pipeline. This section holds one setting. No other subcommand uses it, but they all validate it, so a value outside the range fails their load too.
 
 | Field               | Type    | Default | Description                                                                                                                                                                                                                                       |
 |---------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

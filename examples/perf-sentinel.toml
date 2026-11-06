@@ -128,7 +128,8 @@ grouping_attributes = ["k8s.namespace.name", "service.namespace"]
 # ---------------------------------------------------------------------------
 # `perf-sentinel tempo`
 #
-# Read by that subcommand only. Its other settings are CLI flags.
+# Used by that subcommand only, though every subcommand validates it. Its
+# other settings are CLI flags.
 # ---------------------------------------------------------------------------
 [tempo]
 # Trace bodies read at once after the search. Each read costs the Tempo querier
