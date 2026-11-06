@@ -544,7 +544,7 @@ For the full ack workflow, see [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md).
 
 ## `perf-sentinel tempo` returns 404 or times out
 
-**Symptom.** Either every invocation fails with `Tempo returned HTTP 404 for https://.../api/search?...`, or the search step succeeds but the per-trace fetch loop finishes with `Tempo fetch completed with failures counts={"timeout": N}` and returns a partial (or empty) result.
+**Symptom.** Either every invocation fails with `Tempo returned HTTP 404 for https://.../api/search?...`, or the search step succeeds but the per-trace fetch loop finishes with `Tempo fetch completed with failures counts={"timeout": N}` and returns a partial result, or, when every fetch failed, the error `the search matched N trace(s) but every fetch failed`.
 
 **First checks.**
 
@@ -571,7 +571,7 @@ kubectl logs -n observability deploy/tempo-query-frontend --tail=50 \
 - Causes (1), (2), (3): point `--endpoint` at the actual query-frontend URL, validated by the `curl` above.
 - Cause (4): on the Perf Sentinel side, lower `--fetch-concurrency`, narrow `--lookback` (start at 1 h, widen progressively) or fall back to `--trace-id <id>` for a single-trace replay. On the Tempo side, scale `tempo-query-frontend` horizontally, raise `max_concurrent_queries` if the queriers have memory to spare, and check querier and ingester memory/CPU caps.
 
-Perf Sentinel caps in-flight fetches at 16 by default and `--fetch-concurrency` sets the cap from 1 to 64. The query-frontend splits each fetch into many querier jobs, so the default can exhaust a querier with a small memory limit, on a 100-trace run as well as a 500-trace one. If Tempo still collapses at `--fetch-concurrency 1`, capacity is the bottleneck, not the client. Hitting Ctrl-C during a long run returns a partial result with the already-completed traces (see [LIMITATIONS.md](LIMITATIONS.md) § "Tempo ingestion"). When zero traces had completed, the CLI reports `Tempo fetch was interrupted by Ctrl-C before any trace completed`, distinct from the generic `NoTracesFound`.
+Perf Sentinel caps in-flight fetches at 16 by default and `--fetch-concurrency` or `[tempo] fetch_concurrency` sets the cap from 1 to 64. The query-frontend splits each fetch into many querier jobs, so the default can exhaust a querier with a small memory limit, on a 100-trace run as well as a 500-trace one. If Tempo still collapses at `--fetch-concurrency 1`, capacity is the bottleneck, not the client. Hitting Ctrl-C during a long run returns a partial result with the already-completed traces (see [LIMITATIONS.md](LIMITATIONS.md) § "Tempo ingestion"). When zero traces had completed, the CLI reports `Tempo fetch was interrupted by Ctrl-C before any trace completed`, distinct from the generic `NoTracesFound`.
 
 ---
 

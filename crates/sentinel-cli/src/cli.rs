@@ -388,7 +388,7 @@ pub(crate) enum Commands {
         #[arg(
             long,
             value_parser = clap::value_parser!(u32)
-                .range(1..=sentinel_core::ingest::tempo::MAX_FETCH_CONCURRENCY as i64)
+                .range(1..=sentinel_core::config::MAX_FETCH_CONCURRENCY as i64)
         )]
         fetch_concurrency: Option<u32>,
         #[command(flatten)]

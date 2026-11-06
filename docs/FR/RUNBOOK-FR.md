@@ -556,7 +556,7 @@ Pour le workflow d'ack complet, voir [`ACKNOWLEDGMENTS-FR.md`](ACKNOWLEDGMENTS-F
 
 ## `perf-sentinel tempo` renvoie 404 ou timeout
 
-**Symptôme.** Soit chaque invocation échoue avec `Tempo returned HTTP 404 for https://.../api/search?...`, soit l'étape de recherche réussit mais la boucle de récupération par trace finit avec `Tempo fetch completed with failures counts={"timeout": N}` et renvoie un résultat partiel (ou vide).
+**Symptôme.** Soit chaque invocation échoue avec `Tempo returned HTTP 404 for https://.../api/search?...`, soit l'étape de recherche réussit mais la boucle de récupération par trace finit avec `Tempo fetch completed with failures counts={"timeout": N}` et renvoie un résultat partiel ou, quand toutes les récupérations ont échoué, l'erreur `the search matched N trace(s) but every fetch failed`.
 
 **Premiers contrôles.**
 
@@ -583,7 +583,7 @@ kubectl logs -n observability deploy/tempo-query-frontend --tail=50 \
 - Causes (1), (2), (3) : pointer `--endpoint` sur la vraie URL de query-frontend, validée par le `curl` ci-dessus.
 - Cause (4) : côté Perf Sentinel, baisser `--fetch-concurrency`, réduire `--lookback` (commencer à 1 h, élargir progressivement) ou basculer sur `--trace-id <id>` pour le rejeu d'une trace unique. Côté Tempo, mettre à l'échelle `tempo-query-frontend` horizontalement, remonter `max_concurrent_queries` si les queriers ont de la mémoire en réserve, et vérifier les plafonds mémoire/CPU des queriers et des ingesters.
 
-Perf Sentinel plafonne les récupérations en cours à 16 par défaut et `--fetch-concurrency` règle ce plafond de 1 à 64. Le query-frontend découpe chaque récupération en nombreux morceaux pour les queriers, donc le défaut peut épuiser un querier avec une petite limite mémoire, sur un run de 100 traces comme sur un run de 500. Si Tempo s'effondre encore avec `--fetch-concurrency 1`, c'est la capacité qui bouche, pas le client. Ctrl-C pendant un run long retourne un résultat partiel avec les traces déjà complétées (voir [LIMITATIONS-FR.md](LIMITATIONS-FR.md) § "Ingestion Tempo"). Quand aucune trace n'a eu le temps de se compléter, la CLI renvoie `Tempo fetch was interrupted by Ctrl-C before any trace completed`, distinct du `NoTracesFound` générique.
+Perf Sentinel plafonne les récupérations en cours à 16 par défaut et `--fetch-concurrency` ou `[tempo] fetch_concurrency` règle ce plafond de 1 à 64. Le query-frontend découpe chaque récupération en nombreux morceaux pour les queriers, donc le défaut peut épuiser un querier avec une petite limite mémoire, sur un run de 100 traces comme sur un run de 500. Si Tempo s'effondre encore avec `--fetch-concurrency 1`, c'est la capacité qui bouche, pas le client. Ctrl-C pendant un run long retourne un résultat partiel avec les traces déjà complétées (voir [LIMITATIONS-FR.md](LIMITATIONS-FR.md) § "Ingestion Tempo"). Quand aucune trace n'a eu le temps de se compléter, la CLI renvoie `Tempo fetch was interrupted by Ctrl-C before any trace completed`, distinct du `NoTracesFound` générique.
 
 ---
 

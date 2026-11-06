@@ -10,7 +10,11 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Changed
 
-- **Breaking, `perf-sentinel-core` only.** `ingest_from_tempo_with_grouping` takes `fetch_concurrency` as a new last argument, clamped to `1..=MAX_FETCH_CONCURRENCY`. Callers keep the previous behavior by passing `DEFAULT_FETCH_CONCURRENCY`. `Config` gains a public `tempo` field, so a struct literal without `..Default::default()` stops compiling.
+- **Breaking, `perf-sentinel-core` only.** `ingest_from_tempo_with_grouping` takes `fetch_concurrency` as a new last argument, clamped to `1..=MAX_FETCH_CONCURRENCY`. Callers keep the previous behavior by passing `config::DEFAULT_FETCH_CONCURRENCY`. `Config` gains a public `tempo` field, so a struct literal without `..Default::default()` stops compiling.
+
+### Fixed
+
+- `perf-sentinel tempo` reports `the search matched N trace(s) but every fetch failed` when every trace fetch fails, as on a querier killed mid-run. It used to read `no traces found for the given search criteria`, which pointed at widening a search that had matched. A run where every fetch answers 404 still reports no traces found.
 
 ## [0.42.1] - 2026-11-05
 
