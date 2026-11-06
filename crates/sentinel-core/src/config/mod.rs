@@ -41,6 +41,30 @@ pub struct Config {
     /// destination). Drives daemon startup validation when
     /// `intent = "official"` and is consumed by `perf-sentinel disclose`.
     pub reporting: ReportingConfig,
+    /// `perf-sentinel tempo` settings. Maps 1:1 to `[tempo]` in TOML.
+    pub tempo: TempoConfig,
+}
+
+/// Trace bodies `perf-sentinel tempo` fetches at once when neither the flag
+/// nor `[tempo]` says.
+pub const DEFAULT_FETCH_CONCURRENCY: usize = 16;
+/// Ceiling on `fetch_concurrency`: past it a single run is a load test.
+pub const MAX_FETCH_CONCURRENCY: usize = 64;
+
+/// `[tempo]` settings, read by the `tempo` subcommand only.
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct TempoConfig {
+    /// Trace bodies fetched at once after the search, `1..=MAX_FETCH_CONCURRENCY`.
+    pub fetch_concurrency: usize,
+}
+
+impl Default for TempoConfig {
+    fn default() -> Self {
+        Self {
+            fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
+        }
+    }
 }
 
 /// Maps 1:1 to `[reporting]` in TOML. All fields optional: an absent

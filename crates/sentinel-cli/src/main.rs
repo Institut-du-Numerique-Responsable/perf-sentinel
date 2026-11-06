@@ -256,7 +256,7 @@ async fn dispatch_command(command: Commands) {
         } => {
             backend_cmd::run_backend_query(
                 backend_cmd::QueryBackend::Tempo {
-                    fetch_concurrency: fetch_concurrency as usize,
+                    fetch_concurrency: fetch_concurrency.map(|n| n as usize),
                 },
                 &endpoint,
                 query,

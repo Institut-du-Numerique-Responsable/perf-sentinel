@@ -8,7 +8,7 @@ Perf Sentinel is configured via a `.perf-sentinel.toml` file. All fields are opt
 
 - [Configuration fragments](#configuration-fragments): deterministic multi-file loading.
 - [Subcommands](#subcommands): which subcommands read `.perf-sentinel.toml`.
-- [Sections](#sections): full per-section reference (`[thresholds]`, `[detection]`, `[green]`, `[daemon]`, `[reporting]`).
+- [Sections](#sections): full per-section reference (`[thresholds]`, `[detection]`, `[green]`, `[tempo]`, `[daemon]`, `[reporting]`).
 - [Minimal configuration](#minimal-configuration): the smallest useful `.perf-sentinel.toml`.
 - [Full configuration example](#full-configuration-example): every section populated with example values.
 - [Migration from 0.5.x](#migration-from-05x): the 8 legacy top-level keys removed in 0.6.0 and how to migrate.
@@ -806,9 +806,15 @@ calibration_file = ".perf-sentinel-calibration.toml"
 
 **`perf-sentinel calibrate` input size limits.** Both inputs are capped to protect against unbounded memory use: the `--traces` file is capped at 1 GiB (the fixed batch cap since 0.8.7, same as `analyze`) and the `--measured-energy` CSV is capped at 64 MiB. Calibrate exits with a clear error if either file exceeds its limit. 64 MiB is generous for thousands of RAPL samples per minute. If you need more, file an issue describing the workload.
 
-#### `perf-sentinel tempo` (no config section)
+### `[tempo]`
 
-The `tempo` subcommand runs in batch mode (not daemon), fetches traces from a Grafana Tempo HTTP API and pipes them through the standard analysis pipeline. Its own settings are CLI flags only, there is no `[tempo]` section: `--endpoint` is required, `--max-traces` defaults to `100` and is bounded to 1..=10000 (the client's own read ceiling, not Tempo's), alongside `--trace-id`, `--service`, `--lookback`, `--from`/`--to`, `--sort` and `--auth-header`. Run `perf-sentinel tempo --help` for the current list. A `[tempo]` table written into the config file fails the load since 0.12.0, as any unknown top-level table does. The `--config` file still applies for everything else, thresholds and detection in particular, since the fetched traces go through the same pipeline.
+The `tempo` subcommand runs in batch mode (not daemon), fetches traces from a Grafana Tempo HTTP API and pipes them through the standard analysis pipeline. This section holds one setting, and no other subcommand reads it.
+
+| Field               | Type    | Default | Description                                                                                                                                                                                                                                       |
+|---------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `fetch_concurrency` | integer | `16`    | Trace bodies read at once after the search, 1 to 64. A value outside the range fails the load. Lower it when a small querier runs out of memory, see [Tempo integration](./INTEGRATION.md#tempo-integration). `--fetch-concurrency` overrides it for one run |
+
+Its other settings are CLI flags: `--endpoint` is required, `--max-traces` defaults to `100` and is bounded to 1..=10000 (the client's own read ceiling, not Tempo's), alongside `--trace-id`, `--service`, `--lookback`, `--from`/`--to`, `--sort` and `--auth-header`. Run `perf-sentinel tempo --help` for the current list. Binaries up to 0.42.1 refuse a `[tempo]` table, as they do any unknown top-level table. The `--config` file also applies for everything else, thresholds and detection in particular, since the fetched traces go through the same pipeline.
 
 ### `[daemon]`
 
@@ -1285,6 +1291,10 @@ memory_high_water_pct = 0
 # enabled = true
 # retained_days = 8
 # max_signatures_per_day = 10000
+
+# Optional: trace bodies `perf-sentinel tempo` reads at once (1 to 64)
+# [tempo]
+# fetch_concurrency = 16
 ```
 
 ## Migration from 0.5.x

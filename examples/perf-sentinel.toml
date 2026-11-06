@@ -126,6 +126,17 @@ sanitizer_aware_min_cv = 0.5   # default 0.5, range (0, 10]
 grouping_attributes = ["k8s.namespace.name", "service.namespace"]
 
 # ---------------------------------------------------------------------------
+# `perf-sentinel tempo`
+#
+# Read by that subcommand only. Its other settings are CLI flags.
+# ---------------------------------------------------------------------------
+[tempo]
+# Trace bodies read at once after the search. Each read costs the Tempo querier
+# memory, so lower it when a small querier runs out of memory.
+# `--fetch-concurrency` overrides it for one run.
+fetch_concurrency = 16   # default 16, bounds 1..64
+
+# ---------------------------------------------------------------------------
 # GreenOps / carbon scoring
 #
 # On by default with the embedded reference data, no network access. The

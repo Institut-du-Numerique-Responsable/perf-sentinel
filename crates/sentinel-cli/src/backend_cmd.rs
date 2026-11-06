@@ -17,7 +17,7 @@ use crate::{OutputFormat, apply_acknowledgments_or_exit, grouping_keys, load_con
 #[derive(Clone, Copy)]
 pub(crate) enum QueryBackend {
     #[cfg(feature = "tempo")]
-    Tempo { fetch_concurrency: usize },
+    Tempo { fetch_concurrency: Option<usize> },
     #[cfg(feature = "jaeger-query")]
     JaegerQuery,
 }
@@ -120,7 +120,7 @@ pub(crate) async fn cmd_backend_query(
                 max_traces,
                 auth_header,
                 grouping,
-                fetch_concurrency,
+                fetch_concurrency.unwrap_or(config.tempo.fetch_concurrency),
             )
             .await
             .map_err(|e| e.to_string())

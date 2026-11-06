@@ -6,7 +6,11 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Added
 
-- `perf-sentinel tempo --fetch-concurrency <1..=64>` sets how many trace bodies the search-then-fetch flow reads at once, 16 by default as before. Tempo's query-frontend splits each read by ID into `trace_by_id.query_shards` jobs, 50 by default, so 16 reads queue hundreds of jobs: on a production `tempo-distributed` with a 1 Gi querier, a 500-trace run had the querier killed for running out of memory and the query-frontend restarting with it, and so did a 100-trace run. A lower value spreads the same reads over more time. `ingest_from_tempo_with_grouping` takes the cap as a new last argument, clamped to `1..=MAX_FETCH_CONCURRENCY`. `docs/INTEGRATION.md`, `docs/LIMITATIONS.md` and their French mirrors describe it.
+- `perf-sentinel tempo --fetch-concurrency <1..=64>` and the new `[tempo] fetch_concurrency` key set how many trace bodies the search-then-fetch flow reads at once, 16 by default as before. The flag wins over the key, and a key outside the range fails the load. Tempo's query-frontend splits each read by ID into `trace_by_id.query_shards` jobs, 50 by default, so 16 reads queue hundreds of jobs: on a production `tempo-distributed` with a 1 Gi querier, a 500-trace run had the querier killed for running out of memory and the query-frontend restarting with it, and so did a 100-trace run. A lower value spreads the same reads over more time. `docs/INTEGRATION.md`, `docs/LIMITATIONS.md`, `docs/RUNBOOK.md`, `docs/CONFIGURATION.md` and their French mirrors describe it.
+
+### Changed
+
+- **Breaking, `perf-sentinel-core` only.** `ingest_from_tempo_with_grouping` takes `fetch_concurrency` as a new last argument, clamped to `1..=MAX_FETCH_CONCURRENCY`. Callers keep the previous behavior by passing `DEFAULT_FETCH_CONCURRENCY`. `Config` gains a public `tempo` field, so a struct literal without `..Default::default()` stops compiling.
 
 ## [0.42.1] - 2026-11-05
 

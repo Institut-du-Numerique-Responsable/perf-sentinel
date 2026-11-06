@@ -562,10 +562,9 @@ async fn ingest_from_tempo_search_then_fetch_aggregates_events() {
     server.await.unwrap();
 }
 
-/// A zero cap is clamped to one, not a semaphore that never grants a permit,
-/// and one permit means one trace body in flight at a time.
-#[tokio::test]
-async fn ingest_from_tempo_fetch_concurrency_zero_fetches_one_at_a_time() {
+/// Runs a three-trace search-then-fetch at `cap` and returns the most trace
+/// bodies the mock saw in flight at once.
+async fn peak_fetches_in_flight(cap: usize) -> usize {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -584,19 +583,29 @@ async fn ingest_from_tempo_fetch_concurrency_zero_fetches_one_at_a_time() {
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let in_flight = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
+    let fetched = Arc::new(AtomicUsize::new(0));
 
-    let (in_flight_srv, peak_srv) = (Arc::clone(&in_flight), Arc::clone(&peak));
+    let (in_flight_srv, peak_srv, fetched_srv) = (
+        Arc::clone(&in_flight),
+        Arc::clone(&peak),
+        Arc::clone(&fetched),
+    );
     let server = tokio::spawn(async move {
         loop {
             let (mut socket, _) = listener.accept().await.unwrap();
             let (search_resp, trace_resp) = (search_resp.clone(), trace_resp.clone());
-            let (in_flight, peak) = (Arc::clone(&in_flight_srv), Arc::clone(&peak_srv));
+            let (in_flight, peak, fetched) = (
+                Arc::clone(&in_flight_srv),
+                Arc::clone(&peak_srv),
+                Arc::clone(&fetched_srv),
+            );
             tokio::spawn(async move {
                 let mut rbuf = [0u8; 4096];
                 let n = socket.read(&mut rbuf).await.unwrap_or(0);
                 if String::from_utf8_lossy(&rbuf[..n]).contains("/api/search") {
                     let _ = socket.write_all(&search_resp).await;
                 } else {
+                    fetched.fetch_add(1, Ordering::SeqCst);
                     let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
                     peak.fetch_max(now, Ordering::SeqCst);
                     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -618,15 +627,31 @@ async fn ingest_from_tempo_fetch_concurrency_zero_fetches_one_at_a_time() {
             5,
             None,
             Vec::new(),
-            0,
+            cap,
         ),
     )
     .await
-    .expect("a zero cap must not hang")
+    .expect("the fetches must not hang")
     .expect_err("empty traces end in NoTracesFound");
     assert_matches!(err, TempoError::NoTracesFound);
-    assert_eq!(peak.load(Ordering::SeqCst), 1);
+    // NoTracesFound also ends a run whose fetches all failed.
+    assert_eq!(fetched.load(Ordering::SeqCst), 3);
     server.abort();
+    peak.load(Ordering::SeqCst)
+}
+
+/// A zero cap is clamped to one, not a semaphore that never grants a permit,
+/// and one permit means one trace body in flight at a time.
+#[tokio::test]
+async fn ingest_from_tempo_fetch_concurrency_zero_fetches_one_at_a_time() {
+    assert_eq!(peak_fetches_in_flight(0).await, 1);
+}
+
+/// `Semaphore::new` panics past `MAX_PERMITS`, so this needs the ceiling. The
+/// overlap also proves the mock can see more than one fetch in flight.
+#[tokio::test]
+async fn ingest_from_tempo_fetch_concurrency_past_the_ceiling_still_overlaps() {
+    assert!(peak_fetches_in_flight(usize::MAX).await > 1);
 }
 
 // --- Error display ---

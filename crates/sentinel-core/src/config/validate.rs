@@ -243,8 +243,20 @@ impl Config {
         self.validate_daemon_hub_export()?;
         self.validate_daemon_detections()?;
         self.validate_reporting()?;
+        self.validate_tempo()?;
         self.validate_cross_section_consistency()?;
         Ok(())
+    }
+
+    /// The core clamps this value silently, so only this refusal tells the
+    /// operator their setting is not the one in use.
+    fn validate_tempo(&self) -> Result<(), String> {
+        check_range(
+            "[tempo] fetch_concurrency",
+            &self.tempo.fetch_concurrency,
+            &1,
+            &super::MAX_FETCH_CONCURRENCY,
+        )
     }
 
     /// Validate `[reporting]` settings. Rejects unknown intent /

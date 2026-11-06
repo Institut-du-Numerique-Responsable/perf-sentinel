@@ -6111,3 +6111,25 @@ fn shipped_cloud_examples_share_no_query_across_envelopes() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn tempo_fetch_concurrency_defaults_parses_and_is_bounded() {
+    assert_eq!(
+        load_from_str("").unwrap().tempo.fetch_concurrency,
+        DEFAULT_FETCH_CONCURRENCY
+    );
+    for value in [1, MAX_FETCH_CONCURRENCY] {
+        let toml = format!("[tempo]\nfetch_concurrency = {value}\n");
+        assert_eq!(load_from_str(&toml).unwrap().tempo.fetch_concurrency, value);
+    }
+    for value in [0, MAX_FETCH_CONCURRENCY + 1] {
+        let toml = format!("[tempo]\nfetch_concurrency = {value}\n");
+        let err = load_from_str(&toml).unwrap_err().to_string();
+        assert!(err.contains("[tempo] fetch_concurrency"), "got: {err}");
+    }
+}
+
+#[test]
+fn tempo_section_rejects_unknown_keys() {
+    assert!(load_from_str("[tempo]\nfetch_concurency = 4\n").is_err());
+}

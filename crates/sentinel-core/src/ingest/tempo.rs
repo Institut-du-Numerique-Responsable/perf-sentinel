@@ -150,10 +150,7 @@ const MAX_TRACE_BODY_BYTES: usize = 64 * 1024 * 1024;
 // § "Tempo ingestion".
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(5);
 const FETCH_TRACE_TIMEOUT: Duration = Duration::from_secs(30);
-/// Trace bodies fetched at once when the caller does not say.
-pub const DEFAULT_FETCH_CONCURRENCY: usize = 16;
-/// Ceiling on `fetch_concurrency`: past it a single run is a load test.
-pub const MAX_FETCH_CONCURRENCY: usize = 64;
+pub use crate::config::{DEFAULT_FETCH_CONCURRENCY, MAX_FETCH_CONCURRENCY};
 
 /// Fetch raw bytes from a Tempo endpoint with size limit and timeout.
 ///
