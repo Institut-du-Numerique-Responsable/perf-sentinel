@@ -27,6 +27,11 @@ pub const COLD_START: &str = "cold_start";
 /// due to channel saturation.
 pub const INGESTION_DROPS: &str = "ingestion_drops";
 
+/// Stable kind for a Tempo run that analyzed fewer traces than its search
+/// matched, because some reads failed or came back 404. The figures of such a
+/// report describe the traces that answered, not the whole search.
+pub const PARTIAL_FETCH: &str = "partial_fetch";
+
 /// Stable kind for configuration tuning hints. Emitted by the daemon
 /// when its metrics show the current settings are undersized for the
 /// observed load (queue sheds, cap evictions, near-full trace window),

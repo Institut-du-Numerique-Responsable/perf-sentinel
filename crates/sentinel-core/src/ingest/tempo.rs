@@ -18,6 +18,8 @@ use crate::ingest::auth_header::AuthHeader;
 use crate::ingest::lookback::{SearchWindow, WindowError};
 use crate::ingest::otlp::convert_otlp_request_counted_with_grouping;
 use crate::ingest::url_enc::{percent_encode_query_value, validate_http_endpoint};
+use crate::report::Warning;
+use crate::report::warnings::PARTIAL_FETCH;
 
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -456,6 +458,46 @@ fn emit_fetch_summary(
     }
 }
 
+/// What a Tempo run collected, and how many of its traces it could not read.
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub struct TempoIngest {
+    pub events: Vec<SpanEvent>,
+    /// Traces the run tried to read.
+    pub attempted: usize,
+    /// Reads that failed, 404s aside.
+    pub failed: usize,
+    /// Reads that answered 404: traces gone from retention since the search.
+    pub not_found: usize,
+}
+
+impl TempoIngest {
+    /// The caveat a report over these events must carry, or `None` when every
+    /// trace was read. Counters only, so [`Warning::new`] applies.
+    #[must_use]
+    pub fn partial_warning(&self) -> Option<Warning> {
+        let (attempted, failed, not_found) = (self.attempted, self.failed, self.not_found);
+        let message = match (failed, not_found) {
+            (0, 0) => return None,
+            (0, _) => format!(
+                "{not_found} of {attempted} traces were gone from Tempo by the time they were \
+                 read, so this report only covers the others."
+            ),
+            (_, 0) => format!(
+                "{failed} of {attempted} trace reads failed, so this report only covers the \
+                 traces that answered. If Tempo is running out of memory, lower \
+                 --fetch-concurrency."
+            ),
+            _ => format!(
+                "{failed} of {attempted} trace reads failed and {not_found} more traces were \
+                 gone from Tempo, so this report only covers the traces that answered. If \
+                 Tempo is running out of memory, lower --fetch-concurrency."
+            ),
+        };
+        Some(Warning::new(PARTIAL_FETCH, message))
+    }
+}
+
 /// Ingest traces from Tempo: either a single trace by ID or a search-then-fetch flow.
 ///
 /// # Errors
@@ -480,6 +522,7 @@ pub async fn ingest_from_tempo(
         DEFAULT_FETCH_CONCURRENCY,
     )
     .await
+    .map(|ingest| ingest.events)
 }
 
 /// Ingest traces using the operator-configured grouping attributes.
@@ -501,6 +544,37 @@ pub async fn ingest_from_tempo_with_grouping(
     grouping_attributes: Vec<Arc<str>>,
     fetch_concurrency: usize,
 ) -> Result<Vec<SpanEvent>, TempoError> {
+    ingest_from_tempo_counted(
+        endpoint,
+        service,
+        trace_id,
+        window,
+        max_traces,
+        auth_header,
+        grouping_attributes,
+        fetch_concurrency,
+    )
+    .await
+    .map(|ingest| ingest.events)
+}
+
+/// [`ingest_from_tempo_with_grouping`], with the count of traces it could not
+/// read, for a caller whose report must say so.
+///
+/// # Errors
+///
+/// Returns `TempoError` on API failures.
+#[allow(clippy::too_many_arguments)]
+pub async fn ingest_from_tempo_counted(
+    endpoint: &str,
+    service: Option<&str>,
+    trace_id: Option<&str>,
+    window: SearchWindow,
+    max_traces: usize,
+    auth_header: Option<&str>,
+    grouping_attributes: Vec<Arc<str>>,
+    fetch_concurrency: usize,
+) -> Result<TempoIngest, TempoError> {
     ingest_from_tempo_impl(
         endpoint,
         service,
@@ -524,7 +598,7 @@ async fn ingest_from_tempo_impl(
     auth_header: Option<&str>,
     grouping_attributes: Option<Arc<[Arc<str>]>>,
     fetch_concurrency: usize,
-) -> Result<Vec<SpanEvent>, TempoError> {
+) -> Result<TempoIngest, TempoError> {
     // Endpoint validation (http(s) scheme, no credentials in the
     // authority) lives in `crate::ingest::url_enc` and is shared with
     // `jaeger_query`. We wrap the `&'static str` into the local
@@ -559,7 +633,12 @@ async fn ingest_from_tempo_impl(
             parsed_auth.as_ref(),
             grouping_attributes.as_deref(),
         )
-        .await;
+        .await
+        .map(|events| TempoIngest {
+            events,
+            attempted: 1,
+            ..TempoIngest::default()
+        });
     }
 
     let svc = service.ok_or_else(|| {
@@ -634,7 +713,14 @@ async fn ingest_from_tempo_impl(
         return Err(empty_run_error(&drained, total));
     }
 
-    Ok(drained.events)
+    let not_found = drained.fail_counts.get(NOT_FOUND).copied().unwrap_or(0);
+    let failures: usize = drained.fail_counts.values().sum();
+    Ok(TempoIngest {
+        events: drained.events,
+        attempted: total,
+        failed: failures - not_found,
+        not_found,
+    })
 }
 
 /// Why a search-then-fetch run collected no event.

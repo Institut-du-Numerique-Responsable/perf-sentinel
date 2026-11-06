@@ -112,7 +112,7 @@ pub(crate) async fn cmd_backend_query(
     let fetched = match backend {
         #[cfg(feature = "tempo")]
         QueryBackend::Tempo { fetch_concurrency } => {
-            sentinel_core::ingest::tempo::ingest_from_tempo_with_grouping(
+            sentinel_core::ingest::tempo::ingest_from_tempo_counted(
                 endpoint,
                 service,
                 trace_id,
@@ -123,6 +123,10 @@ pub(crate) async fn cmd_backend_query(
                 fetch_concurrency.unwrap_or(config.tempo.fetch_concurrency),
             )
             .await
+            .map(|ingest| {
+                let caveat = ingest.partial_warning();
+                (ingest.events, caveat)
+            })
             .map_err(|e| e.to_string())
         }
         #[cfg(feature = "jaeger-query")]
@@ -137,12 +141,13 @@ pub(crate) async fn cmd_backend_query(
                 grouping,
             )
             .await
+            .map(|events| (events, None))
             .map_err(|e| e.to_string())
         }
     };
 
-    let events = match fetched {
-        Ok(events) => events,
+    let (events, caveat) = match fetched {
+        Ok(fetched) => fetched,
         Err(e) => {
             eprintln!("Error fetching traces from {}: {e}", backend.display());
             std::process::exit(crate::EXIT_TOOLING_ERROR);
@@ -156,6 +161,7 @@ pub(crate) async fn cmd_backend_query(
     );
 
     let (mut report, traces) = pipeline::analyze_with_traces(events, &config, None);
+    report.warning_details.extend(caveat);
     apply_acknowledgments_or_exit(
         &mut report,
         &config,

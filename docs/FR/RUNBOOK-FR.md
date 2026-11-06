@@ -865,6 +865,14 @@ valeurs dynamiques telles que des compteurs.
   daemon, puis confirmer que l'indication ne revient pas sous la même
   charge.
 
+- `partial_fetch` (**par exécution**, `perf-sentinel tempo` seulement) :
+  l'exécution a analysé moins de traces que sa recherche n'en a trouvé,
+  parce que des lectures ont échoué ou ont répondu 404. Le message donne
+  les nombres, et les chiffres décrivent les traces qui ont répondu.
+  Baisser `--fetch-concurrency` si les échecs viennent d'un querier à
+  court de mémoire. Un 404 seul veut dire que les traces ont quitté la
+  rétention depuis la recherche.
+
 Le champ legacy `Report.warnings: Vec<String>` (0.5.16+) reste émis
 pour la rétrocompatibilité. Les renderers CLI et HTML préfèrent
 `warning_details` quand non vide et se rabattent sur `warnings` sinon.

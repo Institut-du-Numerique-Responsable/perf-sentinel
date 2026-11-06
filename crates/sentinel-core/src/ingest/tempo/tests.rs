@@ -758,6 +758,46 @@ fn not_found_is_not_a_backend_failure() {
     );
 }
 
+fn counted(attempted: usize, failed: usize, not_found: usize) -> TempoIngest {
+    TempoIngest {
+        attempted,
+        failed,
+        not_found,
+        ..TempoIngest::default()
+    }
+}
+
+#[test]
+fn a_full_read_carries_no_caveat() {
+    assert!(counted(5, 0, 0).partial_warning().is_none());
+}
+
+#[test]
+fn failed_reads_are_counted_and_point_at_the_cap() {
+    let warning = counted(100, 40, 0).partial_warning().expect("caveat");
+    assert_eq!(warning.kind, "partial_fetch");
+    assert!(warning.message.starts_with("40 of 100 trace reads failed"));
+    assert!(warning.message.contains("--fetch-concurrency"));
+}
+
+/// Retention does not mean a Tempo in trouble: no advice to lower the cap.
+#[test]
+fn traces_gone_from_retention_do_not_point_at_the_cap() {
+    let warning = counted(10, 0, 3).partial_warning().expect("caveat");
+    assert!(warning.message.starts_with("3 of 10 traces were gone"));
+    assert!(!warning.message.contains("--fetch-concurrency"));
+}
+
+#[test]
+fn failed_and_gone_traces_are_both_counted() {
+    let warning = counted(10, 2, 3).partial_warning().expect("caveat");
+    assert!(
+        warning
+            .message
+            .starts_with("2 of 10 trace reads failed and 3 more")
+    );
+}
+
 /// A peer that answers its headers then stalls would otherwise keep the drain
 /// loop waiting forever, and the run would never report its failures.
 #[tokio::test]

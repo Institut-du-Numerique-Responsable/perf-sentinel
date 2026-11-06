@@ -711,3 +711,94 @@ fn cli_tempo_help_mentions_sort() {
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("--sort"), "help mentions --sort");
 }
+
+/// Serves two traces from the search and answers the trace reads as `reads`
+/// says: the real body for an id it maps to true, a 500 otherwise.
+fn tempo_report_with_reads(reads: &'static [(&'static str, bool)]) -> serde_json::Value {
+    let ids: Vec<String> = reads
+        .iter()
+        .map(|(id, _)| format!(r#"{{"traceID":"{id}"}}"#))
+        .collect();
+    let search_body = format!(r#"{{"traces":[{}]}}"#, ids.join(","));
+    let trace_body = otlp_trace_body();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    thread::spawn(move || {
+        while let Ok((mut stream, _)) = listener.accept() {
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut request_line = String::new();
+            let _ = reader.read_line(&mut request_line);
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            let answers = reads
+                .iter()
+                .any(|(id, ok)| *ok && request_line.contains(&format!("/api/traces/{id}")));
+            let (status, body): (&str, &[u8]) = if request_line.contains("/api/search") {
+                ("200 OK", search_body.as_bytes())
+            } else if answers {
+                ("200 OK", &trace_body)
+            } else {
+                ("500 Internal", b"")
+            };
+            let head = format!(
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body);
+        }
+    });
+
+    let output = Command::new(env!("CARGO_BIN_EXE_perf-sentinel"))
+        .args([
+            "tempo",
+            "--service",
+            "stub",
+            "--no-acknowledgments",
+            "--format",
+            "json",
+            "--endpoint",
+        ])
+        .arg(format!("http://127.0.0.1:{port}"))
+        .output()
+        .expect("run the binary");
+    assert!(output.status.success(), "{output:?}");
+    serde_json::from_slice(&output.stdout).expect("a JSON report")
+}
+
+#[test]
+fn cli_tempo_report_says_when_a_read_failed() {
+    let report = tempo_report_with_reads(&[
+        (STUB_TRACE_ID_HEX, true),
+        ("b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", false),
+    ]);
+    let partial: Vec<_> = report["warning_details"]
+        .as_array()
+        .expect("warning_details")
+        .iter()
+        .filter(|warning| warning["kind"] == "partial_fetch")
+        .collect();
+    assert_eq!(partial.len(), 1, "{report}");
+    let message = partial[0]["message"].as_str().expect("message");
+    assert!(
+        message.starts_with("1 of 2 trace reads failed"),
+        "{message}"
+    );
+}
+
+#[test]
+fn cli_tempo_report_stays_silent_when_every_read_answers() {
+    let report = tempo_report_with_reads(&[(STUB_TRACE_ID_HEX, true)]);
+    let details = report["warning_details"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        details
+            .iter()
+            .all(|warning| warning["kind"] != "partial_fetch"),
+        "{report}"
+    );
+}
