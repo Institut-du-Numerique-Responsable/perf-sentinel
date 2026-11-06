@@ -564,14 +564,14 @@ kubectl logs -n observability deploy/tempo-query-frontend --tail=50 \
 1. **Wrong component in a microservices deployment.** In `tempo-distributed` Helm deployments, the HTTP query API is served exclusively by `tempo-query-frontend`. Pointing `--endpoint` at `tempo-querier` (an internal worker, no public API) or `tempo-ingester` (write path only) returns 404 on every `/api/search`. The 404 message emitted by Perf Sentinel includes the failing URL, so the misconfiguration is visible at a glance.
 2. **Endpoint pointing at Grafana instead of Tempo.** Grafana defaults to port 3000, Tempo HTTP API to 3200. `http://grafana:3000/api/search` has no backing route and returns 404.
 3. **Reverse-proxy path prefix omitted.** If Tempo sits behind ingress with a path prefix (e.g. `https://observability.example.com/tempo/...`), `--endpoint` must include the prefix.
-4. **Tempo degraded under fetch load.** Search succeeded but per-trace fetches time out. Common triggers: long `--lookback` (24 h on a large service), under-provisioned `tempo-query-frontend` replicas, `max_concurrent_queries` hit, ingester resource limits (OOM-killed ingesters produce cascading fetch failures).
+4. **Tempo degraded under fetch load.** Search succeeded but per-trace fetches time out. Common triggers: long `--lookback` (24 h on a large service), under-provisioned `tempo-query-frontend` replicas, `max_concurrent_queries` hit, a querier with a small memory limit (OOM-killed under the fetch load), ingester resource limits (OOM-killed ingesters produce cascading fetch failures).
 
 **Fix.**
 
 - Causes (1), (2), (3): point `--endpoint` at the actual query-frontend URL, validated by the `curl` above.
-- Cause (4): on the Perf Sentinel side, narrow `--lookback` (start at 1 h, widen progressively) or fall back to `--trace-id <id>` for a single-trace replay. On the Tempo side, scale `tempo-query-frontend` horizontally, raise `max_concurrent_queries`, and check ingester memory/CPU caps.
+- Cause (4): on the Perf Sentinel side, lower `--fetch-concurrency`, narrow `--lookback` (start at 1 h, widen progressively) or fall back to `--trace-id <id>` for a single-trace replay. On the Tempo side, scale `tempo-query-frontend` horizontally, raise `max_concurrent_queries` if the queriers have memory to spare, and check querier and ingester memory/CPU caps.
 
-Perf-sentinel caps in-flight fetches at 16 concurrent by default, so the client is not itself flooding Tempo. If Tempo still collapses under a 100-trace run, capacity is the bottleneck, not the client. Hitting Ctrl-C during a long run returns a partial result with the already-completed traces (see [LIMITATIONS.md](LIMITATIONS.md) § "Tempo ingestion"). When zero traces had completed, the CLI reports `Tempo fetch was interrupted by Ctrl-C before any trace completed`, distinct from the generic `NoTracesFound`.
+Perf Sentinel caps in-flight fetches at 16 by default and `--fetch-concurrency` sets the cap from 1 to 64. The query-frontend splits each fetch into many querier jobs, so the default can exhaust a querier with a small memory limit, on a 100-trace run as well as a 500-trace one. If Tempo still collapses at `--fetch-concurrency 1`, capacity is the bottleneck, not the client. Hitting Ctrl-C during a long run returns a partial result with the already-completed traces (see [LIMITATIONS.md](LIMITATIONS.md) § "Tempo ingestion"). When zero traces had completed, the CLI reports `Tempo fetch was interrupted by Ctrl-C before any trace completed`, distinct from the generic `NoTracesFound`.
 
 ---
 
