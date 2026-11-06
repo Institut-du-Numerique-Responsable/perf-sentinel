@@ -42,6 +42,7 @@ config:
       # api_key comes from PERF_SENTINEL_EMAPS_TOKEN, see the Secret below.
       # There is no "env:VAR" indirection: a value in that shape is used
       # literally.
+      # endpoint = "https://api.electricitymaps.com/v4"   # default https://api.electricitymaps.com/v4
       #
       # Size it to your plan's quota: one zone polled every 3600 s spends
       # about 720 requests a month. The free tier is for non-commercial use only.
@@ -53,6 +54,7 @@ config:
       # "lifecycle" (default) includes construction and fuel supply chain,
       # "direct" counts combustion only.
       emission_factor_type = "lifecycle"   # default "lifecycle", or "direct"
+      # temporal_granularity = "hourly"   # default "hourly", or "5_minutes" / "15_minutes"
 
 # Required: without the token the section stays inert and the embedded hourly
 # profiles are used. Create the Secret before installing:
