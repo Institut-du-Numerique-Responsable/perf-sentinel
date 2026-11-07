@@ -18,7 +18,7 @@ Each card renders in English or French (`lang`) and in one of four formats:
 
 - `card.png`, a single 1080 x 1350 image, the format to post.
 - `card.svg`, the same image as an SVG, its text drawn as outlines (see [The SVG](#the-svg)).
-- `card.jxl`, the same pixels as a lossless JPEG XL, an archival export LinkedIn does not accept (see [The JPEG XL](#the-jpeg-xl)).
+- `card.jxl`, the same pixels as a lossless JPEG XL, an archival export social networks do not accept (see [The JPEG XL](#the-jpeg-xl)).
 - `card.pdf`, a four-page carousel (the hook, why it matters, the figures with their equivalence, the proof with the method), PDF/A-3b.
 
 All four carry the full signed payload. The QR code on the image and on the carousel's last page holds the verify URL with the compact payload.
@@ -99,7 +99,7 @@ The same file with one pixel changed prints, with exit 1:
 
 The checks run in a fixed order, and the first that fails decides the line: the envelope and its carrier, the payload's signature over the exact bytes the card carries, the fingerprint, the file's content signature, the payload's rules, then the key's binding. A bad signature is `tampered` whatever the bytes say, and a valid signature over a payload that breaks a rule is `malformed_input`. A file whose content signature does not hold is `content_modified`, and its key is not judged: no `--keys` lookup, no network request under `--online`.
 
-On an original file, `content` says whether the file is the one signed, so a genuine envelope copied onto an edited image reads `content_modified`. A republished image keeps only its QR code (LinkedIn re-encodes images and strips their metadata), and the QR code proves the figures, never the pixels around it: compare `figures`, or the verify page, with the image.
+On an original file, `content` says whether the file is the one signed, so a genuine envelope copied onto an edited image reads `content_modified`. A republished image keeps only its QR code (social networks re-encode images and strip their metadata), and the QR code proves the figures, never the pixels around it: compare `figures`, or the verify page, with the image.
 
 #### Scripting a check
 
@@ -522,7 +522,7 @@ Sizes measured on the test fixtures (English, envelope included):
 | Curve      | 41,486 B   | 110,649 B  | 0.37  |
 | Collective | 42,114 B   | 116,822 B  | 0.36  |
 
-JPEG XL is an archival or high-quality export. The PNG stays the format to post: LinkedIn does not accept JPEG XL ([its help page](https://www.linkedin.com/help/linkedin/answer/a564109) lists GIF, HEIF/HEIC on iOS, JPEG, PNG and WEBP for images), and browser support is recent and uneven: Chrome turns it on by default from version 155, Firefox from 158, Safari has partial support since 17, and Edge does not display it ([caniuse](https://caniuse.com/jpegxl), checked 2026-10-30).
+JPEG XL is an archival or high-quality export. The PNG stays the format to post: social networks do not accept JPEG XL (their image formats stop at GIF, HEIF/HEIC, JPEG, PNG and WEBP), and browser support is recent and uneven: Chrome turns it on by default from version 155, Firefox from 158, Safari has partial support since 17, and Edge does not display it ([caniuse](https://caniuse.com/jpegxl), checked 2026-10-30).
 
 jixel writes a bare codestream (it starts `FF 0A`) and has no API for a custom box, so the engine writes the container itself. The layout is fixed:
 

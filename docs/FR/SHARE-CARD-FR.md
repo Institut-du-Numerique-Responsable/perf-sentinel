@@ -18,7 +18,7 @@ Chaque carte se rend en anglais ou en français (`lang`) et dans l'un de ces qua
 
 - `card.png`, une image unique de 1080 x 1350, le format à publier.
 - `card.svg`, la même image en SVG, son texte dessiné en contours (voir [Le SVG](#le-svg)).
-- `card.jxl`, les mêmes pixels en JPEG XL sans perte, un export d'archive que LinkedIn n'accepte pas (voir [Le JPEG XL](#le-jpeg-xl)).
+- `card.jxl`, les mêmes pixels en JPEG XL sans perte, un export d'archive que les réseaux sociaux n'acceptent pas (voir [Le JPEG XL](#le-jpeg-xl)).
 - `card.pdf`, un carrousel de quatre pages (l'accroche, pourquoi c'est important, les chiffres avec leur équivalence, la preuve avec la méthode), en PDF/A-3b.
 
 Les quatre portent la charge utile complète signée. Le QR code de l'image et de la dernière page du carrousel contient l'URL de vérification avec la charge utile compacte.
@@ -99,7 +99,7 @@ Le même fichier avec un pixel changé affiche, avec la sortie 1 :
 
 Les vérifications suivent un ordre fixe, et la première qui échoue décide de la ligne : l'enveloppe et son support, la signature de la charge utile sur les octets exacts que porte la carte, l'empreinte, la signature du contenu du fichier, les règles de la charge utile, puis le lien de la clé. Une mauvaise signature donne `tampered` quoi que disent les octets, et une signature valide sur une charge utile qui enfreint une règle donne `malformed_input`. Un fichier dont la signature de contenu ne tient pas donne `content_modified`, et sa clé n'est pas jugée : aucune lecture de `--keys`, aucune requête réseau sous `--online`.
 
-Sur un fichier original, `content` dit si le fichier est celui qui a été signé, si bien qu'une vraie enveloppe copiée sur une image retouchée donne `content_modified`. Une image republiée ne garde que son QR code (LinkedIn réencode les images et retire leurs métadonnées), et le QR code prouve les chiffres, jamais les pixels qui l'entourent : comparez `figures`, ou la page de vérification, avec l'image.
+Sur un fichier original, `content` dit si le fichier est celui qui a été signé, si bien qu'une vraie enveloppe copiée sur une image retouchée donne `content_modified`. Une image republiée ne garde que son QR code (les réseaux sociaux réencodent les images et retirent leurs métadonnées), et le QR code prouve les chiffres, jamais les pixels qui l'entourent : comparez `figures`, ou la page de vérification, avec l'image.
 
 #### Vérifier dans un script
 
@@ -522,7 +522,7 @@ Tailles mesurées sur les fixtures de test (anglais, enveloppe comprise) :
 | Courbe    | 41 486 o   | 110 649 o  | 0,37    |
 | Collectif | 42 114 o   | 116 822 o  | 0,36    |
 
-Le JPEG XL est un export d'archive ou de haute qualité. Le PNG reste le format à publier : LinkedIn n'accepte pas le JPEG XL ([sa page d'aide](https://www.linkedin.com/help/linkedin/answer/a564109) liste GIF, HEIF/HEIC sous iOS, JPEG, PNG et WEBP pour les images), et la prise en charge des navigateurs est récente et inégale : Chrome l'active par défaut depuis la version 155, Firefox depuis la 158, Safari la prend en charge partiellement depuis la 17, et Edge ne l'affiche pas ([caniuse](https://caniuse.com/jpegxl), vérifié le 2026-10-30).
+Le JPEG XL est un export d'archive ou de haute qualité. Le PNG reste le format à publier : les réseaux sociaux n'acceptent pas le JPEG XL (leurs formats d'image s'arrêtent à GIF, HEIF/HEIC, JPEG, PNG et WEBP), et la prise en charge des navigateurs est récente et inégale : Chrome l'active par défaut depuis la version 155, Firefox depuis la 158, Safari la prend en charge partiellement depuis la 17, et Edge ne l'affiche pas ([caniuse](https://caniuse.com/jpegxl), vérifié le 2026-10-30).
 
 jixel écrit un codestream nu (il commence par `FF 0A`) et n'a pas d'API pour une boîte personnalisée, le moteur écrit donc le conteneur lui-même. La disposition est fixe :
 

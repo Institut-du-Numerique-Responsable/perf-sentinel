@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Changed
+
+- The share card docs speak of social networks rather than of one of them, where they said which network strips metadata or refuses JPEG XL.
+
 ## [0.43.2] - 2026-11-06
 
 ### Added
