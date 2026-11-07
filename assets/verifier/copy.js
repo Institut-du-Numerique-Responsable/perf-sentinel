@@ -42,7 +42,7 @@ export const COPY = {
     limitsLink: 'Limits of this check',
     limitLevel1: 'Level 1 only proves the figures did not change since they were signed: anyone can create a signing key. Level 2 ties the key to the domain that publishes it.',
     limitStolenKey: 'The signing date is written by whoever holds the key. When a domain withdraws a key for a leak, this page no longer verifies any card that key signed, whatever its date, honest ones included. A key only replaced keeps verifying the cards dated inside its period, a date a thief could also write.',
-    limitLinkedIn: 'LinkedIn and most social networks remove file metadata when you post. Dropping a file only works with the original Perf Sentinel produced. For a card seen online, scan its QR code.',
+    limitSocial: 'Social networks remove file metadata when you post. Dropping a file only works with the original Perf Sentinel produced. For a card seen online, scan its QR code.',
     limitRepost: 'A card posted on a social network is a new image: only its QR code can still be checked, and it proves the figures, not the image around them. Compare the signed figures this page shows with what you see. An original file is checked whole: any change to it shows.',
     dnsButton: 'Check {domain} with Cloudflare',
     // The record name in dnsNote is shown as code.
@@ -209,7 +209,7 @@ export const COPY = {
     limitsLink: 'Limites de cette vérification',
     limitLevel1: 'Le niveau 1 prouve seulement que les chiffres n’ont pas changé depuis leur signature : n’importe qui peut créer une clé. Le niveau 2 rattache la clé au domaine qui la publie.',
     limitStolenKey: 'La date de signature est écrite par le détenteur de la clé. Quand un domaine retire une clé pour une fuite, cette page ne vérifie plus aucune carte signée par cette clé, quelle que soit sa date, honnêtes comprises. Une clé seulement remplacée continue de vérifier les cartes datées de sa période, une date qu’un voleur pourrait aussi écrire.',
-    limitLinkedIn: 'LinkedIn et la plupart des réseaux sociaux retirent les métadonnées des fichiers publiés. Le dépôt ne fonctionne qu’avec le fichier d’origine produit par Perf Sentinel. Pour une carte vue en ligne, scannez son QR code.',
+    limitSocial: 'Les réseaux sociaux retirent les métadonnées des fichiers publiés. Le dépôt ne fonctionne qu’avec le fichier d’origine produit par Perf Sentinel. Pour une carte vue en ligne, scannez son QR code.',
     limitRepost: 'Une carte publiée sur un réseau social est une nouvelle image : seul son QR code peut encore être vérifié, et il prouve les chiffres, pas l’image autour. Comparez les chiffres signés que montre cette page avec ce que vous voyez. Un fichier d’origine est vérifié en entier : toute modification se voit.',
     dnsButton: 'Vérifier {domain} auprès de Cloudflare',
     dnsNote: 'Votre navigateur demande à Cloudflare DNS (1.1.1.1) l’enregistrement _perf-sentinel.{domain}. Cloudflare voit ce domaine et votre adresse IP. S’il ne répond pas, la page interroge Google Public DNS.',

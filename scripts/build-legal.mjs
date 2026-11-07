@@ -173,7 +173,7 @@ function verifierMain(lang) {
     `<div class="vf-res" id="verifier-result" data-state="empty" aria-live="polite"></div>` +
     `<label class="vf-drop" id="verifier-drop"><input type="file" id="verifier-file" accept=".png,.svg,.jxl,.pdf,.jpg,.jpeg,.webp,image/png,image/svg+xml,image/jxl,application/pdf,image/jpeg,image/webp">${vIco('upload')}<span><strong>${lead}<u>${action}</u></strong><small>${t.dropSub}</small></span></label>` +
     `<p class="vf-phone" id="verifier-phone">${t.phone}</p>` +
-    `<details class="vf-lim" id="verifier-limits"><summary>${vIco('chevron-right')}${t.limitsLink}</summary><p>${t.limitLevel1}</p><p>${t.limitStolenKey}</p><p>${t.limitLinkedIn}</p><p>${t.limitRepost}</p><a class="vf-meth" href="${t.methodHref}">${t.method}</a></details>` +
+    `<details class="vf-lim" id="verifier-limits"><summary>${vIco('chevron-right')}${t.limitsLink}</summary><p>${t.limitLevel1}</p><p>${t.limitStolenKey}</p><p>${t.limitSocial}</p><p>${t.limitRepost}</p><a class="vf-meth" href="${t.methodHref}">${t.method}</a></details>` +
     `<script type="module" src="/assets/verifier/page.js"></script>`;
 }
 // The approved mockup (card-site Task 1), inside the .legal-main frame. Level 1 never uses the accent.
