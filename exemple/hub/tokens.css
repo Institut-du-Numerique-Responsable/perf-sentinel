@@ -67,6 +67,8 @@
     --fix-bg: #16382b;
     --fix-fg: #a5e8c9;
     --glow: none;
+    /* The guide's dimmed page around the element it shows. */
+    --veil: rgba(0, 0, 0, .66);
     /* Native controls the page does not draw itself: number spinners, the
        select popup, caret and default focus rings. Without it they render in
        the browser's light scheme on top of a dark page. */
@@ -123,6 +125,7 @@
     --fix-bg: #d6e9e3;
     --fix-fg: #0b523a;
     --glow: none;
+    --veil: rgba(20, 26, 23, .56);
     color-scheme: light;
 }
 

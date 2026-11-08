@@ -204,6 +204,13 @@ button {
         padding: 0 8px;
     }
 
+    /* The chip leads the cluster here, so a long one (the fleet-skew warning) takes a row of
+       its own and the guide's "?" joins theme and language below it rather than standing
+       alone. Only while it holds no link: moved, the release link would break the tab order. */
+    .shell-cluster .shell-version:not(:has(a)) {
+        order: -1;
+    }
+
     #identity-name {
         max-width: 8ch;
         overflow: hidden;
@@ -218,6 +225,16 @@ button {
     }
 
     .shell-cluster .shell-lang-globe {
+        display: none;
+    }
+
+    .shell-cluster .shell-guide {
+        justify-content: center;
+        width: 34px;
+        padding: 0;
+    }
+
+    .shell-guide-label {
         display: none;
     }
 
@@ -382,6 +399,143 @@ a.shell-identity[href]:hover {
 a.shell-identity[aria-current="page"] {
     background: var(--accent-bg);
     color: var(--brand-text);
+}
+
+/* The guide's entry: a "?" in a filled dot and its label, the dot alone on a phone. */
+.shell-guide {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 13px 0 8px;
+    border: 1px solid var(--btn-bd);
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--btn-fg);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.shell-guide:hover {
+    border-color: var(--brand);
+    background: var(--accent-bg);
+}
+
+/* A caret after the label: the entry opens a menu. The phone's bare dot drops it with the label. */
+.shell-guide-label::after {
+    content: "";
+    display: inline-block;
+    margin-left: 6px;
+    border: 4px solid transparent;
+    border-top-color: currentColor;
+    border-bottom: 0;
+    vertical-align: 2px;
+}
+
+/* The host holds the entry's menu under it, and leaves the cluster's gap alone while the entry is hidden. */
+.shell-guide-host {
+    position: relative;
+    display: flex;
+}
+
+.shell-guide-host:has(> .shell-guide[hidden]) {
+    display: none;
+}
+
+/* The entry's menu, in the clothes of the recap's lists: Understand this screen and I am…, then the roles.
+   Opened under the entry's right edge, over the .picker-backdrop that closes it. */
+.guide-menu {
+    position: absolute;
+    z-index: 31;
+    top: calc(100% + 5px);
+    right: 0;
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    /* The five roles outgrow a short window: the list scrolls in it. */
+    max-height: calc(100vh - 80px);
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    background: var(--surface-3);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .35);
+}
+
+.guide-menu-title {
+    margin: 2px 6px 2px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.guide-menu-sub {
+    margin: 0 6px 8px;
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.guide-menu-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.guide-menu-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 32px;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.guide-menu-item:hover,
+.guide-menu-item:focus-visible {
+    background: var(--surface-2);
+}
+
+.guide-menu-item[aria-checked="true"] {
+    border-color: var(--brand-text);
+}
+
+.guide-menu-name {
+    font-weight: 600;
+}
+
+.guide-menu-ask {
+    color: var(--text-2);
+    font-size: 12px;
+}
+
+.guide-menu-promise {
+    color: var(--text-3);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.shell-guide-mark,
+.guide-num {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    background: var(--fill);
+    color: var(--on-fill);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
 }
 
 .shell-theme {
@@ -1687,6 +1841,7 @@ a.shell-identity[aria-current="page"] {
 
 .input-traces[data-band="ceiling"],
 .input-traces[data-band="over"],
+.input-traces[data-band="blocked"],
 .input-traces[data-band="invalid"] {
     color: var(--crit-fg);
 }
@@ -1940,6 +2095,18 @@ a.shell-identity[aria-current="page"] {
     background: var(--info-bg);
     border-color: var(--info-bd);
     color: var(--info-fg);
+}
+
+.notice-block[data-tone="crit"] {
+    background: var(--crit-bg);
+    border-color: var(--crit-bd);
+    color: var(--crit-fg);
+}
+
+/* Inside a field the alert is a line under the control, not a section of its own. */
+.fetch-alert > .notice-block {
+    margin-top: 10px;
+    padding: 10px 13px;
 }
 
 /* The block already carries a tone, and a link inside it keeps that tone rather
@@ -5100,6 +5267,188 @@ a.chip {
     margin-left: auto;
 }
 
+/* The service and namespace lists of the filter line. The button is a .recap-input in a button's
+   clothes; the list opens under it over the page, above the .picker-backdrop that closes it. */
+.recap-pick {
+    position: relative;
+}
+
+.recap-pick-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    max-width: 220px;
+    padding: 0 8px;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.recap-pick-button:hover,
+.recap-pick-button[aria-expanded="true"] {
+    border-color: var(--brand);
+}
+
+/* The chevron the house selects draw as their picker icon: --text-3, turned over while open. */
+.recap-pick-button svg {
+    flex: none;
+    margin-left: auto;
+    color: var(--text-3);
+    transition: transform .15s ease;
+}
+
+.recap-pick-button[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+}
+
+/* A long name is cut short on the button, which is named whole by its label. */
+.recap-pick-button .recap-pick-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.recap-pick-more {
+    flex: none;
+    color: var(--brand-text);
+}
+
+.recap-pick-pop {
+    position: absolute;
+    z-index: 31;
+    top: calc(100% + 5px);
+    left: 0;
+    width: 290px;
+    max-width: calc(100vw - 32px);
+    padding: 8px;
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    background: var(--surface-3);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .35);
+}
+
+.recap-pick-pop-end {
+    left: auto;
+    right: 0;
+}
+
+.recap-pick-pop:focus {
+    outline: none;
+}
+
+.recap-pick-search {
+    width: 100%;
+    height: 28px;
+    margin-bottom: 6px;
+    padding: 0 8px;
+    border: 1px solid var(--border-2);
+    border-radius: 6px;
+    background: var(--inset-bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.recap-pick-search::placeholder {
+    color: var(--text-3);
+}
+
+.recap-pick-list {
+    max-height: 260px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.recap-pick-opt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.recap-pick-opt:hover,
+.recap-pick-opt:has(input:focus-visible) {
+    background: var(--surface-2);
+}
+
+.recap-pick-opt:has(input:disabled) {
+    color: var(--text-3);
+    cursor: default;
+}
+
+.recap-pick-opt input {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: var(--brand);
+}
+
+.recap-pick-opt .recap-pick-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.recap-pick-absent {
+    margin-left: auto;
+    flex: none;
+    color: var(--text-3);
+    font-size: 11px;
+}
+
+.recap-pick-note {
+    margin: 6px 6px 2px;
+    color: var(--text-3);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.recap-pick-note[hidden] {
+    display: none;
+}
+
+.recap-pick-note .recap-pick-clear {
+    margin-left: 8px;
+}
+
+.recap-pick-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 6px;
+    padding: 6px 6px 0;
+    border-top: 1px solid var(--border-2);
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+.recap-pick-clear {
+    padding: 2px 4px;
+    border: 0;
+    background: none;
+    color: var(--brand-text);
+    font: inherit;
+    cursor: pointer;
+}
+
+.recap-pick-clear:disabled {
+    color: var(--text-3);
+    cursor: default;
+}
+
 .recap-section {
     margin-top: 30px;
 }
@@ -5613,6 +5962,25 @@ a.chip {
     color: var(--text);
 }
 
+/* The SQL of a priority, in four theme tokens, each at AA on --inset-bg in both themes
+   (tests/launcher.test.js measures it). */
+.sql-keyword {
+    color: var(--brand-text);
+    font-weight: 600;
+}
+
+.sql-table {
+    color: var(--info-fg);
+}
+
+.sql-param {
+    color: var(--warn-fg);
+}
+
+.sql-column {
+    color: var(--text-2);
+}
+
 .recap-kv {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
@@ -5894,10 +6262,44 @@ a.chip {
     .recap-filter .segmented {
         margin-left: 0;
     }
+
+    /* Two to a row like the fields beside them, and the list as wide as the filter line, whose left
+       edge it can always reach: a 290px list opened from the second button would run off a phone. */
+    .recap-filter {
+        position: relative;
+    }
+
+    .recap-pick {
+        position: static;
+        flex: 1 1 calc(50% - 5px);
+        min-width: 0;
+    }
+
+    .recap-pick-button {
+        width: 100%;
+        max-width: none;
+    }
+
+    .recap-pick-pop,
+    .recap-pick-pop-end {
+        left: 0;
+        right: 0;
+        width: auto;
+        max-width: none;
+    }
+
+    .recap-pick-list {
+        max-height: min(260px, 45vh);
+    }
+
+    .recap-pick-opt {
+        min-height: 40px;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .recap-detail summary svg {
+    .recap-detail summary svg,
+    .recap-pick-button svg {
         transition: none;
     }
 }
@@ -6881,4 +7283,115 @@ a.chip {
     .fix {
         transition: none;
     }
+}
+
+/* ------------------------------------------------------------- the guide */
+
+/* Out of #main, which every render replaces: fixed to the window and placed by guide.js
+   on each scroll and resize, with no transition, which would trail behind the scroll. The
+   page behind is inert, so the veil needs no pointer catch. */
+.guide-root {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    pointer-events: none;
+}
+
+.guide-hole {
+    position: fixed;
+    border-radius: 12px;
+    box-shadow: 0 0 0 2px var(--brand), 0 0 0 9999px var(--veil);
+}
+
+.guide-mark {
+    position: fixed;
+    box-shadow: 0 0 0 2px var(--surface);
+}
+
+.guide-card {
+    position: fixed;
+    width: min(390px, 100% - 32px);
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    padding: 16px 18px 14px;
+    border: 1px solid var(--border-2);
+    border-radius: 14px;
+    background: var(--surface-2);
+    color: var(--text);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, .28);
+    pointer-events: auto;
+}
+
+/* Room for Quit, which sits in the corner over it. */
+.guide-title {
+    margin: 0 0 6px;
+    padding-right: 60px;
+    font-size: 16px;
+    line-height: 1.3;
+}
+
+.guide-body {
+    line-height: 1.5;
+}
+
+.guide-body p {
+    margin: 0 0 8px;
+    font-size: 14px;
+}
+
+.guide-legend {
+    margin: 0 0 8px;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+}
+
+.guide-legend li {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    align-items: start;
+    margin-bottom: 5px;
+}
+
+.guide-legend .guide-num {
+    margin-top: 1px;
+}
+
+.guide-quit {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    min-height: 32px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-2);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.guide-quit:hover {
+    color: var(--brand-text);
+}
+
+/* The card's edge against the veil, which --border-2 leaves faint. */
+:root[data-theme="dark"] .guide-card {
+    border-color: var(--btn-bd);
+}
+
+.guide-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.guide-count {
+    margin-right: auto;
+    font-size: 13px;
+    color: var(--text-2);
 }

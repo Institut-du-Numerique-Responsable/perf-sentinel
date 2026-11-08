@@ -10,6 +10,7 @@
     'use strict';
 
     const PSL = globalThis.PSL;
+    const GUIDE = /** @type {import('../types').GuideController} */ (globalThis.PSL_GUIDE);
     const THEME_KEY = 'perf-sentinel:theme';
     const THEME_POSITIONS = ['auto', 'light', 'dark'];
     const t = PSL.t;
@@ -85,7 +86,20 @@
     /**
      * What a `#/recap?…` hash names, as PSL.readRecapRoute reads it.
      * @typedef {{period: 'day' | 'week' | 'month', at: string | null, environment: string | null,
-     *   service: string | null, grouping: string | null, view: 'tech' | 'pilotage', jobKey?: string}} RecapRoute
+     *   services: string[], groupings: string[], view: 'tech' | 'pilotage', jobKey?: string}} RecapRoute
+     */
+
+    /**
+     * The names the checkbox lists of the recap offer for the period on screen, read from the Hub on the
+     * first opening: `path` is the read they answer, as PSL.recapFiltersPath writes it.
+     * @typedef {{path: ?string, status: 'idle' | 'loading' | 'ready' | 'error', services: string[],
+     *   groupings: string[]}} RecapNames
+     */
+
+    /**
+     * The list open on the recap's filter line, what was typed in its search and the boxes ticked so far,
+     * which the route takes when the list closes.
+     * @typedef {{open: ?('services' | 'groupings'), query: string, draft: string[]}} RecapPick
      */
 
     // Payloads read field by field, named for what they are. Their shapes are in types.d.ts, each
@@ -133,8 +147,8 @@
     /** @typedef {import('../types').AccessConfiguration} AccessConfiguration */
     /** @typedef {import('../types').AccessUnmatched} AccessUnmatched */
     /** @typedef {Incident & {error_code?: string}} IncidentDetail A single-incident read, or the stub a failed one leaves with its error_code. */
-    /** @typedef {{fromMs: number, toMs: number, service: string, incidentId: string, pairKey: string, kind?: string, namespace?: string, atMs?: number}} Handoff An incident link, as PSL.readHandoff reads it, with the row's fields once found. */
-    /** @typedef {{traceId: string, otherTraceId: string}} TraceHandoff An episode's two traces, as PSL.readTraceHandoff reads them. */
+    /** @typedef {{fromMs: number, toMs: number, service: string, incidentId: string, pairKey: string, sourceId: string | null, kind?: string, namespace?: string, atMs?: number}} Handoff An incident link, as PSL.readHandoff reads it, with the row's fields once found. */
+    /** @typedef {{traceId: string, otherTraceId: string, sourceId: string | null}} TraceHandoff An episode's two traces, as PSL.readTraceHandoff reads them. */
     /** @typedef {{label: string, energy_kwh: number, carbon_kgco2eq: number, partial: {windows: number, of: number} | null}} HostRow A host of a disclosure, as PSL.hostRows builds it. */
     /**
      * The ack page, from its link to what the last submit came to.
@@ -200,6 +214,9 @@
     const state = {
         themePosition: document.documentElement.getAttribute('data-theme-position') || 'auto',
         screen: 'new',
+        // The screen guide open, by guideId (the no-grant page reads as access), or null.
+        /** @type {string | null} */
+        guide: null,
         /** @type {HubStatus | null} */
         status: null,
         // The HTTP status /api/status failed with, which tells "no grant" from "down".
@@ -349,6 +366,14 @@
         recapReports: null,
         recapGenerating: false,
         recapGenerateError: null,
+        // The checkbox lists of the filter line: the one open with its search and boxes, the names the Hub
+        // offers for the period, and the control to give the focus to once a closed list has moved the route.
+        /** @type {RecapPick} */
+        recapPick: {open: null, query: '', draft: []},
+        /** @type {RecapNames} */
+        recapNames: {path: null, status: 'idle', services: [], groupings: []},
+        /** @type {?string} */
+        recapRefocus: null,
         // The share card form, made on first use (cardState).
         /** @type {?ShareCard} */
         card: null,
@@ -406,8 +431,12 @@
             detection: {},
             pickerOpen: false,
             maxTraces: 100,
+            // Null until someone types one: the Hub's own limits decide the start, and
+            // they are only known once the status has arrived.
+            fetchConcurrency: null,
             ackUnreachable: false,
-            ackHeavy: false
+            ackHeavy: false,
+            ackFetch: false
         }
     };
 
@@ -673,7 +702,8 @@
             state.tokens = null;
             state.tokensFailed = true;
         }
-        if (state.screen === 'access' || state.screen === 'coverage') render();
+        // Without a status, every route draws the access screen under the no-grant banner.
+        if (state.screen === 'access' || state.screen === 'coverage' || !state.status) render();
     }
 
     /**
@@ -887,10 +917,26 @@
         dropSegment(chip, '.shell-version-skew');
         if (!state.sources || !state.status || !state.status.engine_version) return;
 
-        // Behind only. A fleet ahead of the Hub is a normal moment during a rollout,
-        // and the arrow would have pointed from the newer version down to the older
-        // one, which reads as an instruction to downgrade.
-        const behind = state.sources
+        const behind = fleetBehind();
+        if (behind.length === 0) return;
+
+        const oldest = behind.sort(PSL.vcmp)[0];
+        chip.appendChild(el('span', {class: 'shell-version-rule', 'aria-hidden': 'true'}));
+        chip.appendChild(el('span', {class: 'shell-version-skew', 'data-guide': 'shell.skew'}, [
+            svg([['path', {d: 'M12 4l9 16H3z'}], ['path', {d: 'M12 10v4M12 17.4v.2'}]], 12),
+            el('span', {text: t('shell.skew', {oldest: oldest, engine: state.status.engine_version})})
+        ]));
+    }
+
+    /**
+     * The fleet's producer versions behind the Hub's engine, none until both are known. Behind only: a
+     * fleet ahead of the Hub is a normal moment during a rollout, and the arrow would have pointed from
+     * the newer version down to the older one, which reads as an instruction to downgrade.
+     * @returns {string[]}
+     */
+    function fleetBehind() {
+        if (!state.sources || !state.status || !state.status.engine_version) return [];
+        return state.sources
             .map(function (source) {
                 return source.producer_version;
             })
@@ -898,14 +944,6 @@
                 const skew = version && PSL.skew(version);
                 return skew && skew.dir === 'behind';
             });
-        if (behind.length === 0) return;
-
-        const oldest = behind.sort(PSL.vcmp)[0];
-        chip.appendChild(el('span', {class: 'shell-version-rule', 'aria-hidden': 'true'}));
-        chip.appendChild(el('span', {class: 'shell-version-skew'}, [
-            svg([['path', {d: 'M12 4l9 16H3z'}], ['path', {d: 'M12 10v4M12 17.4v.2'}]], 12),
-            el('span', {text: t('shell.skew', {oldest: oldest, engine: state.status.engine_version})})
-        ]));
     }
 
     function renderSourcesBadge() {
@@ -1038,7 +1076,17 @@
         });
     }
 
+    /** Draws the screen, then the guide's entry and the guide itself, which point into it. */
     function render() {
+        renderScreen();
+        const entry = document.getElementById('guide-open');
+        entry.hidden = guideId(state.screen) === null;
+        // The host hides with the entry, and would hide an open menu with aria-expanded left true.
+        if (entry.hidden) closeGuideMenu(false);
+        GUIDE.refresh();
+    }
+
+    function renderScreen() {
         // A tip whose anchor is about to be replaced would never see its mouseleave.
         closeTip();
         // Same for the daemon tickers: they write into nodes this render replaces.
@@ -1080,7 +1128,7 @@
         else if (state.screen === 'sources') main.replaceChildren(renderSourcesScreen());
         else if (state.screen === 'incidents') main.replaceChildren(renderIncidentsScreen());
         else if (state.screen === 'correlations') main.replaceChildren(renderCorrelationsScreen());
-        else if (state.screen === 'recap') replaceKeepingPdf(main, renderRecapScreen());
+        else if (state.screen === 'recap') drawRecapScreen(main);
         else if (state.screen === 'disclosures') main.replaceChildren(renderDisclosuresScreen());
         else if (state.screen === 'disclosure') main.replaceChildren(renderDisclosureScreen());
         else if (state.screen === 'ack') main.replaceChildren(renderAckScreen());
@@ -1093,6 +1141,456 @@
         // Here and not only on a route change: a run or a report names itself once it has loaded.
         const heading = document.querySelector('#main h1');
         document.title = heading ? heading.textContent + ' · Perf Sentinel Hub' : 'Perf Sentinel Hub';
+    }
+
+    /**
+     * The guide of a screen, or null where it has none.
+     * @param {string} screen
+     */
+    function guideId(screen) {
+        // Without a status every route draws the same page: the caller's access under the no-grant banner,
+        // which the Access guide walks, or a banner alone, which no guide walks.
+        if (!state.status) return state.access && PSL.shellBanner(state.statusError) ? 'access' : null;
+        return PSL.guideIdFor(screen, screen === 'recap' ? recapRoute().view : null);
+    }
+
+    /**
+     * What the recap guides read: the recap the screen holds, in the view it was computed for. While it
+     * is computed the guide waits, and starts no computation of its own.
+     * @returns {import('../types').GuideSource}
+     */
+    function recapGuideSource() {
+        if (state.recapError !== null) return {status: 'failed', steps: []};
+        // The recap of the other view, which a path's move to this one finds before the read starts again.
+        if (state.recap === null || state.recap.view !== recapRoute().view) return {status: 'wait', steps: []};
+        if (state.recap.view === 'pilotage') return {status: 'ready', steps: PSL.recapPilotageSteps(state.recap)};
+        return {
+            status: 'ready',
+            steps: PSL.recapTechSteps(state.recap, {showAll: state.recapShowAll, movesOpen: state.recapMovesOpen})
+        };
+    }
+
+    /**
+     * What the New guide reads: the form as it stands, and what the screen would say about it.
+     * @returns {import('../types').GuideSource}
+     */
+    function newGuideSource() {
+        if (state.loading) return {status: 'wait', steps: []};
+        if (state.sourcesError) return {status: 'failed', steps: []};
+        if (!state.status) return {status: 'wait', steps: []};
+        const source = selectedSource();
+        const skew = source && PSL.skew(source.producer_version);
+        const band = fetchBandNow();
+        return {
+            status: 'ready', steps: PSL.newSteps({
+                sources: (state.sources || []).length,
+                runnable: runSources().length,
+                windowHandoff: Boolean(state.handoff),
+                namespaced: Boolean(state.handoff && state.handoff.namespace),
+                traceHandoff: Boolean(state.traceHandoff),
+                daemon: Boolean(source && source.kind === 'daemon'),
+                skewPill: runSources().some(function (row) {
+                    return Boolean(PSL.skew(row.producer_version));
+                }),
+                mode: state.form.mode,
+                rangeMode: state.form.rangeMode,
+                spanMs: windowSpanMs(),
+                retentionHours: source ? source.retention_hours : null,
+                maxTraces: state.form.maxTraces,
+                weighed: weighedRuns().length > 0,
+                fetchBand: band ? band.key : null,
+                queue: state.status.queue_depth,
+                limits: state.status.limits,
+                blocker: submitBlocker(),
+                unreachable: Boolean(source && !source.reachable),
+                skewBehind: Boolean(skew && skew.dir === 'behind'),
+                command: Boolean(source && PSL.analysisCommand(source, buildRequest(source), state.shell))
+            })
+        };
+    }
+
+    /**
+     * What the Recent guide reads: the list, once it has loaded.
+     * @returns {import('../types').GuideSource}
+     */
+    function recentGuideSource() {
+        if (!state.runs || !state.status) return {status: 'wait', steps: []};
+        return {
+            status: 'ready',
+            steps: PSL.recentSteps({hours: state.status.limits.report_retention_hours, first: state.runs[0] || null})
+        };
+    }
+
+    /**
+     * The source of the run guide or the report guide: both read the run the route names.
+     * @param {(ctx: {run: Run, now: number, limits: import('../types').StatusLimits}) => import('../types').GuideStep[]} steps
+     * @returns {() => import('../types').GuideSource}
+     */
+    function runGuideSource(steps) {
+        return function () {
+            const id = currentRunId();
+            if (state.runError === id) return {status: 'failed', steps: []};
+            if (!state.run || state.run.id !== id || !state.status) return {status: 'wait', steps: []};
+            return {status: 'ready', steps: steps({run: state.run, now: Date.now(), limits: state.status.limits})};
+        };
+    }
+
+    /**
+     * What the Sources guide reads: the fleet the table shows, and the first open daemon row that has read.
+     * @returns {import('../types').GuideSource}
+     */
+    function sourcesGuideSource() {
+        if (state.loading) return {status: 'wait', steps: []};
+        if (state.sourcesError) return {status: 'failed', steps: []};
+        if (!state.sources) return {status: 'wait', steps: []};
+        const daemons = state.sources.filter(function (source) {
+            return source.kind === 'daemon';
+        });
+        const open = daemons.find(function (source) {
+            const view = state.daemonViews[source.id];
+            return state.daemonOpen[source.id] === true && PSL.permits(source, 'sources.read')
+                && view !== undefined && view !== 'loading';
+        });
+        return {
+            status: 'ready', steps: PSL.sourcesSteps({
+                unreachable: state.sources.filter(function (source) {
+                    return !source.reachable;
+                }).length,
+                behind: fleetBehind().length > 0,
+                unknownProducer: daemons.some(function (source) {
+                    return !source.producer_version;
+                }),
+                lockedDaemon: daemons.length > 0 && !PSL.permits(daemons[0], 'sources.read'),
+                gauges: open
+                    ? (/** @type {DaemonView} */ (state.daemonViews[open.id]).error_code ? 'failed' : 'read')
+                    : null
+            })
+        };
+    }
+
+    /**
+     * @param {Incident} incident
+     * @returns {'findings' | 'none' | 'gone' | null} what its unfolded panel shows, null while it is folded or unread
+     */
+    function incidentGuidePanel(incident) {
+        const detail = state.incidentDetails[incident.id];
+        if (state.panelOpen[foldKey(incident)] !== true || detail === undefined || detail === 'loading') return null;
+        if (detail.error_code) return detail.error_code === 'gone' ? 'gone' : null;
+        return (detail.findings || []).length ? 'findings' : 'none';
+    }
+
+    /**
+     * What the Incidents guide reads: the listing, and the first unfolded incident whose detail was read.
+     * An error with no row is the guide's failure, the stale copy with its own words.
+     * @returns {import('../types').GuideSource}
+     */
+    function incidentsGuideSource() {
+        if (state.loading || state.incidents === null) return {status: 'wait', steps: []};
+        if (state.incidentsError && state.incidents.length === 0) {
+            return {status: 'failed', steps: [], variant: state.incidentsError};
+        }
+        const refused = (state.sources || []).find(function (source) {
+            return source.incidents_state === 'unauthorized';
+        });
+        const panels = state.incidents.map(incidentGuidePanel).filter(Boolean);
+        return {
+            status: 'ready', steps: PSL.incidentsSteps({
+                stale: state.incidentsError === 'stale',
+                unauthorized: refused ? refused.name : null,
+                filtered: Object.values(state.incidentFilter).some(Boolean),
+                panel: panels[0] || null,
+                unfolded: state.incidents.some(function (incident) {
+                    return state.panelOpen[foldKey(incident)] === true;
+                })
+            })
+        };
+    }
+
+    /**
+     * What the Correlations guide reads: the pairs of the period, and whether one is unfolded.
+     * @returns {import('../types').GuideSource}
+     */
+    function correlationsGuideSource() {
+        if (state.correlations === null) return {status: 'wait', steps: []};
+        if (state.correlationsError) return {status: 'failed', steps: []};
+        return {
+            status: 'ready', steps: PSL.correlationsSteps({
+                pairOnly: Boolean(state.correlationFilter.pair_key),
+                limit: state.correlations.length === CORRELATION_LIMIT ? CORRELATION_LIMIT : null,
+                opened: PSL.correlationPairs(state.correlations).some(function (pair) {
+                    return state.panelOpen['pair:' + pair.key] === true;
+                }),
+                traceable: (state.sources || []).some(function (source) {
+                    return source.kind !== 'daemon';
+                })
+            })
+        };
+    }
+
+    /**
+     * What the Disclosures guide reads: the list, and the first report, the one its card step points at.
+     * @returns {import('../types').GuideSource}
+     */
+    function disclosuresGuideSource() {
+        if (state.disclosures === null) return {status: 'wait', steps: []};
+        if (state.disclosuresError) return {status: 'failed', steps: []};
+        return {status: 'ready', steps: PSL.disclosuresSteps({first: state.disclosures[0] || null})};
+    }
+
+    /**
+     * What the guide of one disclosure reads: its detail, and the report.json beside it when it came.
+     * @returns {import('../types').GuideSource}
+     */
+    function disclosureGuideSource() {
+        if (state.disclosureError) return {status: 'failed', steps: []};
+        if (!state.disclosure) return {status: 'wait', steps: []};
+        return {status: 'ready', steps: PSL.disclosureSteps({detail: state.disclosure, report: state.disclosureReport})};
+    }
+
+    /** The terminal tokens the access page lists, the caller's own. */
+    function ownTokens() {
+        return (state.tokens || []).filter(function (/** @type {TerminalToken} */ token) {
+            return token.subject === state.access.subject;
+        });
+    }
+
+    /**
+     * What the Access guide reads: the caller's access, with or without the no-grant banner. The screen
+     * exists only once /api/access answered, so there is nothing to wait for.
+     * @returns {import('../types').GuideSource}
+     */
+    function accessGuideSource() {
+        const access = state.access;
+        let tokens = 'listed';
+        if (state.tokensFailed) tokens = 'failed';
+        else if (ownTokens().length === 0) tokens = 'none';
+        return {
+            status: 'ready', steps: PSL.accessSteps({
+                machine: access.caller === 'machine_token',
+                noGroup: access.groups.length === 0,
+                noReach: access.reach.length === 0,
+                everything: access.reach.some(function (entry) {
+                    return entry.project === '*';
+                }),
+                tokens: /** @type {'listed' | 'none' | 'failed'} */ (tokens)
+            })
+        };
+    }
+
+    /**
+     * What the Coverage guide reads: what no project covers and the conflicts, as an admin's access holds them.
+     * @returns {import('../types').GuideSource}
+     */
+    function coverageGuideSource() {
+        const unmatched = state.access.unmatched;
+        const conflicts = state.access.conflicts;
+        const count = unmatched ? unmatched.services.length + unmatched.attributes.length + unmatched.sources.length : 0;
+        return {
+            status: 'ready', steps: PSL.coverageSteps({
+                covered: Boolean(unmatched) && count === 0,
+                truncated: count > 0 && unmatched.truncated,
+                backend: count > 0 && unmatched.sources.some(function (row) {
+                    return row.findings == null;
+                }),
+                noConflict: Boolean(conflicts) && conflicts.copies.length === 0
+            })
+        };
+    }
+
+    /**
+     * The attributes of an element the guide may point at only while its fold is open: the guide never
+     * opens a fold, and a folded row stays in the page. foldAnchors names it again when the fold moves.
+     * @param {string} name
+     * @param {boolean} open
+     */
+    function foldGuide(name, open) {
+        return {'data-guide-fold': name, 'data-guide': open ? name : null};
+    }
+
+    /**
+     * @param {Element} scope a fold that just opened or closed in place
+     * @param {boolean} open
+     */
+    function foldAnchors(scope, open) {
+        scope.querySelectorAll('[data-guide-fold]').forEach(function (node) {
+            if (open) node.setAttribute('data-guide', node.getAttribute('data-guide-fold'));
+            else node.removeAttribute('data-guide');
+        });
+    }
+
+    /**
+     * The source of steps of each guide, keyed by the id guideId returns.
+     * @type {Record<string, () => import('../types').GuideSource>}
+     */
+    const GUIDE_SOURCES = {
+        'recap.pilotage': recapGuideSource,
+        'recap.tech': recapGuideSource,
+        'new': newGuideSource,
+        'recent': recentGuideSource,
+        'run': runGuideSource(PSL.runSteps),
+        'report': runGuideSource(PSL.reportSteps),
+        'sources': sourcesGuideSource,
+        'incidents': incidentsGuideSource,
+        'correlations': correlationsGuideSource,
+        'disclosures': disclosuresGuideSource,
+        'disclosure': disclosureGuideSource,
+        'access': accessGuideSource,
+        'coverage': coverageGuideSource
+    };
+
+    function initGuide() {
+        const entry = document.getElementById('guide-open');
+        entry.setAttribute('aria-haspopup', 'menu');
+        entry.setAttribute('aria-expanded', 'false');
+        entry.addEventListener('click', function () {
+            if (document.getElementById('guide-menu')) closeGuideMenu(true);
+            else openGuideMenu(false);
+        });
+        // Shift+Tab out of the menu lands on the entry with the menu still open.
+        entry.addEventListener('keydown', function (event) {
+            if (event.key !== 'Escape' || !document.getElementById('guide-menu')) return;
+            closeGuideMenu(true);
+            event.preventDefault();
+            event.stopPropagation();
+        });
+    }
+
+    /**
+     * The entry's menu: Understand this screen and I am…, or, once I am… is chosen, the roles, the one
+     * this browser remembers ticked. A list in the style of the recap's filters, over a backdrop.
+     * @param {boolean} roles
+     */
+    function openGuideMenu(roles) {
+        closeGuideMenu(false);
+        const entry = document.getElementById('guide-open');
+        const host = entry.parentElement;
+        const items = roles ? guideRoleItems() : guideMenuItems();
+        const list = el('div', {
+            role: 'menu', class: 'guide-menu-list', 'aria-labelledby': roles ? 'guide-menu-title' : null,
+            'aria-label': roles ? null : t('guide.menu.label'),
+            'aria-describedby': roles ? 'guide-menu-sub' : null
+        }, items);
+        const pop = el('div', {class: 'guide-menu', id: 'guide-menu'}, [
+            roles && el('p', {class: 'guide-menu-title', id: 'guide-menu-title', text: t('guide.role.title')}),
+            roles && el('p', {class: 'guide-menu-sub', id: 'guide-menu-sub', text: t('guide.role.sub')}),
+            list
+        ]);
+        pop.addEventListener('keydown', function (event) {
+            guideMenuKey(event, items);
+        });
+        // Tabbing on past the menu closes it where it is, as the recap's lists do.
+        pop.addEventListener('focusout', function (event) {
+            const to = event.relatedTarget;
+            if (to instanceof Element && !host.contains(to)) closeGuideMenu(false);
+        });
+        const backdrop = el('div', {class: 'picker-backdrop', id: 'guide-menu-backdrop'});
+        backdrop.addEventListener('click', function () {
+            closeGuideMenu(true);
+        });
+        host.append(backdrop, pop);
+        // On a phone the entry can sit mid-row: the menu slides right to stay in the window.
+        const left = pop.getBoundingClientRect().left;
+        if (left < 16) pop.style.right = left - 16 + 'px';
+        entry.setAttribute('aria-expanded', 'true');
+        (items.find(function (item) {
+            return item.getAttribute('aria-checked') === 'true';
+        }) || items[0]).focus();
+    }
+
+    /** The menu's two doors: the screen's own guide, and the roles, which need the status the paths read. */
+    function guideMenuItems() {
+        const screen = el('button', {type: 'button', class: 'guide-menu-item', role: 'menuitem', id: 'guide-menu-screen',
+            text: t('guide.menu.screen')});
+        screen.addEventListener('click', function () {
+            closeGuideMenu(false);
+            startScreenGuide();
+        });
+        const role = el('button', {type: 'button', class: 'guide-menu-item', role: 'menuitem', id: 'guide-menu-role',
+            text: t('guide.menu.role')});
+        role.addEventListener('click', function () {
+            openGuideMenu(true);
+        });
+        return state.status ? [screen, role] : [screen];
+    }
+
+    /** Each role with its question and what its path brings; the one this browser remembers is ticked. */
+    function guideRoleItems() {
+        const remembered = GUIDE.role();
+        return PSL.GUIDE_ROLES.map(function (role) {
+            const item = el('button', {
+                type: 'button', class: 'guide-menu-item', role: 'menuitemradio', 'data-role': role,
+                'aria-checked': role === remembered ? 'true' : 'false'
+            }, [
+                el('span', {class: 'guide-menu-name', text: t('guide.role.' + role)}),
+                el('span', {class: 'guide-menu-ask', text: t('guide.role.' + role + '.ask')}),
+                el('span', {class: 'guide-menu-promise', text: t('guide.path.' + role + '.promise')})
+            ]);
+            item.addEventListener('click', function () {
+                closeGuideMenu(false);
+                startRolePath(role);
+            });
+            return item;
+        });
+    }
+
+    /**
+     * Escape closes the menu and gives the focus back to the entry; the arrows, Home and End move in it.
+     * @param {KeyboardEvent} event
+     * @param {HTMLElement[]} items
+     */
+    function guideMenuKey(event, items) {
+        const at = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+        /** @type {Record<string, number>} */
+        const moves = {ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: items.length - 1};
+        if (event.key === 'Escape') closeGuideMenu(true);
+        else if (event.key in moves) items[(moves[event.key] + items.length) % items.length].focus();
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    /** @param {boolean} refocus whether the entry takes the focus back */
+    function closeGuideMenu(refocus) {
+        const menu = document.getElementById('guide-menu');
+        if (!menu) return;
+        menu.remove();
+        document.getElementById('guide-menu-backdrop').remove();
+        const entry = document.getElementById('guide-open');
+        entry.setAttribute('aria-expanded', 'false');
+        if (refocus) entry.focus();
+    }
+
+    function startScreenGuide() {
+        state.guide = guideId(state.screen);
+        GUIDE.start(GUIDE_SOURCES[state.guide], state.guide);
+    }
+
+    /**
+     * Walks a role's screens, those whose tab this caller sees. The recap is entered in the path's view,
+     * by the route the view switch would write.
+     * @param {string} role
+     */
+    function startRolePath(role) {
+        const path = PSL.guidePath(role, function (screen) {
+            const tab = /** @type {HTMLElement | null} */ (document.querySelector('.shell-tab[data-screen="' + screen + '"]'));
+            // The tab bar is hidden whole on a page without a grant, so a hidden ancestor counts too.
+            return Boolean(tab) && !tab.closest('[hidden]');
+        });
+        GUIDE.startPath({
+            role, skipped: path.skipped, stops: path.stops.map(function (stop) {
+                const guide = PSL.guideIdFor(stop.screen, stop.view);
+                return Object.assign({}, stop, {
+                    guide,
+                    hash: stop.screen === 'recap'
+                        ? PSL.recapHash(Object.assign(PSL.readRecapRoute(location.hash), {view: stop.view}))
+                        : '#/' + stop.screen,
+                    // Without a status every route draws the same banner, a refusal to this screen's guide.
+                    source: function () {
+                        return state.status ? GUIDE_SOURCES[guide]() : {status: 'failed', steps: []};
+                    }
+                });
+            })
+        });
     }
 
     /**
@@ -1614,7 +2112,19 @@
         // onRoute has to apply it again, and loadRuns never re-renders New.
         applyHandoff(PSL.readHandoff(location.hash, Date.now()));
         applyTraceHandoff(PSL.readTraceHandoff(location.hash));
+        // A list open on the recap's filter line goes with the route it was opened on. One that moved the
+        // route closed itself first, and left the control to give the focus to.
+        state.recapPick = {open: null, query: '', draft: []};
+        const refocus = state.recapRefocus;
+        state.recapRefocus = null;
         const screen = currentScreen();
+        closeGuideMenu(false);
+        // A guide walks the screen it was opened on, a path the stop it is on or heads to: another screen,
+        // or the other view, ends it.
+        const stop = GUIDE.pathStop();
+        const kept = stop ? stop.screen === screen && (stop.view === null || stop.view === recapRoute().view)
+            : guideId(screen) === state.guide;
+        if (GUIDE.isOpen() && !kept) GUIDE.stop();
         if (screen !== 'ack') state.ackReturn = null;
         clearTimeout(state.runTimer);
         // A recap job keeps running on the Hub: only the screen stops asking, and asks again on return.
@@ -1624,6 +2134,8 @@
         render();
         if (state.loading) return;
         announceRoute();
+        const returned = refocus ? document.getElementById(refocus) : null;
+        if (returned) returned.focus();
         // Both screens read the runs list: recent renders it, the launcher
         // shows what past runs weighed. Reloaded on every entry, not once, so
         // coming back from a run that just finished shows its weight.
@@ -1690,6 +2202,7 @@
         state.form.fromMs = handoff.fromMs;
         state.form.toMs = handoff.toMs;
         state.form.pickerOpen = false;
+        openHandoffSource(handoff.sourceId);
         const row = (state.incidents || []).find(function (incident) {
             return incident.id === handoff.incidentId;
         });
@@ -1719,6 +2232,7 @@
         state.form.traceId = handoff.traceId;
         state.form.service = '';
         state.form.pickerOpen = false;
+        openHandoffSource(handoff.sourceId);
     }
 
     // -------------------------------------------------------- screen: sources
@@ -1744,7 +2258,8 @@
             return section;
         }
 
-        section.appendChild(el('div', {class: 'sources-wrap'}, [sourcesTable(state.sources)]));
+        section.appendChild(el('div', {class: 'sources-wrap', 'data-guide': 'sources.table'},
+            [sourcesTable(state.sources)]));
         return section;
     }
 
@@ -1780,10 +2295,29 @@
                 [tableGroupRow(t('sources.group.backends'))],
                 rows(kinds.backends))
             : sources.flatMap(sourceRow);
+        guideSourceAnchors(body);
         return el('table', {class: 'table'}, [
             el('thead', {}, [head]),
             el('tbody', {}, body)
         ]);
+    }
+
+    /**
+     * Names the first row's cells, and the first daemon's name, where the Sources guide points.
+     * @param {HTMLElement[]} rows
+     */
+    function guideSourceAnchors(rows) {
+        const first = rows.find(function (row) {
+            return !row.classList.contains('table-group');
+        });
+        if (!first) return;
+        ['env', 'health', 'last_success', 'down_for', 'producer', 'last_error'].forEach(function (name) {
+            first.children[SOURCE_COLUMNS.indexOf(name)].setAttribute('data-guide', 'sources.' + name);
+        });
+        const daemon = rows.map(function (row) {
+            return row.querySelector('.row-toggle, .source-locked');
+        }).find(Boolean);
+        if (daemon) daemon.closest('td').setAttribute('data-guide', 'sources.daemon');
     }
 
     /**
@@ -2045,6 +2579,7 @@
         if (!cell) return;
         const row = /** @type {HTMLElement} */ (cell.parentNode);
         row.hidden = !open;
+        foldAnchors(cell, open);
         // A folded row is not being read, so it stops costing the daemon anything.
         if (!open) {
             stopTicker(source.id);
@@ -2088,6 +2623,7 @@
                 // cell is found again rather than kept in a closure.
                 const target = document.getElementById('daemon-detail-' + index);
                 if (target) target.replaceChildren(daemonPanel(source, index));
+                GUIDE.refresh();
                 // And the row may have been folded in the meantime, in which case
                 // starting to poll it would contradict the fold. A failed read still
                 // gets a ticker: its panel carries the same countdown, and the row
@@ -2149,7 +2685,8 @@
      * @param {string} code
      */
     function daemonError(source, index, code) {
-        return el('div', {class: 'daemon-panel'}, [
+        const gauges = foldGuide('sources.gauges', state.daemonOpen[source.id] === true);
+        return el('div', {class: 'daemon-panel', ...gauges}, [
             el('div', {class: 'banner', 'data-tone': 'crit'}, [
                 critGlyph(16),
                 el('div', {}, [
@@ -2253,7 +2790,8 @@
             }
         }
 
-        return el('div', {}, [
+        // One element for the guide's cutout: the verdict above, the gauges and the hints beside them.
+        return el('div', foldGuide('sources.gauges', state.daemonOpen[source.id] === true), [
             el('div', {class: 'daemon-verdict-row'}, [
                 el('span', {
                     class: 'daemon-verdict',
@@ -2907,13 +3445,33 @@
      * @param {string} id
      */
     function selectSource(id) {
-        state.form.sourceId = id;
         saveSource(id);
+        switchSource(id);
+        render();
+    }
+
+    /**
+     * Puts the form on another source: what was acknowledged or typed for the last one goes.
+     * @param {string} id
+     */
+    function switchSource(id) {
+        state.form.sourceId = id;
         state.form.ackUnreachable = false;
         state.form.ackHeavy = false;
+        state.form.ackFetch = false;
         state.form.pickerOpen = false;
         state.form.detection = {};
-        render();
+    }
+
+    /**
+     * Opens a handed-over window or trace on a trace backend, a daemon taking neither. Never
+     * saved: the source the reader chose stays what the next visit opens on. Sources that
+     * arrive after the route find the form here again, through loadShell's own onRoute.
+     * @param {string | null} originId the daemon the link came from
+     */
+    function openHandoffSource(originId) {
+        const id = PSL.handoffSourceId(state.sources || [], state.form.sourceId, originId);
+        if (id !== null && id !== state.form.sourceId) switchSource(id);
     }
 
     /**
@@ -2921,6 +3479,9 @@
      */
     function setMode(mode) {
         state.form.mode = mode;
+        // A trace ID reads one trace, so the reads count leaves with the block, and a
+        // tick given for it does not wait behind the field to count for the next service run.
+        state.form.ackFetch = false;
         // Switching clears the other field, and a trace ID takes no window at all,
         // so the picker cannot stay open behind a hidden control.
         if (mode === 'trace') {
@@ -2960,7 +3521,7 @@
         // typing into is left alone.
         if (number && number.value !== value) number.value = value;
         if (number) {
-            number.toggleAttribute('data-over', over);
+            number.setAttribute('data-over', over ? 'true' : 'false');
             number.setAttribute('data-band', band.key);
         }
         if (slider) {
@@ -2992,6 +3553,96 @@
         else slot.replaceChildren();
     }
 
+    /** The reads count on screen against this Hub's limits, or null while the block is not on screen. */
+    function fetchBandNow() {
+        const value = fetchValue();
+        if (value === undefined) return null;
+        const limits = state.status.limits;
+        return PSL.fetchBand(value, limits.fetch_concurrency_warn, limits.fetch_concurrency_max);
+    }
+
+    /** The reads count the form carries, undefined while the block is not on screen. */
+    function fetchValue() {
+        return PSL.fetchRequested(state.form, selectedSource(), state.status.limits);
+    }
+
+    /**
+     * Updated in place, like setMaxTraces, for the same reason.
+     * @param {number} value
+     */
+    function setFetchConcurrency(value) {
+        state.form.fetchConcurrency = value;
+        // Dropping back to the warning or under withdraws the question that was asked above it.
+        if (!fetchBandNow().needsAck) state.form.ackFetch = false;
+        paintFetch(document);
+        updateSubmit();
+    }
+
+    /**
+     * Everything on screen that reads the reads count. Builds the block and refreshes it
+     * with the same code, so the two cannot drift.
+     * @param {ParentNode} root
+     */
+    function paintFetch(root) {
+        const band = fetchBandNow();
+        if (!band) return;
+        const limits = state.status.limits;
+        const value = fetchValue();
+        const bad = band.key !== 'ok';
+        const tone = bad ? 'crit' : 'ok';
+
+        const number = /** @type {HTMLInputElement} */ (root.querySelector('#fetch-number'));
+        const slider = /** @type {HTMLInputElement} */ (root.querySelector('#fetch-slider'));
+        // Assigned only when it differs, so the element being dragged or typed into is left alone.
+        if (number.value !== String(value)) number.value = String(value);
+        number.setAttribute('data-over', bad ? 'true' : 'false');
+        number.setAttribute('data-band', band.key);
+        const clamped = String(Math.min(Math.max(value, 1), limits.fetch_concurrency_max));
+        if (slider.value !== clamped) slider.value = clamped;
+
+        const chip = root.querySelector('#fetch-band');
+        chip.textContent = t('new.fetch.chip.' + band.key);
+        chip.setAttribute('style', bandStyle({fg: 'var(--' + tone + '-fg)', bg: 'var(--' + tone + '-bg)'}));
+
+        const cap = root.querySelector('#fetch-cap');
+        cap.textContent = band.key === 'invalid'
+            ? t('new.fetch.at_least')
+            : t('new.fetch.cap', {warn: limits.fetch_concurrency_warn, max: limits.fetch_concurrency_max});
+        cap.setAttribute('data-over', bad ? 'true' : 'false');
+
+        // The comfortable reading is said once the alert has nothing to say.
+        root.querySelector('#fetch-body').textContent =
+            bad ? '' : t('new.fetch.body.' + PSL.plural(value), {count: value});
+
+        // Rebuilt only when the band changes: a slider drag inside one band leaves the
+        // alert, its checkbox and the screen reader's last announcement alone.
+        const slot = root.querySelector('#fetch-alert');
+        if (slot.getAttribute('data-band') === band.key) return;
+        slot.setAttribute('data-band', band.key);
+        slot.replaceChildren.apply(slot, fetchAlert(band));
+    }
+
+    /**
+     * Past the warning, the reason and the box that lets it through; past the max, the
+     * reason alone, since nothing lets that through.
+     * @param {{key: string, needsAck: boolean}} band
+     * @returns {HTMLElement[]}
+     */
+    function fetchAlert(band) {
+        if (band.key !== 'over' && band.key !== 'blocked') return [];
+        const limits = state.status.limits;
+        const text = el('div', {class: 'notice-block-text'}, [
+            el('p', {
+                class: 'notice-block-body',
+                text: band.key === 'blocked'
+                    ? t('new.fetch.blocked', {max: limits.fetch_concurrency_max})
+                    : t('new.fetch.over', {warn: limits.fetch_concurrency_warn})
+            })
+        ]);
+        if (band.needsAck) text.appendChild(ackPill('ackFetch', 'new.fetch.ack'));
+        return [el('section', {class: 'notice-block', 'data-tone': 'crit'}, [warningGlyph(16), text])];
+    }
+
     function renderNewScreen() {
         const section = el('section', {}, [
             ruledOverline(t('new.overline')),
@@ -3010,11 +3661,11 @@
             return section;
         }
         if (!state.sources || state.sources.length === 0) {
-            section.appendChild(el('div', {class: 'empty-state', text: t('new.no_source')}));
+            section.appendChild(el('div', {class: 'empty-state', 'data-guide': 'new.empty', text: t('new.no_source')}));
             return section;
         }
         if (runSources().length === 0) {
-            section.appendChild(el('div', {class: 'empty-state', text: t('new.no_grant')}));
+            section.appendChild(el('div', {class: 'empty-state', 'data-guide': 'new.empty', text: t('new.no_grant')}));
             return section;
         }
 
@@ -3043,7 +3694,7 @@
         // No build queued here: submitRow's updateSubmit runs after the same
         // render and builds the panels, so a second build would be thrown away.
         state.terminalSig = null;
-        return el('div', {id: 'terminal-panels', class: 'terminal-stack'});
+        return el('div', {id: 'terminal-panels', class: 'terminal-stack', 'data-guide': 'new.terminal'});
     }
 
     /**
@@ -3063,6 +3714,8 @@
         if (sig === state.terminalSig) return;
         state.terminalSig = sig;
         slot.replaceChildren.apply(slot, terminalPanels(source));
+        // Built a microtask after the render, so the guide's cutout on the panels is placed again.
+        GUIDE.refresh();
     }
 
     /**
@@ -3170,7 +3823,7 @@
         const origin = handoff.pairKey
             ? t('new.handoff.episode', {name: name})
             : t('new.handoff.incident', {kind: kind || t('new.handoff.incident_kind'), name: name});
-        return el('div', {class: 'banner', 'data-tone': daemon ? 'warn' : 'info'}, [
+        return el('div', {class: 'banner', 'data-tone': daemon ? 'warn' : 'info', 'data-guide': 'new.handoff'}, [
             daemon ? warningGlyph(16) : infoGlyph(16),
             el('div', {
                 text: t('new.handoff.window', {origin: origin, span: span})
@@ -3201,7 +3854,7 @@
                 render();
             });
         }
-        return el('div', {class: 'banner', 'data-tone': daemon ? 'warn' : 'info'}, [
+        return el('div', {class: 'banner', 'data-tone': daemon ? 'warn' : 'info', 'data-guide': 'new.handoff'}, [
             daemon ? warningGlyph(16) : infoGlyph(16),
             el('div', {}, [
                 el('p', {
@@ -3215,7 +3868,7 @@
     }
 
     function sourcePanel() {
-        return el('div', {class: 'card source-panel'}, [
+        return el('div', {class: 'card source-panel', 'data-guide': 'new.source'}, [
             el('div', {class: 'panel-head'}, [
                 el('h2', {class: 'overline', text: t('new.source.head')}),
                 el('span', {
@@ -3338,7 +3991,7 @@
     }
 
     function daemonNotice() {
-        return el('div', {class: 'notice'}, [
+        return el('div', {class: 'notice', 'data-guide': 'new.daemon'}, [
             svg([['circle', {cx: '12', cy: '12', r: '9'}], ['path', {d: 'M12 11v5M12 8.2v.2'}]], 16),
             el('div', {}, [
                 el('p', {text: t('new.daemon.none')}),
@@ -3378,6 +4031,8 @@
             ? t('new.field.range_absolute')
             : t('new.field.range_relative')));
         nodes.push(maxTracesBlock());
+        const reads = fetchConcurrencyBlock();
+        if (reads) nodes.push(reads);
         return nodes;
     }
 
@@ -3395,7 +4050,9 @@
             });
             group.appendChild(button);
         });
-        return field(t('new.mode.field'), radioKeys(group, 'mode'), t('new.mode.gloss'));
+        const row = field(t('new.mode.field'), radioKeys(group, 'mode'), t('new.mode.gloss'));
+        row.setAttribute('data-guide', 'new.mode');
+        return row;
     }
 
     function serviceInput() {
@@ -3525,7 +4182,7 @@
             button,
             el('span', {class: 'range-wire', text: rangeWire()})
         ]);
-        const wrap = el('div', {class: 'range'}, [row]);
+        const wrap = el('div', {class: 'range', 'data-guide': 'new.range'}, [row]);
         button.addEventListener('click', function () {
             if (state.form.pickerOpen) {
                 closePicker();
@@ -3550,21 +4207,13 @@
      * @param {Source} source
      */
     function rangeConsequences(source) {
-        const notes = [];
-        const spanMs = windowSpanMs();
-        if (spanMs > 86400000) {
-            notes.push(consequence(t('new.range.wide')));
-        }
-        if (spanMs > 7 * 86400000) {
-            notes.push(consequence(t('new.range.timeout', {seconds: state.status.limits.analysis_timeout_seconds})));
-        }
-        if (source.retention_hours != null && spanMs > source.retention_hours * 3600000) {
-            notes.push(consequence(t('new.range.retention', {duration: PSL.dur(source.retention_hours * 3600000)}),
-                'warn'));
-        } else if (source.retention_hours == null && spanMs > 86400000) {
-            notes.push(consequence(t('new.range.undeclared')));
-        }
-        return notes;
+        // The thresholds are PSL.rangeNotes', which the guide reads too.
+        return PSL.rangeNotes(windowSpanMs(), source.retention_hours).map(function (note) {
+            if (note === 'retention') {
+                return consequence(t('new.range.retention', {duration: PSL.dur(source.retention_hours * 3600000)}), 'warn');
+            }
+            return consequence(t('new.range.' + note, {seconds: state.status.limits.analysis_timeout_seconds}));
+        });
     }
 
     /**
@@ -3775,7 +4424,7 @@
                 return segment;
             }));
 
-        const block = el('div', {class: 'field'}, [
+        const block = el('div', {class: 'field', 'data-guide': 'new.traces'}, [
             // A div and not a label: the "?" is a button, which a label may not
             // contain, and the real binding is the `for` on the name beside it.
             el('div', {class: 'field-label'}, [
@@ -3799,6 +4448,83 @@
         const history = weightHistory();
         if (history) slot.appendChild(history);
         block.appendChild(slot);
+        return block;
+    }
+
+    /**
+     * How many traces the engine reads from Tempo at once. Only where the request can
+     * carry it: a Tempo source, a service run and an engine that reads the flag. It takes
+     * the field, the chip and the band rule of the trace count above, in two bands: the
+     * Hub's warning and its max.
+     */
+    function fetchConcurrencyBlock() {
+        if (!fetchBandNow()) return null;
+        const limits = state.status.limits;
+        const warn = limits.fetch_concurrency_warn;
+        const max = limits.fetch_concurrency_max;
+
+        const number = el('input', {
+            type: 'number',
+            id: 'fetch-number',
+            class: 'input input-traces',
+            min: '1',
+            max: String(max)
+        });
+        number.addEventListener('input', function () {
+            setFetchConcurrency(Number(number.value));
+        });
+        const slider = el('input', {
+            type: 'range',
+            id: 'fetch-slider',
+            min: '1',
+            max: String(max),
+            step: '1',
+            'aria-label': t('new.fetch.label')
+        });
+        slider.addEventListener('input', function () {
+            setFetchConcurrency(Number(slider.value));
+        });
+
+        // The handle sits at (n - 1) / (max - 1) of the track, so that is where the warning
+        // falls. A warning at the max leaves no red part, and a max of 1 no track at all.
+        const okShare = max > 1 ? (warn - 1) / (max - 1) : 1;
+        const stretches = /** @type {Array<[string, number, string]>} */ ([
+            ['ok', okShare, warn + ' ' + t('new.fetch.scale.warn')],
+            ['crit', 1 - okShare, max + ' ' + t('new.fetch.scale.max')]
+        ]).filter(function (stretch) {
+            return stretch[1] > 0;
+        });
+        const segments = el('div', {class: 'band-segs', 'aria-hidden': 'true'},
+            stretches.map(function (stretch) {
+                const segment = el('span', {class: 'band-seg', 'data-seg': stretch[0]});
+                segment.style.width = (stretch[1] * 100).toFixed(2) + '%';
+                return segment;
+            }));
+        const grid = el('div', {class: 'band-scale-grid'}, stretches.map(function (stretch) {
+            return el('span', {text: stretch[2]});
+        }));
+        grid.style.gridTemplateColumns = stretches.map(function (stretch) {
+            return (stretch[1] * 100).toFixed(2) + '%';
+        }).join(' ');
+        const scale = el('div', {class: 'band-scale'}, [el('span', {class: 'band-scale-start', text: '1'}), grid]);
+
+        const block = el('div', {class: 'field', 'data-guide': 'new.fetch'}, [
+            el('div', {class: 'field-label'}, [
+                el('label', {for: 'fetch-number', text: t('new.fetch.label')}),
+                el('span', {class: 'field-gloss', text: t('new.fetch.gloss')})
+            ]),
+            el('div', {class: 'traces-head'}, [
+                number,
+                el('span', {id: 'fetch-band', class: 'band-chip'}),
+                el('span', {id: 'fetch-cap', class: 'traces-cap'})
+            ]),
+            el('div', {class: 'band-track'}, [segments, slider]),
+            scale,
+            el('p', {id: 'fetch-body', class: 'band-body', style: 'color:var(--ok-fg)'}),
+            // A slot, like traces-ack: the alert comes and goes as the count crosses a limit.
+            el('div', {id: 'fetch-alert', class: 'fetch-alert', 'aria-live': 'polite'})
+        ]);
+        paintFetch(block);
         return block;
     }
 
@@ -3856,19 +4582,7 @@
      * know before the run. Absent until this source has a measured run.
      */
     function weightHistory() {
-        const source = selectedSource();
-        if (!source || !state.runs) return null;
-        const past = state.runs.filter(function (run) {
-            /** @type {Partial<RunResult>} */
-            const result = run.result || {};
-            // Trace-id runs are excluded: their weight says nothing about the
-            // slider. A missing max_traces on a service run is the server-side
-            // default, not an unmeasured one.
-            return run.source_id === source.id &&
-                run.status === 'succeeded' &&
-                typeof result.report_bytes === 'number' &&
-                (run.request || {}).trace_id === undefined;
-        }).slice(0, 3);
+        const past = weighedRuns();
         if (past.length === 0) return null;
 
         return sinkBlock(t('new.weighed.head'), t('new.weighed.sub'),
@@ -3880,6 +4594,27 @@
                     duration: PSL.dur(Date.now() - (run.finished_at_ms || run.created_at_ms))
                 })];
             }));
+    }
+
+    /**
+     * The last three succeeded service runs on the chosen source that weighed their report, newest
+     * first: what weightHistory draws, and what the New guide only needs to count.
+     * @returns {Run[]}
+     */
+    function weighedRuns() {
+        const source = selectedSource();
+        if (!source || !state.runs) return [];
+        return state.runs.filter(function (run) {
+            /** @type {Partial<RunResult>} */
+            const result = run.result || {};
+            // Trace-id runs are excluded: their weight says nothing about the
+            // slider. A missing max_traces on a service run is the server-side
+            // default, not an unmeasured one.
+            return run.source_id === source.id &&
+                run.status === 'succeeded' &&
+                typeof result.report_bytes === 'number' &&
+                (run.request || {}).trace_id === undefined;
+        }).slice(0, 3);
     }
 
     /**
@@ -3996,11 +4731,21 @@
     }
 
     function heavyAck() {
+        return ackPill('ackHeavy', 'new.traces.ack');
+    }
+
+    /**
+     * The box that lets a run through past a limit it was warned about. Lives on the
+     * form only, never in the request: the server has no such thing to remember.
+     * @param {'ackHeavy' | 'ackFetch'} field
+     * @param {string} textKey
+     */
+    function ackPill(field, textKey) {
         const node = checkbox(
-            state.form.ackHeavy,
-            t('new.traces.ack'),
+            state.form[field],
+            t(textKey),
             function (checked) {
-                state.form.ackHeavy = checked;
+                state.form[field] = checked;
                 updateSubmit();
             });
         node.classList.add('checkbox-pill');
@@ -4157,7 +4902,7 @@
                 t('new.cost.workers_note')],
             [String(limits.report_retention_hours), t('unit.h'), t('new.cost.retention'), t('new.cost.retention_note')]
         ];
-        return el('section', {class: 'card cost'}, [
+        return el('section', {class: 'card cost', 'data-guide': 'new.cost'}, [
             el('div', {class: 'cost-head'}, [
                 el('h2', {class: 'overline', text: t('new.cost.head')}),
                 el('span', {class: 'cost-sub', text: t('new.cost.sub')})
@@ -4192,7 +4937,26 @@
         const band = PSL.weightBand(state.form.maxTraces, tracesCap());
         if (band.key === 'over') return t('new.block.over');
         if (band.key === 'invalid') return t('new.block.invalid');
-        return band.needsAck && !state.form.ackHeavy ? t('new.block.heavy') : null;
+        if (band.needsAck && !state.form.ackHeavy) return t('new.block.heavy');
+        return fetchBlocker();
+    }
+
+    /**
+     * What the reads count blocks, or null. The server refuses each of these too (an
+     * unreadable or too high count, and a max under the engine's default with an engine
+     * that cannot be told), so this only spares the round trip.
+     */
+    function fetchBlocker() {
+        const limits = state.status.limits;
+        const max = limits.fetch_concurrency_max;
+        if (PSL.fetchAccess(selectedSource(), state.form.mode, limits) === 'refused') {
+            return t('new.fetch.unsupported', {max: max});
+        }
+        const band = fetchBandNow();
+        if (!band) return null;
+        if (band.key === 'blocked') return t('new.fetch.blocked', {max: max});
+        if (band.key === 'invalid') return t('new.fetch.invalid');
+        return band.needsAck && !state.form.ackFetch ? t('new.fetch.confirm') : null;
     }
 
     /** Restates the request in a sentence, so the button is not a leap of faith. */
@@ -4228,7 +4992,7 @@
             el('span', {text: t('new.submit.button')})
         ]);
         button.addEventListener('click', submit);
-        const row = el('div', {class: 'submit-row'}, [
+        const row = el('div', {class: 'submit-row', 'data-guide': 'new.submit'}, [
             button,
             el('p', {class: 'submit-sentence', id: 'submit-sentence'})
         ]);
@@ -4272,6 +5036,10 @@
             return trace;
         }
         const request = {service: state.form.service.trim(), max_traces: state.form.maxTraces};
+        // Only while its block is on screen: a Jaeger source, an engine that cannot read
+        // the flag or a trace ID run sends none, whatever was typed before.
+        const reads = PSL.fetchRequested(state.form, source, state.status.limits);
+        if (reads !== undefined) request.fetch_concurrency = reads;
         if (Object.keys(state.form.detection).length > 0) request.detection = state.form.detection;
         if (state.form.rangeMode === 'absolute') {
             request.from_ms = state.form.fromMs;
@@ -4328,11 +5096,11 @@
 
         const key = PSL.statusKey(run);
         const view = runView(run, key);
-        section.appendChild(el('div', {class: 'run-head'}, [
+        section.appendChild(el('div', {class: 'run-head', 'data-guide': 'run.head'}, [
             el('span', {class: 'status-pill', 'data-status': key, text: t('status.' + key)}),
             el('span', {class: 'run-id', text: run.id})
         ]));
-        section.appendChild(el('h1', {class: 'page-title', text: view.headline}));
+        section.appendChild(el('h1', {class: 'page-title', 'data-guide': 'run.headline', text: view.headline}));
         const sub = typeof view.sub === 'function' ? view.sub : null;
         section.appendChild(live(el('p', {class: 'page-sub', text: sub ? sub() : view.sub}), sub));
 
@@ -4360,8 +5128,10 @@
      * @param {Run} run
      */
     function rerun(run) {
-        Object.assign(state.form, PSL.formFromRequest(run.request),
-            {sourceId: run.source_id, ackUnreachable: false, ackHeavy: false});
+        // The count first, so a run that carried none starts from the default rather
+        // than from whatever was typed since.
+        Object.assign(state.form, {fetchConcurrency: null}, PSL.formFromRequest(run.request),
+            {sourceId: run.source_id, ackUnreachable: false, ackHeavy: false, ackFetch: false});
         state.handoff = /** @type {?Handoff} */ (null);
         state.traceHandoff = /** @type {?TraceHandoff} */ (null);
         location.hash = '#/new';
@@ -4483,7 +5253,7 @@
             rows.push(logRow(run.expires_at_ms, t('run.log.deleted'), t('run.log.deleted_detail'), 'muted'));
         }
 
-        return el('section', {class: 'card log-card', 'aria-label': t('run.log.label')}, [
+        return el('section', {class: 'card log-card', 'aria-label': t('run.log.label'), 'data-guide': 'run.log'}, [
             el('div', {class: 'log-head'}, [
                 el('h2', {class: 'overline', text: t('run.log.head')}),
                 el('span', {class: 'log-head-note', text: t('run.log.note')})
@@ -4536,7 +5306,7 @@
             ]));
         });
 
-        const elapsed = el('section', {class: 'card rail-card'}, [
+        const elapsed = el('section', {class: 'card rail-card', 'data-guide': 'run.elapsed'}, [
             el('h2', {class: 'overline overline-p', text: t('run.elapsed')}),
             figure
         ]);
@@ -4583,7 +5353,7 @@
             [t('run.fact.type'), PSL.KIND_LABEL[run.kind] || run.kind, 'mono']
         ];
         // The engine's own argument names, kept as they are sent.
-        ['service', 'trace_id', 'lookback', 'max_traces'].forEach(function (name) {
+        ['service', 'trace_id', 'lookback', 'max_traces', 'fetch_concurrency'].forEach(function (name) {
             if (request[name] != null) facts.push([name, String(request[name]), 'mono']);
         });
         if (request.from_ms) {
@@ -4603,7 +5373,7 @@
                 return expiryText(run);
             }]);
 
-        return el('section', {class: 'request'}, [
+        return el('section', {class: 'request', 'data-guide': 'run.request'}, [
             el('h2', {class: 'overline overline-p', text: t('run.request')}),
             el('div', {class: 'request-grid'}, facts.map(function (fact) {
                 return el('div', {class: 'fact-card'}, [
@@ -4637,9 +5407,9 @@
     function outcomePanel(run, key) {
         if (key === 'running' || key === 'queued') return null;
         const spec = outcomeSpec(run, key);
-        const panel = el('section', {class: 'outcome', 'data-tone': spec.tone}, [
+        const panel = el('section', {class: 'outcome', 'data-tone': spec.tone, 'data-guide': 'run.outcome'}, [
             el('h2', {class: 'overline overline-p', text: '// ' + spec.title}),
-            el('p', {class: 'outcome-body', text: spec.body})
+            proseInto(el('p', {class: 'outcome-body'}), spec.body)
         ]);
         if (spec.counts) panel.appendChild(countStrip(spec.counts, {toned: true, filled: 1}));
         (spec.warnings || []).forEach(function (/** @type {{kind: string, message: string}} */ warning) {
@@ -4705,7 +5475,8 @@
                 tone: 'crit', title: run.error_code || 'internal',
                 body: t('run.outcome.failed_body', {
                     name: run.source_name,
-                    meaning: PSL.ERRORS[run.error_code] || t('run.outcome.unnamed')
+                    meaning: PSL.runFailureMeaning(run.error_code, state.status?.limits.engine_memory_limit_mib)
+                        || t('run.outcome.unnamed')
                 }),
                 primary: rerunAction(t('run.outcome.rerun'), false),
                 secondary: {label: t('run.outcome.check_source'), href: '#/sources'},
@@ -5008,7 +5779,7 @@
             body.appendChild(detectionRow(knob));
         });
 
-        const panel = el('details', {class: 'advanced'}, [summary, body]);
+        const panel = el('details', {class: 'advanced', 'data-guide': 'new.advanced'}, [summary, body]);
         // Open because the reader left it open, or because a threshold in it is
         // set and hiding that would hide what the run is about to do.
         panel.open = state.panelOpen.advanced === true || detectionCount() > 0;
@@ -5212,7 +5983,7 @@
         const section = el('section', {}, [
             ruledOverline(t('incidents.overline')),
             el('h1', {class: 'page-title', text: t('incidents.title')}),
-            el('p', {class: 'page-sub'}, [
+            el('p', {class: 'page-sub', 'data-guide': 'incidents.sub'}, [
                 document.createTextNode(t('incidents.sub')),
                 helpDot(t('incidents.help'), t('incidents.topic'))
             ])
@@ -5226,7 +5997,10 @@
             return section;
         }
         if (state.incidentsError) {
-            section.appendChild(el('div', {class: 'banner', 'data-tone': INCIDENT_ERROR_TONE[state.incidentsError]}, [
+            section.appendChild(el('div', {
+                class: 'banner', 'data-tone': INCIDENT_ERROR_TONE[state.incidentsError],
+                'data-guide': state.incidentsError === 'stale' ? 'incidents.stale' : null
+            }, [
                 state.incidentsError === 'stale' ? warningGlyph(16) : critGlyph(16),
                 el('div', {text: t(INCIDENT_ERROR_TEXT[state.incidentsError])})
             ]));
@@ -5242,7 +6016,7 @@
         });
         section.appendChild(incidentFilterLine());
         if (state.incidents.length === 0) {
-            section.appendChild(el('div', {class: 'empty-state'}, [
+            section.appendChild(el('div', {class: 'empty-state', 'data-guide': 'incidents.empty'}, [
                 el('p', {class: 'empty-title', text: t('incidents.empty.title')}),
                 proseInto(el('p'), t(Object.values(state.incidentFilter).some(Boolean)
                     ? 'incidents.empty.body_filtered' : 'incidents.empty.body'))
@@ -5250,9 +6024,10 @@
             appendCopyNote(section);
             return section;
         }
-        section.appendChild(el('div', {class: 'sources-wrap'}, [incidentsTable(state.incidents)]));
+        section.appendChild(el('div', {class: 'sources-wrap', 'data-guide': 'incidents.table'},
+            [incidentsTable(state.incidents)]));
         if (!state.incidentsDone) {
-            const older = el('button', {type: 'button', class: 'pill-button'}, [
+            const older = el('button', {type: 'button', class: 'pill-button', 'data-guide': 'incidents.older'}, [
                 svg([['path', {d: 'M12 5v14M5 12l7 7 7-7'}]], 14),
                 el('span', {text: t('incidents.older')})
             ]);
@@ -5273,8 +6048,9 @@
     function unauthorizedBanners() {
         return (state.sources || []).filter(function (source) {
             return source.incidents_state === 'unauthorized';
-        }).map(function (source) {
-            return el('div', {class: 'banner', 'data-tone': 'warn'}, [
+        }).map(function (source, index) {
+            const guide = index === 0 ? 'incidents.unauthorized' : null;
+            return el('div', {class: 'banner', 'data-tone': 'warn', 'data-guide': guide}, [
                 warningGlyph(16),
                 el('div', {}, [
                     el('p', {}, [
@@ -5385,7 +6161,7 @@
             }), setFilter('source_id'))
         ]);
         folded.hidden = !state.incidentFiltersOpen;
-        return el('div', {class: 'filter-stack'}, [
+        return el('div', {class: 'filter-stack', 'data-guide': 'incidents.filters'}, [
             el('div', {class: 'refresh'}, [
                 filterSelect('kind', filter.kind, Object.keys(PSL.INCIDENT_KIND_LABEL).map(function (kind) {
                     return [kind, PSL.INCIDENT_KIND_LABEL[kind]];
@@ -5423,7 +6199,7 @@
             return source.kind === 'daemon';
         });
         if (daemons.length === 0) return null;
-        return el('p', {class: 'sources-note'}, [
+        return el('p', {class: 'sources-note', 'data-guide': 'incidents.copy'}, [
             el('span', {text: t('incidents.copy_note')})
         ].concat(daemons.map(function (source) {
             const text = function () {
@@ -5459,9 +6235,12 @@
                 'data-align': INCIDENT_COLUMNS_RIGHT.indexOf(name) >= 0 ? 'right' : null
             });
         }));
+        const rows = incidents.flatMap(incidentRow);
+        rows[0].children[INCIDENT_COLUMNS.indexOf('capture')].setAttribute('data-guide', 'incidents.capture');
+        rows[0].children[INCIDENT_COLUMNS.indexOf('service')].setAttribute('data-guide', 'incidents.row');
         return el('table', {class: 'table'}, [
             el('thead', {}, [head]),
-            el('tbody', {}, incidents.flatMap(incidentRow))
+            el('tbody', {}, rows)
         ]);
     }
 
@@ -5575,6 +6354,7 @@
         if (cell) {
             const row = /** @type {HTMLElement} */ (cell.parentNode);
             row.hidden = !open;
+            foldAnchors(cell, open);
         }
         const detail = state.incidentDetails[incident.id];
         if (open && (detail === undefined || (detail !== 'loading' && detail.error_code))) loadIncident(incident);
@@ -5599,6 +6379,7 @@
             .finally(function () {
                 const target = document.getElementById('incident-detail-' + incidentKey(incident));
                 if (target) target.replaceChildren(incidentPanel(incident));
+                GUIDE.refresh();
             });
     }
 
@@ -5613,12 +6394,14 @@
                 el('div', {class: 'skeleton', style: 'height:90px'})
             ]);
         }
+        const opened = state.panelOpen[foldKey(incident)] === true;
         if (detail.error_code) {
-            return el('div', {class: 'daemon-panel'}, [
+            const gone = detail.error_code === 'gone';
+            return el('div', {class: 'daemon-panel', ...(gone ? foldGuide('incidents.panel', opened) : {})}, [
                 el('div', {class: 'banner', 'data-tone': 'crit'}, [
                     critGlyph(16),
                     el('p', {
-                        text: t(detail.error_code === 'gone' ? 'incidents.panel.gone' : 'incidents.panel.failed')
+                        text: t(gone ? 'incidents.panel.gone' : 'incidents.panel.failed')
                     })
                 ])
             ]);
@@ -5633,7 +6416,7 @@
         // The button comes after the note that describes the window, since it
         // is the action the note argues for. A bare row, so the panel's own
         // gap sets the distance and no margin adds a second one.
-        return el('div', {class: 'daemon-panel'}, [
+        return el('div', {class: 'daemon-panel', ...foldGuide('incidents.panel', opened)}, [
             el('p', {class: 'overline daemon-audience', text: t('incidents.panel.overline')}),
             el('p', {
                 class: 'daemon-source-note',
@@ -5901,7 +6684,7 @@
         const section = el('section', {}, [
             ruledOverline(t('correlations.overline')),
             el('h1', {class: 'page-title', text: t('correlations.title')}),
-            el('p', {class: 'page-sub'}, [
+            el('p', {class: 'page-sub', 'data-guide': 'correlations.sub'}, [
                 document.createTextNode(t('correlations.sub')),
                 helpDot(t('correlations.help'), t('correlations.topic'))
             ]),
@@ -5920,20 +6703,21 @@
         }
         const pairs = PSL.correlationPairs(state.correlations);
         if (pairs.length === 0) {
-            section.appendChild(el('div', {class: 'empty-state'}, [
+            section.appendChild(el('div', {class: 'empty-state', 'data-guide': 'correlations.empty'}, [
                 el('p', {class: 'empty-title', text: t('correlations.empty.title')}),
                 proseInto(el('p'), t('correlations.empty.body'))
             ]));
             return section;
         }
-        section.appendChild(el('div', {class: 'sources-wrap'}, [correlationsTable(pairs)]));
+        section.appendChild(el('div', {class: 'sources-wrap', 'data-guide': 'correlations.table'},
+            [correlationsTable(pairs)]));
         if (state.correlations.length === CORRELATION_LIMIT) {
             section.appendChild(el('p', {
                 class: 'sources-note',
                 text: t('correlations.limit', {limit: CORRELATION_LIMIT})
             }));
         }
-        section.appendChild(el('p', {class: 'sources-note'}, [
+        section.appendChild(el('p', {class: 'sources-note', 'data-guide': 'correlations.note'}, [
             el('span', {text: t('correlations.note.lead')}),
             el('span', {class: 'code-inline', text: '[daemon.hub_export]'}),
             el('span', {text: t('correlations.note.and')}),
@@ -5976,7 +6760,7 @@
                 href: '#/correlations'
             }, [el('span', {text: t('correlations.every_pair')})])
             : null;
-        return el('div', {class: 'refresh'}, [
+        return el('div', {class: 'refresh', 'data-guide': 'correlations.filters'}, [
             pairOnly,
             el('span', {class: 'refresh-label', text: t('correlations.range')}),
             range,
@@ -6001,7 +6785,9 @@
                 'data-align': CORRELATION_COLUMNS_RIGHT.indexOf(name) >= 0 ? 'right' : null
             });
         }));
-        return el('table', {class: 'table'}, [el('thead', {}, [head]), el('tbody', {}, pairs.flatMap(pairRow))]);
+        const rows = pairs.flatMap(pairRow);
+        rows[0].querySelector('.row-toggle').setAttribute('data-guide', 'correlations.pair');
+        return el('table', {class: 'table'}, [el('thead', {}, [head]), el('tbody', {}, rows)]);
     }
 
     /**
@@ -6035,6 +6821,7 @@
             if (cell) {
                 const row = /** @type {HTMLElement} */ (cell.parentNode);
                 row.hidden = !next;
+                foldAnchors(cell, next);
             }
         });
         const row = el('tr', {}, [
@@ -6105,7 +6892,8 @@
             return incident.source_id === pair.source_id
                 && PSL.spansOverlap(incident.window_from_ms, incidentEnd(incident), fromMs, toMs);
         });
-        return el('div', {class: 'daemon-panel'}, [
+        const guide = foldGuide('correlations.panel', state.panelOpen['pair:' + pair.key] === true);
+        return el('div', {class: 'daemon-panel', ...guide}, [
             timelineStrip(pair.episodes, incidents, fromMs, toMs),
             el('div', {class: 'sources-wrap'}, [episodesTable(pair.episodes, incidents)])
         ]);
@@ -6818,8 +7606,8 @@
 
     // -------------------------------------------------------- screen: recap
 
-    const RECAP_FIRST_PAGE = 10;
-    const RECAP_MOVES_FIRST = 5;
+    const RECAP_FIRST_PAGE = PSL.RECAP_FIRST_PAGE;
+    const RECAP_MOVES_FIRST = PSL.RECAP_MOVES_FIRST;
     const RECAP_PERIOD_CHOICES = ['day', 'week', 'month'];
     /** @type {Record<string, GlyphPaths>} */
     const RECAP_STATE_GLYPH = {
@@ -6844,7 +7632,7 @@
 
     /**
      * Writes the route the filters name; the hash change reads the recap again.
-     * @param {Record<string, string | null>} change
+     * @param {Record<string, string | string[] | null>} change
      */
     function goRecap(change) {
         location.hash = PSL.recapHash(Object.assign({}, recapRoute(), change));
@@ -7209,7 +7997,7 @@
         const environments = Array.from(new Set((state.sources || []).map(function (source) {
             return source.environment;
         }).filter(Boolean))).sort();
-        return el('div', {class: 'refresh recap-filter'}, [
+        return el('div', {class: 'refresh recap-filter', 'data-guide': 'recap.filters'}, [
             el('span', {class: 'refresh-label', text: t('recap.filter.period')}),
             period,
             day,
@@ -7218,34 +8006,321 @@
             }), function (value) {
                 goRecap({environment: value || null});
             }),
-            recapTextFilter(t('recap.filter.service'), route.service, 'service'),
-            recapTextFilter(t('recap.filter.namespace'), route.grouping, 'grouping'),
+            recapMultiFilter(t('recap.filter.service'), PSL.RECAP_PICK_COPY['all.service'], 'services', route.services,
+                recapPickOptions('services')),
+            recapMultiFilter(t('recap.filter.namespace'), PSL.RECAP_PICK_COPY['all.grouping'], 'groupings',
+                route.groupings, recapPickOptions('groupings')),
             recapViewSwitch(route)
         ]);
     }
 
+    // ---- the service and namespace lists of the filter line
+
     /**
-     * Applied on change, so a name is not searched for a letter at a time.
-     * @param {string} label
-     * @param {string | null} value
-     * @param {string} key
+     * Draws the recap screen. The screen is drawn again as the recap loads and lands, so a list's button,
+     * or the control of an open list, that held the focus gets it back.
+     * @param {HTMLElement} main
      */
-    function recapTextFilter(label, value, key) {
-        const input = el('input', {
-            class: 'recap-input', type: 'text', placeholder: label, value: value || '', 'aria-label': label,
-            spellcheck: 'false'
+    function drawRecapScreen(main) {
+        const held = document.activeElement;
+        const button = held && held.classList.contains('recap-pick-button') ? held.id : null;
+        const inside = held && held.closest('.recap-pick-pop');
+        const was = inside ? {pick: held.getAttribute('data-pick'), name: held.getAttribute('data-name')} : null;
+        replaceKeepingPdf(main, renderRecapScreen());
+        const pop = was && state.recapPick.open ? document.querySelector('.recap-pick-pop') : null;
+        if (pop) {
+            const stops = /** @type {HTMLElement[]} */ (Array.from(pop.querySelectorAll('[data-pick]')));
+            const back = stops.find(function (node) {
+                return node.getAttribute('data-pick') === was.pick && node.getAttribute('data-name') === was.name;
+            });
+            (back || /** @type {HTMLElement} */ (pop)).focus();
+        }
+        const returned = button ? document.getElementById(button) : null;
+        if (returned) returned.focus();
+        fitRecapPick(document.querySelector('.recap-pick-pop'));
+    }
+
+    /**
+     * A list opened from a button near the right edge would run past the window and widen the page: it
+     * then hangs from the button's right edge instead.
+     * @param {Element | null} pop
+     */
+    function fitRecapPick(pop) {
+        if (!pop) return;
+        pop.classList.remove('recap-pick-pop-end');
+        if (pop.getBoundingClientRect().right > document.documentElement.clientWidth - 16) {
+            pop.classList.add('recap-pick-pop-end');
+        }
+    }
+
+    /**
+     * What a list can show of the names read for the period on screen, `idle` for any other period.
+     * @param {'services' | 'groupings'} key
+     * @returns {{status: RecapNames['status'], names: string[]}}
+     */
+    function recapPickOptions(key) {
+        const read = state.recapNames;
+        const current = read.path === PSL.recapFiltersPath(recapRoute());
+        return {status: current ? read.status : 'idle', names: current ? read[key] : []};
+    }
+
+    /**
+     * Reads the names the lists offer for the period on screen, once: a read already made, or in flight,
+     * for this period is kept. A failed one is made again. Only the latest read lands, and a list open
+     * meanwhile is drawn again with what it brought.
+     */
+    function loadRecapNames() {
+        const path = PSL.recapFiltersPath(recapRoute());
+        if (state.recapNames.path === path && state.recapNames.status !== 'error') return;
+        state.recapNames = {path: path, status: 'loading', services: [], groupings: []};
+        /**
+         * @param {RecapNames['status']} status
+         * @param {string[]} services
+         * @param {string[]} groupings
+         */
+        const settle = function (status, services, groupings) {
+            if (state.recapNames.path !== path) return;
+            state.recapNames = {path: path, status: status, services: services, groupings: groupings};
+            if (state.recapPick.open && currentScreen() === 'recap') render();
+        };
+        getJson(path).then(function (/** @type {import('../types').RecapFilterOptions} */ answer) {
+            settle('ready', Array.isArray(answer.services) ? answer.services : [],
+                Array.isArray(answer.groupings) ? answer.groupings : []);
+        }, function () {
+            settle('error', [], []);
         });
-        input.addEventListener('change', function () {
-            goRecap({[key]: input.value.trim() || null});
+    }
+
+    /**
+     * A list of names to tick on the filter line: a button saying what is chosen, which opens a list with
+     * a search. The route takes the boxes once, when the list closes, so ticking five names starts one
+     * recap and not five. Written from the state, so a render keeps it open.
+     * @param {string} label what the list is named
+     * @param {string} allLabel what the button says while nothing is chosen
+     * @param {'services' | 'groupings'} key the route field it writes
+     * @param {string[]} selected the names the route chooses
+     * @param {{status: RecapNames['status'], names: string[]}} options the names the Hub offers
+     * @returns {HTMLElement}
+     */
+    function recapMultiFilter(label, allLabel, key, selected, options) {
+        const pick = state.recapPick;
+        const open = pick.open === key;
+        const host = el('div', {class: 'recap-pick', id: 'recap-pick-' + key, 'data-guide': 'recap.pick.' + key});
+        // This list alone is drawn again, so a focus that moved on to another control stays there.
+        const again = function () {
+            const fresh = recapMultiFilter(label, allLabel, key, selected, recapPickOptions(key));
+            host.replaceWith(fresh);
+            return fresh;
+        };
+        const button = el('button', {
+            type: 'button', class: 'recap-pick-button', id: 'recap-pick-' + key + '-button',
+            'aria-expanded': open ? 'true' : 'false', 'aria-controls': open ? 'recap-pick-' + key + '-pop' : null
         });
-        return input;
+        const paint = function () {
+            paintRecapPickButton(button, label, allLabel, open ? pick.draft : selected);
+        };
+        paint();
+        button.addEventListener('click', function () {
+            if (open) {
+                closeRecapPick(key, again, true);
+                return;
+            }
+            state.recapPick = {open: key, query: '', draft: selected.slice()};
+            loadRecapNames();
+            const fresh = again();
+            // A phone would raise its keyboard over a short list: there the group takes the focus instead.
+            const first = globalThis.matchMedia('(pointer: coarse)').matches ? '.recap-pick-pop' : '.recap-pick-search';
+            fitRecapPick(fresh.querySelector('.recap-pick-pop'));
+            /** @type {HTMLElement} */ (fresh.querySelector(first)).focus();
+        });
+        host.appendChild(button);
+        if (!open) return host;
+        const backdrop = el('div', {class: 'picker-backdrop'});
+        backdrop.addEventListener('click', function () {
+            closeRecapPick(key, again, true);
+        });
+        host.appendChild(backdrop);
+        host.appendChild(recapPickPopover(label, key, options, paint));
+        // Tabbing on past the list closes it where it is, without taking the focus back.
+        host.addEventListener('focusout', function (event) {
+            const to = event.relatedTarget;
+            if (to instanceof Element && !host.contains(to)) closeRecapPick(key, again, false, to.id);
+        });
+        return host;
+    }
+
+    /**
+     * The button's words: the list's name, then what is chosen: the first name and how many more, or
+     * `allLabel` for none. A long name is cut short by the style, and the label keeps it whole.
+     * @param {HTMLElement} button
+     * @param {string} label
+     * @param {string} allLabel
+     * @param {string[]} names
+     */
+    function paintRecapPickButton(button, label, allLabel, names) {
+        const more = names.length > 1 ? '+' + (names.length - 1) : '';
+        button.setAttribute('aria-label', label + ': ' + (names[0] || allLabel) + (more ? ' ' + more : ''));
+        button.replaceChildren(
+            el('span', {class: 'recap-pick-name', text: names[0] || allLabel}),
+            ...(more ? [el('span', {class: 'recap-pick-more', text: more})] : []),
+            svg([['path', {d: 'M6 9l6 6 6-6'}]], 11));
+    }
+
+    /**
+     * Closes the open list. When its boxes differ from the route the route takes them, and the hash
+     * change that follows draws the screen again; otherwise this list alone is drawn closed.
+     * @param {'services' | 'groupings'} key
+     * @param {() => HTMLElement} again
+     * @param {boolean} refocus whether the button gets the focus back: not when the focus moved on by itself
+     * @param {string} [movedTo] the id of the control it moved on to, which a route change would draw anew
+     */
+    function closeRecapPick(key, again, refocus, movedTo) {
+        if (state.recapPick.open !== key) return;
+        const draft = state.recapPick.draft.slice().sort();
+        state.recapPick = {open: null, query: '', draft: []};
+        if (JSON.stringify(draft) !== JSON.stringify(recapRoute()[key])) {
+            state.recapRefocus = refocus ? 'recap-pick-' + key + '-button' : movedTo || null;
+            goRecap({[key]: draft});
+            return;
+        }
+        const closed = again();
+        if (refocus) /** @type {HTMLElement} */ (closed.querySelector('.recap-pick-button')).focus();
+    }
+
+    /**
+     * The open list: a search, the names with a box each, the count of boxes ticked and a way to clear them.
+     * Ticking and searching change the list in place; nothing here moves the route.
+     * @param {string} label
+     * @param {'services' | 'groupings'} key
+     * @param {{status: RecapNames['status'], names: string[]}} options
+     * @param {() => void} paintButton
+     * @returns {HTMLElement}
+     */
+    function recapPickPopover(label, key, options, paintButton) {
+        const pick = state.recapPick;
+        const copy = PSL.RECAP_PICK_COPY;
+        const search = el('input', {
+            type: 'text', class: 'recap-pick-search', 'data-pick': 'search', value: pick.query, spellcheck: 'false',
+            autocomplete: 'off', placeholder: copy.search, 'aria-label': copy.search
+        });
+        const body = el('div', {class: 'recap-pick-list'});
+        const limit = el('p', {class: 'recap-pick-note', text: t('recap.pick.limit', {max: PSL.RECAP_FILTER_MAX_VALUES})});
+        const count = el('span', {class: 'recap-pick-count'});
+        const clear = el('button', {type: 'button', class: 'recap-pick-clear', 'data-pick': 'clear', text: copy.clear});
+        // After each box: the count, the limit, which boxes can still be ticked, and the button's words.
+        const ticked = function () {
+            const full = pick.draft.length >= PSL.RECAP_FILTER_MAX_VALUES;
+            count.textContent = t('recap.pick.count.' + PSL.plural(pick.draft.length), {count: pick.draft.length});
+            limit.hidden = !full;
+            clear.disabled = pick.draft.length === 0;
+            body.querySelectorAll('input[data-pick="box"]').forEach(function (/** @type {HTMLInputElement} */ box) {
+                box.disabled = !box.checked && full;
+            });
+            paintButton();
+        };
+        const rows = function () {
+            body.replaceChildren(...recapPickBody(options, pick, ticked));
+            ticked();
+        };
+        search.addEventListener('input', function () {
+            pick.query = search.value;
+            rows();
+        });
+        clear.addEventListener('click', function () {
+            pick.draft = [];
+            rows();
+            search.focus();
+        });
+        const pop = el('div', {
+            class: 'recap-pick-pop', id: 'recap-pick-' + key + '-pop', role: 'group', 'aria-label': label, tabindex: '-1'
+        }, [search, body, limit, el('div', {class: 'recap-pick-foot'}, [count, clear])]);
+        pop.addEventListener('keydown', function (event) {
+            const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+            if (step === 0) return;
+            const stops = /** @type {HTMLElement[]} */ ([search].concat(
+                Array.from(body.querySelectorAll('input[data-pick="box"]:not(:disabled)'))));
+            const at = stops.indexOf(/** @type {HTMLElement} */ (event.target));
+            if (at < 0) return;
+            event.preventDefault();
+            stops[Math.max(0, Math.min(stops.length - 1, at + step))].focus();
+        });
+        rows();
+        return pop;
+    }
+
+    /**
+     * What fills the list: a line while the names are read, the failure with a way to read them again,
+     * a box for each name, or the line that says there is none. A name already ticked stays in a list
+     * that failed, and in one that lacks it, so it can be unticked.
+     * @param {{status: RecapNames['status'], names: string[]}} options
+     * @param {RecapPick} pick
+     * @param {() => void} ticked
+     * @returns {HTMLElement[]}
+     */
+    function recapPickBody(options, pick, ticked) {
+        const copy = PSL.RECAP_PICK_COPY;
+        const ready = options.status === 'ready';
+        const rows = PSL.recapPickRows(ready ? options.names : [], pick.draft, pick.query);
+        /** @type {HTMLElement[]} */
+        const nodes = [];
+        if (!ready && options.status !== 'error') {
+            nodes.push(el('p', {class: 'recap-pick-note', role: 'status', text: copy.loading}));
+        }
+        if (options.status === 'error') nodes.push(recapPickFailure());
+        rows.forEach(function (row) {
+            nodes.push(recapPickRow(row, ready, pick, ticked));
+        });
+        if (ready && rows.length === 0) {
+            nodes.push(el('p', {class: 'recap-pick-note', text: pick.query.trim() === '' ? copy.empty : copy.nomatch}));
+        }
+        return nodes;
+    }
+
+    function recapPickFailure() {
+        const retry = el('button', {
+            type: 'button', class: 'recap-pick-clear', 'data-pick': 'retry', text: PSL.RECAP_PICK_COPY.retry
+        });
+        retry.addEventListener('click', function () {
+            loadRecapNames();
+            render();
+        });
+        return el('div', {class: 'recap-pick-note', role: 'status'}, [
+            el('span', {text: PSL.RECAP_PICK_COPY.error}), retry
+        ]);
+    }
+
+    /**
+     * One name and its box. The name is the Hub's text, set as text.
+     * @param {{name: string, checked: boolean, absent: boolean}} row
+     * @param {boolean} known whether the Hub offered the names, so one it lacks can be said to be absent
+     * @param {RecapPick} pick
+     * @param {() => void} ticked
+     */
+    function recapPickRow(row, known, pick, ticked) {
+        const box = el('input', {type: 'checkbox', 'data-pick': 'box', 'data-name': row.name});
+        box.checked = row.checked;
+        box.disabled = !row.checked && pick.draft.length >= PSL.RECAP_FILTER_MAX_VALUES;
+        box.addEventListener('change', function () {
+            const rest = pick.draft.filter(function (name) {
+                return name !== row.name;
+            });
+            pick.draft = (box.checked ? rest.concat(row.name) : rest).sort();
+            ticked();
+        });
+        return el('label', {class: 'recap-pick-opt'}, [
+            box,
+            el('span', {class: 'recap-pick-name', text: row.name}),
+            row.absent && known ? el('span', {class: 'recap-pick-absent', text: PSL.RECAP_PICK_COPY.absent}) : null
+        ]);
     }
 
     /**
      * @param {RecapRoute} route
      */
     function recapViewSwitch(route) {
-        const group = el('div', {class: 'segmented', role: 'radiogroup', 'aria-label': t('recap.view.label')});
+        const group = el('div', {
+            class: 'segmented', role: 'radiogroup', 'aria-label': t('recap.view.label'), 'data-guide': 'recap.view'
+        });
         ['tech', 'pilotage'].forEach(function (view) {
             const button = el('button', {
                 type: 'button', role: 'radio', 'aria-checked': route.view === view ? 'true' : 'false',
@@ -7310,7 +8385,7 @@
                 }).join(', ')
             }));
         }
-        const block = el('div', {class: 'recap-period-block'}, [
+        const block = el('div', {class: 'recap-period-block', 'data-guide': 'recap.period'}, [
             el('div', {class: 'recap-period'}, [
                 el('span', {class: 'recap-period-main', text: PSL.periodText(period)}),
                 el('span', {class: 'recap-period-tz', text: 'UTC'}),
@@ -7345,9 +8420,10 @@
      * @param {string[]} subs
      * @param {string} help
      * @param {string} topic
+     * @param {string} guide the tile's `data-guide` name
      */
-    function recapTile(label, chip, value, subs, help, topic) {
-        return el('div', {class: 'disc-figure'}, [
+    function recapTile(label, chip, value, subs, help, topic, guide) {
+        return el('div', {class: 'disc-figure', 'data-guide': guide}, [
             el('span', {class: 'disc-figure-label'}, [document.createTextNode(label), chip, helpDot(help, topic)]),
             value
         ].concat(subs.filter(Boolean).map(function (sub) {
@@ -7379,14 +8455,6 @@
     }
 
     /**
-     * A count with thousands separators, or null when the Hub has none.
-     * @param {number | null} value
-     */
-    function recapCount(value) {
-        return value === null || value === undefined ? null : PSL.num(value);
-    }
-
-    /**
      * @param {RecapSnapshot} snapshot
      */
     function recapCo2Tile(snapshot) {
@@ -7408,7 +8476,7 @@
         return recapTile(t('recap.tile.co2'), recapProgressChip(snapshot), value, [
             known ? t('recap.tile.magnitude', {tail: PSL.co2Tail(without, snapshot.view)}) : '',
             previous ? recapPreviousText(snapshot, previous) : ''
-        ], recapHelp(snapshot, 'co2'), t('recap.topic.co2'));
+        ], recapHelp(snapshot, 'co2'), t('recap.topic.co2'), 'recap.co2');
     }
 
     /**
@@ -7421,16 +8489,16 @@
         const management = snapshot.view === 'pilotage';
         return el('div', {class: 'disc-figures recap-tiles'}, [
             recapTile(labels.io, recapProgressChip(snapshot),
-                el('span', {class: 'disc-figure-value', text: recapCount(tiles.avoidable_io_ops) || '\u2014'}),
-                [recapPreviousText(snapshot, recapCount(tiles.previous_avoidable_io_ops))],
-                recapHelp(snapshot, 'io'), labels.io),
+                el('span', {class: 'disc-figure-value', text: PSL.recapCount(tiles.avoidable_io_ops) || '\u2014'}),
+                [recapPreviousText(snapshot, PSL.recapCount(tiles.previous_avoidable_io_ops))],
+                recapHelp(snapshot, 'io'), labels.io, 'recap.io'),
             recapCo2Tile(snapshot),
             recapTile(labels.findings, null,
                 el('span', {class: 'disc-figure-value', text: String(tiles.active_findings)}), [
                     recapPreviousText(snapshot, tiles.previous_active_findings),
                     t('recap.tile.acked.' + (management ? 'pilotage.' : 'tech.') + PSL.plural(tiles.acked_findings),
                         {count: tiles.acked_findings})
-                ], recapHelp(snapshot, 'findings'), labels.findings),
+                ], recapHelp(snapshot, 'findings'), labels.findings, 'recap.findings'),
             recapTile(t('recap.tile.actions'), null, el('span', {class: 'disc-figure-value'}, [
                 document.createTextNode(String(actions.done)),
                 el('span', {class: 'disc-figure-unit', text: t('recap.tile.done.' + PSL.plural(actions.done))})
@@ -7439,7 +8507,7 @@
                     confirmed: actions.confirmed, contradicted: actions.contradicted, came_back: actions.came_back
                 }),
                 t('recap.tile.actions.open', {in_progress: actions.in_progress, todo: actions.todo})
-            ], recapHelp(snapshot, 'actions'), t('recap.topic.actions'))
+            ], recapHelp(snapshot, 'actions'), t('recap.topic.actions'), 'recap.actions')
         ]);
     }
 
@@ -7462,12 +8530,17 @@
             if (PSL.dividesBefore(all, index)) {
                 list.appendChild(el('li', {
                     class: 'recap-divider',
-                    text: t('recap.prio.divider.' + (management ? 'pilotage' : 'tech'))
+                    text: t('recap.prio.divider.' + (management ? 'pilotage' : 'tech')),
+                    'data-guide': 'recap.below'
                 }));
             }
-            list.appendChild(recapRow(priority, max, snapshot, route, PSL.namesService(shown, index)));
+            const row = recapRow(priority, max, snapshot, route, PSL.namesService(shown, index));
+            if (index === 0) guideRowAnchors(row);
+            list.appendChild(row);
         });
-        const section = el('section', {class: 'recap-section', 'aria-labelledby': 'recap-h-prio'}, [
+        const section = el('section', {
+            class: 'recap-section', 'aria-labelledby': 'recap-h-prio', 'data-guide': 'recap.table'
+        }, [
             ruledOverline(t('recap.prio.overline')),
             recapHeading('recap-h-prio', t('recap.prio.title'), hint, recapHelp(snapshot, 'prio'), t('recap.topic.ranking'))
         ]);
@@ -7480,6 +8553,34 @@
         section.appendChild(list);
         recapPriorityNotes(snapshot, all, section);
         return section;
+    }
+
+    /**
+     * Names the first line and its parts, where the guide puts its numbered marks.
+     * @param {HTMLElement} row
+     */
+    function guideRowAnchors(row) {
+        row.setAttribute('data-guide', 'recap.row');
+        const parts = {
+            rank: '.recap-rank', what: '.recap-what', where: '.recap-where', suggest: '.recap-suggest',
+            figure: '.recap-figure', trend: '.recap-trend', facts: '.facts', state: '.recap-action'
+        };
+        Object.keys(parts).forEach(function (part) {
+            const found = row.querySelector(parts[part]);
+            if (found) found.setAttribute('data-guide', 'recap.row.' + part);
+        });
+        // A folded fix is no anchor: the guide never opens a fold, so its step waits for the reader to.
+        const detail = /** @type {HTMLDetailsElement | null} */ (row.querySelector('.recap-detail'));
+        if (!detail) return;
+        const sql = detail.querySelector('.recap-sql');
+        const name = function () {
+            if (detail.open) detail.setAttribute('data-guide', 'recap.row.detail');
+            else detail.removeAttribute('data-guide');
+            if (sql && detail.open) sql.setAttribute('data-guide', 'recap.row.sql');
+            else if (sql) sql.removeAttribute('data-guide');
+        };
+        name();
+        detail.addEventListener('toggle', name);
     }
 
     /**
@@ -7622,7 +8723,7 @@
         }
         const share = max > 0 ? Math.max(2, Math.round(priority.avoidable_io_ops / max * 100)) : 2;
         return el('div', {class: 'recap-figure'}, [
-            el('span', {class: 'recap-figure-n', text: recapCount(priority.avoidable_io_ops)}),
+            el('span', {class: 'recap-figure-n', text: PSL.recapCount(priority.avoidable_io_ops)}),
             el('span', {class: 'recap-figure-u', text: lower}),
             el('span', {class: 'recap-bar', 'aria-hidden': 'true'}, [el('i', {style: 'width:' + share + '%'})]),
             recapTrend(priority)
@@ -7640,7 +8741,7 @@
         const details = el('details', {class: 'recap-detail'}, [
             el('summary', {}, [svg([['path', {d: 'M9 6l6 6-6 6'}]], 12), document.createTextNode(t('recap.fix.summary'))]),
             el('div', {class: 'recap-detail-body'}, [
-                priority.template ? el('pre', {class: 'recap-code', text: priority.template}) : null,
+                priority.template ? recapTemplate(priority) : null,
                 recapFix(priority.suggested_fix),
                 recapCodeLocation(priority.code_location),
                 recapFacts(priority),
@@ -7652,6 +8753,18 @@
             state.panelOpen[key] = details.open;
         });
         return details;
+    }
+
+    /**
+     * The template as the engine saw it. SQL is laid out and coloured, one span per piece set with
+     * `textContent` since the text comes from observed traffic. Anything else is printed as it is.
+     * @param {RecapPriority} priority
+     */
+    function recapTemplate(priority) {
+        if (!PSL.isSqlFinding(priority.finding_type)) return el('pre', {class: 'recap-code', text: priority.template});
+        return el('pre', {class: 'recap-code recap-sql'}, PSL.sqlTokens(priority.template).map(function (token) {
+            return el('span', {class: 'sql-' + token.kind, text: token.text});
+        }));
     }
 
     /**
@@ -8103,7 +9216,9 @@
         ].filter(function (group) {
             return group[1].length > 0;
         });
-        const section = el('section', {class: 'recap-section', 'aria-labelledby': 'recap-h-moved'}, [
+        const section = el('section', {
+            class: 'recap-section', 'aria-labelledby': 'recap-h-moved', 'data-guide': 'recap.moved'
+        }, [
             ruledOverline(t('recap.moves.overline')),
             recapHeading('recap-h-moved', labels.moved, recapAgainst('recap.moves.since.', snapshot.previous),
                 recapHelp(snapshot, 'moved'), labels.moved)
@@ -8379,7 +9494,7 @@
         again.addEventListener('click', function () {
             loadRecap(false, true);
         });
-        return el('div', {class: 'recap-freshness'}, [
+        return el('div', {class: 'recap-freshness', 'data-guide': 'recap.fresh'}, [
             el('span', {class: 'recap-freshness-text', text: t('recap.job.fresh', fresh)}),
             again
         ]);
@@ -8397,7 +9512,9 @@
     function recapReportsPanel(route) {
         const reports = state.recapReports;
         if (reports === null) return null;
-        const section = el('section', {class: 'recap-section', 'aria-labelledby': 'recap-h-reports'}, [
+        const section = el('section', {
+            class: 'recap-section', 'aria-labelledby': 'recap-h-reports', 'data-guide': 'recap.reports'
+        }, [
             ruledOverline(t('recap.reports.overline')),
             recapHeading('recap-h-reports', PSL.RECAP_REPORTS_COPY.title, PSL.RECAP_REPORTS_COPY.hint,
                 PSL.RECAP_REPORTS_COPY.help, t('recap.topic.reports')),
@@ -8759,7 +9876,10 @@
         if (cards !== true && cards !== false) return null;
         const card = cardState();
         const management = route.view === 'pilotage';
-        const section = el('section', {class: 'recap-section share', 'aria-labelledby': 'recap-h-share'}, [
+        const section = el('section', {
+            // The banner alone is no card to point at, so the guide skips its step.
+            class: 'recap-section share', 'aria-labelledby': 'recap-h-share', 'data-guide': cards ? 'recap.card' : null
+        }, [
             ruledOverline(t('card.overline')),
             recapHeading('recap-h-share', PSL.CARD_COPY.title, PSL.CARD_COPY.hint, PSL.CARD_COPY.help, t('card.topic'))
         ]);
@@ -10152,6 +11272,7 @@
      */
     function disclosureBanners(item) {
         const banners = [];
+        const notes = PSL.disclosureNotes(item);
         if (item.withdrawn) {
             banners.push(el('div', {class: 'banner', 'data-tone': 'crit'}, [critGlyph(16), el('div', {
                 text: t('disc.banner.withdrawn', {
@@ -10161,14 +11282,13 @@
                     reason: (item.withdrawn.reason || '').replace(/\.+\s*$/, '') || t('disc.banner.withdrawn.no_reason')
                 })
             })]));
-        } else if (item.intent === 'official' && (item.integrity_level === 'hash-only' || item.integrity_level === 'none')) {
+        } else if (notes.indexOf('unsigned') >= 0) {
             banners.push(el('div', {class: 'banner', 'data-tone': 'warn'}, [warningGlyph(16), el('div', {
                 text: t('disc.banner.unsigned')
             })]));
         }
         if (item.pdf !== 'rendered') {
-            // A render again the engine refused: the files are suspect, not merely unchecked.
-            const refused = item.render_reason === 'content_hash_mismatch' || item.render_reason === 'binding_mismatch';
+            const refused = notes.indexOf('refused') >= 0;
             const reason = RENDER_REASONS[item.render_reason] ? t(RENDER_REASONS[item.render_reason])
                 : item.render_reason || t('disc.render.none');
             const text = el('div', {text: t(refused ? 'disc.banner.refused' : 'disc.banner.not_checked', {reason: reason})});
@@ -10237,7 +11357,7 @@
     }
 
     function railLegend() {
-        return el('div', {class: 'disc-legend'}, [
+        return el('div', {class: 'disc-legend', 'data-guide': 'disc.legend'}, [
             el('span', {class: 'disc-legend-label', text: t('disc.legend.declared')}),
             levelChip('hash-only'), levelChip('signed'), levelChip('signed-with-attestation'),
             el('span', {class: 'disc-legend-label', text: t('disc.legend.checked')}),
@@ -10247,20 +11367,22 @@
     }
 
     function publishPanel() {
-        return terminalBlock({
+        const panel = terminalBlock({
             head: t('disc.publish.head'),
             sub: t('disc.publish.sub'),
             text: PSL.publishCommand(location.origin),
             copyLabel: t('disc.publish.copy'),
             notes: [t('disc.publish.note')]
         });
+        panel.setAttribute('data-guide', 'disc.publish');
+        return panel;
     }
 
     function renderDisclosuresScreen() {
         const section = el('section', {class: 'disc'}, [
             ruledOverline(t('disc.overline')),
             el('h1', {class: 'page-title', text: t('disc.title')}),
-            el('p', {class: 'page-sub', text: t('disc.sub')})
+            el('p', {class: 'page-sub', 'data-guide': 'disc.sub', text: t('disc.sub')})
         ]);
         if (state.disclosures === null) {
             section.appendChild(el('div', {class: 'card skeleton', style: 'height:220px'}));
@@ -10274,20 +11396,22 @@
             return section;
         }
         if (state.disclosures.length === 0) {
-            section.appendChild(el('div', {class: 'empty-state'}, [
+            section.appendChild(el('div', {class: 'empty-state', 'data-guide': 'disc.empty'}, [
                 el('p', {class: 'empty-title', text: t('disc.empty.title')}),
                 el('p', {text: t('disc.empty.body')})
             ]));
             section.appendChild(publishPanel());
             return section;
         }
-        section.appendChild(el('div', {class: 'disc-rail-wrap'}, [
+        section.appendChild(el('div', {class: 'disc-rail-wrap', 'data-guide': 'disc.rail'}, [
             el('span', {class: 'disc-legend-label', text: t('disc.rail.head')}),
             railView(state.disclosures)
         ]));
         section.appendChild(railLegend());
-        state.disclosures.forEach(function (item) {
-            section.appendChild(disclosureCard(item));
+        state.disclosures.forEach(function (item, index) {
+            const card = disclosureCard(item);
+            if (index === 0) card.setAttribute('data-guide', 'disc.card');
+            section.appendChild(card);
         });
         section.appendChild(publishPanel());
         return section;
@@ -10299,9 +11423,10 @@
      * @param {string} head
      * @param {string} sub
      * @param {Child[]} children
+     * @param {string} guide the name the guide points it at
      */
-    function detailPanel(head, sub, children) {
-        return el('section', {class: 'card disc-panel'}, /** @type {Child[]} */ ([
+    function detailPanel(head, sub, children, guide) {
+        return el('section', {class: 'card disc-panel', 'data-guide': guide}, /** @type {Child[]} */ ([
             el('div', {class: 'disc-panel-head'}, [
                 el('h2', {class: 'overline', text: head}),
                 sub ? el('p', {class: 'disc-panel-sub', text: sub}) : null
@@ -10442,7 +11567,7 @@
             return t('disc.apps.col.' + id);
         });
         return detailPanel(t('disc.apps.head'), [coverage, hostNote].filter(Boolean).join(' ') || null,
-            [simpleTable(heads, rows, [heads[1], heads[3], heads[4], heads[5]])]);
+            [simpleTable(heads, rows, [heads[1], heads[3], heads[4], heads[5]])], 'disc.apps');
     }
 
     /**
@@ -10485,7 +11610,7 @@
                     copyLabel: t('disc.verify.copy'),
                     notes: [t('disc.verify.note')]
                 })
-            ]);
+            ], 'disc.integrity');
     }
 
     /**
@@ -10503,7 +11628,7 @@
             ]);
         });
         return detailPanel(t('disc.files.head'), t('disc.files.sub'),
-            [simpleTable([t('disc.files.col.file'), t('disc.files.col.role'), ''], rows), status]);
+            [simpleTable([t('disc.files.col.file'), t('disc.files.col.role'), ''], rows), status], 'disc.files');
     }
 
     /**
@@ -10555,7 +11680,7 @@
                 class: 'sources-note',
                 text: t(item.confidentiality === 'internal' ? 'disc.links.internal' : 'disc.links.none')
             }));
-        return detailPanel(t('disc.links.head'), t('disc.links.sub'), children);
+        return detailPanel(t('disc.links.head'), t('disc.links.sub'), children, 'disc.links');
     }
 
     /**
@@ -10593,7 +11718,8 @@
         const heads = ['webhook', 'event', 'last_attempt', 'outcome'].map(function (id) {
             return t('disc.deliveries.col.' + id);
         });
-        return detailPanel(t('disc.deliveries.head'), t('disc.deliveries.sub'), [simpleTable(heads.concat(['']), rows)]);
+        return detailPanel(t('disc.deliveries.head'), t('disc.deliveries.sub'), [simpleTable(heads.concat(['']), rows)],
+            'disc.deliveries');
     }
 
     /**
@@ -10622,7 +11748,7 @@
             disclaimers.length ? engineText(el('ol', {class: 'disc-disclaimers'}, disclaimers.map(function (/** @type {string} */ text) {
                 return el('li', {text: String(text)});
             }))) : null
-        ]);
+        ], 'disc.method');
     }
 
     /**
@@ -10716,7 +11842,7 @@
             buttons.push(toggle);
         }
         buttons.push(status);
-        return el('div', {class: 'disc-actions'}, buttons);
+        return el('div', {class: 'disc-actions', 'data-guide': 'disc.actions'}, buttons);
     }
 
     function renderDisclosureScreen() {
@@ -10742,13 +11868,13 @@
         [
             ruledOverline(t('disc.detail.overline', {period: PSL.periodLabel(item.period)})),
             el('h1', {
-                class: 'page-title', text: t('disc.detail.title', {
+                class: 'page-title', 'data-guide': 'disc.head', text: t('disc.detail.title', {
                     organisation: item.organisation,
                     from: PSL.day(item.period.from, {withYear: true}), to: PSL.day(item.period.to, {withYear: true})
                 })
             }),
             el('p', {
-                class: 'page-sub',
+                class: 'page-sub', 'data-guide': 'disc.head.sub',
                 text: t(item.pdf === 'rendered' ? 'disc.detail.sub.rendered' : 'disc.detail.sub.kept', {
                     intent: PSL.hasText(intent) ? t(intent)
                         : t('disc.detail.intent.other', {intent: item.intent.charAt(0).toUpperCase() + item.intent.slice(1)}),
@@ -10769,7 +11895,7 @@
         section.appendChild(detailPanel(t('disc.glance.head'), null, [
             disclosureFigures(item.figures),
             carbonBracket(item.figures && item.figures.carbon_kgco2eq)
-        ]));
+        ], 'disc.glance'));
         [applicationsPanel(state.disclosureReport, item.figures), integrityPanel(detail), filesPanel(item),
             shareLinksPanel(detail, manage), deliveriesPanel(detail, manage), methodPanel(state.disclosureReport)]
             .forEach(function (panel) {
@@ -10795,7 +11921,7 @@
         const section = el('section', {class: 'access-screen'}, [
             ruledOverline(t('access.overline')),
             el('h1', {class: 'page-title', text: t('access.title')}),
-            el('p', {class: 'page-sub', text: t('access.sub')})
+            el('p', {class: 'page-sub', 'data-guide': 'access.sub', text: t('access.sub')})
         ]);
         if (banner) section.appendChild(noGrantBanner(banner));
 
@@ -10806,7 +11932,7 @@
                 el('span', {text: signedIn.subjectLabel}),
                 el('code', {class: 'access-subject', text: signedIn.subject})
             ])
-        ]));
+        ], undefined, 'access.who'));
         section.appendChild(accessCard(t('access.card.groups'), [
             access.groups.length === 0
                 ? el('p', {class: 'access-muted', text: t('access.groups.none')})
@@ -10820,7 +11946,7 @@
                         text: group.name + ' · ' + group.origin
                     });
                 }))
-        ]));
+        ], undefined, 'access.groups'));
         if (banner) {
             // The banner already says nothing is reached. What helps now is the request.
             section.appendChild(terminalBlock({
@@ -10839,21 +11965,19 @@
                         reach.map(function (/** @type {{project: string, group: string, role: string, permissions: string}} */ row) {
                             return [row.project, row.group, row.role, row.permissions];
                         }))
-            ]));
+            ], undefined, 'access.reach'));
         }
         if (state.tokens || state.tokensFailed) {
-            section.appendChild(tokensCard((state.tokens || []).filter(function (/** @type {TerminalToken} */ token) {
-                return token.subject === access.subject;
-            }), t('access.card.own_tokens'), 'tokens-own'));
+            section.appendChild(tokensCard(ownTokens(), t('access.card.own_tokens'), 'tokens-own', 'access.tokens'));
         }
         if (access.admin) {
-            section.appendChild(el('p', {class: 'access-pointer'}, [
+            section.appendChild(el('p', {class: 'access-pointer', 'data-guide': 'access.admin'}, [
                 el('span', {text: t('access.admin.lead')}),
                 el('a', {href: '#/coverage', text: t('shell.tab.coverage')}),
                 el('span', {text: t('access.admin.tail')})
             ]));
         } else if (access.projects.length > 0) {
-            section.appendChild(accessCard(t('access.card.projects'), [projectsTable(access.projects)]));
+            section.appendChild(accessCard(t('access.card.projects'), [projectsTable(access.projects)], undefined, 'access.projects'));
         }
         return section;
     }
@@ -10867,21 +11991,23 @@
         const section = el('section', {class: 'access-screen'}, [
             ruledOverline(t('coverage.overline')),
             el('h1', {class: 'page-title', text: t('coverage.title')}),
-            el('p', {class: 'page-sub', text: t('coverage.sub')})
+            el('p', {class: 'page-sub', 'data-guide': 'coverage.sub', text: t('coverage.sub')})
         ]);
         if (access.unmatched) section.appendChild(attentionCard(access.unmatched));
         const snippet = access.unmatched ? PSL.coverageSnippet(access.unmatched) : null;
         if (snippet) {
-            section.appendChild(terminalBlock({
+            const block = terminalBlock({
                 head: t('coverage.snippet.head'),
                 sub: t('coverage.snippet.sub'),
                 text: snippet,
                 copyLabel: t('coverage.snippet.copy')
-            }));
+            });
+            block.setAttribute('data-guide', 'coverage.snippet');
+            section.appendChild(block);
         }
         if (access.conflicts) section.appendChild(conflictsCard(access.conflicts));
         if (state.tokens || state.tokensFailed) {
-            section.appendChild(tokensCard(state.tokens || [], t('coverage.card.tokens'), 'tokens-all'));
+            section.appendChild(tokensCard(state.tokens || [], t('coverage.card.tokens'), 'tokens-all', 'coverage.tokens'));
         }
         if (access.configuration) section.appendChild(configurationCard(access.configuration));
         return section;
@@ -10892,9 +12018,10 @@
      * @param {string} title
      * @param {Child[]} children
      * @param {string} [headingId]
+     * @param {string} [guide] the name the guide points it at
      */
-    function accessCard(title, children, headingId) {
-        return el('section', {class: 'card access-card'}, /** @type {Child[]} */ ([
+    function accessCard(title, children, headingId, guide) {
+        return el('section', {class: 'card access-card', 'data-guide': guide}, /** @type {Child[]} */ ([
             el('h2', {class: 'overline access-card-title', id: headingId, tabindex: headingId ? '-1' : null}, [
                 el('span', {'aria-hidden': 'true', text: '// '}),
                 el('span', {text: title})
@@ -10947,8 +12074,9 @@
      * @param {TerminalToken[]} tokens
      * @param {string} title
      * @param {string} headingId
+     * @param {string} guide
      */
-    function tokensCard(tokens, title, headingId) {
+    function tokensCard(tokens, title, headingId, guide) {
         const rows = PSL.tokenRows(tokens);
         const notice = state.tokensNotice && state.tokensNotice.card === headingId ? state.tokensNotice : null;
         return accessCard(title, [
@@ -10968,7 +12096,7 @@
                         rows.map(function (/** @type {{id: string, owner: string, from: string, created: string, expires: string, lastUsed: string}} */ row) {
                             return [row.owner, row.from, row.created, row.expires, row.lastUsed, revokeButton(row, headingId)];
                         }))
-        ], headingId);
+        ], headingId, guide);
     }
 
     /**
@@ -11093,7 +12221,7 @@
                 configuration.local_accounts.map(function (/** @type {string} */ name) {
                     return [name, 'local:' + name];
                 }))
-        ]);
+        ], undefined, 'coverage.config');
     }
 
     /**
@@ -11103,7 +12231,8 @@
     function attentionCard(unmatched) {
         const count = unmatched.services.length + unmatched.attributes.length + unmatched.sources.length;
         if (count === 0) {
-            return accessCard(t('coverage.attention.title'), [el('p', {text: t('coverage.attention.none')})]);
+            return accessCard(t('coverage.attention.title'), [el('p', {text: t('coverage.attention.none')})], undefined,
+                'coverage.attention');
         }
         const parts = [el('p', {text: t('coverage.attention.count.' + PSL.plural(count), {count: count})})];
         if (unmatched.services.length > 0) {
@@ -11130,7 +12259,7 @@
         if (unmatched.truncated) {
             parts.push(el('p', {class: 'access-muted', text: t('coverage.truncated')}));
         }
-        return accessCard(t('coverage.attention.title'), parts);
+        return accessCard(t('coverage.attention.title'), parts, undefined, 'coverage.attention');
     }
 
     /**
@@ -11150,14 +12279,17 @@
                             row.values.join(', '), String(row.identities_without_key)];
                     })),
             conflicts.truncated ? el('p', {class: 'access-muted', text: t('coverage.conflicts.truncated')}) : null
-        ]);
+        ], undefined, 'coverage.conflicts');
     }
 
     function renderRecentScreen() {
         const section = el('section', {}, [
             ruledOverline(t('recent.overline')),
             el('h1', {class: 'page-title', text: t('recent.title')}),
-            el('p', {class: 'page-sub', text: t('recent.sub', {hours: state.status.limits.report_retention_hours})})
+            el('p', {
+                class: 'page-sub', 'data-guide': 'recent.sub',
+                text: t('recent.sub', {hours: state.status.limits.report_retention_hours})
+            })
         ]);
 
         if (!state.runs) {
@@ -11165,12 +12297,9 @@
             return section;
         }
         if (state.runs.length === 0) {
-            section.appendChild(el('div', {class: 'empty-state'}, [
-                el('p', {
-                    class: 'empty-title',
-                    text: t('recent.empty.title', {hours: state.status.limits.report_retention_hours})
-                }),
-                el('p', {text: t('recent.empty.body', {hours: state.status.limits.report_retention_hours})}),
+            section.appendChild(el('div', {class: 'empty-state', 'data-guide': 'recent.empty'}, [
+                el('p', {class: 'empty-title', text: t('recent.empty.title')}),
+                el('p', {text: t('recent.empty.body')}),
                 el('div', {class: 'outcome-actions empty-actions'}, [
                     el('a', {class: 'action action-filled', href: '#/new', text: t('recent.run_new')})
                 ])
@@ -11183,7 +12312,7 @@
                 return run.producer_version;
             }).filter(Boolean))).sort(PSL.vcmp);
         if (binaries.length > 1) {
-            section.appendChild(el('div', {class: 'banner', 'data-tone': 'warn'}, [
+            section.appendChild(el('div', {class: 'banner', 'data-tone': 'warn', 'data-guide': 'recent.binaries'}, [
                 svg([['path', {d: 'M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'}],
                     ['path', {d: 'M12 9v4M12 17h.01'}]], 16),
                 el('p', {
@@ -11199,7 +12328,7 @@
             return Object.keys((run.request || {}).detection || {}).length > 0;
         });
         if (tuned.length > 0 && tuned.length < state.runs.length) {
-            section.appendChild(el('div', {class: 'banner', 'data-tone': 'warn'}, [
+            section.appendChild(el('div', {class: 'banner', 'data-tone': 'warn', 'data-guide': 'recent.tuned'}, [
                 warningGlyph(16),
                 el('p', {text: t('recent.tuned.' + PSL.plural(tuned.length), {count: tuned.length})})
             ]));
@@ -11211,10 +12340,13 @@
 
     /**
      * @param {Run} run
+     * @param {number} index its place in the list: the first is the one the guide reads
      */
-    function runCard(run) {
+    function runCard(run, index) {
         const key = PSL.statusKey(run);
-        const card = el('a', {class: 'run-card', 'data-status': key, href: '#/run/' + run.id});
+        const card = el('a', {
+            class: 'run-card', 'data-status': key, href: '#/run/' + run.id, 'data-guide': index === 0 ? 'recent.card' : null
+        });
 
         card.appendChild(el('span', {class: 'run-card-line'}, [
             el('span', {
@@ -11355,6 +12487,7 @@
         }
         const frame = el('iframe', {
             class: 'report-frame',
+            'data-guide': 'report.frame',
             src: '/reports/' + id + '.html',
             title: t('report.frame_title')
         });
@@ -11381,7 +12514,7 @@
                 return reportLifetime(id);
             });
         // Without a run, the page under the bar carries the ways out, so the bar does not repeat one.
-        return el('div', {class: 'report-bar'}, [
+        return el('div', {class: 'report-bar', 'data-guide': 'report.bar'}, [
             run ? el('a', {class: 'pill-button', href: '#/run/' + id}, [
                 svg([['path', {d: 'M14 6l-6 6 6 6'}]], 14),
                 el('span', {text: t('report.back')})
@@ -11398,9 +12531,9 @@
      * @param {string} key
      */
     function reportGone(run, key) {
-        const view = ['queued', 'running', 'failed', 'interrupted', 'expired'].indexOf(key) >= 0 ? key : 'other';
+        const view = PSL.reportGoneView(key);
         const finished = key !== 'queued' && key !== 'running';
-        return el('div', {class: 'gone report-gone'}, [
+        return el('div', {class: 'gone report-gone', 'data-guide': 'report.gone'}, [
             el('h1', {class: 'page-title', text: t('report.gone.' + view + '.title')}),
             el('p', {class: 'page-sub', text: t('report.gone.' + view + '.body', {name: run.source_name})}),
             el('div', {class: 'outcome-actions'}, [
@@ -11439,6 +12572,7 @@
     // daemon on its own rather than waiting to be clicked again.
     restoreFolds();
     restoreShell();
+    initGuide();
     // Escape closes the picker. Without it the only ways out are Apply, a quick
     // range or a click outside, and a keyboard user has none of them.
     globalThis.addEventListener('keydown', function (event) {
@@ -11449,6 +12583,9 @@
             return;
         }
         if (state.form.pickerOpen) closePicker();
+        // The open list of the recap's filter line closes as its button does, and takes the focus back.
+        const pickButton = state.recapPick.open ? document.querySelector('.recap-pick-button[aria-expanded="true"]') : null;
+        if (pickButton instanceof HTMLElement) pickButton.click();
     });
     render();
     void loadShell();
