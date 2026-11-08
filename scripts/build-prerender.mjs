@@ -157,7 +157,10 @@ function localizeHead(s, p) {
 // from the root. No href=/src= literals exist in the JS region, so this is safe.
 function rootAbsoluteLinks(s) {
   s = s.replace(/(\b(?:href|src)=")\.\//g, '$1/');
-  return s.replace(/(\b(?:href|src)=")(?!\/|#|https?:|mailto:|data:|\{\{)/g, '$1/');
+  s = s.replace(/(\b(?:href|src)=")(?!\/|#|https?:|mailto:|data:|\{\{)/g, '$1/');
+  // srcset holds several URLs, each candidate needs the same rooting.
+  return s.replace(/(\bsrcset=")([^"]*)"/g, (m, a, v) =>
+    a + v.replace(/(^|,)(\s*)(?:\.\/)?(?![\s/]|https?:|data:|\{\{)/g, '$1$2/') + '"');
 }
 
 const server = await startServer();
