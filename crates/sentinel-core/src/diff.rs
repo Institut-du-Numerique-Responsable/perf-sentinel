@@ -10,7 +10,10 @@
 //! Finding identity for stable comparison is the tuple
 //! `(finding_type, service, source_endpoint, pattern.template)`. The
 //! template is already normalized at detection time so direct equality
-//! suffices, no re-normalization at diff time.
+//! suffices, no re-normalization at diff time. The one exception is the
+//! path id masking: findings and endpoints left unmatched are compared once
+//! more in their masked form, so a baseline written before the masking does
+//! not read as a regression (see `drop_masked_twins`).
 //!
 //! A template mutation (schema change, renamed column, host move) shifts
 //! that identity, so the first pass sees one resolved plus one new
@@ -177,6 +180,8 @@ pub fn diff_runs(before: &Report, after: &Report) -> DiffReport {
         }
     }
 
+    drop_masked_twins(&mut resolved_findings, &mut new_findings, with_grouping);
+
     // Stable, deterministic ordering for the two finding lists. Reuses
     // the same ordering rule as `analyze` so a reader's mental model
     // is identical between the two outputs.
@@ -209,6 +214,51 @@ pub fn diff_runs(before: &Report, after: &Report) -> DiffReport {
         warning_details: after.warning_details.clone(),
         mutated_findings,
     }
+}
+
+/// The identity of `finding` once the current path id masking is applied
+/// to its endpoint and, where it holds a path, to its template.
+fn masked_identity_of(finding: &Finding, with_grouping: bool) -> IdentityKey {
+    use crate::normalize::http::{masked_endpoint, remask_http_template};
+    let mut key = identity_of(finding, with_grouping);
+    key.3 = masked_endpoint(&key.3);
+    match finding.finding_type {
+        // A fan-out's template is its parent's or its dominant child's,
+        // HTTP or not: SQL ones come back `None`.
+        FindingType::NPlusOneHttp
+        | FindingType::RedundantHttp
+        | FindingType::SlowHttp
+        | FindingType::ExcessiveFanout => {
+            if let Some(remasked) = remask_http_template(&key.4) {
+                key.4 = remasked;
+            }
+        }
+        // Both use the entry endpoint as their template.
+        FindingType::ChattyService | FindingType::SerializedCalls => {
+            key.4 = masked_endpoint(&key.4);
+        }
+        _ => {}
+    }
+    key
+}
+
+/// Drop the resolved and new findings that are one finding seen before and
+/// after the path id masking: a baseline written by an earlier version
+/// carries `/dossiers/K7QX2P` where the current run says `/dossiers/{id}`,
+/// which would otherwise diff as one resolved finding per id plus one new.
+///
+/// Only these leftovers are compared masked. Masking every finding would
+/// fold `/rest/api/2/x` and `/rest/api/3/x` together and hide a new finding
+/// on one behind the other.
+fn drop_masked_twins(resolved: &mut Vec<Finding>, new: &mut Vec<Finding>, with_grouping: bool) {
+    if resolved.is_empty() || new.is_empty() {
+        return;
+    }
+    let masked = |f: &Finding| masked_identity_of(f, with_grouping);
+    let resolved_keys: BTreeSet<IdentityKey> = resolved.iter().map(masked).collect();
+    let new_keys: BTreeSet<IdentityKey> = new.iter().map(masked).collect();
+    new.retain(|f| !resolved_keys.contains(&masked(f)));
+    resolved.retain(|f| !new_keys.contains(&masked(f)));
 }
 
 /// `IdentityKey` without the template: what stays stable when a template
@@ -394,24 +444,20 @@ fn diff_per_endpoint_io_ops(
     before: &[PerEndpointIoOps],
     after: &[PerEndpointIoOps],
 ) -> Vec<EndpointDelta> {
-    let mut before_map: BTreeMap<(&str, &str), usize> = BTreeMap::new();
-    for entry in before {
-        before_map.insert((&entry.service, &entry.endpoint), entry.io_ops);
-    }
-    let mut after_map: BTreeMap<(&str, &str), usize> = BTreeMap::new();
-    for entry in after {
-        after_map.insert((&entry.service, &entry.endpoint), entry.io_ops);
-    }
+    let mut before_map = endpoint_ops(before);
+    let mut after_map = endpoint_ops(after);
+    fold_masked_twins(&mut before_map, &mut after_map);
 
-    let mut keys: BTreeSet<(&str, &str)> = BTreeSet::new();
-    keys.extend(before_map.keys().copied());
-    keys.extend(after_map.keys().copied());
+    let mut keys: BTreeSet<&(String, String)> = BTreeSet::new();
+    keys.extend(before_map.keys());
+    keys.extend(after_map.keys());
 
     let mut deltas: Vec<EndpointDelta> = keys
-        .iter()
-        .filter_map(|(service, endpoint)| {
-            let before_io = before_map.get(&(*service, *endpoint)).copied().unwrap_or(0);
-            let after_io = after_map.get(&(*service, *endpoint)).copied().unwrap_or(0);
+        .into_iter()
+        .filter_map(|key| {
+            let (service, endpoint) = (key.0.as_str(), key.1.as_str());
+            let before_io = before_map.get(key).copied().unwrap_or(0);
+            let after_io = after_map.get(key).copied().unwrap_or(0);
             if before_io == after_io {
                 return None;
             }
@@ -432,8 +478,8 @@ fn diff_per_endpoint_io_ops(
                 if delta > 0 { i64::MAX } else { i64::MIN }
             });
             Some(EndpointDelta {
-                service: (*service).to_string(),
-                endpoint: (*endpoint).to_string(),
+                service: service.to_string(),
+                endpoint: endpoint.to_string(),
                 before_io_ops: before_io,
                 after_io_ops: after_io,
                 delta: delta_i64,
@@ -452,6 +498,55 @@ fn diff_per_endpoint_io_ops(
             .then_with(|| a.endpoint.cmp(&b.endpoint))
     });
     deltas
+}
+
+/// I/O ops keyed by `(service, endpoint)`.
+type EndpointOps = BTreeMap<(String, String), usize>;
+
+fn endpoint_ops(entries: &[PerEndpointIoOps]) -> EndpointOps {
+    entries
+        .iter()
+        .map(|e| ((e.service.clone(), e.endpoint.clone()), e.io_ops))
+        .collect()
+}
+
+/// The endpoint counterpart of [`drop_masked_twins`]: endpoints present on
+/// one side only whose masked form meets on both sides are one endpoint
+/// seen before and after the path id masking. Their rows fold into the
+/// masked endpoint, so its delta compares the whole of each side.
+fn fold_masked_twins(before: &mut EndpointOps, after: &mut EndpointOps) {
+    let masked = |(service, endpoint): &(String, String)| {
+        (
+            service.clone(),
+            crate::normalize::http::masked_endpoint(endpoint),
+        )
+    };
+    let one_sided = |a: &EndpointOps, b: &EndpointOps| -> BTreeSet<(String, String)> {
+        a.keys()
+            .filter(|k| !b.contains_key(*k))
+            .map(masked)
+            .collect()
+    };
+    let before_only = one_sided(before, after);
+    let after_only = one_sided(after, before);
+    let twins: BTreeSet<&(String, String)> = before_only.intersection(&after_only).collect();
+    if twins.is_empty() {
+        return;
+    }
+    for map in [before, after] {
+        let mut folded = EndpointOps::new();
+        for (key, ops) in std::mem::take(map) {
+            let masked_key = masked(&key);
+            let key = if twins.contains(&masked_key) {
+                masked_key
+            } else {
+                key
+            };
+            let slot = folded.entry(key).or_default();
+            *slot = slot.saturating_add(ops);
+        }
+        *map = folded;
+    }
 }
 
 #[cfg(test)]
@@ -645,6 +740,85 @@ mod tests {
         )];
         let diff = diff_runs(&before, &after);
         assert_eq!(diff.warning_details, after.warning_details);
+    }
+
+    #[test]
+    fn a_baseline_with_raw_ids_diffs_clean_against_its_masked_twin() {
+        let raw = |ep: &str, ops| {
+            (
+                finding(
+                    FindingType::NPlusOneHttp,
+                    Severity::Warning,
+                    "crm",
+                    &format!("GET /dossiers/{ep}"),
+                    &format!("GET crm-api/api/dossiers/{ep}"),
+                ),
+                endpoint("crm", &format!("GET /dossiers/{ep}"), ops),
+            )
+        };
+        let (a, a_ops) = raw("K7QX2P", 3);
+        let (b, b_ops) = raw("R4TN8W", 4);
+        let before = make_report(vec![a, b], vec![a_ops, b_ops]);
+        let after = make_report(
+            vec![finding(
+                FindingType::NPlusOneHttp,
+                Severity::Warning,
+                "crm",
+                "GET /dossiers/{id}",
+                "GET crm-api/api/dossiers/{id}",
+            )],
+            vec![endpoint("crm", "GET /dossiers/{id}", 7)],
+        );
+        let diff = diff_runs(&before, &after);
+        assert!(diff.new_findings.is_empty(), "{:?}", diff.new_findings);
+        assert!(
+            diff.resolved_findings.is_empty(),
+            "{:?}",
+            diff.resolved_findings
+        );
+        assert!(
+            diff.endpoint_metric_deltas.is_empty(),
+            "{:?}",
+            diff.endpoint_metric_deltas
+        );
+    }
+
+    #[test]
+    fn a_new_finding_on_a_numbered_route_is_not_hidden_by_its_sibling() {
+        // `/rest/api/2/...` and `/rest/api/3/...` mask to one endpoint, and
+        // the v2 finding sits in both runs: the v3 one must stay new.
+        let on = |version: u8| {
+            finding(
+                FindingType::NPlusOneSql,
+                Severity::Warning,
+                "jira",
+                &format!("/rest/api/{version}/issue/{{key}}"),
+                "SELECT * FROM issue WHERE id = ?",
+            )
+        };
+        let before = make_report(
+            vec![on(2)],
+            vec![endpoint("jira", "/rest/api/2/issue/{key}", 5)],
+        );
+        let after = make_report(
+            vec![on(2), on(3)],
+            vec![
+                endpoint("jira", "/rest/api/2/issue/{key}", 5),
+                endpoint("jira", "/rest/api/3/issue/{key}", 6),
+            ],
+        );
+        let diff = diff_runs(&before, &after);
+        assert_eq!(diff.new_findings.len(), 1);
+        assert_eq!(
+            diff.new_findings[0].source_endpoint,
+            "/rest/api/3/issue/{key}"
+        );
+        assert_eq!(diff.endpoint_metric_deltas.len(), 1);
+        assert_eq!(
+            diff.endpoint_metric_deltas[0].endpoint,
+            "/rest/api/3/issue/{key}"
+        );
+        assert_eq!(diff.endpoint_metric_deltas[0].delta, 6);
     }
 
     #[test]

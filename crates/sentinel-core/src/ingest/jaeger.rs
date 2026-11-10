@@ -224,6 +224,7 @@ fn http_endpoint(span: &JaegerSpan, allow_url_fallback: bool) -> Option<String> 
                 .or_else(|| find_tag(&span.tags, "http.url").filter(usable))
                 .or_else(|| find_tag(&span.tags, "url.full").filter(usable))
                 .or_else(|| find_tag(&span.tags, "url.path").filter(usable))
+                .map(|url| crate::event::raw_url_endpoint(&url))
         })
 }
 
@@ -233,7 +234,7 @@ fn own_sql_http_endpoint(span: &JaegerSpan) -> Option<String> {
         find_tag(&span.tags, "url.path").as_deref(),
         find_tag(&span.tags, "span.kind").as_deref() == Some("server"),
     )
-    .or_else(|| find_tag(&span.tags, "http.target"))
+    .or_else(|| find_tag(&span.tags, "http.target").map(|url| crate::event::raw_url_endpoint(&url)))
     .filter(|endpoint| !endpoint.trim().is_empty())
 }
 

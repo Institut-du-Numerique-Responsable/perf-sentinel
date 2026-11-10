@@ -541,7 +541,7 @@ fn http_target_used_only_when_route_absent() {
     let ingest = JaegerIngest::new(1_048_576);
     let events = ingest.ingest(json.as_bytes()).unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].source.endpoint, "/api/orders/42");
+    assert_eq!(events[0].source.endpoint, "/api/orders/{id}");
 }
 
 #[test]
@@ -900,7 +900,7 @@ fn walk_accepts_http_target_on_an_ancestor() {
         .iter()
         .find(|e| e.event_type == EventType::Sql)
         .expect("sql leaf present");
-    assert_eq!(sql.source.endpoint, "/api/orders/42");
+    assert_eq!(sql.source.endpoint, "/api/orders/{id}");
 }
 
 #[test]

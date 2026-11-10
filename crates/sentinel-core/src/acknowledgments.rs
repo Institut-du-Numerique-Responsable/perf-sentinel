@@ -455,10 +455,12 @@ fn drift_kind(
     finding: &Finding,
 ) -> Option<Drift> {
     let (prefix, hash) = sig.rsplit_once(':')?;
-    let endpoint_matches = ack
-        .source_endpoint
-        .as_ref()
-        .is_none_or(|e| e == &finding.source_endpoint);
+    // An entry written before the path id masking names the raw path
+    // (`/orders/42`): its masked form still points at the same finding.
+    let endpoint_matches = ack.source_endpoint.as_ref().is_none_or(|e| {
+        e == &finding.source_endpoint
+            || crate::normalize::http::masked_endpoint(e) == finding.source_endpoint
+    });
     if prefix == ack_prefix && hash != ack_hash {
         let service_matches = ack.service.as_ref().is_none_or(|s| s == &finding.service);
         return (service_matches && endpoint_matches).then_some(Drift::Template);
@@ -532,7 +534,13 @@ fn unmatched_message(
     }
     match (&ack.service, &ack.source_endpoint) {
         (Some(service), Some(endpoint)) => {
-            if observed.contains(&(service.as_str(), endpoint.as_str())) {
+            // An entry on a raw path (`/orders/42`) was exercised if its
+            // masked form was: the run only counts the masked endpoint.
+            let masked = crate::normalize::http::masked_endpoint(endpoint);
+            if [endpoint.as_str(), masked.as_str()]
+                .iter()
+                .any(|e| observed.contains(&(service.as_str(), *e)))
+            {
                 format!(
                     "acknowledgment {sig} matched no finding in this run: \
                      {service} {endpoint} was exercised and the finding did not \

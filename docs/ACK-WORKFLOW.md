@@ -290,9 +290,11 @@ When traced services emit `http.route`:
 When `http.route` is missing on an explicitly SERVER span, Perf Sentinel falls
 back to `http.url`, `url.full`, `url.path`, then `http.target` (depending on
 the ingest format). URL-only CLIENT spans remain outbound operations and are
-not mistaken for entry points. Each unique URL
-yields a different signature, ack churn becomes proportional to URL
-cardinality, and deferred findings reappear at every new request id.
+not mistaken for entry points. Perf Sentinel masks the ids it recognizes in
+that path (numbers, UUIDs, hex ids, upper-case codes), but each URL that
+differs by any other id (`/accounts/alice`) still yields a different
+signature, ack churn becomes proportional to that cardinality, and deferred
+findings reappear at every new such id.
 The fallback exists so the operator still sees a usable endpoint
 string, not as a recommended posture.
 
@@ -310,10 +312,13 @@ recent finding's `source_endpoint` against a running daemon:
 curl -s http://localhost:4318/api/findings | jq -r '.[].source_endpoint' | sort -u
 ```
 
-Templates with placeholders (`/api/orders/{id}`) indicate healthy
-instrumentation. Instantiated URLs with hardcoded ids
-(`/api/orders/42`) indicate `http.route` is missing and acks will
-churn.
+A placeholder named after its variable (`/api/orders/{orderId}`) or in the
+framework's syntax (`/api/orders/:id`) indicates healthy instrumentation. A
+bare `{id}` or `{uuid}` proves nothing on its own, since Perf Sentinel puts
+the same placeholders in a raw path. Hardcoded ids that survive the masking
+(`/api/accounts/alice`), or a full URL with its scheme and host
+(`http://order-svc/api/orders/{id}`), indicate `http.route` is missing and
+acks will churn.
 
 Upgrade note (0.11.2): endpoint attribution changed in three ways, on OTLP,
 Jaeger and Zipkin alike. It selects the outermost route in a contiguous

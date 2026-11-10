@@ -54,7 +54,7 @@ Type ``
 Enter
 Type `[[acknowledged]]`
 Enter
-Type `signature = "n_plus_one_http:order-svc:POST__api_orders_42_submit:30ce6c042411888a2bd69374d0dac255"`
+Type `signature = "n_plus_one_http:order-svc:POST__api_orders_42_submit:cd80e7e97cf84255958943efe281962e"`
 Enter
 Type `acknowledged_by = "bob@example.com"`
 Enter

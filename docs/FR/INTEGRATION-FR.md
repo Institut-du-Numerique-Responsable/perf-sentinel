@@ -662,7 +662,7 @@ perf-sentinel jaeger-query --endpoint http://jaeger:16686 --service order-svc --
 1. **Vérifiez les attributs de span.** Perf Sentinel ne traite que les spans avec `db.statement`/`db.query.text` (SQL) ou `http.url`/`url.full` (HTTP). Les autres spans sont ignorés.
 2. **Vérifiez le kind du span.** Depuis 0.11.2, un span `SERVER` portant une URL HTTP est un traitement entrant et non un appel sortant, il ne produit donc aucun finding HTTP même si l'attribut est présent. Les flottes sur les anciennes conventions sémantiques, qui posent aussi `http.url` sur le span de traitement, perdent ainsi les appels qu'elles voyaient auparavant. Un appel sortant se présente comme un span `CLIENT` du côté de l'appelant.
 3. **Vérifiez les seuils de détection.** Le seuil N+1 par défaut est 5 occurrences du même template normalisé dans la même trace. Si votre trace compte moins de 5 appels répétés, aucun finding n'est généré.
-4. **Vérifiez la normalisation des URLs.** Perf Sentinel remplace les segments de chemin numériques par `{id}` et les UUIDs par `{uuid}`. Si vos URLs répétées ne diffèrent que par un identifiant texte (par exemple `/account/alice`, `/account/bob`), elles ne seront pas regroupées dans le même template.
+4. **Vérifiez la normalisation des URLs.** Perf Sentinel remplace les segments de chemin numériques, les identifiants hexadécimaux et les codes alphanumériques en majuscules (`K7QX2P`) par `{id}`, et les UUIDs par `{uuid}`. Si vos URLs répétées ne diffèrent que par un autre identifiant texte (par exemple `/account/alice`, `/account/bob`), elles ne seront pas regroupées dans le même template.
 
 ### Erreur AOT cache avec le Java Agent
 

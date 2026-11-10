@@ -129,8 +129,8 @@ The SQL normalizer uses a homemade tokenizer, a single-pass state machine, rathe
 
 - Text between double quotes is kept as an identifier, except on MySQL and MariaDB, where `"..."` is a string literal and is masked like `'...'`. The engine comes from the span's `db.system`, so input that does not carry it (native JSON, whose `operation` is a verb) keeps the identifier reading. A MySQL server in `ANSI_QUOTES` mode loses its double-quoted identifiers to `?`.
 - SQL comments (`-- ...`, `/* ... */`) are not stripped, so the words they contain stay in the template.
-- The HTTP path normalizer masks numeric segments (`{id}`) and UUIDs (`{uuid}`) and drops the query string. Any other segment stays as is: an email address, a username, a slug or an opaque token in the path reaches the template.
-- The endpoint a finding is attributed to (`source.endpoint`) comes from `http.route` when the instrumentation sets it. Without it, the raw request path is kept, minus its query string, fragment and credentials, and its numeric segments are not masked.
+- The HTTP path normalizer masks numeric segments and upper-case alphanumeric codes such as `K7QX2P` (`{id}`) and UUIDs (`{uuid}`), and drops the query string. Hex ids of 16 characters or more become `{id}` too. A code has at least 4 upper-case letters and digits that alternate at least twice or carry a run of 6 digits, so `UTF8` or `H264` stay. Any other segment stays as is, lower-case or mixed-case identifiers included: an email address, a username, a slug or an opaque token in the path reaches the template.
+- The endpoint a finding is attributed to (`source.endpoint`) comes from `http.route` when the instrumentation sets it. Without it, the raw request path is kept, minus its query string, fragment and credentials, and its id segments are masked as in a template. An `http.route` template and the `source.endpoint` of a native-format input are kept as they are.
 
 If a query normalizes incorrectly, open an issue with the raw SQL anonymized.
 

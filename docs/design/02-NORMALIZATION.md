@@ -127,6 +127,17 @@ fn is_uuid(s: &str) -> bool {
 
 **Why hand-coded?** This function is called on every path segment of every HTTP URL in the pipeline. A compiled regex (`Regex::is_match`) runs the regex engine on every call. The hand-coded check is a length check (fast rejection for >99% of segments), four byte comparisons for dash positions and a single pass for hex digits.
 
+### Identifier-like segments
+
+Besides numeric segments and dashed UUIDs, two shapes become `{id}`, because they otherwise gave one template per value:
+
+- A hex string of at least 16 characters with a digit, in any case: a dashless UUID, a Mongo `ObjectId`, a SHA digest. No path word that long uses only the letters `a` to `f`.
+- An upper-case alphanumeric code of at least 4 characters, such as a dossier number (`K7QX2P`) or an invoice number (`INV2024001`). Letters and digits must alternate at least twice, or the digits must run 6 long. Fixed words built from a prefix and a short number (`UTF8`, `H264`, `X509`, `SHA256`, `ISO8601`, `ED25519`) stay, and so do lower-case path words (`v2`, `oauth2`) and all-letter segments (`CSV`). The cost: an id whose letters and digits sit in two blocks (`ORD12345`, `QWERT7`) stays as is, and a fixed word that alternates twice (`AES256GCM`, `UTF16LE`, `I18N`) becomes `{id}`. Fixed words in URL paths are lower case far more often, and those are never codes.
+
+Neither rule has an upper bound on length, like a numeric segment. The code rule is off for RPC targets (`service/method`, recognized by having no leading slash, no `scheme://` and no `host:port`): an IDL name such as `WAFV2` is never a per-call value. Lower-case and mixed-case identifiers that are not hex are not covered: telling them from path words takes more than a byte check.
+
+`source.endpoint` gets the same masking where OTLP, Jaeger or Zipkin ingestion falls back to a URL attribute (`url.path`, `http.target`, `http.url`, `url.full`) for want of `http.route`: `/dossiers/K7QX2P` and `/dossiers/R4TN8W` then share one ack signature. Only that fallback masks. An `http.route` template is authoritative, and masking it would fold `/rest/api/2/issue/{key}` and `/rest/api/3/issue/{key}` into one endpoint, so that acknowledging one would silence the other. A consumer destination and the `source.endpoint` of a native-format input are kept for the same reason. `diff` compares the findings and endpoints it left unmatched once more in their masked form, so a baseline written before the masking still compares cleanly, without folding the numbered routes that matched exactly.
+
 ### `split_origin` and host-aware grouping
 
 ```rust
