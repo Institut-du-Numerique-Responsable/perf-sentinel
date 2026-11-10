@@ -63,7 +63,7 @@ jobs:
       # No `toolchain:` input so the action installs what `rust-toolchain.toml`
       # declares (passing one makes it ignore the file). Empty rustflags keeps
       # its RUSTFLAGS=-D warnings default from applying.
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         if: steps.guard.outputs.skip != 'true'
         with:
           components: rustfmt

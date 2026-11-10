@@ -75,7 +75,7 @@ jobs:
       # reports on stderr that the object cargo-auditable embeds carries no
       # platform load command, rustc's `linker_messages` lint turns that into a
       # warning, and deny turns it into a failed release.
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           rustflags: ""
           build-warnings: ""
@@ -111,7 +111,7 @@ jobs:
       # (aarch64-musl on an arm64 runner), so every released binary carries
       # the embedded data.
       - name: Install cargo-auditable
-        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-auditable@0.7.5
 
@@ -243,7 +243,7 @@ jobs:
       # Empty build-warnings for the same reason as the build job above:
       # `cargo publish` verifies by building, and a denied warning there fails
       # the publish.
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           rustflags: ""
           build-warnings: ""
