@@ -792,7 +792,7 @@ jobs:
         # by root but world-readable in /tmp, which is fine for
         # subsequent inspection by the runner user.
         run: |
-          sudo -E sh -c 'nohup scaphandre --vm -s powercap_rapl prometheus --address 127.0.0.1 --port 8080 > /tmp/scaphandre.log 2>&1 & echo $! > /tmp/scaph-daemon.pid'
+          sudo env SCAPHANDRE_POWERCAP_PATH="${SCAPHANDRE_POWERCAP_PATH}" sh -c 'nohup scaphandre --vm -s powercap_rapl prometheus --address 127.0.0.1 --port 8080 > /tmp/scaphandre.log 2>&1 & echo $! > /tmp/scaph-daemon.pid'
           sleep 2
 
       - name: Wait for Scaphandre /metrics reachable
