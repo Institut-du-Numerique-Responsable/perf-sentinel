@@ -1273,6 +1273,10 @@
         'report.frame_title': 'Analysis report',
         'report.back': 'Back to the run',
         'report.path': 'report / {id}',
+        'report.download': 'Download the report',
+        'report.downloading': 'Downloading…',
+        'report.download.sent': 'Sent to your browser.',
+        'report.download.missing': 'The Hub did not return the report.',
         'report.gone.queued.title': 'The report is not ready yet.',
         'report.gone.queued.body': 'The analysis is still waiting for a worker. Its page says when the report is '
             + 'ready.',
@@ -2035,6 +2039,7 @@
         'guide.report.failed.body': 'The link may be mistyped, or come from another Hub.',
         'guide.report.bar.title': 'You are in the report',
         'guide.report.bar.body': '"Back to the run" returns to its page. On the right, the version of the engine that rendered this report, and how long until it expires.',
+        'guide.report.bar.download': '"Download the report" keeps it as an HTML file.',
         'guide.report.frame.title': 'The engine\'s report',
         'guide.report.frame.body': 'This document is served as the engine wrote it, in a frame of its own. This guide stops at its edge.',
         'guide.report.frame.empty': 'An empty report is expected: the source had nothing to analyse.',

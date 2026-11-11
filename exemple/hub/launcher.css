@@ -2367,6 +2367,16 @@ body[data-screen="report"] .shell-footer {
     color: var(--text-3);
 }
 
+.report-download {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* A margin, not display: none, while empty: a hidden live region leaves the accessibility tree and its message goes unread. */
+.report-download .report-engine:not(:empty) {
+    margin-right: 10px;
+}
+
 .report-stage {
     position: relative;
     display: flex;
@@ -5376,6 +5386,15 @@ a.chip {
     font-family: var(--font-mono);
     font-size: 12px;
     cursor: pointer;
+}
+
+/* A row's height, less its padding, so the list does not jump when the names land. The list sits on
+   surface-3, the skeleton's own colour, so it takes the border's. */
+.recap-pick-skeleton {
+    height: 20px;
+    margin: 4px 6px;
+    border-radius: 6px;
+    background: var(--border-2);
 }
 
 .recap-pick-opt:hover,

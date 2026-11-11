@@ -7651,6 +7651,10 @@
         const sequence = ++state.recapSeq;
         const route = recapRoute();
         const key = PSL.recapJobKey(route);
+        // The lists' names are read with the recap, not on the first click: on a large base they take
+        // seconds, and a list opened on them read as empty. Not on a row write's reload (`keep`): a failed
+        // read would run again on each one, and the list's own retry and the next route change are enough.
+        if (!keep) loadRecapNames();
         // Carried with the read, so a job started before midnight UTC keeps the key it was started on.
         route.jobKey = key;
         // Every move when the screen already held them all or a group is being opened whole: a write
@@ -8265,6 +8269,8 @@
         const nodes = [];
         if (!ready && options.status !== 'error') {
             nodes.push(el('p', {class: 'recap-pick-note', role: 'status', text: copy.loading}));
+            // Rows that shimmer where the names will come, so a list being read does not read as empty.
+            for (let i = 0; i < 3; i++) nodes.push(el('div', {class: 'recap-pick-skeleton skeleton', 'aria-hidden': 'true'}));
         }
         if (options.status === 'error') nodes.push(recapPickFailure());
         rows.forEach(function (row) {
@@ -12466,8 +12472,9 @@
     function renderReportScreen(id) {
         const run = state.run && state.run.id === id ? state.run : null;
         const key = run ? PSL.statusKey(run) : null;
+        const shown = key === 'succeeded' || key === 'empty';
         const stage = el('div', {class: 'report-stage'});
-        const shell = el('div', {class: 'report-shell'}, [reportBar(id, run), stage]);
+        const shell = el('div', {class: 'report-shell'}, [reportBar(id, run, shown), stage]);
         if (state.runError === id) {
             stage.appendChild(el('div', {class: 'gone report-gone'}, [unknownRun()]));
             return shell;
@@ -12481,7 +12488,7 @@
             stage.appendChild(loading);
             return shell;
         }
-        if (key !== 'succeeded' && key !== 'empty') {
+        if (!shown) {
             stage.appendChild(reportGone(run, key));
             return shell;
         }
@@ -12497,6 +12504,8 @@
             // an empty 404, which the frame would show as a blank page.
             const body = frame.contentDocument && frame.contentDocument.body;
             if (body && !body.firstElementChild && body.textContent.trim() === '') {
+                const download = shell.querySelector('.report-download');
+                if (download) download.remove();
                 stage.replaceChildren(reportGone(run, 'expired'));
             }
         });
@@ -12506,9 +12515,10 @@
 
     /**
      * @param {string} id
-     * @param {Run} run
+     * @param {Run | null} run
+     * @param {boolean} ready whether the run wrote a report there is to save
      */
-    function reportBar(id, run) {
+    function reportBar(id, run, ready) {
         const lifetime = live(el('span', {class: 'report-engine', text: reportLifetime(id)}),
             function () {
                 return reportLifetime(id);
@@ -12521,8 +12531,37 @@
             ]) : null,
             el('span', {class: 'report-path', text: t('report.path', {id: id})}),
             el('span', {class: 'report-spacer'}),
-            lifetime
+            lifetime,
+            ready ? reportDownload(id) : null
         ]);
+    }
+
+    /**
+     * The report as a file: the same bytes the frame shows, which carry their own styles.
+     * @param {string} id
+     */
+    function reportDownload(id) {
+        const filename = 'perf-sentinel-report-' + id + '.html';
+        const status = el('span', {class: 'report-engine', role: 'status'});
+        const label = el('span', {text: t('report.download')});
+        const button = el('button', {type: 'button', class: 'pill-button'}, [downloadGlyph(), label]);
+        let timer = 0;
+        button.addEventListener('click', function () {
+            button.disabled = true;
+            label.textContent = t('report.downloading');
+            clearTimeout(timer);
+            status.textContent = '';
+            PSL.downloadAs('/reports/' + id + '.html', filename).then(function (/** @type {boolean} */ saved) {
+                button.disabled = false;
+                label.textContent = t('report.download');
+                // Said, because a blocked download is otherwise indistinguishable from a click never received.
+                status.textContent = t(saved ? 'report.download.sent' : 'report.download.missing');
+                timer = setTimeout(function () {
+                    status.textContent = '';
+                }, 6000);
+            });
+        });
+        return el('span', {class: 'report-download'}, [status, button]);
     }
 
     /**
