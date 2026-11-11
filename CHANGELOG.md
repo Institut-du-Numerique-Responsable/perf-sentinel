@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-11-11
+
 ### Changed
 
 - `skrifa` moves to 0.50.0 and `lopdf` to 0.47.0, and the PNG, SVG, JPEG XL and PDF renderers share one walk over a QR code's dark modules. The three card fixtures in every format and the official example disclosure render to the same bytes as with 0.44.0. `fuzz/Cargo.lock` follows the root lock again, and the reference-data refresh scripts no longer swap a module global in their self-test.
