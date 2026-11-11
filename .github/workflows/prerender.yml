@@ -22,7 +22,8 @@ jobs:
     # Skip the bot's own refresh commits (belt-and-suspenders; GITHUB_TOKEN pushes
     # don't retrigger workflows anyway).
     if: ${{ !contains(github.event.head_commit.message, 'skip-prerender') }}
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 installs no Chromium on ubuntu 26.04, which ubuntu-latest now is.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
