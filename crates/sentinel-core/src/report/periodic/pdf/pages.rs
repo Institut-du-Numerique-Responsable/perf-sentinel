@@ -909,6 +909,25 @@ fn transparency(w: &mut Writer, report: &PeriodicReport, x: f32, side: f32) {
     w.y = baseline;
 }
 
+/// The side of one module of a QR code drawn `side` wide at `(x, y)`, and
+/// the top-left corner of each dark module: one walk for the PDF, PNG and
+/// SVG renderers.
+#[allow(clippy::cast_precision_loss)] // at most 177 modules a side
+pub(crate) fn dark_module_cells(
+    (x, y): (f32, f32),
+    side: f32,
+    modules: &[Vec<bool>],
+) -> (f32, impl Iterator<Item = (f32, f32)> + '_) {
+    let unit = side / modules.len().max(1) as f32;
+    let cells = modules.iter().enumerate().flat_map(move |(row, line)| {
+        line.iter()
+            .enumerate()
+            .filter(|(_, dark)| **dark)
+            .map(move |(col, _)| (x + col as f32 * unit, y + row as f32 * unit))
+    });
+    (unit, cells)
+}
+
 fn qr_modules(url: &str) -> Option<Vec<Vec<bool>>> {
     let code = fast_qr::QRBuilder::new(url).build().ok()?;
     Some(

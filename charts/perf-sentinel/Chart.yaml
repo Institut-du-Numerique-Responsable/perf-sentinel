@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.44.0
-appVersion: "0.44.0"
+version: 0.44.1
+appVersion: "0.44.1"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -37,10 +37,10 @@ annotations:
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
     - kind: changed
-      description: "appVersion 0.44.0. The daemon masks upper-case alphanumeric codes and hex ids in URL paths as {id}, and the ids of a source endpoint taken from the raw URL when http.route is absent. Findings on such URLs get a new signature, so their acknowledgments must be renewed. No chart value or template changes."
+      description: "appVersion 0.44.1. skrifa moves to 0.50.0 and lopdf to 0.47.0 inside the binary, and the share cards and disclosure PDFs render to the same bytes as with 0.44.0. No chart value or template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.44.0
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.44.1
       platforms:
         - linux/amd64
         - linux/arm64

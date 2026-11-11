@@ -469,17 +469,10 @@ fn rounded_rect(left: f32, top: f32, width: f32, height: f32, radius: f32) -> Op
 fn draw_qr(surface: &mut Surface<'_>, x: f32, y: f32, side: f32, modules: &[Vec<bool>]) {
     surface.set_stroke(None);
     fill(surface, (0, 0, 0));
-    #[allow(clippy::cast_precision_loss)] // at most 177 modules a side
-    let unit = side / modules.len().max(1) as f32;
+    let (unit, cells) = pages::dark_module_cells((x, y), side, modules);
     let mut builder = PathBuilder::new();
-    for (row, line) in modules.iter().enumerate() {
-        for (col, dark) in line.iter().enumerate() {
-            #[allow(clippy::cast_precision_loss)] // at most 177 modules a side
-            let cell = Rect::from_xywh(x + col as f32 * unit, y + row as f32 * unit, unit, unit);
-            if let (true, Some(cell)) = (*dark, cell) {
-                builder.push_rect(cell);
-            }
-        }
+    for cell in cells.filter_map(|(cx, cy)| Rect::from_xywh(cx, cy, unit, unit)) {
+        builder.push_rect(cell);
     }
     if let Some(path) = builder.finish() {
         surface.draw_path(&path);

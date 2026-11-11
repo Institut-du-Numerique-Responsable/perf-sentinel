@@ -8,6 +8,19 @@ use super::payload::{
 use crate::detect::FindingType;
 use serde_json::{Value, json};
 
+/// Fails on the first differing byte rather than printing both buffers, as
+/// `assert_eq!` would for a 1080 by 1350 RGB frame (4 MiB each).
+#[track_caller]
+pub(crate) fn assert_same_bytes(left: &[u8], right: &[u8], what: &str) {
+    if let Some(at) = left.iter().zip(right).position(|(a, b)| a != b) {
+        panic!(
+            "{what}: byte {at} differs, {} against {}",
+            left[at], right[at]
+        );
+    }
+    assert_eq!(left.len(), right.len(), "{what}: the lengths differ");
+}
+
 fn fixture(text: &str) -> Value {
     serde_json::from_str(text).expect("card fixture is JSON")
 }
@@ -111,6 +124,19 @@ pub(crate) fn png_chunks(png: &[u8]) -> Vec<([u8; 4], std::ops::Range<usize>)> {
         at = end;
     }
     out
+}
+
+/// The byte range of the first chunk of `kind` among [`png_chunks`].
+pub(crate) fn chunk_range(
+    chunks: &[([u8; 4], std::ops::Range<usize>)],
+    kind: [u8; 4],
+) -> std::ops::Range<usize> {
+    chunks
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .expect("the chunk")
+        .1
+        .clone()
 }
 
 /// A whole PNG chunk: length, type, data and its CRC.

@@ -349,7 +349,7 @@ fn output_identity(_metadata: &std::fs::Metadata) -> OutputIdentity {}
 
 /// The file holds raw telemetry: owner-only, no symlink followed, and an
 /// existing file another user owns is refused rather than written into.
-fn open_output(path: &std::path::Path) -> std::io::Result<tokio::fs::File> {
+fn open_output(path: &Path) -> std::io::Result<tokio::fs::File> {
     let file = crate::daemon::archive::open_truncate(path)?;
     if crate::daemon::archive::is_reparse_point(&file.metadata()?) {
         return Err(std::io::Error::other("capture output is a symlink"));

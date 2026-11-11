@@ -10,6 +10,14 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.44.1]
+
+### Changed
+
+- **`appVersion` moves to `0.44.1`.** `skrifa` moves to 0.50.0 and `lopdf` to
+  0.47.0 inside the binary, and the share cards and disclosure PDFs render to the
+  same bytes as with 0.44.0. No chart value or template changes.
+
 ## [0.44.0]
 
 ### Changed

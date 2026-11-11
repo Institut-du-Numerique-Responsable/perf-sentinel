@@ -386,7 +386,7 @@ mod tests {
             .collect()
     }
 
-    fn day_row(ledger: &DetectionLedger, day: u64) -> crate::daemon::detection_ledger::DayRow {
+    fn day_row(ledger: &DetectionLedger, day: u64) -> DayRow {
         ledger
             .page(None, None, 5000)
             .days

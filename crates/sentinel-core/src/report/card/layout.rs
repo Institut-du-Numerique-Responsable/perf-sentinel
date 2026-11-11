@@ -1939,7 +1939,7 @@ mod tests {
         assert_eq!(input["org"]["domain"].as_str().map(str::len), Some(60));
         let error = image_error(&input);
         assert_eq!(error.reason, "compact_too_large");
-        assert_eq!(error.result, crate::report::card::CardResult::Unrenderable);
+        assert_eq!(error.result, CardResult::Unrenderable);
         image(&story());
     }
 
@@ -1974,7 +1974,7 @@ mod tests {
     fn an_unrendered_language_is_refused() {
         let error = ensure_rendered(Lang::En, &[]).expect_err("refused");
         assert_eq!(error.reason, "unsupported_language");
-        assert_eq!(error.result, crate::report::card::CardResult::Refused);
+        assert_eq!(error.result, CardResult::Refused);
         for lang in LANGS {
             // A new language fails to compile here until it is handled.
             match lang {

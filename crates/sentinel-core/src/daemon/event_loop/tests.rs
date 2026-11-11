@@ -254,7 +254,7 @@ async fn ledger_counts_even_with_zero_retention() {
     let signature = probed[0].finding.signature.clone();
 
     let now = current_time_ms();
-    let ledger = super::super::detection_ledger::DetectionLedger::new(
+    let ledger = DetectionLedger::new(
         &crate::config::DaemonDetectionsConfig::default(),
         false,
         1.0,

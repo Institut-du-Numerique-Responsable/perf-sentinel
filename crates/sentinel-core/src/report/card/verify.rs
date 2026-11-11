@@ -348,7 +348,7 @@ mod tests {
 
     /// The full and compact canonical bytes of `input` under `signer`,
     /// with `key` as the full payload's fingerprint.
-    fn canonical(input: &serde_json::Value, signer: &CardSigner, key: &str) -> (Vec<u8>, Vec<u8>) {
+    fn canonical(input: &Value, signer: &CardSigner, key: &str) -> (Vec<u8>, Vec<u8>) {
         let input = parse_card_input(&serde_json::to_vec(input).expect("json")).expect("input");
         let (full, compact) = build_payloads(&input, &signer.public_key_b64(), key).expect("build");
         (canonical_bytes(&full), canonical_bytes(&compact))
@@ -458,8 +458,8 @@ mod tests {
     }
 
     /// The canonical bytes of `payload` after `edit` changes its JSON.
-    fn resigned(payload: &[u8], edit: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
-        let mut value: serde_json::Value = serde_json::from_slice(payload).expect("json");
+    fn resigned(payload: &[u8], edit: impl FnOnce(&mut Value)) -> Vec<u8> {
+        let mut value: Value = serde_json::from_slice(payload).expect("json");
         edit(&mut value);
         canonical_bytes(&value)
     }
@@ -655,7 +655,7 @@ mod tests {
 
     /// The figures `verify-card` prints for the PNG of `input`, and for its
     /// verify URL: both must agree.
-    fn figures_of(input: &serde_json::Value, pkcs8: &[u8]) -> serde_json::Value {
+    fn figures_of(input: &Value, pkcs8: &[u8]) -> Value {
         let json = serde_json::to_vec(input).expect("json");
         let card = render_card(&json, pkcs8, CardFormat::Png).expect("renders");
         let file = check_integrity(CardSource::Png(&card.bytes)).expect("checks");

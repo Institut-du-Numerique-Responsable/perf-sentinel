@@ -183,7 +183,7 @@ mod tests {
     };
     use payload::parse_full_payload;
     use raster::read_png_envelope;
-    use test_fixtures::story_input;
+    use test_fixtures::{assert_same_bytes, story_input};
     use verify::{CardSource, ContentVerdict, check_integrity};
 
     #[test]
@@ -274,7 +274,7 @@ mod tests {
         ] {
             let once = render_card(&input, &key.pkcs8, format).expect("renders");
             let twice = render_card(&input, &key.pkcs8, format).expect("renders");
-            assert!(once.bytes == twice.bytes, "{format:?}");
+            assert_same_bytes(&once.bytes, &twice.bytes, &format!("{format:?}"));
             assert_eq!(format.as_str(), &once.file_name[5..]);
         }
     }
