@@ -38,9 +38,10 @@ card = ["pdf", "dep:ring", "dep:base64", "dep:tiny-skia", "dep:png", "dep:jixel"
 [dependencies]
 krilla = { version = "0.8.2", optional = true, default-features = false, features = ["simple-text"] }
 fast_qr = { version = "0.14.0", optional = true, default-features = false }
-# Glyph coverage and advances for line breaking, the version krilla draws with.
-skrifa = { version = "0.49.0", optional = true }
-lopdf = { version = "0.46.0", optional = true, default-features = false }
+# Glyph coverage and advances for line breaking. krilla draws with its own
+# skrifa 0.42, so the tree carries two versions.
+skrifa = { version = "0.50.0", optional = true }
+lopdf = { version = "0.47.0", optional = true, default-features = false }
 # Ed25519 card signing. Daemon builds already unify it with rustls' ring.
 ring = { version = "0.17.14", optional = true, default-features = false }
 # Base64url for card keys and payloads, already in the tree through krilla.
