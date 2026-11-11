@@ -790,3 +790,14 @@ v0.42.0	b71f715	2026-11-04	PASS
 # (admission step skipped, no Prometheus-Operator CRD). All PASS. Not run:
 # validate-findings, verify-all-scenarios.
 v0.42.1	0823d2e	2026-11-05	PASS
+# v0.44.0 targeted pass on a local release binary built from bdb6bf48, no
+# cluster: path-id-masking, new, run against 0.44.0 (18/18: P1-P4 URL path
+# templates, E1-E4 raw-URL endpoints over OTLP, Jaeger and Zipkin, D0-D3
+# report --before an 0.43.2 baseline, K1-K2 ack successor, W1-W3 loopback
+# daemon /api/findings and /api/detections) and against the published 0.43.2
+# binary as a control (P1, P2, E1, E1b, E3, E4, W1, W2, K1, K2 fail),
+# endpoint-resolution (53/53), rpc-carrier-parity, diff-mutated-findings,
+# ack-lifecycle-warning, semconv-drift, detection-volume and grouping-identity
+# as regression checks. All PASS. Not run: the cluster scenarios,
+# validate-findings, verify-all-scenarios.
+v0.44.0	469a396	2026-11-11	PASS
