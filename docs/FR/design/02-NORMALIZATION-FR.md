@@ -127,6 +127,17 @@ fn is_uuid(s: &str) -> bool {
 
 **Pourquoi codé à la main ?** Cette fonction est appelée sur chaque segment de chemin de chaque URL HTTP dans le pipeline. Une regex compilée (`Regex::is_match`) fait tourner le moteur regex à chaque appel. La vérification codée à la main consiste en une vérification de longueur (rejet rapide pour >99% des segments), quatre comparaisons d'octets pour les positions des tirets et une seule passe pour les chiffres hexadécimaux.
 
+### Segments en forme d'identifiant
+
+En plus des segments numériques et des UUID à tirets, deux formes deviennent `{id}`, parce qu'elles donnaient sinon un template par valeur :
+
+- Une chaîne hexadécimale d'au moins 16 caractères avec un chiffre, quelle que soit la casse : un UUID sans tirets, un `ObjectId` Mongo, une empreinte SHA. Aucun mot de chemin aussi long n'emploie que les lettres `a` à `f`.
+- Un code alphanumérique en majuscules d'au moins 4 caractères, comme un numéro de dossier (`K7QX2P`) ou de facture (`INV2024001`). Lettres et chiffres doivent alterner au moins deux fois, ou les chiffres se suivre sur 6 positions. Les mots fixes formés d'un préfixe et d'un petit nombre (`UTF8`, `H264`, `X509`, `SHA256`, `ISO8601`, `ED25519`) restent, comme les mots de chemin en minuscules (`v2`, `oauth2`) et les segments tout en lettres (`CSV`). En contrepartie, un identifiant dont lettres et chiffres forment deux blocs (`ORD12345`, `QWERT7`) reste tel quel, et un mot fixe qui alterne deux fois (`AES256GCM`, `UTF16LE`, `I18N`) devient `{id}`. Dans un chemin d'URL, les mots fixes sont bien plus souvent en minuscules, et ceux-là ne sont jamais des codes.
+
+Aucune des deux règles n'a de borne de longueur, comme pour un segment numérique. La règle des codes ne s'applique pas aux cibles RPC (`service/method`, reconnues à l'absence de slash initial, de `scheme://` et de `host:port`) : un nom d'IDL comme `WAFV2` n'est jamais une valeur propre à un appel. Les identifiants en minuscules ou à casse mixte qui ne sont pas hexadécimaux ne sont pas couverts : les distinguer des mots de chemin demande plus qu'une vérification d'octets.
+
+`source.endpoint` reçoit le même masquage là où l'ingestion OTLP, Jaeger ou Zipkin retombe sur un attribut d'URL (`url.path`, `http.target`, `http.url`, `url.full`) faute de `http.route` : `/dossiers/K7QX2P` et `/dossiers/R4TN8W` partagent alors une signature d'acquittement. Seul ce repli masque. Un template `http.route` fait autorité, et le masquer fondrait `/rest/api/2/issue/{key}` et `/rest/api/3/issue/{key}` en un seul endpoint, si bien qu'acquitter l'un ferait taire l'autre. Une destination de consumer et le `source.endpoint` d'une entrée au format natif sont gardés pour la même raison. `diff` compare une fois de plus, sous leur forme masquée, les findings et les endpoints restés sans correspondance : une baseline écrite avant le masquage se compare donc toujours proprement, sans fondre les routes numérotées qui correspondaient exactement.
+
 ### `split_origin` et regroupement conscient du host
 
 ```rust

@@ -698,7 +698,7 @@ fn classified_inbound_http_endpoint(
             .filter(usable)
             .or_else(|| c.url_full.filter(usable))
             .or_else(|| c.url_path.filter(usable))
-            .map(ToString::to_string)
+            .map(crate::event::raw_url_endpoint)
     })
 }
 

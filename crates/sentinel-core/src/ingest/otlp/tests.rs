@@ -1473,7 +1473,10 @@ fn parent_span_http_url_used_only_when_route_absent() {
         .iter()
         .find(|e| e.event_type == EventType::Sql)
         .expect("sql child event present");
-    assert_eq!(sql.source.endpoint, "http://order-svc/api/orders/42/submit");
+    assert_eq!(
+        sql.source.endpoint,
+        "http://order-svc/api/orders/{id}/submit"
+    );
 }
 
 #[test]
@@ -2142,7 +2145,7 @@ fn parent_span_url_full_used_when_neither_route_nor_url_present() {
         .iter()
         .find(|e| e.event_type == EventType::Sql)
         .expect("sql child event present");
-    assert_eq!(sql.source.endpoint, "http://order-svc/api/orders/42");
+    assert_eq!(sql.source.endpoint, "http://order-svc/api/orders/{id}");
 }
 
 #[test]

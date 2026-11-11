@@ -1,7 +1,8 @@
 //! HTTP URL normalizer.
 //!
-//! Replaces numeric path segments with `{id}`, UUID segments with `{uuid}`,
-//! strips query parameters, and prepends the HTTP method.
+//! Replaces numeric path segments and upper-case alphanumeric codes with
+//! `{id}`, UUID segments with `{uuid}`, strips query parameters, and prepends
+//! the HTTP method.
 
 use std::borrow::Cow;
 
@@ -28,9 +29,83 @@ pub struct HttpNormalized {
     pub params: Vec<String>,
 }
 
-/// Check if a segment is purely numeric (ASCII digits, non-empty).
-fn is_numeric(seg: &str) -> bool {
-    !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_digit())
+/// The placeholder an identifier-like path segment becomes, or `None` for a
+/// path word kept as is.
+///
+/// - `{uuid}`: a dashed UUID.
+/// - `{id}`: all digits, or a hex string of at least 16 characters with a
+///   digit (dashless UUID, Mongo `ObjectId`, SHA digest), in any case.
+/// - `{id}`, with `mask_codes` only: an upper-case alphanumeric code of at
+///   least 4 characters (`K7QX2P`, `INV2024001`). Letters and digits must
+///   alternate at least twice, or the digits run 6 long, so fixed words made
+///   of a prefix and a short number (`UTF8`, `H264`, `X509`, `SHA256`,
+///   `ISO8601`) stay. RPC `service/method` targets turn it off: an IDL name
+///   such as `WAFV2` is never a per-call value.
+///
+/// One pass over the bytes, and the first byte that is neither a letter nor
+/// a digit ends it: most path words (`api`, `v2`, `my-orders`) cost a few
+/// bytes.
+fn segment_placeholder(seg: &str, mask_codes: bool) -> Option<&'static str> {
+    if is_uuid(seg) {
+        return Some("{uuid}");
+    }
+    let shape = SegmentShape::scan(seg)?;
+    let len = seg.len();
+    if shape.digits == 0 {
+        return None;
+    }
+    let numeric = shape.digits == len;
+    let hex_id = shape.hex && len >= 16;
+    let code = mask_codes
+        && len >= 4
+        && shape.digits + shape.upper == len
+        && (shape.runs >= 3 || shape.longest_digit_run >= 6);
+    (numeric || hex_id || code).then_some("{id}")
+}
+
+/// Byte counts of an all-alphanumeric segment, read by `segment_placeholder`.
+struct SegmentShape {
+    digits: usize,
+    upper: usize,
+    /// Every letter is a hex digit.
+    hex: bool,
+    /// Maximal runs of letters or of digits: `K7QX2P` has 5, `UTF8` 2.
+    runs: usize,
+    longest_digit_run: usize,
+}
+
+impl SegmentShape {
+    /// `None` at the first byte that is neither an ASCII letter nor a digit.
+    fn scan(seg: &str) -> Option<Self> {
+        let mut shape = Self {
+            digits: 0,
+            upper: 0,
+            hex: true,
+            runs: 0,
+            longest_digit_run: 0,
+        };
+        let mut digit_run = 0usize;
+        let mut prev_digit = None;
+        for &c in seg.as_bytes() {
+            let is_digit = c.is_ascii_digit();
+            if is_digit {
+                shape.digits += 1;
+                digit_run += 1;
+                shape.longest_digit_run = shape.longest_digit_run.max(digit_run);
+            } else if c.is_ascii_alphabetic() {
+                digit_run = 0;
+                shape.upper += usize::from(c.is_ascii_uppercase());
+                shape.hex &= c.is_ascii_hexdigit();
+            } else {
+                return None;
+            }
+            if prev_digit != Some(is_digit) {
+                shape.runs += 1;
+                prev_digit = Some(is_digit);
+            }
+        }
+        Some(shape)
+    }
 }
 
 /// Count occurrences of `target` in `s`.
@@ -40,12 +115,13 @@ fn bytecount(s: &str, target: u8) -> usize {
 
 /// Normalize an HTTP target URL.
 ///
-/// Replaces numeric segments with `{id}`, UUID segments with `{uuid}`,
-/// strips query params, and prepends the method. The callee host is kept in
-/// the template for DNS-addressed calls (`GET user-svc/api/x`) so two calls
-/// to the same path on different backends do not merge into one group and
-/// raise a false redundant/N+1 finding. IP-literal authorities are dropped,
-/// so load-balanced replicas (pods behind one service) still group together.
+/// Replaces numeric segments and upper-case alphanumeric codes with `{id}`,
+/// UUID segments with `{uuid}`, strips query params, and prepends the
+/// method. The callee host is kept in the template for DNS-addressed calls
+/// (`GET user-svc/api/x`) so two calls to the same path on different
+/// backends do not merge into one group and raise a false redundant/N+1
+/// finding. IP-literal authorities are dropped, so load-balanced replicas
+/// (pods behind one service) still group together.
 #[must_use]
 pub fn normalize_http(method: &str, target: &str) -> HttpNormalized {
     // Split scheme + authority from the path, keeping the authority so a
@@ -75,7 +151,8 @@ pub fn normalize_http(method: &str, target: &str) -> HttpNormalized {
         None => Vec::new(),
     };
 
-    let normalized_path = normalize_path_segments(path, &mut params);
+    let mask_codes = is_url_like(target);
+    let normalized_path = normalize_path_segments(path, &mut params, mask_codes);
 
     // `normalized_path` starts with `/` whenever an authority was present
     // (it is sliced from the authority's trailing `/`), so a DNS host slots
@@ -87,8 +164,43 @@ pub fn normalize_http(method: &str, target: &str) -> HttpNormalized {
     HttpNormalized { template, params }
 }
 
-/// Normalize path segments: replace numeric with `{id}`, UUIDs with `{uuid}`.
-fn normalize_path_segments(path: &str, params: &mut Vec<String>) -> String {
+/// Whether `target` is a URL or a URL path rather than an RPC
+/// `service/method` (see `segment_placeholder`): a leading `/`, a
+/// `scheme://` in any case, or a `host:port` first segment.
+fn is_url_like(target: &str) -> bool {
+    let first = target.split('/').next().unwrap_or_default();
+    first.is_empty()
+        || first.ends_with(':')
+        || first.rsplit_once(':').is_some_and(|(host, port)| {
+            !host.is_empty() && !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit())
+        })
+}
+
+/// Re-apply the current path masking to the template of an HTTP finding
+/// read from an older report (`GET svc/api/dossiers/K7QX2P`). `None` when
+/// nothing changes, or for an RPC template, whose first token is a
+/// lower-case `rpc.system` rather than an HTTP method, or for a SQL template
+/// (a fan-out's), which has more than one word after its verb or no `/`.
+///
+/// Only the segments past the first `/` are read. What precedes it, a kept
+/// DNS host or a scheme `split_origin` leaves in the path (`ws:`), stays as
+/// written.
+pub(crate) fn remask_http_template(template: &str) -> Option<String> {
+    let (method, rest) = template.split_once(' ')?;
+    if method.is_empty()
+        || !method.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
+        || rest.contains(char::is_whitespace)
+    {
+        return None;
+    }
+    let path_start = rest.find('/')?;
+    let masked = mask_path(&rest[path_start..])?;
+    Some(format!("{method} {}{masked}", &rest[..path_start]))
+}
+
+/// Normalize path segments: replace each identifier-like segment with the
+/// placeholder [`segment_placeholder`] gives it.
+fn normalize_path_segments(path: &str, params: &mut Vec<String>, mask_codes: bool) -> String {
     if path.is_empty() || path == "/" {
         return "/".to_string();
     }
@@ -97,19 +209,71 @@ fn normalize_path_segments(path: &str, params: &mut Vec<String>) -> String {
         if idx > 0 {
             result.push('/');
         }
-        if seg.is_empty() {
-            // leading or trailing slash
-        } else if is_uuid(seg) {
+        if let Some(placeholder) = segment_placeholder(seg, mask_codes) {
             params.push(seg.to_string());
-            result.push_str("{uuid}");
-        } else if is_numeric(seg) {
-            params.push(seg.to_string());
-            result.push_str("{id}");
+            result.push_str(placeholder);
         } else {
             result.push_str(seg);
         }
     }
     result
+}
+
+/// Mask identifier-like path segments of a `source.endpoint` in place.
+///
+/// Without `http.route` the endpoint is the raw request path, and each
+/// `/dossiers/42` would mint its own ack signature and ledger entry. Only the
+/// path is touched: after a URL authority, after a `METHOD ` prefix, or the
+/// whole endpoint when it starts with `/`. Called on the raw URL fallback
+/// (`event::raw_url_endpoint`) and by the readers of an older report or ack
+/// entry, never on an authoritative endpoint such as an `http.route`.
+pub(crate) fn mask_endpoint_ids(endpoint: &mut String) {
+    // Past a `METHOD ` prefix, so `GET //host/x` reads like `//host/x`. A
+    // space further in (`http://svc/a b /42`) belongs to the URL.
+    let url_start = endpoint
+        .find(" /")
+        .filter(|&i| !endpoint[..i].contains('/'))
+        .map_or(0, |i| i + 1);
+    let url = &endpoint[url_start..];
+    let path_start = match crate::event::endpoint_authority_start(url) {
+        Some(a) => url[a..].find('/').map(|j| a + j),
+        None => url.starts_with('/').then_some(0),
+    };
+    let Some(start) = path_start.map(|p| url_start + p) else {
+        return;
+    };
+    if let Some(masked) = mask_path(&endpoint[start..]) {
+        endpoint.replace_range(start.., &masked);
+    }
+}
+
+/// An owned copy of `endpoint` with [`mask_endpoint_ids`] applied, for the
+/// readers of an older report, archive or acknowledgment entry.
+pub(crate) fn masked_endpoint(endpoint: &str) -> String {
+    let mut masked = endpoint.to_string();
+    mask_endpoint_ids(&mut masked);
+    masked
+}
+
+/// `path` with its identifier-like segments masked, or `None` when it has
+/// none. One walk, and no allocation until the first match.
+fn mask_path(path: &str) -> Option<String> {
+    let mut out: Option<String> = None;
+    let mut seg_start = 0;
+    for seg in path.split('/') {
+        let placeholder = segment_placeholder(seg, true);
+        if let Some(out) = out.as_mut() {
+            out.push('/');
+            out.push_str(placeholder.unwrap_or(seg));
+        } else if let Some(placeholder) = placeholder {
+            let mut masked = String::with_capacity(path.len() + 8);
+            masked.push_str(&path[..seg_start]);
+            masked.push_str(placeholder);
+            out = Some(masked);
+        }
+        seg_start += seg.len() + 1;
+    }
+    out
 }
 
 /// Split scheme + authority from an `http(s)` URL. Returns
@@ -229,6 +393,161 @@ mod tests {
         let r = normalize_http("DELETE", "/api/orders/42/items/7");
         assert_eq!(r.template, "DELETE /api/orders/{id}/items/{id}");
         assert_eq!(r.params, vec!["42", "7"]);
+    }
+
+    #[test]
+    fn upper_case_alphanumeric_codes_become_ids() {
+        // One signature per dossier number flooded a production ledger.
+        let a = normalize_http("GET", "https://crm.example.test/api/dossiers/K7QX2P");
+        let b = normalize_http("GET", "https://crm.example.test/api/dossiers/R4TN8W");
+        assert_eq!(a.template, "GET crm.example.test/api/dossiers/{id}");
+        assert_eq!(a.template, b.template);
+        assert_eq!(a.params, vec!["K7QX2P"]);
+    }
+
+    #[test]
+    fn alphanumeric_code_shapes() {
+        let code = |s: &str| segment_placeholder(s, true);
+        assert_eq!(code("A1B2"), Some("{id}"));
+        assert_eq!(code("INV2024001"), Some("{id}"));
+        // No upper bound, like a numeric segment.
+        assert_eq!(code(&format!("A{}", "1B".repeat(100))), Some("{id}"));
+        assert_eq!(code("A1B"), None);
+        assert_eq!(code("ORD12345"), None);
+        assert_eq!(code("K7qx2P"), None);
+        assert_eq!(segment_placeholder("K7QX2P", false), None);
+    }
+
+    #[test]
+    fn fixed_words_with_a_number_stay() {
+        for word in [
+            "UTF8", "H264", "H265", "X509", "IPV6", "HTTP2", "SHA256", "ISO8601", "ED25519",
+            "ISO27001", "1080P", "WAFV2",
+        ] {
+            let path = format!("/api/{word}/items");
+            let r = normalize_http("GET", &path);
+            assert_eq!(r.template, format!("GET {path}"), "{word}");
+        }
+    }
+
+    #[test]
+    fn hex_ids_become_ids_in_any_case() {
+        for (seg, kept) in [
+            ("507f1f77bcf86cd799439011", false),
+            ("507F1F77BCF86CD799439011", false),
+            ("a1b2c3d4e5f67890abcdef1234567890", false),
+            ("A1B2C3D4E5F67890ABCDEF1234567890", false),
+            ("da39a3ee5e6b4b0d3255bfef95601890afd80709", false),
+            ("deadbeef1234567", true),
+            ("abcdefabcdefabcdef", true),
+        ] {
+            let r = normalize_http("GET", &format!("/api/items/{seg}"));
+            let expected = if kept {
+                format!("GET /api/items/{seg}")
+            } else {
+                "GET /api/items/{id}".to_string()
+            };
+            assert_eq!(r.template, expected, "{seg}");
+        }
+    }
+
+    #[test]
+    fn url_targets_mask_codes_whatever_their_scheme() {
+        for target in [
+            "HTTP://svc/api/dossiers/K7QX2P",
+            "ws://svc/api/dossiers/K7QX2P",
+            "order-svc:8080/api/dossiers/K7QX2P",
+        ] {
+            let r = normalize_http("GET", target);
+            assert!(
+                r.template.ends_with("/dossiers/{id}"),
+                "{target}: {}",
+                r.template
+            );
+        }
+    }
+
+    #[test]
+    fn older_http_templates_are_remasked() {
+        assert_eq!(
+            remask_http_template("GET crm.example.test/api/dossiers/K7QX2P").as_deref(),
+            Some("GET crm.example.test/api/dossiers/{id}")
+        );
+        assert_eq!(
+            remask_http_template("GET /api/items/507f1f77bcf86cd799439011").as_deref(),
+            Some("GET /api/items/{id}")
+        );
+        assert_eq!(remask_http_template("GET /api/orders/{id}"), None);
+        assert_eq!(remask_http_template("GET svc/encoding/UTF8"), None);
+        assert_eq!(remask_http_template("aws-api WAFV2/ListWebACLs"), None);
+        assert_eq!(remask_http_template("GET ws://svc/api/dossiers/{id}"), None);
+        assert_eq!(remask_http_template("GET HTTP://svc/api/x"), None);
+        // Masking only: a first segment is never re-read as a host.
+        assert_eq!(remask_http_template("GET 10.0.0.1/api/x"), None);
+        assert_eq!(remask_http_template("GET Order-Svc/api/x"), None);
+        assert_eq!(remask_http_template("SELECT * FROM t WHERE id = ?"), None);
+        assert_eq!(remask_http_template("SHOW TABLES"), None);
+    }
+
+    #[test]
+    fn rpc_targets_keep_upper_case_names() {
+        let r = normalize_http("aws-api", "WAFV2/ListWebACLs");
+        assert_eq!(r.template, "aws-api WAFV2/ListWebACLs");
+        let r = normalize_http("grpc", "K7QX2PService/Get");
+        assert_eq!(r.template, "grpc K7QX2PService/Get");
+        // Numeric and UUID masking still apply, as before.
+        let r = normalize_http("grpc", "svc/42");
+        assert_eq!(r.template, "grpc svc/{id}");
+    }
+
+    #[test]
+    fn endpoint_ids_are_masked() {
+        for (raw, expected) in [
+            ("/api/dossiers/K7QX2P", "/api/dossiers/{id}"),
+            ("GET /api/orders/42/submit", "GET /api/orders/{id}/submit"),
+            (
+                "http://svc/api/items/507f1f77bcf86cd799439011",
+                "http://svc/api/items/{id}",
+            ),
+            ("/api/orders/{id}", "/api/orders/{id}"),
+            // A `://` inside the path is no scheme, and a `//host` is kept.
+            (
+                "/api/orders/42/cb/http://x/7",
+                "/api/orders/{id}/cb/http://x/{id}",
+            ),
+            ("//ABC123DEF/api/42", "//ABC123DEF/api/{id}"),
+            ("GET //ABC123DEF/api/42", "GET //ABC123DEF/api/{id}"),
+            ("GET http://svc/a/42/b", "GET http://svc/a/{id}/b"),
+            // A space inside the URL starts no method prefix.
+            ("http://svc/a/7/b c /42", "http://svc/a/{id}/b c /{id}"),
+            ("/42", "/{id}"),
+            ("/a/42/", "/a/{id}/"),
+            ("activemq /queue/INV2024001", "activemq /queue/{id}"),
+            ("/encoding/UTF8", "/encoding/UTF8"),
+            ("com.acme.Job.run", "com.acme.Job.run"),
+            ("kafka orders", "kafka orders"),
+            ("unknown", "unknown"),
+        ] {
+            let mut endpoint = raw.to_string();
+            mask_endpoint_ids(&mut endpoint);
+            assert_eq!(endpoint, expected, "{raw}");
+        }
+    }
+
+    #[test]
+    fn path_words_and_short_or_letter_only_segments_stay() {
+        for path in [
+            "/api/v2/items",
+            "/oauth2/token",
+            "/hash/sha256",
+            "/export/CSV",
+            "/api/A1B",
+            "/files/AB12-CD",
+        ] {
+            let r = normalize_http("GET", path);
+            assert_eq!(r.template, format!("GET {path}"), "{path}");
+            assert!(r.params.is_empty(), "{path}");
+        }
     }
 
     #[test]

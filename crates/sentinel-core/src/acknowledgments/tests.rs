@@ -602,6 +602,94 @@ fn apply_to_report_unmatched_ack_names_the_reattributed_successor() {
     assert_eq!(report.findings.len(), 1, "the successor stays unsuppressed");
 }
 
+/// An entry written before the path id masking names the raw path. The
+/// finding now signs on the masked one, and the warning must name it
+/// rather than read "emitted no I/O, keep the entry".
+#[test]
+fn apply_to_report_names_the_successor_of_an_entry_on_a_raw_path() {
+    let raw = make_finding(FindingType::NPlusOneSql, Severity::Warning);
+    let acked_old = compute_signature(&raw);
+    // Two raw paths mask to one endpoint: two findings, one successor.
+    let masked = Finding {
+        source_endpoint: "POST /api/orders/{id}/submit".to_string(),
+        trace_id: "trace-2".to_string(),
+        ..raw.clone()
+    };
+    let mut findings = vec![masked.clone(), masked];
+    enrich_with_signatures(&mut findings);
+    let successor_sig = findings[0].signature.clone();
+
+    let mut report = empty_report(findings);
+    report.per_endpoint_io_ops = vec![crate::report::PerEndpointIoOps {
+        service: raw.service.clone(),
+        endpoint: "POST /api/orders/{id}/submit".to_string(),
+        io_ops: 12,
+    }];
+    let acks = AcknowledgmentsFile {
+        acknowledged: vec![Acknowledgment {
+            service: Some(raw.service.clone()),
+            source_endpoint: Some(raw.source_endpoint.clone()),
+            ..ack(&acked_old, None)
+        }],
+    };
+    apply_to_report(
+        &mut report,
+        &acks,
+        &Config::default(),
+        now_2026_05_02(),
+        ReportOrigin::FreshAnalysis,
+    );
+
+    let warning = report
+        .warning_details
+        .iter()
+        .find(|w| w.kind == warnings::UNMATCHED_ACKNOWLEDGMENT)
+        .expect("unmatched warning");
+    assert!(
+        warning.message.contains(&successor_sig) && warning.message.contains("attribution"),
+        "warning must name the masked successor, got: {}",
+        warning.message
+    );
+}
+
+/// Same entry, with the finding fixed: the endpoint ran under its masked
+/// name, so the entry reads as fixed rather than "emitted no I/O".
+#[test]
+fn apply_to_report_reads_a_fixed_entry_on_a_raw_path_as_exercised() {
+    let raw = make_finding(FindingType::NPlusOneSql, Severity::Warning);
+    let mut report = empty_report(vec![]);
+    report.per_endpoint_io_ops = vec![crate::report::PerEndpointIoOps {
+        service: raw.service.clone(),
+        endpoint: "POST /api/orders/{id}/submit".to_string(),
+        io_ops: 12,
+    }];
+    let acks = AcknowledgmentsFile {
+        acknowledged: vec![Acknowledgment {
+            service: Some(raw.service.clone()),
+            source_endpoint: Some("POST /api/orders/42/submit".to_string()),
+            ..ack(&compute_signature(&raw), None)
+        }],
+    };
+    apply_to_report(
+        &mut report,
+        &acks,
+        &Config::default(),
+        now_2026_05_02(),
+        ReportOrigin::FreshAnalysis,
+    );
+
+    let warning = report
+        .warning_details
+        .iter()
+        .find(|w| w.kind == warnings::UNMATCHED_ACKNOWLEDGMENT)
+        .expect("unmatched warning");
+    assert!(
+        warning.message.contains("looks fixed"),
+        "a masked endpoint that ran must read as exercised, got: {}",
+        warning.message
+    );
+}
+
 /// A same-prefix template drift outranks a same-hash finding
 /// elsewhere: the second must not turn the named successor back into
 /// the generic message.

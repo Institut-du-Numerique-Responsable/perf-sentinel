@@ -165,7 +165,7 @@ fn http_endpoint(span: &ZipkinSpan, allow_url_fallback: bool) -> Option<String> 
             .or_else(|| present("http.url"))
             .or_else(|| present("url.full"))
             .or_else(|| present("url.path"))
-            .map(ToString::to_string)
+            .map(crate::event::raw_url_endpoint)
     })
 }
 
@@ -366,7 +366,7 @@ fn convert_zipkin_span(
             get_tag("url.path"),
             span.kind.as_deref() == Some("SERVER"),
         )
-        .or_else(|| get_tag("http.target").map(ToString::to_string))
+        .or_else(|| get_tag("http.target").map(crate::event::raw_url_endpoint))
         .filter(|s| !s.trim().is_empty()),
         super::TagIoKind::HttpOut => own_inbound_http_endpoint(span),
     };
@@ -876,7 +876,7 @@ mod tests {
         let ingest = ZipkinIngest::new(1_048_576);
         let events = ingest.ingest(json.as_bytes()).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].source.endpoint, "/api/orders/42");
+        assert_eq!(events[0].source.endpoint, "/api/orders/{id}");
     }
 
     #[test]

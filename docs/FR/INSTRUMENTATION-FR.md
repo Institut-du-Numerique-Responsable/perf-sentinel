@@ -769,7 +769,7 @@ Ces spans nomment la méthode et le statut dans les tags Micrometer `method` et 
 
 #### 4. Route entrante
 
-La convention serveur par défaut ne pose la route que sur les métriques. Le span porte le chemin brut, donc les findings sont regroupés par URL instanciée, un endpoint par id, et les [acquittements](./ACK-WORKFLOW-FR.md#stabilité-de-signature-et-redémarrages-de-service) perdent leur stabilité. Deux façons de poser `http.route` sur le span :
+La convention serveur par défaut ne pose la route que sur les métriques. Le span porte le chemin brut. Perf Sentinel y masque les identifiants qu'il reconnaît (nombres, UUID, identifiants hexadécimaux, codes en majuscules), mais tout autre identifiant (`/account/alice`) donne encore un endpoint par valeur, et les [acquittements](./ACK-WORKFLOW-FR.md#stabilité-de-signature-et-redémarrages-de-service) perdent leur stabilité. Deux façons de poser `http.route` sur le span :
 
 - Déclarer un bean `OpenTelemetryServerRequestObservationConvention`. Le span suit alors les conventions HTTP d'OpenTelemetry, de même que les métriques HTTP serveur, renommées `http.server.request.duration`.
 - Étendre la convention par défaut et ajouter la route comme clé à haute cardinalité. Les clés à haute cardinalité ne vont que dans les traces, donc les métriques Prometheus gardent leurs noms et leurs tags.

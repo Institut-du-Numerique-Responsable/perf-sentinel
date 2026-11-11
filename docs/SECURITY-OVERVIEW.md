@@ -62,7 +62,7 @@ The Hub calls its configured daemon sources (poll, ack relay, live view), and th
 
 ## Data handled and stored
 
-**Normalization.** Spans are processed in memory, inside a streaming window (30 s TTL, 10,000 traces at most by default). SQL literals become `?`, numeric and UUID path segments become `{id}` and `{uuid}`, and the query string is dropped. A finding carries the resulting template and a count of distinct values, not the values. A few things stay verbatim, such as SQL comments, non-numeric path segments and, outside MySQL and MariaDB, text between double quotes: see [What stays verbatim in a template](LIMITATIONS.md#sql-tokenizer). A finding also carries the service name, the grouping attribute values, the code location and the trace id.
+**Normalization.** Spans are processed in memory, inside a streaming window (30 s TTL, 10,000 traces at most by default). SQL literals become `?`, numeric segments, hex ids and upper-case alphanumeric codes in a path become `{id}`, UUIDs `{uuid}`, and the query string is dropped. A finding carries the resulting template and a count of distinct values, not the values. A few things stay verbatim, such as SQL comments, other path segments and, outside MySQL and MariaDB, text between double quotes: see [What stays verbatim in a template](LIMITATIONS.md#sql-tokenizer). A finding also carries the service name, the grouping attribute values, the code location and the trace id.
 
 **What the daemon writes to disk.**
 - The ack log, `acks.jsonl`, under the user's local data directory, mode `0600`.

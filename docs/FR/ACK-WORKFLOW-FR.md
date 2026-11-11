@@ -303,10 +303,12 @@ Quand les services tracés émettent `http.route` :
 Quand `http.route` est absent sur un span explicitement SERVER, Perf Sentinel
 se rabat sur `http.url`, `url.full`, `url.path`, puis `http.target` selon le
 format d'ingestion. Les spans CLIENT portant uniquement une URL restent des
-opérations sortantes et ne sont pas pris pour des points d'entrée. Chaque URL
-unique produit une signature différente, le renouvellement des acks devient
-proportionnel à la cardinalité des URL, et les findings différés
-réapparaissent à chaque nouvel id de requête. Le repli existe pour que
+opérations sortantes et ne sont pas pris pour des points d'entrée. Perf
+Sentinel masque les id qu'il reconnaît dans ce chemin (nombres, UUID, id
+hexadécimaux, codes en majuscules), mais chaque URL qui diffère par un autre
+id (`/accounts/alice`) produit encore une signature différente, le
+renouvellement des acks devient proportionnel à cette cardinalité, et les
+findings différés réapparaissent à chaque nouvel id de ce genre. Le repli existe pour que
 l'opérateur voie encore une chaîne d'endpoint exploitable, pas comme
 posture recommandée.
 
@@ -326,10 +328,13 @@ daemon qui tourne :
 curl -s http://localhost:4318/api/findings | jq -r '.[].source_endpoint' | sort -u
 ```
 
-Des templates avec placeholders (`/api/orders/{id}`) signalent une
-instrumentation saine. Des URL instanciées avec des id en dur
-(`/api/orders/42`) signalent que `http.route` est absent et que les
-acks devront être recréés sans cesse.
+Un placeholder nommé d'après sa variable (`/api/orders/{orderId}`) ou dans
+la syntaxe du framework (`/api/orders/:id`) signale une instrumentation
+saine. Un `{id}` ou un `{uuid}` seul ne prouve rien, puisque Perf Sentinel
+met les mêmes placeholders dans un chemin brut. Des id en dur qui échappent
+au masquage (`/api/accounts/alice`), ou une URL complète avec son schéma et
+son hôte (`http://order-svc/api/orders/{id}`), signalent que `http.route` est
+absent et que les acks devront être recréés sans cesse.
 
 Note de montée de version (0.11.2) : l'attribution d'endpoint change de trois
 façons, aussi bien sur OTLP que sur Jaeger et Zipkin. Elle sélectionne la route

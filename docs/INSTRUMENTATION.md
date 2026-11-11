@@ -766,7 +766,7 @@ These spans name the method and the status in the Micrometer `method` and `statu
 
 #### 4. Inbound route
 
-The default server convention tags the route only on metrics. The span carries the raw path, so findings group by instantiated URL, one endpoint per id, and [acknowledgments](./ACK-WORKFLOW.md#signature-stability-and-service-restarts) lose their stability. Two ways to put `http.route` on the span:
+The default server convention tags the route only on metrics. The span carries the raw path. Perf Sentinel masks the ids it recognizes there (numbers, UUIDs, hex ids, upper-case codes), but any other id (`/account/alice`) still gives one endpoint per value, and [acknowledgments](./ACK-WORKFLOW.md#signature-stability-and-service-restarts) lose their stability. Two ways to put `http.route` on the span:
 
 - Declare an `OpenTelemetryServerRequestObservationConvention` bean. The span then follows the OpenTelemetry HTTP conventions, and so do the HTTP server metrics, which are renamed `http.server.request.duration`.
 - Extend the default convention and add the route as a high-cardinality key. High-cardinality keys go to traces only, so the Prometheus metrics keep their names and tags.

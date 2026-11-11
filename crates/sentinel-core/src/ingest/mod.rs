@@ -70,7 +70,7 @@ pub(crate) fn http_route_endpoint(
         && !route.contains('/')
         && let Some(path) = url_path.filter(|path| !path.trim().is_empty())
     {
-        return Some(path.to_string());
+        return Some(crate::event::raw_url_endpoint(path));
     }
     Some(canonical_http_route(route))
 }

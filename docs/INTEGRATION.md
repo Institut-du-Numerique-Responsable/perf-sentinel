@@ -660,7 +660,7 @@ perf-sentinel jaeger-query --endpoint http://jaeger:16686 --service order-svc --
 1. **Check span attributes.** Perf Sentinel only processes spans with `db.statement`/`db.query.text` (SQL) or `http.url`/`url.full` (HTTP). Other spans are skipped.
 2. **Check the span kind.** Since 0.11.2 a `SERVER` span carrying an HTTP URL is inbound work, not an outbound call, so it produces no HTTP finding even though the attribute is present. Fleets on legacy semantic conventions, which set `http.url` on the handler span too, lose the calls they used to see this way. An outbound call shows up as a `CLIENT` span on the caller's side.
 3. **Check detection thresholds.** The default N+1 threshold is 5 occurrences of the same normalized template within the same trace. If your trace has fewer than 5 repeated calls, no finding is generated.
-4. **Check URL normalization.** Perf Sentinel replaces numeric path segments with `{id}` and UUIDs with `{uuid}`. If your repeated URLs differ only by a string identifier (e.g., `/account/alice`, `/account/bob`), they will not be grouped into the same template.
+4. **Check URL normalization.** Perf Sentinel replaces numeric path segments, hex ids and upper-case alphanumeric codes (`K7QX2P`) with `{id}` and UUIDs with `{uuid}`. If your repeated URLs differ only by another string identifier (e.g., `/account/alice`, `/account/bob`), they will not be grouped into the same template.
 
 ### AOT cache error with Java Agent
 

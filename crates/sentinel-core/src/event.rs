@@ -119,19 +119,10 @@ fn strip_endpoint_secrets(endpoint: &mut String) {
     if let Some(cut) = endpoint.find(['?', '#']) {
         endpoint.truncate(cut);
     }
-    // Authority begins after a scheme `://` (only when that `://` precedes the
-    // first path '/'), after a leading `//`, or at 0 for a scheme-less
-    // `user:pass@host`. Strip its userinfo up to the last '@' before the path.
-    let authority_start = if endpoint.starts_with("//") {
-        2
-    } else if let Some(i) = endpoint
-        .find("://")
-        .filter(|&i| !endpoint[..i].contains('/'))
-    {
-        i + 3
-    } else {
-        0
-    };
+    // Authority begins as `endpoint_authority_start` says, or at 0 for a
+    // scheme-less `user:pass@host`. Strip its userinfo up to the last '@'
+    // before the path.
+    let authority_start = endpoint_authority_start(endpoint).unwrap_or(0);
     let authority_end = endpoint[authority_start..]
         .find('/')
         .map_or(endpoint.len(), |i| authority_start + i);
@@ -140,9 +131,47 @@ fn strip_endpoint_secrets(endpoint: &mut String) {
     }
 }
 
+/// Byte offset where the URL authority of an endpoint starts: after a
+/// leading `//`, or after a scheme `://` that precedes the first path `/`.
+/// `None` when it has neither. Shared by the secret stripping and the id
+/// masking (`normalize::http::mask_endpoint_ids`) so both read one URL.
+pub(crate) fn endpoint_authority_start(endpoint: &str) -> Option<usize> {
+    if endpoint.starts_with("//") {
+        return Some(2);
+    }
+    endpoint
+        .find("://")
+        .filter(|&i| !endpoint[..i].contains('/'))
+        .map(|i| i + 3)
+}
+
+/// The endpoint a URL attribute (`url.path`, `http.target`, `http.url`,
+/// `url.full`) gives when no `http.route` names the route: secrets stripped,
+/// then path ids masked, so `/orders/42` and `/orders/43` share one endpoint
+/// and one ack signature. Only this fallback masks. A route template
+/// (`/rest/api/2/issue/{key}`), a consumer destination or a native-format
+/// `source.endpoint` is authoritative and keeps its segments.
+pub(crate) fn raw_url_endpoint(url: &str) -> String {
+    let mut endpoint = url.to_string();
+    strip_endpoint_secrets(&mut endpoint);
+    // Bounds the masking work on a huge raw URL, with room left for the
+    // masking to shrink a long id back under the cap.
+    truncate_field(&mut endpoint, MAX_SOURCE_LENGTH * 16);
+    crate::normalize::http::mask_endpoint_ids(&mut endpoint);
+    endpoint
+}
+
 pub(crate) fn sanitize_source_endpoint(endpoint: &mut String) {
     strip_endpoint_secrets(endpoint);
-    truncate_field(endpoint, MAX_SOURCE_LENGTH);
+    if endpoint.len() > MAX_SOURCE_LENGTH {
+        truncate_field(endpoint, MAX_SOURCE_LENGTH);
+        // A placeholder cut in half (`.../{i`) would spell a route nobody has.
+        if let Some(open) = endpoint.rfind('{')
+            && !endpoint[open..].contains('}')
+        {
+            endpoint.truncate(open);
+        }
+    }
 }
 
 /// Drop the field if it contains any ASCII control character, otherwise truncate.
@@ -1019,6 +1048,45 @@ mod tests {
             let mut event = make_event_with_field("endpoint", raw);
             sanitize_span_event(&mut event);
             assert_eq!(event.source.endpoint, expected, "input: {raw}");
+        }
+    }
+
+    #[test]
+    fn truncation_never_cuts_an_endpoint_placeholder() {
+        // 300 one-digit ids grow past the cap once masked.
+        let raw = format!("/a{}", "/1".repeat(300));
+        for prefix in ["", "x", "xx", "xxx"] {
+            let masked = raw_url_endpoint(&format!("/{prefix}{raw}"));
+            let mut event = make_event_with_field("endpoint", &masked);
+            sanitize_span_event(&mut event);
+            let endpoint = &event.source.endpoint;
+            assert!(endpoint.len() <= MAX_SOURCE_LENGTH);
+            let open = endpoint.rfind('{').expect("placeholder");
+            assert!(endpoint[open..].contains('}'), "{endpoint}");
+        }
+    }
+
+    #[test]
+    fn a_long_id_past_the_cap_masks_back_under_it() {
+        let raw = format!("/items/{}/details?token=SECRET", "a1".repeat(400));
+        assert_eq!(raw_url_endpoint(&raw), "/items/{id}/details");
+    }
+
+    #[test]
+    fn only_the_raw_url_fallback_masks_endpoint_ids() {
+        assert_eq!(
+            raw_url_endpoint("/api/orders/42?page=2"),
+            "/api/orders/{id}"
+        );
+        // A route template or a consumer destination is authoritative.
+        for kept in [
+            "/rest/api/2/issue/{key}",
+            "aws_sqs https://sqs.eu-west-3.amazonaws.com/123456789012/orders",
+            "POST /api/orders/42/submit",
+        ] {
+            let mut event = make_event_with_field("endpoint", kept);
+            sanitize_span_event(&mut event);
+            assert_eq!(event.source.endpoint, kept);
         }
     }
 
