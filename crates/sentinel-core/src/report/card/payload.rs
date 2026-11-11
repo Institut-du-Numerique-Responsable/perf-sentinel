@@ -186,7 +186,7 @@ pub struct CardInput {
     pub lang: Lang,
     pub period: Period,
     pub scope: Scope,
-    pub figures: serde_json::Value,
+    pub figures: Value,
     #[serde(default)]
     pub story: Option<Story>,
     #[serde(default)]

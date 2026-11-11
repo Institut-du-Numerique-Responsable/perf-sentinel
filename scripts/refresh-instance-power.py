@@ -321,7 +321,7 @@ def fetch_ccf(ref: str) -> "tuple[dict[tuple[str, str], tuple[float, float]], st
     return coefficients, sha, date
 
 
-def fetch_scaleway() -> "list[tuple[str, int, tuple[str, str], bool]]":
+def fetch_scaleway(get_json=http_json) -> "list[tuple[str, int, tuple[str, str], bool]]":
     """Scaleway offers eligible for the SPECpower model, as
     `(offer_id, vcpu, (csv provider, architecture), dram premium)`.
 
@@ -334,7 +334,7 @@ def fetch_scaleway() -> "list[tuple[str, int, tuple[str, str], bool]]":
     offers: "dict[str, tuple[str, int, tuple[str, str], bool]]" = {}
     page, seen = 1, 0
     while True:
-        payload = http_json(f"{SCALEWAY_CATALOG}?page_size=1000&page={page}")
+        payload = get_json(f"{SCALEWAY_CATALOG}?page_size=1000&page={page}")
         products = payload.get("products") or []
         if not products:
             break
@@ -485,18 +485,13 @@ def fake_catalog(offer_id: str) -> dict:
 
 
 def self_test() -> None:
-    global http_json
-    real_http_json = http_json
-    http_json = lambda url: fake_catalog("DEV1-S")
-    assert fetch_scaleway() == [("DEV1-S", 2, ("aws", "EPYC 1st Gen"), False)]
+    assert fetch_scaleway(lambda url: fake_catalog("DEV1-S")) == [("DEV1-S", 2, ("aws", "EPYC 1st Gen"), False)]
     for bad in ['X", 0.0, 0.0), ]; fn f() {} //', "DEV1-S\n#[test]", "-S"]:
-        http_json = lambda url, bad=bad: fake_catalog(bad)
         try:
-            fetch_scaleway()
+            fetch_scaleway(lambda url, offer=bad: fake_catalog(offer))
         except ValueError:
             continue
         raise AssertionError(f"offer_id {bad!r} was accepted")
-    http_json = real_http_json
 
     os.environ["GH_TOKEN"] = "self-test-token"
     assert request(SCALEWAY_CATALOG).get_header("Authorization") is None

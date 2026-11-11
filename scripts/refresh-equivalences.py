@@ -170,7 +170,8 @@ def fetch(url: str) -> bytes:
     # A browser-like agent: some of these hosts refuse the urllib default.
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 perf-sentinel-refresh"})
     with urllib.request.urlopen(request, timeout=120) as response:
-        return response.read()
+        body = response.read()
+    return body
 
 
 def get_json(url: str) -> dict:
@@ -269,7 +270,7 @@ def desnz_lines(data: bytes, wanted: "set[str]") -> "tuple[str, dict[str, list[t
     sheets = sorted((n for n in archive.namelist() if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)),
                     key=lambda n: int(re.search(r"\d+", n.rsplit("/", 1)[1]).group(0)))
     for sheet in sheets:
-        header = None
+        header, year = None, ""
         found: "dict[str, list[tuple]]" = {}
         for cells in sheet_rows(archive, sheet, strings):
             if header is None:

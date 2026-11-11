@@ -34,9 +34,12 @@ fn kinds_found(trace: &Trace, config: &DetectConfig, kind: &FindingType) -> Vec<
 
 /// The signature of the one finding of `kind` the trace yields under `config`.
 fn signature_of(trace: &Trace, config: &DetectConfig, kind: &FindingType) -> String {
-    let mut signatures = kinds_found(trace, config, kind);
-    assert_eq!(signatures.len(), 1, "one {kind:?} finding expected");
-    signatures.remove(0)
+    let signatures = kinds_found(trace, config, kind);
+    let found = signatures.len();
+    let Ok([signature]) = <[String; 1]>::try_from(signatures) else {
+        panic!("one {kind:?} finding expected, found {found}");
+    };
+    signature
 }
 
 fn count(trace: &Trace, config: &DetectConfig, watch: &WatchIndex) -> HashMap<Arc<str>, u64> {

@@ -77,12 +77,7 @@ pub(crate) fn pdf_slot(pdf: &[u8], content_sig_b64: &str) -> Option<usize> {
     if content_sig_b64.len() != CONTENT_SIG_PLACEHOLDER.len() {
         return None;
     }
-    let marker = CONTENT_SIG_MARKER.as_bytes();
-    let mut found = pdf
-        .windows(marker.len())
-        .enumerate()
-        .filter(|(_, window)| *window == marker)
-        .map(|(at, _)| at + marker.len());
+    let mut found = marker_ends(pdf, CONTENT_SIG_MARKER.as_bytes());
     let at = found.next()?;
     if found.next().is_some() {
         return None;
@@ -93,6 +88,15 @@ pub(crate) fn pdf_slot(pdf: &[u8], content_sig_b64: &str) -> Option<usize> {
             .get(end..)
             .is_some_and(|rest| rest.starts_with(SLOT_END));
     holds.then_some(at)
+}
+
+/// The offset right after each occurrence of `marker` in `bytes`.
+fn marker_ends<'a>(bytes: &'a [u8], marker: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
+    bytes
+        .windows(marker.len())
+        .enumerate()
+        .filter(move |(_, window)| *window == marker)
+        .map(move |(at, _)| at + marker.len())
 }
 
 /// Draft, hash, sign, assemble: `assemble` writes the file around an
@@ -166,7 +170,8 @@ mod tests {
     };
     use crate::report::card::svg::{read_svg_envelope, render_svg, svg_envelope_range};
     use crate::report::card::test_fixtures::{
-        card_itxt, compact_url_of, full_payload, png_chunk, png_chunks, splice, story_input,
+        card_itxt, chunk_range, compact_url_of, full_payload, png_chunk, png_chunks, splice,
+        story_input,
     };
     use crate::report::card::verify::{CardSource, ContentVerdict, check_integrity};
     use crate::report::card::{CardError, render_card};
@@ -311,13 +316,7 @@ mod tests {
 
     /// The offset of the 86 slot bytes after the only marker of `pdf`.
     fn slot(pdf: &[u8]) -> usize {
-        let marker = CONTENT_SIG_MARKER.as_bytes();
-        let at: Vec<usize> = pdf
-            .windows(marker.len())
-            .enumerate()
-            .filter(|(_, w)| *w == marker)
-            .map(|(i, _)| i + marker.len())
-            .collect();
+        let at: Vec<usize> = marker_ends(pdf, CONTENT_SIG_MARKER.as_bytes()).collect();
         assert_eq!(at.len(), 1, "one slot");
         at[0]
     }
@@ -642,14 +641,7 @@ mod tests {
     fn png_envelope_chunks_are_walked_whole() {
         let png = file(CardFormat::Png);
         let chunks = png_chunks(png);
-        let range_of = |kind: &[u8; 4]| {
-            chunks
-                .iter()
-                .find(|(k, _)| k == kind)
-                .expect("the chunk")
-                .1
-                .clone()
-        };
+        let range_of = |kind: &[u8; 4]| chunk_range(&chunks, *kind);
         let card = range_of(b"iTXt");
         let idat = range_of(b"IDAT");
         let iend = range_of(b"IEND");

@@ -16,7 +16,7 @@ use super::layout::{CARD_HEIGHT, CARD_WIDTH};
 use super::{CardError, CardResult};
 use crate::report::periodic::pdf::layout::{Face, text_width};
 use crate::report::periodic::pdf::logo::{self, Segment};
-use crate::report::periodic::pdf::pages::{Op, Outline, Rgb};
+use crate::report::periodic::pdf::pages::{Op, Outline, Rgb, dark_module_cells};
 
 /// The `iTXt` keyword of the chunk holding the signed envelope.
 pub const CARD_PAYLOAD_KEYWORD: &str = "perf-sentinel-card";
@@ -429,17 +429,10 @@ fn rounded_rect(left: f32, top: f32, width: f32, height: f32, radius: f32) -> Op
 /// Dark modules as rectangles without anti-aliasing, so a module on whole
 /// pixels fills exactly its pixels.
 fn draw_qr(pixmap: &mut Pixmap, (x, y): (f32, f32), side: f32, modules: &[Vec<bool>]) {
-    #[allow(clippy::cast_precision_loss)] // at most 177 modules a side
-    let unit = side / modules.len().max(1) as f32;
+    let (unit, cells) = dark_module_cells((x, y), side, modules);
     let mut builder = PathBuilder::new();
-    for (row, line) in modules.iter().enumerate() {
-        for (col, dark) in line.iter().enumerate() {
-            #[allow(clippy::cast_precision_loss)] // at most 177 modules a side
-            let cell = Rect::from_xywh(x + col as f32 * unit, y + row as f32 * unit, unit, unit);
-            if let (true, Some(cell)) = (*dark, cell) {
-                builder.push_rect(cell);
-            }
-        }
+    for cell in cells.filter_map(|(cx, cy)| Rect::from_xywh(cx, cy, unit, unit)) {
+        builder.push_rect(cell);
     }
     if let Some(path) = builder.finish() {
         let mut paint = solid((0, 0, 0));
@@ -506,7 +499,8 @@ mod tests {
     use crate::report::card::layout::{UNDERLINE_PX, layout_image};
     use crate::report::card::payload::canonical_bytes;
     use crate::report::card::test_fixtures::{
-        compact_url_of, full_payload, png_chunk, png_chunks, splice, story_input,
+        assert_same_bytes, chunk_range, compact_url_of, full_payload, png_chunk, png_chunks,
+        splice, story_input,
     };
     use crate::report::card::verify::{CardSource, ContentVerdict, check_integrity};
     use crate::report::card::{CardFormat, render_card};
@@ -534,7 +528,7 @@ mod tests {
         encode_png(&pixmap, &envelope(input)).expect("the image encodes")
     }
 
-    fn pixel(pixmap: &tiny_skia::Pixmap, x: f32, y: f32) -> (u8, u8, u8) {
+    fn pixel(pixmap: &Pixmap, x: f32, y: f32) -> (u8, u8, u8) {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // on the card
         let p = pixmap
             .pixel(x as u32, y as u32)
@@ -585,9 +579,10 @@ mod tests {
     fn opaque_rgb_is_what_the_png_holds() {
         let pixmap = rasterize(&ops(&story())).expect("the image rasterizes");
         let (_, pixels) = decode(&encode_png(&pixmap, "{}").expect("the image encodes"));
-        assert!(
-            opaque_rgb(&pixmap) == pixels,
-            "opaque_rgb is the PNG's pixels"
+        assert_same_bytes(
+            &opaque_rgb(&pixmap),
+            &pixels,
+            "opaque_rgb is the PNG's pixels",
         );
     }
 
@@ -739,14 +734,7 @@ mod tests {
             .expect("renders")
             .bytes;
         let chunks = png_chunks(&png);
-        let range_of = |kind: &[u8; 4]| {
-            chunks
-                .iter()
-                .find(|(k, _)| k == kind)
-                .expect("the chunk")
-                .1
-                .clone()
-        };
+        let range_of = |kind: &[u8; 4]| chunk_range(&chunks, *kind);
         let (ihdr, card, idat, iend) = (
             range_of(b"IHDR"),
             range_of(b"iTXt"),

@@ -225,7 +225,7 @@ mod tests {
     use crate::report::card::payload::canonical_bytes;
     use crate::report::card::raster::{encode_png, opaque_rgb, rasterize};
     use crate::report::card::test_fixtures::{
-        collective_input, compact_url_of, curve_input, full_payload, story_input,
+        assert_same_bytes, collective_input, compact_url_of, curve_input, full_payload, story_input,
     };
     use serde_json::Value;
     use tiny_skia::Pixmap;
@@ -400,15 +400,17 @@ mod tests {
             .next_frame(&mut png_pixels)
             .expect("the frame decodes");
         png_pixels.truncate(info.buffer_size());
-        assert!(rgb == png_pixels, "opaque_rgb is the PNG's pixels");
+        assert_same_bytes(&rgb, &png_pixels, "opaque_rgb is the PNG's pixels");
 
-        assert!(
-            decode_oxide(jxl, w, h) == rgb,
-            "jxl-oxide decodes the PNG's pixels"
+        assert_same_bytes(
+            &decode_oxide(jxl, w, h),
+            &rgb,
+            "jxl-oxide decodes the PNG's pixels",
         );
-        assert!(
-            decode_jxl_rs(jxl, w, h) == rgb,
-            "jxl-rs decodes the PNG's pixels"
+        assert_same_bytes(
+            &decode_jxl_rs(jxl, w, h),
+            &rgb,
+            "jxl-rs decodes the PNG's pixels",
         );
     }
 

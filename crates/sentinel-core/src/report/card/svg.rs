@@ -13,7 +13,7 @@ use super::raster::{CARD_PAYLOAD_KEYWORD, MAX_ENVELOPE_BYTES, draw_glyph, for_ea
 use super::{CardError, CardResult};
 use crate::report::periodic::pdf::layout::Face;
 use crate::report::periodic::pdf::logo::{self, Segment};
-use crate::report::periodic::pdf::pages::{Op, Outline, Rgb};
+use crate::report::periodic::pdf::pages::{Op, Outline, Rgb, dark_module_cells};
 
 /// The `id` of the `<metadata>` element holding the signed envelope.
 pub const SVG_METADATA_ID: &str = CARD_PAYLOAD_KEYWORD;
@@ -273,16 +273,11 @@ fn rect(
 
 /// One subpath per dark module, without anti-aliasing.
 fn qr(out: &mut String, (x, y): (f32, f32), side: f32, modules: &[Vec<bool>]) {
-    #[allow(clippy::cast_precision_loss)] // at most 177 modules a side
-    let unit = side / modules.len().max(1) as f32;
+    let (unit, cells) = dark_module_cells((x, y), side, modules);
     let m = num(unit);
     out.push_str("<path fill=\"#000000\" shape-rendering=\"crispEdges\" d=\"");
-    for (row, line) in modules.iter().enumerate() {
-        for (col, _) in line.iter().enumerate().filter(|(_, dark)| **dark) {
-            #[allow(clippy::cast_precision_loss)] // at most 177 modules a side
-            let (cx, cy) = (x + col as f32 * unit, y + row as f32 * unit);
-            let _ = write!(out, "M{} {}h{m}v{m}h-{m}z", num(cx), num(cy));
-        }
+    for (cx, cy) in cells {
+        let _ = write!(out, "M{} {}h{m}v{m}h-{m}z", num(cx), num(cy));
     }
     out.push_str("\"/>");
 }

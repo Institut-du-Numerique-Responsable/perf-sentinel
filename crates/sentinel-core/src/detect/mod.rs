@@ -1534,8 +1534,7 @@ mod tests {
                     "2025-07-10T14:32:01.100Z",
                 );
                 child.parent_span_id = Some(parent_id.to_string());
-                child.instrumentation_scopes =
-                    vec![std::sync::Arc::from(format!("scope-{parent_id}"))];
+                child.instrumentation_scopes = vec![Arc::from(format!("scope-{parent_id}"))];
                 events.push(child);
             }
         }

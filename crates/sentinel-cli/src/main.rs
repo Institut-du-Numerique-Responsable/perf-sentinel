@@ -644,11 +644,12 @@ async fn dispatch_command(command: Commands) {
                 out_dir,
                 format,
             } => {
+                use sentinel_core::report::card::CardFormat;
                 let format = match format {
-                    cli::CardFormatArg::Png => sentinel_core::report::card::CardFormat::Png,
-                    cli::CardFormatArg::Pdf => sentinel_core::report::card::CardFormat::Pdf,
-                    cli::CardFormatArg::Svg => sentinel_core::report::card::CardFormat::Svg,
-                    cli::CardFormatArg::Jxl => sentinel_core::report::card::CardFormat::Jxl,
+                    cli::CardFormatArg::Png => CardFormat::Png,
+                    cli::CardFormatArg::Pdf => CardFormat::Pdf,
+                    cli::CardFormatArg::Svg => CardFormat::Svg,
+                    cli::CardFormatArg::Jxl => CardFormat::Jxl,
                 };
                 std::process::exit(card::cmd_card_render(&card::RenderArgs {
                     input: &input,
@@ -1174,7 +1175,7 @@ fn trace_counts_for_cross_reference(
         Err(e) => {
             eprintln!(
                 "Warning: failed to ingest trace file for cross-reference: {}",
-                sentinel_core::text_safety::sanitize_for_terminal(&e.to_string())
+                sanitize_for_terminal(&e.to_string())
             );
             None
         }
