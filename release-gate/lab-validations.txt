@@ -801,3 +801,12 @@ v0.42.1	0823d2e	2026-11-05	PASS
 # as regression checks. All PASS. Not run: the cluster scenarios,
 # validate-findings, verify-all-scenarios.
 v0.44.0	469a396	2026-11-11	PASS
+# v0.44.1 targeted pass on a local release binary built from a37bff49, no
+# cluster: skrifa 0.50.0, lopdf 0.47.0 and the shared QR walk. card-cli and
+# card-signal for the card renderers and the PDF carousel, disclose (10/10) and
+# verify-hash-roundtrip (7/7) for the disclosure path, path-id-masking (18/18)
+# as a regression check. All PASS. The three card fixtures in png, pdf, svg and
+# jxl and the official example disclosure PDF render to the same bytes as with
+# 0.44.0. Not run: the cluster scenarios, validate-findings,
+# verify-all-scenarios.
+v0.44.1	afa0437	2026-11-11	PASS
