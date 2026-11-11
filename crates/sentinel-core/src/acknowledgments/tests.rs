@@ -609,10 +609,13 @@ fn apply_to_report_unmatched_ack_names_the_reattributed_successor() {
 fn apply_to_report_names_the_successor_of_an_entry_on_a_raw_path() {
     let raw = make_finding(FindingType::NPlusOneSql, Severity::Warning);
     let acked_old = compute_signature(&raw);
-    let mut findings = vec![Finding {
+    // Two raw paths mask to one endpoint: two findings, one successor.
+    let masked = Finding {
         source_endpoint: "POST /api/orders/{id}/submit".to_string(),
+        trace_id: "trace-2".to_string(),
         ..raw.clone()
-    }];
+    };
+    let mut findings = vec![masked.clone(), masked];
     enrich_with_signatures(&mut findings);
     let successor_sig = findings[0].signature.clone();
 

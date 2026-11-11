@@ -415,10 +415,15 @@ fn drifted_successor<'a>(
     let acked = ack.signature.rsplit_once(':')?;
     let (mut templates, mut attributions) = (Vec::new(), Vec::new());
     for (sig, finding) in kept {
-        match drift_kind(ack, acked, sig, finding) {
-            Some(Drift::Template) => templates.push(sig.as_ref()),
-            Some(Drift::Attribution) => attributions.push(sig.as_ref()),
-            None => {}
+        let list = match drift_kind(ack, acked, sig, finding) {
+            Some(Drift::Template) => &mut templates,
+            Some(Drift::Attribution) => &mut attributions,
+            None => continue,
+        };
+        // Findings sharing one signature are one successor: the raw paths
+        // `/orders/42` and `/orders/43` both mask to `/orders/{id}`.
+        if !list.contains(&sig.as_ref()) {
+            list.push(sig.as_ref());
         }
     }
     // A template drift (same service and endpoint) is the stronger
