@@ -10,6 +10,16 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.44.0]
+
+### Changed
+
+- **`appVersion` moves to `0.44.0`.** The daemon masks upper-case alphanumeric
+  codes and hex ids in URL paths as `{id}`, and the ids of a source endpoint
+  taken from the raw URL when `http.route` is absent. Findings on such URLs get
+  a new signature, so their acknowledgments must be renewed. No chart value or
+  template changes.
+
 ## [0.43.2]
 
 ### Changed
