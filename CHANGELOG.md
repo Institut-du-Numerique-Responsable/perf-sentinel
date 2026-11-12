@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-12
+
 ### Changed
 
 - Batch commands that read an OTLP JSON file, such as `analyze --input` on a Collector file-exporter dump, now join the lines of the file per identical resource before converting them. Each line used to be converted alone, so a span lost its parent, its root or the other half of its query when that span sat in another export batch. Findings on long traces now get their real `source_endpoint` where they showed `unknown`, the framework of the root scope, and one event per query on emitters that split a query over several spans. On a Symfony + Doctrine capture, a `pg_sleep` loop of 6 queries went from `redundant_sql` x11 on `unknown` to x6 on `/api/fault/slow-sql`. A finding that leaves `unknown` changes signature, so an acknowledgment taken on it must be captured again. Blocks whose resource attributes differ are not joined, and a join never exceeds the 100 000 spans one request may index. The parsed lines stay in memory until they convert: on a 112 MiB dump of 210 000 spans, peak memory went from 279 MiB to 383 MiB (debug build). The Jaeger v3 search joins the messages of its stream the same way, and `perf-sentinel tempo` and the daemon's OTLP listeners join the blocks of one resource within each request. Resources with no service name are never joined: two of them can be two processes. The daemon's OTLP listeners still convert one export request at a time.

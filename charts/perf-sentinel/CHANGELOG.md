@@ -10,6 +10,19 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.45.0]
+
+### Fixed
+
+- **`appVersion` moves to `0.45.0`.** The daemon counts a SQL query once when
+  two instrumentation layers record it as sibling spans (Laravel + PDO,
+  SQLAlchemy + asyncpg) or when its spans reach it in several export requests,
+  and Rails prepared statements and attribute-less Active Record spans no
+  longer add events. A trace split over export requests is stitched again when
+  it leaves the window, so its findings get their real endpoint and framework.
+  OTLP conversion on the daemon takes 9 to 20% longer, and a trace keeps up to
+  `[daemon] max_events_per_trace` more records. No chart value or template changes.
+
 ## [0.44.1]
 
 ### Changed

@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.44.1
-appVersion: "0.44.1"
+version: 0.45.0
+appVersion: "0.45.0"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -36,11 +36,11 @@ annotations:
     - name: Helm deployment guide
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
-    - kind: changed
-      description: "appVersion 0.44.1. skrifa moves to 0.50.0 and lopdf to 0.47.0 inside the binary, and the share cards and disclosure PDFs render to the same bytes as with 0.44.0. No chart value or template changes."
+    - kind: fixed
+      description: "appVersion 0.45.0. The daemon counts a SQL query once when two instrumentation layers record it (Laravel + PDO, SQLAlchemy + asyncpg) or when its spans arrive in several export requests, and Rails prepared statements and Active Record spans no longer add false events. A trace split over export requests is stitched again when it leaves the window, and its findings get their real endpoint and framework. No chart value or template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.44.1
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.45.0
       platforms:
         - linux/amd64
         - linux/arm64
