@@ -4470,6 +4470,38 @@ async fn each_service_of_a_trace_is_stitched_on_its_own() {
 }
 
 #[tokio::test]
+async fn second_pass_keeps_what_a_request_already_stitched() {
+    // Request 2 stitched its execute span to its own prepare ('SELECT b').
+    // Seen whole, the nearest donor is the 'SET a' span of request 1. The
+    // pass must not drop 'SET a' while the execute keeps 'SELECT b'.
+    let traces = replay_requests(&[
+        otlp_request(
+            "orders-svc",
+            vec![
+                otlp_server_root(1, "/api/orders"),
+                otlp_sql_span(2, 1, "query", Some("SET a"), 5, 1),
+            ],
+        ),
+        otlp_request(
+            "orders-svc",
+            vec![
+                otlp_sql_span(3, 1, "PDO::prepare", Some("SELECT b"), 1, 0),
+                otlp_sql_span(4, 1, "PDOStatement::execute", None, 10, 300),
+            ],
+        ),
+    ])
+    .await;
+
+    let mut targets: Vec<&str> = traces[0]
+        .1
+        .iter()
+        .map(|event| event.event.target.as_str())
+        .collect();
+    targets.sort_unstable();
+    assert_eq!(targets, vec!["SELECT b", "SET a"]);
+}
+
+#[tokio::test]
 async fn trace_from_one_request_is_not_stitched_again() {
     let events = assert_split_matches_one_request(vec![vec![
         otlp_server_root(1, "/api/orders"),

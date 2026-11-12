@@ -1031,6 +1031,18 @@ async fn ingest_event_batch(
                 &mut source_endpoint_generations,
             );
         }
+        // Before the events, as the endpoint context: a trace this batch's
+        // pushes evict leaves with its records, and existing traces go first
+        // so a new records-only trace cannot evict them.
+        let (existing, missing): (Vec<_>, Vec<_>) =
+            group_stitch_records(stitch_records, sampling_rate)
+                .into_iter()
+                .partition(|(trace_id, _)| w.contains_trace(trace_id));
+        for (trace_id, records) in existing.into_iter().chain(missing) {
+            if let Some(evicted) = w.retain_stitch_records(&trace_id, records, now_ms) {
+                lru_evicted.push(evicted);
+            }
+        }
         for event in normalized {
             let trace_id = event.event.trace_id.as_str();
             if source_context.parents.contains_key(trace_id) {
@@ -1049,12 +1061,6 @@ async fn ingest_event_batch(
                 }
             }
             if let Some(evicted) = w.push(event, now_ms) {
-                lru_evicted.push(evicted);
-            }
-        }
-        // After the events, so each trace already has its buffer.
-        for (trace_id, records) in group_stitch_records(stitch_records, sampling_rate) {
-            if let Some(evicted) = w.retain_stitch_records(&trace_id, records, now_ms) {
                 lru_evicted.push(evicted);
             }
         }

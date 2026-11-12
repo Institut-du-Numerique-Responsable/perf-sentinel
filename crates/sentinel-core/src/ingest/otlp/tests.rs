@@ -1068,6 +1068,22 @@ fn source_context_keeps_internal_edges_and_unspecified_routes() {
 
 #[cfg(feature = "daemon")]
 #[test]
+fn stitch_records_spell_a_long_service_like_its_events() {
+    // The window joins a record to its event on the service name.
+    let service = "s".repeat(crate::event::MAX_SERVICE_LENGTH + 10);
+    let request = make_request(
+        &service,
+        vec![make_sql_span(
+            &[1; 16], &[2; 8], &[3; 8], "SELECT 1", 0, 1_000,
+        )],
+    );
+    let (events, _, records) = convert_otlp_request_stitchable(&request, None);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].service, events[0].service);
+}
+
+#[cfg(feature = "daemon")]
+#[test]
 fn source_context_drops_a_scope_named_with_control_characters() {
     // The window appends a retained scope to events after
     // `sanitize_span_event` has run on them.
@@ -5560,4 +5576,87 @@ fn source_context_retains_consumer_entry_points() {
         consumer.consumer_endpoint.as_deref(),
         Some("rabbitmq crm.dossiers")
     );
+}
+
+#[test]
+fn join_resource_blocks_merges_one_resource_and_keeps_anonymous_apart() {
+    let block = |service: Option<&str>, span_id: u8| {
+        let mut request = match service {
+            Some(service) => make_request(service, vec![]),
+            None => make_request("x", vec![]),
+        };
+        let mut block = request.resource_spans.remove(0);
+        if service.is_none() {
+            block.resource = None;
+        }
+        block.scope_spans[0].spans = vec![make_sql_span(
+            &[1; 16],
+            &[span_id; 8],
+            &[9; 8],
+            "SELECT 1",
+            0,
+            1_000,
+        )];
+        block
+    };
+    let mut request = ExportTraceServiceRequest {
+        resource_spans: vec![
+            block(Some("a"), 1),
+            block(None, 2),
+            block(Some("b"), 3),
+            block(Some("a"), 4),
+            block(None, 5),
+        ],
+    };
+
+    join_resource_blocks(&mut request);
+
+    let shape: Vec<(String, usize)> = request
+        .resource_spans
+        .iter()
+        .map(|block| {
+            let spans = block.scope_spans.iter().map(|s| s.spans.len()).sum();
+            (resource_service_name(block).to_string(), spans)
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            ("a".to_string(), 2),
+            ("unknown".to_string(), 1),
+            ("b".to_string(), 1),
+            ("unknown".to_string(), 1),
+        ]
+    );
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn an_attribute_less_execute_that_adopted_is_recorded() {
+    // Its donor is consumed, and the daemon's second pass must see who took it.
+    let mut execute = stitch_span(&[2; 8], &[10; 8], vec![], 3_000_000, 3_800_000);
+    execute.name = "X execute".to_string();
+    let prepare = stitch_span(
+        &[1; 8],
+        &[10; 8],
+        vec![make_kv("db.query.text", "SELECT 1")],
+        1_000_000,
+        1_100_000,
+    );
+    let request = scoped_request(
+        "svc",
+        vec![
+            ("http", vec![make_parent_span(&[10; 8], "GET /x")]),
+            ("orm", vec![prepare, execute]),
+        ],
+    );
+
+    let (events, _, records) = convert_otlp_request_stitchable(&request, None);
+
+    assert_eq!(events.len(), 1, "the execute adopted the prepare");
+    let roles: Vec<bool> = records
+        .iter()
+        .map(|record| matches!(record.role, StitchRole::Orphan { .. }))
+        .collect();
+    assert_eq!(roles, vec![false, true], "donor and adopter both recorded");
 }

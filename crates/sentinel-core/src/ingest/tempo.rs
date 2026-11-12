@@ -382,8 +382,9 @@ async fn fetch_trace_with_grouping(
 
     let body = fetch_bytes(client, uri, MAX_TRACE_BODY_BYTES, auth).await?;
 
-    let request = ExportTraceServiceRequest::decode(body)
+    let mut request = ExportTraceServiceRequest::decode(body)
         .map_err(|e| TempoError::ProtobufDecode(e.to_string()))?;
+    super::otlp::join_resource_blocks(&mut request);
 
     let (events, stats) = convert_otlp_request_counted_with_grouping(&request, grouping_attributes);
     Ok((events, stats.received))

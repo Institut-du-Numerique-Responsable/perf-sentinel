@@ -91,9 +91,12 @@ struct TraceBuffer {
     /// The SQL spans conversion looked at, in arrival order, for
     /// [`restitch_trace`].
     stitch_records: Vec<StitchRecord>,
-    /// `ResourceSpans` blocks, over all export requests, that brought
-    /// `stitch_records`. A trace stitched from one block is already whole.
-    stitch_batches: u32,
+    /// Services whose records came from more than one `ResourceSpans` block.
+    /// A trace with none was stitched whole by its requests.
+    stitch_split: bool,
+    /// Services that brought records, to tell a later block of one of them.
+    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+    stitch_services: Vec<Arc<str>>,
     /// Records were dropped at the per-trace cap: stitching again would
     /// decide on a partial view.
     stitch_overflow: bool,
@@ -445,7 +448,7 @@ impl TraceWindow {
     pub fn peek_clone(&self, trace_id: &str) -> Option<Vec<NormalizedEvent>> {
         self.traces.peek(trace_id).map(|buf| {
             let mut events: Vec<_> = buf.events.iter().cloned().collect();
-            if buf.stitch_batches > 1 && !buf.stitch_overflow {
+            if needs_restitch(buf) {
                 restitch_trace(
                     trace_id,
                     &mut events,
@@ -484,7 +487,8 @@ fn new_trace_buffer(now_ms: u64, per_trace_cap: usize) -> TraceBuffer {
         needs_reconciliation: false,
         source_endpoint_generation: 0,
         stitch_records: Vec::new(),
-        stitch_batches: 0,
+        stitch_split: false,
+        stitch_services: Vec::new(),
         stitch_overflow: false,
         last_seen_ms: now_ms,
     }
@@ -1044,7 +1048,7 @@ fn peek_parent_endpoint(
 fn finish_trace_buffer(
     (trace_id, mut buffer): (String, TraceBuffer),
 ) -> Option<(String, Vec<NormalizedEvent>)> {
-    if buffer.stitch_batches > 1 && !buffer.stitch_overflow {
+    if needs_restitch(&buffer) {
         let mut events = Vec::from(std::mem::take(&mut buffer.events));
         buffer.needs_reconciliation |= restitch_trace(
             &trace_id,
@@ -1075,14 +1079,39 @@ fn finish_trace_buffer(
     (!events.is_empty()).then_some((trace_id, events))
 }
 
+/// Whether a trace's records span several blocks of one service, and the
+/// whole of them and of its ancestry is at hand: a capped view would decide
+/// on missing spans.
+fn needs_restitch(buffer: &TraceBuffer) -> bool {
+    buffer.stitch_split
+        && !buffer.stitch_overflow
+        && buffer
+            .resolved_ancestry
+            .as_ref()
+            .is_some_and(|ancestry| ancestry.len() < buffer.resolved_ancestry_cap)
+}
+
 /// Append one export request's records under the per-trace cap.
 #[cfg(feature = "daemon")]
 fn keep_stitch_records(buffer: &mut TraceBuffer, records: Vec<StitchRecord>, cap: usize) {
-    let mut blocks: Vec<usize> = records.iter().map(|record| record.block).collect();
-    blocks.sort_unstable();
-    blocks.dedup();
-    let blocks = u32::try_from(blocks.len()).unwrap_or(u32::MAX);
-    buffer.stitch_batches = buffer.stitch_batches.saturating_add(blocks);
+    // Blocks per service in this request, and services seen in an earlier one.
+    let mut blocks: Vec<(&Arc<str>, usize)> = Vec::new();
+    for record in &records {
+        let entry = (&record.service, record.block);
+        if !blocks.contains(&entry) {
+            blocks.push(entry);
+        }
+    }
+    for (index, &(service, _)) in blocks.iter().enumerate() {
+        let again = blocks[..index].iter().any(|&(seen, _)| seen == service)
+            || buffer.stitch_services.contains(service);
+        buffer.stitch_split |= again;
+    }
+    for (service, _) in blocks {
+        if !buffer.stitch_services.contains(service) {
+            buffer.stitch_services.push(Arc::clone(service));
+        }
+    }
     let room = cap.saturating_sub(buffer.stitch_records.len());
     buffer.stitch_overflow |= records.len() > room;
     buffer.stitch_records.extend(records.into_iter().take(room));
@@ -1211,8 +1240,10 @@ fn restitch_service(
                 statement: Some(statement),
                 ..
             } => Some(&**statement),
-            StitchRole::Donor { .. } => event.map(|index| events[index].event.target.as_str()),
-            StitchRole::Orphan { .. } => None,
+            // An orphan its own request stitched holds that statement.
+            StitchRole::Donor { .. } | StitchRole::Orphan { .. } => {
+                event.map(|index| events[index].event.target.as_str())
+            }
         })
         .collect();
     let decisions = restitch_records(trace_id, records, &statements, links);
@@ -1232,9 +1263,8 @@ fn restitch_service(
                 crate::event::sanitize_span_event(&mut event);
                 adopted.push(crate::normalize::normalize(event));
             }
-            // shortcut: a donor its own request suppressed has no event to
-            // bring back, and an adopted span keeps the statement its
-            // request gave it. Both need the span's full event to revisit.
+            // A donor its own request suppressed has no event to bring
+            // back, and `restitch_records` keeps what a request decided.
             _ => {}
         }
     }

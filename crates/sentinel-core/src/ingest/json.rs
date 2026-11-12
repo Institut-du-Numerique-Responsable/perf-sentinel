@@ -139,6 +139,12 @@ impl OtlpDocuments<'_> {
         }
         self.pending_spans += spans;
         for block in request.resource_spans {
+            // Conversion never lets two anonymous blocks share a parent
+            // index (they can be two processes), so the join keeps them apart.
+            if crate::ingest::otlp::resource_service_name(&block) == crate::event::UNKNOWN_SERVICE {
+                self.pending.resource_spans.push(block);
+                continue;
+            }
             let key = block
                 .resource
                 .as_ref()
@@ -407,8 +413,8 @@ fn is_recoverable_attribute_shape(e: &serde_json::Error) -> bool {
 /// omitted `values` on empty `arrayValue`/`kvlistValue`, drop a `"value": {}`
 /// so `AnyValue` stays `None` rather than matching no oneof variant, and drop
 /// a resource's `entityRefs`. The `OTel` Java SDK 1.67 writes them without
-/// their empty `descriptionKeys`, which `EntityRef` requires, and nothing
-/// here reads them. Recursion depth is bounded by the pre-dispatch
+/// their empty `descriptionKeys`, which `EntityRef` requires
+/// (open-telemetry/opentelemetry-rust#3866), and nothing here reads them. Recursion depth is bounded by the pre-dispatch
 /// `MAX_JSON_DEPTH` cap.
 fn normalize_otlp_json(value: &mut serde_json::Value) {
     match value {
@@ -1072,6 +1078,26 @@ mod tests {
                 "1720621921000300000"
             ),
         );
+        let events = JsonIngest::new(1_048_576).ingest(json.as_bytes()).unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn otlp_ndjson_keeps_anonymous_resources_apart() {
+        // Two resources with no service name can be two processes, so the
+        // join does not pair their spans.
+        let anonymous = |scope: &str, span_id: &str, end_ns: &str| {
+            twin_document("pod-a", scope, span_id, end_ns).replace(
+                r#"{"key":"service.name","value":{"stringValue":"svc"}},"#,
+                "",
+            )
+        };
+        let json = format!(
+            "{}\n{}\n",
+            anonymous("pdo", "eee19b7ec3c1b174", "1720621921000007000"),
+            anonymous("laravel", "eee19b7ec3c1b175", "1720621921000300000"),
+        );
+        assert!(!json.contains("service.name"));
         let events = JsonIngest::new(1_048_576).ingest(json.as_bytes()).unwrap();
         assert_eq!(events.len(), 2);
     }

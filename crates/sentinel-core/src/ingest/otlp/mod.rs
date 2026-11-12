@@ -812,7 +812,7 @@ fn index_resource_spans<'a>(
 /// Non-blank `service.name` from the resource attributes, or `"unknown"`.
 /// Shared by the span index and the emitted events so both agree. The blank
 /// check does not trim a useful display value.
-fn resource_service_name(
+pub(crate) fn resource_service_name(
     resource_spans: &opentelemetry_proto::tonic::trace::v1::ResourceSpans,
 ) -> &str {
     resource_spans
@@ -1608,8 +1608,30 @@ fn decide_stitch<'a>(
     orphans: &[&'a Span],
     span_index: &HashMap<SpanKey<'a>, &'a Span>,
 ) -> HashMap<SpanKey<'a>, StitchDecision<'a>> {
+    decide_stitch_traced(donors, orphans, span_index).decisions
+}
+
+/// [`decide_stitch`] with the reason behind each donor's suppression.
+struct StitchOutcome<'a> {
+    decisions: HashMap<SpanKey<'a>, StitchDecision<'a>>,
+    /// The donor each adopting orphan took its statement from.
+    adopted_from: HashMap<SpanKey<'a>, usize>,
+    /// Donors suppressed by a rule other than being adopted (layered
+    /// duplicate, declared prepare, shorter twin).
+    merged: Vec<bool>,
+}
+
+fn decide_stitch_traced<'a>(
+    donors: &[StitchDonor<'a>],
+    orphans: &[&'a Span],
+    span_index: &HashMap<SpanKey<'a>, &'a Span>,
+) -> StitchOutcome<'a> {
     if donors.is_empty() {
-        return HashMap::new();
+        return StitchOutcome {
+            decisions: HashMap::new(),
+            adopted_from: HashMap::new(),
+            merged: Vec::new(),
+        };
     }
 
     let donor_by_id: HashMap<SpanKey<'a>, usize> = donors
@@ -1631,7 +1653,7 @@ fn decide_stitch<'a>(
 
     let mut decisions: HashMap<SpanKey<'a>, StitchDecision<'a>> = HashMap::new();
     let mut donor_consumed = vec![false; donors.len()];
-    let mut stitched: HashSet<SpanKey<'a>> = HashSet::new();
+    let mut adopted_from: HashMap<SpanKey<'a>, usize> = HashMap::new();
 
     // Rule 3: each carrier adopts the nearest related donor's statement.
     if !carriers.is_empty() {
@@ -1659,7 +1681,7 @@ fn decide_stitch<'a>(
             ) {
                 decisions.insert(span_key(orphan), StitchDecision::Adopt(donors[i].statement));
                 donor_consumed[i] = true;
-                stitched.insert(span_key(orphan));
+                adopted_from.insert(span_key(orphan), i);
             }
         }
     }
@@ -1671,11 +1693,15 @@ fn decide_stitch<'a>(
         }
     }
     for (span, carrier_key) in deferred {
-        if stitched.contains(&carrier_key) {
+        if adopted_from.contains_key(&carrier_key) {
             decisions.insert(span_key(span), StitchDecision::Suppress);
         }
     }
-    decisions
+    StitchOutcome {
+        decisions,
+        adopted_from,
+        merged: donor_suppressed,
+    }
 }
 
 /// Convert an OTLP `ExportTraceServiceRequest` into `SpanEvent`s.
@@ -1781,6 +1807,43 @@ fn convert_request(
     }
 
     (events, stats)
+}
+
+/// Join the `ResourceSpans` blocks of one resource in a request into the
+/// first of them. The stitch works one block at a time, and a sender that
+/// batches spans (a Collector, Tempo's storage blocks) can split one
+/// resource's spans, and the two halves of a query, over several blocks.
+/// Blocks with no service name stay apart: two of them can be two
+/// processes. Applied where the request is owned (daemon listeners, Tempo);
+/// file ingest joins across documents in `ingest::json`.
+#[cfg_attr(not(any(feature = "daemon", feature = "tempo")), allow(dead_code))]
+pub(crate) fn join_resource_blocks(request: &mut ExportTraceServiceRequest) {
+    use std::collections::hash_map::Entry;
+    if request.resource_spans.len() < 2 {
+        return;
+    }
+    let blocks = std::mem::take(&mut request.resource_spans);
+    let mut first: HashMap<Vec<u8>, usize> = HashMap::new();
+    for block in blocks {
+        if resource_service_name(&block) == crate::event::UNKNOWN_SERVICE {
+            request.resource_spans.push(block);
+            continue;
+        }
+        let key = block
+            .resource
+            .as_ref()
+            .map(prost::Message::encode_to_vec)
+            .unwrap_or_default();
+        match first.entry(key) {
+            Entry::Occupied(slot) => request.resource_spans[*slot.get()]
+                .scope_spans
+                .extend(block.scope_spans),
+            Entry::Vacant(slot) => {
+                slot.insert(request.resource_spans.len());
+                request.resource_spans.push(block);
+            }
+        }
+    }
 }
 
 #[cfg(feature = "daemon")]
@@ -2019,6 +2082,15 @@ fn push_stitch_records<'a>(
     stitch: &HashMap<SpanKey<'a>, StitchDecision<'a>>,
     pending_event: impl Fn(&StitchOrphan<'a>) -> Option<Box<SpanEvent>>,
 ) {
+    // Truncated as `sanitize_span_event` truncates the events' service, so
+    // the window finds a record's event and its ancestry.
+    let service: Arc<str> = if service.len() > crate::event::MAX_SERVICE_LENGTH {
+        let mut name = service.to_string();
+        crate::event::truncate_field(&mut name, crate::event::MAX_SERVICE_LENGTH);
+        Arc::from(name)
+    } else {
+        Arc::clone(service)
+    };
     // A block names a few traces, scopes and engines over many spans.
     let mut trace_ids: HashMap<&'a [u8], Arc<str>> = HashMap::new();
     let mut scopes: HashMap<&str, Arc<str>> = HashMap::new();
@@ -2039,7 +2111,7 @@ fn push_stitch_records<'a>(
         });
         records.push(StitchRecord {
             trace_id: Arc::clone(trace_id),
-            service: Arc::clone(service),
+            service: Arc::clone(&service),
             span_id,
             parent_span_id,
             start_ns: span.start_time_unix_nano,
@@ -2072,12 +2144,15 @@ fn push_stitch_records<'a>(
         record(donor.span, donor.scope, role);
     }
     for orphan in provisional {
+        let decided = stitch.contains_key(&span_key(orphan.span));
         // An attribute-less span named like a query (Active Record) belongs
         // to no database layer: no later request can give it a statement.
-        if !orphan.has_sql_db_system && !orphan.names_db_operation {
+        // One its request stitched is still recorded, as the adopter of its
+        // donor.
+        let attributeless = !orphan.has_sql_db_system && !orphan.names_db_operation;
+        if (attributeless && !decided) || record_ids(orphan.span).is_none() {
             continue;
         }
-        let decided = stitch.contains_key(&span_key(orphan.span));
         let role = StitchRole::Orphan {
             has_sql_db_system: orphan.has_sql_db_system,
             pending: if decided { None } else { pending_event(orphan) },
@@ -2089,10 +2164,16 @@ fn push_stitch_records<'a>(
 /// Stitch one service's records of one trace as [`decide_stitch`] would have
 /// stitched a single request holding all its spans.
 ///
-/// `statements[i]` is the statement of donor record `i`, `None` for a donor
-/// that has lost it (its event left the window) and for an orphan. `links`
-/// are the parent links of the trace's other spans, for the ancestor walks.
-/// Returns one decision per record.
+/// `statements[i]` is the statement of record `i`: a donor's, or the one an
+/// orphan's own request already gave it. `None` for a donor that has lost it
+/// (its event left the window) and for an orphan still waiting for one.
+/// `links` are the parent links of the trace's other spans, for the ancestor
+/// walks. Returns one decision per record.
+///
+/// The pass only adds to what each request decided. An orphan its request
+/// stitched keeps that statement, and a donor loses its event to adoption
+/// only when an orphan the pass newly stitches, or one that already holds
+/// the donor's statement, took it.
 pub(crate) fn restitch_records(
     trace_id: &str,
     records: &[&StitchRecord],
@@ -2161,15 +2242,65 @@ pub(crate) fn restitch_records(
         }
     }
     let orphans = admit_orphans(&donors, &provisional);
-    let stitch = decide_stitch(&donors, &orphans, &span_index);
+    let outcome = decide_stitch_traced(&donors, &orphans, &span_index);
+    record_decisions(records, statements, &record_spans, &donors, &outcome)
+}
+
+/// [`restitch_records`]' decisions per record, from the whole-trace outcome
+/// and what each request already decided.
+fn record_decisions(
+    records: &[&StitchRecord],
+    statements: &[Option<&str>],
+    record_spans: &[Span],
+    donors: &[StitchDonor<'_>],
+    outcome: &StitchOutcome<'_>,
+) -> Vec<RecordDecision> {
+    let pinned = |index: usize| {
+        matches!(records[index].role, StitchRole::Orphan { .. })
+            .then(|| statements.get(index).copied().flatten())
+            .flatten()
+    };
+    let record_of: HashMap<SpanKey<'_>, usize> = record_spans
+        .iter()
+        .enumerate()
+        .map(|(index, span)| (span_key(span), index))
+        .collect();
+    // Donors that lost their event to an adoption the requests agree with.
+    let mut taken = vec![false; donors.len()];
+    for (orphan, &donor) in &outcome.adopted_from {
+        let agrees = record_of
+            .get(orphan)
+            .and_then(|&index| pinned(index))
+            .is_none_or(|statement| statement == donors[donor].statement);
+        taken[donor] |= agrees;
+    }
+    let donor_of: HashMap<SpanKey<'_>, usize> = donors
+        .iter()
+        .enumerate()
+        .map(|(index, donor)| (span_key(donor.span), index))
+        .collect();
     record_spans
         .iter()
-        .map(|span| match stitch.get(&span_key(span)) {
-            Some(StitchDecision::Suppress) => RecordDecision::Suppress,
-            Some(StitchDecision::Adopt(statement)) => {
-                RecordDecision::Adopt((*statement).to_string())
+        .enumerate()
+        .map(|(index, span)| {
+            let key = span_key(span);
+            if pinned(index).is_some() {
+                return RecordDecision::Keep;
             }
-            None => RecordDecision::Keep,
+            if let Some(&donor) = donor_of.get(&key) {
+                return if outcome.merged[donor] || taken[donor] {
+                    RecordDecision::Suppress
+                } else {
+                    RecordDecision::Keep
+                };
+            }
+            match outcome.decisions.get(&key) {
+                Some(StitchDecision::Suppress) => RecordDecision::Suppress,
+                Some(StitchDecision::Adopt(statement)) => {
+                    RecordDecision::Adopt((*statement).to_string())
+                }
+                None => RecordDecision::Keep,
+            }
         })
         .collect()
 }
