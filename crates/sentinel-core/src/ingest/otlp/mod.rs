@@ -1683,13 +1683,15 @@ pub(crate) fn source_endpoint_updates(
         crate::event::truncate_field(&mut service, crate::event::MAX_SERVICE_LENGTH);
         let service: Arc<str> = Arc::from(service);
         for scope_spans in &resource_spans.scope_spans {
-            let mut scope = scope_spans
-                .scope
-                .as_ref()
-                .map(|scope| scope.name.clone())
-                .unwrap_or_default();
-            crate::event::truncate_field(&mut scope, crate::event::MAX_SCOPE_NAME_LENGTH);
-            let scope: Option<Arc<str>> = (!scope.is_empty()).then(|| Arc::from(scope));
+            let name = scope_spans.scope.as_ref().map_or("", |s| s.name.as_str());
+            // Same guard as `sanitize_span_event` on an event's own scopes:
+            // this one reaches the event after that pass has run.
+            let scope: Option<Arc<str>> =
+                (!name.is_empty() && !crate::config::has_control_char(name)).then(|| {
+                    let mut name = name.to_string();
+                    crate::event::truncate_field(&mut name, crate::event::MAX_SCOPE_NAME_LENGTH);
+                    Arc::from(name)
+                });
             updates.extend(scope_spans.spans.iter().filter_map(|span| {
                 span_endpoint_update(span, &service, span_index, scope.as_ref())
             }));
@@ -1699,7 +1701,9 @@ pub(crate) fn source_endpoint_updates(
 }
 
 /// The endpoint update one span carries, or `None` when its identifiers are
-/// malformed or it holds none of an endpoint, a parent link or a scope.
+/// malformed or it holds neither an endpoint nor a parent link. A scope alone
+/// does not make one: a lone root span with no route would then hold a window
+/// slot for a trace that has no event.
 #[cfg(feature = "daemon")]
 fn span_endpoint_update<'a>(
     span: &'a Span,
@@ -1742,11 +1746,7 @@ fn span_endpoint_update<'a>(
     }
     let parent_span_id =
         (!span.parent_span_id.is_empty()).then(|| bytes_to_hex(&span.parent_span_id));
-    if endpoint.is_none()
-        && parent_span_id.is_none()
-        && consumer_endpoint.is_none()
-        && scope.is_none()
-    {
+    if endpoint.is_none() && parent_span_id.is_none() && consumer_endpoint.is_none() {
         return None;
     }
     Some(crate::daemon::SourceEndpointUpdate {

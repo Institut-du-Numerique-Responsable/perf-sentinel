@@ -1066,6 +1066,33 @@ fn source_context_keeps_internal_edges_and_unspecified_routes() {
     assert_eq!(internal.parent_span_id, Some(bytes_to_hex(&[10; 8])));
 }
 
+#[cfg(feature = "daemon")]
+#[test]
+fn source_context_drops_a_scope_named_with_control_characters() {
+    // The window appends a retained scope to events after
+    // `sanitize_span_event` has run on them.
+    let child = |id: u8| Span {
+        trace_id: vec![1; 16],
+        span_id: vec![id; 8],
+        parent_span_id: vec![10; 8],
+        ..Default::default()
+    };
+    let request = scoped_request(
+        "svc",
+        vec![
+            ("io.opentelemetry.jdbc", vec![child(1)]),
+            ("evil\u{1b}[31m", vec![child(2)]),
+        ],
+    );
+
+    let scopes: Vec<_> = source_endpoint_updates(&request)
+        .into_iter()
+        .map(|update| update.scope)
+        .collect();
+
+    assert_eq!(scopes, vec![Some(Arc::from("io.opentelemetry.jdbc")), None]);
+}
+
 #[test]
 fn span_index_keeps_same_span_ids_separate_between_traces() {
     let route = |trace: u8, endpoint: &str| Span {

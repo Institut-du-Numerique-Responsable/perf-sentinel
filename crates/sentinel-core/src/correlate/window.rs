@@ -58,6 +58,8 @@ struct AncestryEntry {
 
 type SourceEndpointGroups = HashMap<Arc<str>, HashMap<String, String>>;
 type SourceEndpointParentGroups = HashMap<Arc<str>, HashMap<String, Option<String>>>;
+/// Instrumentation scope by service and span id.
+type SpanScopeGroups = HashMap<Arc<str>, HashMap<String, Arc<str>>>;
 
 /// One trace's retained endpoint context, borrowed for a walk. Named fields,
 /// so the two same-typed maps cannot swap places at a call site.
@@ -201,6 +203,29 @@ impl TraceWindow {
         service_consumer_endpoints: &HashMap<Arc<str>, HashMap<String, String>>,
         now_ms: u64,
     ) -> Option<(String, Vec<NormalizedEvent>)> {
+        self.retain_source_context(
+            trace_id,
+            service_root_endpoints,
+            service_root_parents,
+            service_consumer_endpoints,
+            &HashMap::new(),
+            now_ms,
+        )
+    }
+
+    /// [`Self::retain_source_endpoint_context_groups`] with the instrumentation
+    /// scope of the spans that carry a parent link. A finished trace gives
+    /// each event the scopes of ancestors exported in a later request (a
+    /// framework root ends after its children).
+    pub(crate) fn retain_source_context(
+        &mut self,
+        trace_id: &str,
+        service_root_endpoints: &HashMap<Arc<str>, HashMap<String, String>>,
+        service_root_parents: &SourceEndpointParentGroups,
+        service_consumer_endpoints: &HashMap<Arc<str>, HashMap<String, String>>,
+        service_span_scopes: &SpanScopeGroups,
+        now_ms: u64,
+    ) -> Option<(String, Vec<NormalizedEvent>)> {
         if service_root_endpoints.is_empty()
             && service_root_parents.is_empty()
             && service_consumer_endpoints.is_empty()
@@ -216,6 +241,7 @@ impl TraceWindow {
                 service_root_endpoints,
                 service_root_parents,
                 service_consumer_endpoints,
+                service_span_scopes,
                 root_cap,
             );
             buf.source_endpoint_generation = source_endpoint_generation;
@@ -233,6 +259,7 @@ impl TraceWindow {
             service_root_endpoints,
             service_root_parents,
             service_consumer_endpoints,
+            service_span_scopes,
             root_cap,
         );
         if buf.source_endpoint_count == 0
@@ -254,32 +281,6 @@ impl TraceWindow {
             self.reconciliation_passes += 1;
         }
         evicted.and_then(finish_trace_buffer)
-    }
-
-    /// Record the instrumentation scope of spans whose ancestry is retained,
-    /// so a finished trace gives each event the scopes of ancestors exported
-    /// in a later request (a framework root ends after its children). Spans
-    /// the ancestry cache does not hold are skipped. Neither refreshes the
-    /// trace TTL nor reorders the cache.
-    pub fn retain_span_scopes(
-        &mut self,
-        trace_id: &str,
-        service_span_scopes: &HashMap<Arc<str>, HashMap<String, Arc<str>>>,
-    ) {
-        let Some(ancestry) = self
-            .traces
-            .peek_mut(trace_id)
-            .and_then(|buffer| buffer.resolved_ancestry.as_mut())
-        else {
-            return;
-        };
-        for (service, span_scopes) in service_span_scopes {
-            for (span_id, scope) in span_scopes {
-                if let Some(entry) = ancestry.peek_mut(&(Arc::clone(service), span_id.clone())) {
-                    entry.scope = Some(Arc::clone(scope));
-                }
-            }
-        }
     }
 
     /// Fill unresolved source endpoints below retained entry spans in one trace.
@@ -306,6 +307,7 @@ impl TraceWindow {
         merge_source_endpoint_groups(
             buf,
             service_root_endpoints,
+            &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
             root_cap,
@@ -475,9 +477,10 @@ fn merge_source_endpoint_groups(
     incoming: &HashMap<Arc<str>, HashMap<String, String>>,
     incoming_parents: &SourceEndpointParentGroups,
     incoming_consumers: &SourceEndpointGroups,
+    incoming_scopes: &SpanScopeGroups,
     root_cap: usize,
 ) {
-    index_incoming_ancestry(buffer, incoming_parents);
+    index_incoming_ancestry(buffer, incoming_parents, incoming_scopes);
     merge_incoming_roots(buffer, incoming, incoming_parents, root_cap);
     merge_incoming_consumers(buffer, incoming_consumers, incoming_parents, root_cap);
 }
@@ -514,13 +517,17 @@ fn merge_incoming_consumers(
     }
 }
 
-/// Record the batch's parent links in the ancestry cache, refreshing an
-/// entry already there rather than evicting it.
+/// Record the batch's parent links and span scopes in the ancestry cache,
+/// refreshing an entry already there rather than evicting it.
 fn index_incoming_ancestry(
     buffer: &mut TraceBuffer,
     incoming_parents: &SourceEndpointParentGroups,
+    incoming_scopes: &SpanScopeGroups,
 ) {
     for (service, span_id, parent_span_id) in by_service_and_span(incoming_parents) {
+        let scope = incoming_scopes
+            .get(service)
+            .and_then(|span_scopes| span_scopes.get(span_id));
         let key = (Arc::clone(service), span_id.clone());
         if let Some(entry) = buffer
             .resolved_ancestry
@@ -528,6 +535,9 @@ fn index_incoming_ancestry(
             .and_then(|ancestry| ancestry.get_mut(&key))
         {
             entry.parent_span_id.clone_from(parent_span_id);
+            if scope.is_some() {
+                entry.scope = scope.cloned();
+            }
         } else {
             cache_ancestry_entry(
                 &mut buffer.resolved_ancestry,
@@ -536,7 +546,7 @@ fn index_incoming_ancestry(
                 AncestryEntry {
                     parent_span_id: parent_span_id.clone(),
                     resolution: None,
-                    scope: None,
+                    scope: scope.cloned(),
                 },
             );
         }
@@ -1063,6 +1073,9 @@ fn late_ancestry(
 /// first. A SQL ancestor event with the event's own statement is the outer
 /// layer of the same query (rule 1 of the conversion stitch): it is dropped
 /// and the innermost event, which now carries every layer's scope, stays.
+/// That event also takes the outer layer's duration when it is the only one
+/// left below it: the outer span timed the whole query, and the inner event
+/// can be a ~0 ms prepare span whose execute half converted without it.
 fn settle_late_ancestors(
     events: &mut Vec<NormalizedEvent>,
     ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
@@ -1085,13 +1098,31 @@ fn settle_late_ancestors(
         .collect();
     drop(sql_events);
     let mut dropped = vec![false; events.len()];
-    for (event, late) in events.iter_mut().zip(found) {
-        let scopes = &mut event.event.instrumentation_scopes;
+    for &outer in found.iter().flat_map(|late| &late.duplicate_ancestors) {
+        dropped[outer] = true;
+    }
+    // Events that stay below each dropped layer. Two queries under one span
+    // must not both take its duration, so only a sole heir does.
+    let mut heirs = vec![0_usize; events.len()];
+    for (index, late) in found.iter().enumerate() {
+        if !dropped[index] {
+            for &outer in &late.duplicate_ancestors {
+                heirs[outer] += 1;
+            }
+        }
+    }
+    for (index, late) in found.into_iter().enumerate() {
+        let whole_query = late
+            .duplicate_ancestors
+            .iter()
+            .filter(|&&outer| heirs[outer] == 1)
+            .map(|&outer| events[outer].event.duration_us)
+            .max();
+        let event = &mut events[index].event;
+        event.duration_us = event.duration_us.max(whole_query.unwrap_or(0));
+        let scopes = &mut event.instrumentation_scopes;
         let room = crate::event::MAX_INSTRUMENTATION_SCOPES.saturating_sub(scopes.len());
         scopes.extend(late.scopes.into_iter().take(room));
-        for outer in late.duplicate_ancestors {
-            dropped[outer] = true;
-        }
     }
     let mut kept = dropped.iter().map(|&dropped| !dropped);
     events.retain(|_| kept.next().unwrap_or(true));
@@ -1150,11 +1181,24 @@ fn collapse_split_twins(events: &mut Vec<NormalizedEvent>) {
 }
 
 /// Mark every event of one `(service, parent, statement)` group that is the
-/// shorter twin of another. Events naming two SQL engines are two queries.
+/// shorter twin of another. Events naming two SQL engines are two queries, and
+/// so are events that do not overlap in time: conversion already kept those
+/// apart (an ORM query, then the same statement sent through the bare
+/// driver).
 fn mark_split_twins(events: &[NormalizedEvent], mut group: Vec<usize>, dropped: &mut [bool]) {
     let scope = |index: usize| twin_candidate_scope(&events[index]).unwrap_or("");
     let start = |index: usize| {
         crate::time::parse_iso8601_utc_to_ms(&events[index].event.timestamp).unwrap_or(0)
+    };
+    // Starts are read at millisecond precision, so two spans of one query
+    // can look up to 1 ms apart.
+    let overlap = |a: usize, b: usize| {
+        let span = |index: usize| {
+            let from = start(index).saturating_mul(1000);
+            (from, from.saturating_add(events[index].event.duration_us))
+        };
+        let (a, b) = (span(a), span(b));
+        a.0 <= b.1.saturating_add(1000) && b.0 <= a.1.saturating_add(1000)
     };
     group.sort_by_cached_key(|&index| (scope(index), start(index), index));
     let lanes: Vec<Vec<(u64, usize)>> = group
@@ -1179,7 +1223,7 @@ fn mark_split_twins(events: &[NormalizedEvent], mut group: Vec<usize>, dropped: 
             .max_by_key(|&index| (events[index].event.duration_us, std::cmp::Reverse(index)));
         if let Some(longest) = longest.filter(|_| !two_engines) {
             for &twin in twins.iter().filter(|&&twin| twin != longest) {
-                dropped[twin] = true;
+                dropped[twin] = overlap(twin, longest);
             }
         }
     }

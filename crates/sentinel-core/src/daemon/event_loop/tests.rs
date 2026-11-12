@@ -4294,4 +4294,12 @@ async fn symfony_trace_split_over_export_requests_keeps_one_event_per_query() {
             "the Doctrine event stays, not the span above it"
         );
     }
+    // Five of the six Doctrine events are ~0 ms prepare spans whose execute
+    // half arrived one request later, without a statement. The manual span
+    // above each one timed the query.
+    let slow = events
+        .iter()
+        .filter(|event| event.event.duration_us >= 600_000)
+        .count();
+    assert_eq!(slow, 6, "each pg_sleep query keeps its duration");
 }

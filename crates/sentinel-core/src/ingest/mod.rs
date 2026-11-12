@@ -219,18 +219,32 @@ pub(crate) fn twin_rows(lanes: &[Vec<(u64, usize)>]) -> Vec<Vec<usize>> {
     {
         let mut free = 0;
         for (placed, &(start, id)) in lane.iter().enumerate() {
-            // Anchors the entries still to place need after this one.
-            let reserved = lane.len() - placed - 1;
-            while free + 1 + reserved < anchors.len()
-                && anchors[free + 1].0.abs_diff(start) < anchors[free].0.abs_diff(start)
-            {
-                free += 1;
-            }
-            rows[free].push(id);
-            free += 1;
+            // The entries still to place each need an anchor after this one.
+            let open = &anchors[free..=anchors.len() - (lane.len() - placed)];
+            let row = free + nearest_start(open, start);
+            rows[row].push(id);
+            free = row + 1;
         }
     }
     rows
+}
+
+/// Index of the entry of `sorted` that starts nearest `start`: the earlier
+/// one on a tie, the first one among equal starts. A binary search, so
+/// anchors sharing a start do not hide a nearer one and a crafted request
+/// cannot make the pairing quadratic. `sorted` is not empty.
+fn nearest_start(sorted: &[(u64, usize)], start: u64) -> usize {
+    let after = sorted.partition_point(|&(anchor, _)| anchor < start);
+    let nearest = match (after.checked_sub(1), sorted.get(after)) {
+        (Some(before), Some(&(next, _)))
+            if next.abs_diff(start) < sorted[before].0.abs_diff(start) =>
+        {
+            after
+        }
+        (Some(before), _) => before,
+        (None, _) => after,
+    };
+    sorted.partition_point(|&(anchor, _)| anchor < sorted[nearest].0)
 }
 
 /// Maximum parent hops for any ancestor walk, shared by the OTLP, Jaeger and
@@ -804,6 +818,17 @@ mod tests {
             super::twin_rows(&lanes),
             vec![vec![0], vec![1, 7], vec![2, 8]]
         );
+    }
+
+    #[test]
+    fn twin_rows_looks_past_anchors_that_share_a_start() {
+        // The window reads starts at millisecond precision, so the fast
+        // queries of a loop share one. The late twin belongs to the last one.
+        let lanes = vec![vec![(100, 0), (100, 1), (250, 2)], vec![(250, 9)]];
+        assert_eq!(super::twin_rows(&lanes), vec![vec![0], vec![1], vec![2, 9]]);
+        // Among equal starts the first free anchor takes the entry.
+        let lanes = vec![vec![(100, 0), (100, 1), (250, 2)], vec![(120, 9)]];
+        assert_eq!(super::twin_rows(&lanes), vec![vec![0, 9], vec![1], vec![2]]);
     }
 
     #[test]

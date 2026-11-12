@@ -888,17 +888,16 @@ fn retain_source_endpoint_context(
     source_endpoint_generations: &mut HashMap<String, u64>,
 ) {
     let empty = HashMap::new();
-    if let Some(evicted) = window.retain_source_endpoint_context_groups(
+    let no_scopes = HashMap::new();
+    if let Some(evicted) = window.retain_source_context(
         trace_id,
         context.roots.get(trace_id).unwrap_or(&empty),
         &context.parents[trace_id],
         context.consumers.get(trace_id).unwrap_or(&empty),
+        context.scopes.get(trace_id).unwrap_or(&no_scopes),
         now_ms,
     ) {
         lru_evicted.push(evicted);
-    }
-    if let Some(scopes) = context.scopes.get(trace_id) {
-        window.retain_span_scopes(trace_id, scopes);
     }
     if let Some(generation) = window.source_endpoint_generation(trace_id) {
         source_endpoint_generations.insert(trace_id.to_string(), generation);

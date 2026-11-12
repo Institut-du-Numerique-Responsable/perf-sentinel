@@ -2020,6 +2020,32 @@ fn split_twins_collapse_onto_the_nearest_execution() {
 }
 
 #[test]
+fn events_that_do_not_overlap_stay_two_queries() {
+    // An ORM query, then the same statement sent through the bare driver
+    // 10 ms later. Conversion kept both, so the window must too.
+    let mut events = vec![
+        twin_event(
+            "orm",
+            "sqlalchemy",
+            "postgresql",
+            "2025-07-10T14:32:01.000Z",
+            500,
+        ),
+        twin_event(
+            "raw",
+            "asyncpg",
+            "postgresql",
+            "2025-07-10T14:32:01.010Z",
+            300,
+        ),
+    ];
+
+    collapse_split_twins(&mut events);
+
+    assert_eq!(span_ids(&events), vec!["orm", "raw"]);
+}
+
+#[test]
 fn same_scope_events_and_two_engines_never_collapse() {
     let mut same_scope = vec![
         twin_event("a", "pdo", "postgresql", "2025-07-10T14:32:01.000Z", 500),
@@ -2073,19 +2099,16 @@ fn late_ancestor_gives_its_scope_and_yields_to_the_inner_duplicate() {
         Arc::clone(&service),
         HashMap::from([("root".to_string(), None)]),
     )]);
-    window.retain_source_endpoint_context_groups(
+    window.retain_source_context(
         "trace-1",
         &HashMap::new(),
         &links,
         &HashMap::new(),
-        1_000,
-    );
-    window.retain_span_scopes(
-        "trace-1",
         &HashMap::from([(
             service,
             HashMap::from([("root".to_string(), Arc::from("symfony"))]),
         )]),
+        1_000,
     );
 
     let (_, events) = window.drain_all().pop().expect("one trace");
@@ -2101,4 +2124,38 @@ fn late_ancestor_gives_its_scope_and_yields_to_the_inner_duplicate() {
     };
     assert_eq!(scopes(0), vec!["doctrine", "manual", "symfony"]);
     assert_eq!(scopes(1), vec!["doctrine", "symfony"]);
+}
+
+#[test]
+fn dropped_outer_layer_hands_its_duration_to_a_sole_inner_event() {
+    // `outer` timed the whole query and its only inner event is a ~0 ms
+    // prepare span. Under `shared`, two inner events repeat the statement:
+    // neither may take a duration that covers both.
+    let mut window = TraceWindow::new(WindowConfig::default());
+    let under = |span_id: &str, parent: &str, duration_us: u64| {
+        let ts = "2025-07-10T14:32:01.000Z";
+        let mut event = twin_event(span_id, "doctrine", "sql", ts, duration_us);
+        event.event.parent_span_id = Some(parent.to_string());
+        event
+    };
+    for event in [
+        under("prepare", "outer", 30),
+        under("first", "shared", 40),
+        under("second", "shared", 50),
+        under("outer", "root", 900_000),
+        under("shared", "root", 800_000),
+    ] {
+        window.push(event, 1_000);
+    }
+
+    let (_, events) = window.drain_all().pop().expect("one trace");
+
+    let durations: Vec<_> = events
+        .iter()
+        .map(|event| (event.event.span_id.as_str(), event.event.duration_us))
+        .collect();
+    assert_eq!(
+        durations,
+        vec![("prepare", 900_000), ("first", 40), ("second", 50)]
+    );
 }
