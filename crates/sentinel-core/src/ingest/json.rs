@@ -103,6 +103,58 @@ pub enum InputFormat {
     Zipkin,
 }
 
+type OtlpRequest = opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+
+/// Joins the documents of one OTLP JSON stream before conversion.
+///
+/// A file exporter writes one request per export batch, so the spans of one
+/// trace (its root, the twin spans of one query) spread over several
+/// documents. Blocks with the identical resource are joined, and parents,
+/// scopes and the SQL stitch then resolve as they do inside one request.
+/// Blocks whose resources differ (two pods) stay apart.
+struct OtlpDocuments<'g> {
+    pending: OtlpRequest,
+    /// The blocks of `pending` other documents join.
+    blocks: crate::ingest::otlp::JoinedBlocks,
+    pending_spans: usize,
+    events: Vec<SpanEvent>,
+    stats: SpanConversionStats,
+    grouping_attributes: Option<&'g [std::sync::Arc<str>]>,
+}
+
+impl OtlpDocuments<'_> {
+    fn push(&mut self, request: OtlpRequest) {
+        let spans: usize = request
+            .resource_spans
+            .iter()
+            .flat_map(|block| &block.scope_spans)
+            .map(|scope| scope.spans.len())
+            .sum();
+        // A joined request never outgrows the span budget one document has.
+        if self.pending_spans > 0
+            && self.pending_spans + spans > crate::ingest::otlp::MAX_SPANS_PER_SERVICE
+        {
+            self.flush();
+        }
+        self.pending_spans += spans;
+        for block in request.resource_spans {
+            crate::ingest::otlp::join_resource_block(&mut self.pending, &mut self.blocks, block);
+        }
+    }
+
+    fn flush(&mut self) {
+        let (converted, stats) = crate::ingest::otlp::convert_otlp_request_counted_with_grouping(
+            &self.pending,
+            self.grouping_attributes,
+        );
+        self.events.extend(converted);
+        self.stats.merge(&stats);
+        self.pending = OtlpRequest::default();
+        self.blocks.clear();
+        self.pending_spans = 0;
+    }
+}
+
 /// Ingests span events from JSON input with auto-format detection.
 pub struct JsonIngest {
     max_size: usize,
@@ -202,21 +254,28 @@ impl JsonIngest {
     /// Deserializes each document (a single pretty-printed request or
     /// the Collector file exporter's NDJSON, one request per line)
     /// straight into the typed `ExportTraceServiceRequest`: that keeps
-    /// strict duplicate-key rejection, positioned parse errors, and
-    /// streaming memory. Only a document that trips protojson's
-    /// omitted-`values` case (empty arrayValue/kvlistValue) is
-    /// re-parsed through a normalized Value, so the common case pays
-    /// nothing. `convert_otlp_request_counted` sanitizes each event, same
-    /// code path as the daemon listeners. The Jaeger v3 search hands each
-    /// unwrapped `result` document to this same function.
+    /// strict duplicate-key rejection and positioned parse errors. Only a
+    /// document that trips a protojson shape the derived Deserialize
+    /// rejects (see [`is_recoverable_attribute_shape`]) is re-parsed
+    /// through a normalized Value. Every line of an `OTel` Java SDK 1.67
+    /// dump is one, and a document that needs no repair pays nothing. The
+    /// documents convert together (see [`OtlpDocuments`]), so the parsed
+    /// requests stay in memory up to one span budget at a time, and
+    /// `convert_otlp_request_counted` sanitizes each event, same code path
+    /// as the daemon listeners. The Jaeger v3 search hands its
+    /// unwrapped `result` documents to this same function in one call.
     pub(crate) fn ingest_otlp(
         raw: &[u8],
         grouping_attributes: Option<&[std::sync::Arc<str>]>,
     ) -> Result<(Vec<SpanEvent>, SpanConversionStats), JsonIngestError> {
-        type OtlpRequest =
-            opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-        let mut events = Vec::new();
-        let mut stats = SpanConversionStats::default();
+        let mut documents = OtlpDocuments {
+            pending: OtlpRequest::default(),
+            blocks: std::collections::HashMap::new(),
+            pending_spans: 0,
+            events: Vec::new(),
+            stats: SpanConversionStats::default(),
+            grouping_attributes,
+        };
         let mut parsed_any = false;
         let mut offset = 0;
         while offset < raw.len() {
@@ -232,16 +291,11 @@ impl JsonIngest {
                         return Err(err);
                     }
                     parsed_any = true;
-                    let (converted, request_stats) =
-                        crate::ingest::otlp::convert_otlp_request_counted_with_grouping(
-                            &request,
-                            grouping_attributes,
-                        );
-                    events.extend(converted);
-                    stats.merge(&request_stats);
+                    documents.push(request);
                     offset += stream.byte_offset();
                 }
-                // Empty list (`{"arrayValue":{}}`) and valueless attribute
+                // Resource `entityRefs` without `descriptionKeys` (Java SDK
+                // 1.67), empty list (`{"arrayValue":{}}`) and valueless attribute
                 // (`{"key":"k","value":{}}`, seen from the Java stdout
                 // exporter): normalize_otlp_json repairs both, retry this
                 // document only.
@@ -257,13 +311,7 @@ impl JsonIngest {
                     let request: OtlpRequest =
                         serde_json::from_value(value).map_err(|_| JsonIngestError::Parse(e))?;
                     parsed_any = true;
-                    let (converted, request_stats) =
-                        crate::ingest::otlp::convert_otlp_request_counted_with_grouping(
-                            &request,
-                            grouping_attributes,
-                        );
-                    events.extend(converted);
-                    stats.merge(&request_stats);
+                    documents.push(request);
                     offset += retry.byte_offset();
                 }
                 // A truncated trailing document is routine on a live or
@@ -281,7 +329,8 @@ impl JsonIngest {
                 Some(Err(e)) => return Err(JsonIngestError::Parse(e)),
             }
         }
-        Ok((events, stats))
+        documents.flush();
+        Ok((documents.events, documents.stats))
     }
 
     /// The native arm of [`Self::ingest_with_stats`].
@@ -326,27 +375,33 @@ impl IngestSource for JsonIngest {
     }
 }
 
-/// True for the two serde errors raised by attribute shapes canonical protojson
-/// allows but the derived Deserialize rejects: an empty list (missing field
-/// "values") and a valueless attribute (no known keys found).
+/// True for the serde errors raised by shapes canonical protojson allows but
+/// the derived Deserialize rejects: an omitted empty repeated field (missing
+/// field "values" on an empty list, "descriptionKeys" on a resource entity
+/// ref) and a valueless attribute (no known keys found).
 ///
-/// The first is unambiguous (only ArrayValue/KeyValueList have `values`), the
-/// second is not: any unrecognised flattened oneof takes the retry too. That
-/// costs one reparse on a document that fails either way, and the caller still
-/// gets the strict pass's positioned error.
+/// Any missing field or unrecognised flattened oneof takes the retry, repaired
+/// or not. That costs one reparse on a document that fails either way, and the
+/// caller still gets the strict pass's positioned error.
 fn is_recoverable_attribute_shape(e: &serde_json::Error) -> bool {
     e.classify() == serde_json::error::Category::Data
-        && (e.to_string().contains("missing field `values`")
+        && (e.to_string().contains("missing field `")
             || e.to_string().contains("no known keys found"))
 }
 
-/// Repair the protojson attribute shapes the derived Deserialize rejects: backfill
-/// the omitted `values` on empty `arrayValue`/`kvlistValue`, and drop a `"value": {}`
-/// so `AnyValue` stays `None` rather than matching no oneof variant. Recursion depth
-/// is bounded by the pre-dispatch `MAX_JSON_DEPTH` cap.
+/// Repair the protojson shapes the derived Deserialize rejects: backfill the
+/// omitted `values` on empty `arrayValue`/`kvlistValue`, drop a `"value": {}`
+/// so `AnyValue` stays `None` rather than matching no oneof variant, and drop
+/// a resource's `entityRefs`. The `OTel` Java SDK 1.67 writes them without
+/// their empty `descriptionKeys`, which `EntityRef` requires
+/// (open-telemetry/opentelemetry-rust#3866), and nothing here reads them. Recursion depth is bounded by the pre-dispatch
+/// `MAX_JSON_DEPTH` cap.
 fn normalize_otlp_json(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::Object(resource)) = map.get_mut("resource") {
+                resource.remove("entityRefs");
+            }
             for key in ["arrayValue", "kvlistValue"] {
                 if let Some(serde_json::Value::Object(inner)) = map.get_mut(key)
                     && !inner.contains_key("values")
@@ -866,6 +921,30 @@ mod tests {
     }
 
     #[test]
+    fn otlp_resource_entity_refs_without_description_keys_ingest() {
+        // Resource shape of the OTel Java SDK 1.67 (agent 2.33.1), from a
+        // quarkus-svc Collector file-exporter dump: protojson omits the empty
+        // `descriptionKeys`.
+        let line = otlp_request_json("0af7651916cd43dd8448eb211c80319c", "SELECT 1").replace(
+            r#""resource":{"#,
+            r#""resource":{"entityRefs":[{"schemaUrl":"https://opentelemetry.io/schemas/1.40.0","type":"service.instance","idKeys":["service.instance.id"]},{"schemaUrl":"https://opentelemetry.io/schemas/1.40.0","type":"service","idKeys":["service.name"]}],"#,
+        );
+        assert!(line.contains("entityRefs"));
+        let ingest = JsonIngest::new(1_048_576);
+        let events = ingest.ingest(line.as_bytes()).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].service.as_ref(), "svc");
+
+        // protojson also omits an empty `attributes` list.
+        let bare = otlp_request_json("0af7651916cd43dd8448eb211c80319c", "SELECT 1").replace(
+            r#""resource":{"attributes":[{"key":"service.name","value":{"stringValue":"svc"}}]}"#,
+            r#""resource":{"entityRefs":[{"type":"service","idKeys":["service.name"]}]}"#,
+        );
+        assert!(bare.contains("entityRefs") && !bare.contains("service.name\",\"value"));
+        assert_eq!(ingest.ingest(bare.as_bytes()).unwrap().len(), 1);
+    }
+
+    #[test]
     fn otlp_empty_array_value_mid_ndjson_continues() {
         // The lenient retry must advance past the patched document and keep
         // parsing the rest of the stream, not stop at the first empty list.
@@ -936,6 +1015,100 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].target, "SELECT 1");
         assert_eq!(events[1].target, "SELECT 2");
+    }
+
+    /// One-span OTLP document: a statement-bearing SQL span under a shared
+    /// parent, emitted by `scope` on `host`.
+    fn twin_document(host: &str, scope: &str, span_id: &str, end_ns: &str) -> String {
+        format!(
+            r#"{{"resourceSpans":[{{"resource":{{"attributes":[{{"key":"service.name","value":{{"stringValue":"svc"}}}},{{"key":"host.name","value":{{"stringValue":"{host}"}}}}]}},"scopeSpans":[{{"scope":{{"name":"{scope}"}},"spans":[{{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"{span_id}","parentSpanId":"aaaaaaaaaaaaaaaa","name":"db","kind":3,"startTimeUnixNano":"1720621921000000000","endTimeUnixNano":"{end_ns}","attributes":[{{"key":"db.query.text","value":{{"stringValue":"SELECT 1"}}}},{{"key":"db.system.name","value":{{"stringValue":"postgresql"}}}}]}}]}}]}}]}}"#
+        )
+    }
+
+    #[test]
+    fn otlp_ndjson_joins_documents_of_one_resource() {
+        // An exporter can write the two layers of one query in two export
+        // batches. Joined, the cross-scope twins count once.
+        let json = format!(
+            "{}\n{}\n",
+            twin_document("pod-a", "pdo", "eee19b7ec3c1b174", "1720621921000007000"),
+            twin_document(
+                "pod-a",
+                "laravel",
+                "eee19b7ec3c1b175",
+                "1720621921000300000"
+            ),
+        );
+        let (events, stats) = JsonIngest::new(1_048_576)
+            .ingest_with_stats(json.as_bytes())
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(stats.unwrap().filtered_merged_db_span, 1);
+    }
+
+    #[test]
+    fn otlp_ndjson_keeps_different_resources_apart() {
+        let json = format!(
+            "{}\n{}\n",
+            twin_document("pod-a", "pdo", "eee19b7ec3c1b174", "1720621921000007000"),
+            twin_document(
+                "pod-b",
+                "laravel",
+                "eee19b7ec3c1b175",
+                "1720621921000300000"
+            ),
+        );
+        let events = JsonIngest::new(1_048_576).ingest(json.as_bytes()).unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn otlp_ndjson_keeps_anonymous_resources_apart() {
+        // Two resources with no service name can be two processes, so the
+        // join does not pair their spans.
+        let anonymous = |scope: &str, span_id: &str, end_ns: &str| {
+            twin_document("pod-a", scope, span_id, end_ns).replace(
+                r#"{"key":"service.name","value":{"stringValue":"svc"}},"#,
+                "",
+            )
+        };
+        let json = format!(
+            "{}\n{}\n",
+            anonymous("pdo", "eee19b7ec3c1b174", "1720621921000007000"),
+            anonymous("laravel", "eee19b7ec3c1b175", "1720621921000300000"),
+        );
+        assert!(!json.contains("service.name"));
+        let events = JsonIngest::new(1_048_576).ingest(json.as_bytes()).unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn otlp_documents_convert_before_outgrowing_the_span_budget() {
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+        let request = |spans: usize| OtlpRequest {
+            resource_spans: vec![ResourceSpans {
+                scope_spans: vec![ScopeSpans {
+                    spans: vec![Span::default(); spans],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let mut documents = OtlpDocuments {
+            pending: OtlpRequest::default(),
+            blocks: std::collections::HashMap::new(),
+            pending_spans: 0,
+            events: Vec::new(),
+            stats: SpanConversionStats::default(),
+            grouping_attributes: None,
+        };
+        let budget = crate::ingest::otlp::MAX_SPANS_PER_SERVICE;
+        documents.push(request(budget - 1));
+        documents.push(request(1));
+        assert_eq!(documents.stats.received, 0, "still within one budget");
+        documents.push(request(1));
+        assert_eq!(documents.stats.received, budget as u64);
+        assert_eq!(documents.pending_spans, 1);
     }
 
     #[test]

@@ -329,7 +329,7 @@ curl -sf http://perf-sentinel:4318/metrics
 3. **Network policy.** A Kubernetes `NetworkPolicy` or security group may block cross-namespace traffic. Temporarily disable it or explicitly allow the path from the service to the daemon.
 4. **Service not instrumented.** Verify `OTEL_SDK_DISABLED=false` and that the service is producing spans (most OTel SDKs have internal counters or debug logs).
 5. **OTLP endpoint URL typo.** `OTEL_EXPORTER_OTLP_ENDPOINT` should be `http://<host>:4318`. No `/v1/traces` suffix, the SDK appends it. The Spring Boot property `management.opentelemetry.tracing.export.otlp.endpoint` is the exception: it takes the full URL, `/v1/traces` included.
-6. **Spans arrive but none is analyzable.** `perf_sentinel_otlp_spans_received_total` rising while `events_processed_total` stays flat means the daemon receives spans but every one is filtered out (no `db.statement`, no `http.url`). Check `perf_sentinel_otlp_spans_filtered_total` by `reason`: a dominant `missing_db_statement` points at drivers configured to omit query text (see [LIMITATIONS.md](./LIMITATIONS.md#instrumentation-quality-bounds-findings) and the per-language settings in [INSTRUMENTATION.md](./INSTRUMENTATION.md#required-span-attributes)).
+6. **Spans arrive but none is analyzable.** `perf_sentinel_otlp_spans_received_total` rising while `events_processed_total` stays flat for longer than `trace_ttl_ms` means the daemon receives spans but every one is filtered out (no `db.statement`, no `http.url`). Check `perf_sentinel_otlp_spans_filtered_total` by `reason`: a dominant `missing_db_statement` points at drivers configured to omit query text (see [LIMITATIONS.md](./LIMITATIONS.md#instrumentation-quality-bounds-findings) and the per-language settings in [INSTRUMENTATION.md](./INSTRUMENTATION.md#required-span-attributes)).
 
 **Sanity check.** After a fix, drive one request through an instrumented service and watch:
 
@@ -337,7 +337,7 @@ curl -sf http://perf-sentinel:4318/metrics
 watch -n 1 'curl -s http://perf-sentinel:4318/metrics | grep events_processed_total'
 ```
 
-The counter should tick up within seconds.
+The counter moves when the request's trace leaves the window, `trace_ttl_ms` to 1.5 × `trace_ttl_ms` after its last span (30 to 45 s by default). `perf_sentinel_otlp_spans_received_total` moves within seconds.
 
 ---
 

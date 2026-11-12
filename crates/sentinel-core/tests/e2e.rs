@@ -742,6 +742,132 @@ fn php_doctrine_split_fixture_detects_slow_sql_not_redundant() {
 }
 
 #[test]
+fn php_laravel_pdo_siblings_fixture_counts_each_query_once() {
+    // Two laravel-svc traces captured with auto-laravel 1.10.0 + auto-pdo.
+    // Each query arrives twice, as the `sql SELECT` span of the
+    // `...php.laravel.query` scope and as the pdo
+    // `PDO::prepare`/`PDOStatement::execute` siblings.
+    let mut config = Config::default();
+    config.detection.sanitizer_aware_classification =
+        sentinel_core::detect::sanitizer_aware::SanitizerAwareMode::Strict;
+    let events = load_fixture("otlp_php_laravel_pdo_siblings.ndjson");
+    // 20 OrderItem loads + 10 Payment loads + one count(*), plus the
+    // pdo-only `set search_path` of each trace's connection.
+    assert_eq!(events.len(), 33, "one SQL event per executed query");
+
+    let report = pipeline::analyze(events, &config);
+
+    let found: Vec<_> = report
+        .findings
+        .iter()
+        .map(|f| {
+            (
+                f.finding_type.clone(),
+                f.source_endpoint.as_str(),
+                f.pattern.occurrences,
+                f.suggested_fix.as_ref().map(|s| s.framework.as_str()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                FindingType::NPlusOneSql,
+                "/api/fault/n-plus-one-sql",
+                20,
+                Some("php_laravel_eloquent"),
+            ),
+            (
+                FindingType::RedundantSql,
+                "/api/fault/redundant-sql",
+                10,
+                Some("php_laravel_eloquent"),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn php_laravel_slow_sql_batches_fixture_joins_export_batches() {
+    // One 12 s laravel-svc trace as the Collector file exporter wrote it,
+    // one line per export batch. The kernel span (route, laravel scope) sits
+    // in the last line and each `sql SELECT` one line after its
+    // `PDO::prepare`.
+    let events = load_fixture("otlp_php_laravel_slow_sql_batches.ndjson");
+    assert_eq!(
+        events.len(),
+        7,
+        "six pg_sleep queries and the connection's search_path"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|e| e.source.endpoint == "/api/fault/slow-sql")
+    );
+
+    let report = pipeline::analyze(events, &Config::default());
+
+    let slow: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.finding_type == FindingType::SlowSql)
+        .collect();
+    assert_eq!(slow.len(), 1);
+    assert_eq!(slow[0].pattern.occurrences, 6);
+    assert_eq!(
+        slow[0].suggested_fix.as_ref().map(|f| f.framework.as_str()),
+        Some("php_laravel_eloquent")
+    );
+}
+
+#[test]
+fn python_sqlalchemy_asyncpg_siblings_fixture_counts_each_query_once() {
+    // One fastapi-svc trace: every app query is a `SQLAlchemy` span and an
+    // asyncpg span, siblings under the server span. asyncpg alone records the
+    // `BEGIN;` and `ROLLBACK;` round trips.
+    let events = load_fixture("otlp_python_sqlalchemy_asyncpg_siblings.ndjson");
+    assert_eq!(events.len(), 13, "11 app queries, BEGIN and ROLLBACK");
+
+    let report = pipeline::analyze(events, &Config::default());
+
+    assert_eq!(report.findings.len(), 1);
+    let finding = &report.findings[0];
+    assert_eq!(finding.finding_type, FindingType::RedundantSql);
+    assert_eq!(finding.pattern.occurrences, 10);
+    assert_eq!(
+        finding.suggested_fix.as_ref().map(|f| f.framework.as_str()),
+        Some("python_sqlalchemy"),
+        "the kept twin is the SQLAlchemy span"
+    );
+}
+
+#[test]
+fn ruby_active_record_first_request_fixture_adopts_no_neighbour_statement() {
+    // The first rails-svc request of a kind: schema introspection `pg` spans
+    // sit beside ten attribute-less Active Record `Payment query` spans, nine
+    // of them query-cache hits with no `pg` child. None of those may take a
+    // neighbour's statement.
+    // The one real query is prepared on this request: `PREPARE` and `EXECUTE`
+    // siblings carry its statement, and only the execution counts.
+    let events = load_fixture("otlp_ruby_active_record_first_request.ndjson");
+    assert_eq!(
+        events.len(),
+        3,
+        "two introspection statements and the one executed query"
+    );
+
+    let report = pipeline::analyze(events, &Config::default());
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|f| f.finding_type != FindingType::NPlusOneSql)
+    );
+}
+
+#[test]
 fn full_pipeline_runs_on_new_fixtures() {
     let config = Config::default();
     for fixture in [
@@ -751,6 +877,9 @@ fn full_pipeline_runs_on_new_fixtures() {
         "fanout.json",
         "n_plus_one_sql_java_mutiny_reactive.json",
         "otlp_php_doctrine_split.json",
+        "otlp_php_laravel_pdo_siblings.ndjson",
+        "otlp_python_sqlalchemy_asyncpg_siblings.ndjson",
+        "otlp_ruby_active_record_first_request.ndjson",
     ] {
         let events = load_fixture(fixture);
         let report = pipeline::analyze(events, &config);

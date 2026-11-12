@@ -868,13 +868,14 @@ impl AnalysisServiceMeter {
     }
 }
 
-/// A batch's grouped endpoint context: route roots, parent links and consumer
-/// destinations, each keyed by trace id. Every update writes a parent link,
-/// so `parents` holds every trace id the other two do.
+/// A batch's grouped endpoint context: route roots, parent links, consumer
+/// destinations and span scopes, each keyed by trace id. Every update writes
+/// a parent link, so `parents` holds every trace id the other three do.
 struct BatchSourceContext {
     roots: TraceSourceEndpointGroups<String>,
     parents: TraceSourceEndpointGroups<Option<String>>,
     consumers: TraceSourceEndpointGroups<String>,
+    scopes: TraceSourceEndpointGroups<Arc<str>>,
 }
 
 /// Merge one trace's sampled endpoint context and collect any LRU eviction.
@@ -887,11 +888,13 @@ fn retain_source_endpoint_context(
     source_endpoint_generations: &mut HashMap<String, u64>,
 ) {
     let empty = HashMap::new();
-    if let Some(evicted) = window.retain_source_endpoint_context_groups(
+    let no_scopes = HashMap::new();
+    if let Some(evicted) = window.retain_source_context(
         trace_id,
         context.roots.get(trace_id).unwrap_or(&empty),
         &context.parents[trace_id],
         context.consumers.get(trace_id).unwrap_or(&empty),
+        context.scopes.get(trace_id).unwrap_or(&no_scopes),
         now_ms,
     ) {
         lru_evicted.push(evicted);
@@ -908,6 +911,7 @@ fn group_source_endpoint_updates(
     let mut roots: TraceSourceEndpointGroups<String> = HashMap::new();
     let mut parents: TraceSourceEndpointGroups<Option<String>> = HashMap::new();
     let mut consumers: TraceSourceEndpointGroups<String> = HashMap::new();
+    let mut scopes: TraceSourceEndpointGroups<Arc<str>> = HashMap::new();
     for update in updates
         .into_iter()
         .filter(|update| should_sample(&update.trace_id, sampling_rate))
@@ -928,6 +932,18 @@ fn group_source_endpoint_updates(
                 .or_default()
                 .insert(update.span_id.clone(), endpoint);
         }
+        if let Some(scope) = update.scope {
+            // One trace id clone per trace, not per span.
+            if !scopes.contains_key(&update.trace_id) {
+                scopes.insert(update.trace_id.clone(), HashMap::new());
+            }
+            if let Some(trace_scopes) = scopes.get_mut(&update.trace_id) {
+                trace_scopes
+                    .entry(Arc::clone(&update.service))
+                    .or_default()
+                    .insert(update.span_id.clone(), scope);
+            }
+        }
         // Unconditional, and last, so the common child span moves its
         // strings here instead of cloning them.
         parents
@@ -941,6 +957,7 @@ fn group_source_endpoint_updates(
         roots,
         parents,
         consumers,
+        scopes,
     }
 }
 
@@ -956,9 +973,9 @@ async fn ingest_event_batch(
     let super::IngestBatch {
         events,
         source_endpoint_updates,
+        stitch_records,
     } = batch;
     let events = apply_sampling(events, sampling_rate);
-    let event_count = events.len();
     // Normalize OUTSIDE the lock to minimize lock hold time.
     let normalized: Vec<_> = events.into_iter().map(normalize::normalize).collect();
     let now_ms = current_time_ms();
@@ -973,6 +990,7 @@ async fn ingest_event_batch(
         );
     }
     let source_context = group_source_endpoint_updates(source_endpoint_updates, sampling_rate);
+    let stitch_groups = group_stitch_records(stitch_records, sampling_rate);
     let mut lru_evicted = Vec::new();
     let mut source_endpoint_generations = HashMap::new();
     {
@@ -1013,6 +1031,17 @@ async fn ingest_event_batch(
                 &mut source_endpoint_generations,
             );
         }
+        // Before the events, as the endpoint context: a trace this batch's
+        // pushes evict leaves with its records, and existing traces go first
+        // so a new records-only trace cannot evict them.
+        let (existing, missing): (Vec<_>, Vec<_>) = stitch_groups
+            .into_iter()
+            .partition(|(trace_id, _)| w.contains_trace(trace_id));
+        for (trace_id, records) in existing.into_iter().chain(missing) {
+            if let Some(evicted) = w.retain_stitch_records(&trace_id, records, now_ms) {
+                lru_evicted.push(evicted);
+            }
+        }
         for event in normalized {
             let trace_id = event.event.trace_id.as_str();
             if source_context.parents.contains_key(trace_id) {
@@ -1036,8 +1065,29 @@ async fn ingest_event_batch(
         }
         metrics.active_traces.set(w.active_traces() as f64);
     }
-    metrics.events_processed_total.inc_by(event_count as f64);
     lru_evicted
+}
+
+/// A batch's sampled stitch records per trace, traces in order of first
+/// appearance and records in arrival order.
+fn group_stitch_records(
+    records: Vec<crate::ingest::otlp::StitchRecord>,
+    sampling_rate: f64,
+) -> Vec<(Arc<str>, Vec<crate::ingest::otlp::StitchRecord>)> {
+    let mut slots: HashMap<Arc<str>, usize> = HashMap::new();
+    let mut groups: Vec<(Arc<str>, Vec<crate::ingest::otlp::StitchRecord>)> = Vec::new();
+    for record in records
+        .into_iter()
+        .filter(|record| should_sample(&record.trace_id, sampling_rate))
+    {
+        if let Some(&slot) = slots.get(&record.trace_id) {
+            groups[slot].1.push(record);
+        } else {
+            slots.insert(Arc::clone(&record.trace_id), groups.len());
+            groups.push((Arc::clone(&record.trace_id), vec![record]));
+        }
+    }
+    groups
 }
 
 /// Pop TTL-expired traces under the lock and refresh the active gauge.
@@ -1473,6 +1523,7 @@ fn inc_scored(total: &prometheus::Counter, value: f64, parts: [(&prometheus::Cou
 /// `None` when `findings_stdout` is off.
 fn emit_findings_and_update_metrics(
     trace_count: usize,
+    event_count: usize,
     findings: &[detect::Finding],
     green_summary: &GreenSummary,
     metrics: &MetricsState,
@@ -1480,6 +1531,7 @@ fn emit_findings_and_update_metrics(
     mut findings_out: Option<impl std::io::Write>,
 ) {
     metrics.traces_analyzed_total.inc_by(trace_count as f64);
+    metrics.events_processed_total.inc_by(event_count as f64);
     metrics
         .total_io_ops
         .inc_by(green_summary.total_io_ops as f64);
@@ -1779,6 +1831,8 @@ async fn process_traces(
         .into_iter()
         .map(|(trace_id, spans)| Trace { trace_id, spans })
         .collect();
+    // Counted here, not at ingest: the trace-completion stitch drops twins.
+    let events_processed: usize = trace_structs.iter().map(|t| t.spans.len()).sum();
 
     let watch = ctx.detection_ledger.map(DetectionLedger::watch);
     let (mut findings, passes) =
@@ -1849,6 +1903,7 @@ async fn process_traces(
 
     emit_findings_and_update_metrics(
         trace_count,
+        events_processed,
         &findings,
         &green_summary,
         ctx.metrics,
@@ -1857,7 +1912,6 @@ async fn process_traces(
     );
 
     if let Some(archive_tx) = ctx.archive_tx {
-        let events_processed = trace_structs.iter().map(|t| t.spans.len()).sum();
         // Operator + canonical avoidable tiers, archived side by side.
         // Skipped when green scoring produced no carbon: the tiers would
         // carry avoidable ops with zero energy/carbon, and the extra

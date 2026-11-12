@@ -1739,6 +1739,26 @@ fn detects_php_laravel_eloquent_via_scope() {
 }
 
 #[test]
+fn detects_php_laravel_eloquent_via_split_scopes() {
+    // auto-laravel 1.10.0 splits the scope per hooked component.
+    for scope in [
+        "io.opentelemetry.contrib.php.laravel.http.kernel",
+        "io.opentelemetry.contrib.php.laravel.database.eloquent.model",
+        "io.opentelemetry.contrib.php.laravel.query",
+    ] {
+        let f = finding_with_scopes(
+            FindingType::NPlusOneSql,
+            &["io.opentelemetry.contrib.php.pdo", scope],
+        );
+        assert_eq!(
+            detect_framework(&f),
+            Some(Framework::PhpLaravelEloquent),
+            "{scope}"
+        );
+    }
+}
+
+#[test]
 fn detects_php_generic_via_pdo_scope_prefix() {
     // A PHP OTel scope with no Laravel/Doctrine vendor match routes to
     // the PHP generic.

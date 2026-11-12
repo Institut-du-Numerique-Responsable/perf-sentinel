@@ -1066,6 +1066,49 @@ fn source_context_keeps_internal_edges_and_unspecified_routes() {
     assert_eq!(internal.parent_span_id, Some(bytes_to_hex(&[10; 8])));
 }
 
+#[cfg(feature = "daemon")]
+#[test]
+fn stitch_records_spell_a_long_service_like_its_events() {
+    // The window joins a record to its event on the service name.
+    let service = "s".repeat(crate::event::MAX_SERVICE_LENGTH + 10);
+    let request = make_request(
+        &service,
+        vec![make_sql_span(
+            &[1; 16], &[2; 8], &[3; 8], "SELECT 1", 0, 1_000,
+        )],
+    );
+    let (events, _, records) = convert_otlp_request_stitchable(&request, None);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].service, events[0].service);
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn source_context_drops_a_scope_named_with_control_characters() {
+    // The window appends a retained scope to events after
+    // `sanitize_span_event` has run on them.
+    let child = |id: u8| Span {
+        trace_id: vec![1; 16],
+        span_id: vec![id; 8],
+        parent_span_id: vec![10; 8],
+        ..Default::default()
+    };
+    let request = scoped_request(
+        "svc",
+        vec![
+            ("io.opentelemetry.jdbc", vec![child(1)]),
+            ("evil\u{1b}[31m", vec![child(2)]),
+        ],
+    );
+
+    let scopes: Vec<_> = source_endpoint_updates(&request)
+        .into_iter()
+        .map(|update| update.scope)
+        .collect();
+
+    assert_eq!(scopes, vec![Some(Arc::from("io.opentelemetry.jdbc")), None]);
+}
+
 #[test]
 fn span_index_keeps_same_span_ids_separate_between_traces() {
     let route = |trace: u8, endpoint: &str| Span {
@@ -4313,9 +4356,9 @@ fn orphan_without_donor_stays_missing_db_statement() {
 }
 
 #[test]
-fn laravel_sibling_prepare_and_execute_both_emit_unchanged() {
-    // Single-layer emitters (Laravel/PDO) put the statement on both the
-    // prepare and the execute span, as siblings. Sibling donors are never
+fn same_scope_sibling_prepare_and_execute_both_emit_unchanged() {
+    // A single-layer emitter can put the statement on both the prepare and
+    // the execute span, as siblings. Same-scope sibling donors are never
     // collapsed, so both spans still emit their own event.
     let root = make_parent_span(&[10; 8], "GET /api/users");
     let prepare = make_sql_span(
@@ -4342,6 +4385,344 @@ fn laravel_sibling_prepare_and_execute_both_emit_unchanged() {
     assert_eq!(events[0].duration_us, 500);
     assert_eq!(events[1].duration_us, 600_000);
     assert_eq!(stats.filtered_merged_db_span, 0);
+}
+
+const LARAVEL_SCOPE: &str = "io.opentelemetry.contrib.php.laravel";
+const PDO_SCOPE: &str = "io.opentelemetry.contrib.php.pdo";
+
+/// One Laravel query as auto-laravel >= 1.9.1 + auto-pdo emit it (shape
+/// from a laravel-svc capture): under `parent`, the `QueryWatcher` span
+/// `sql SELECT` (laravel scope, whole-query time, starting just after the
+/// prepare) and the pdo `PDO::prepare` (statement, ~0 ms),
+/// `PDOStatement::execute` (duration, no statement) and `fetchAll`
+/// siblings. Returns `(laravel_spans, pdo_spans)`.
+fn laravel_pdo_query(
+    idx: u8,
+    parent: &[u8],
+    statement: &str,
+    start_ns: u64,
+    execute_ns: u64,
+) -> (Vec<Span>, Vec<Span>) {
+    let sid = |tag: u8| vec![idx, tag, 0, 0, 0, 0, 0, 0];
+    let pdo = |name: &str, extra: Option<&str>, id: u8, start: u64, end: u64| {
+        let mut attrs = vec![
+            make_kv("code.function.name", name),
+            make_kv("db.system.name", "postgresql"),
+        ];
+        if let Some(text) = extra {
+            attrs.push(make_kv("db.query.text", text));
+        }
+        let mut span = stitch_span(&sid(id), parent, attrs, start, end);
+        span.name = name.to_string();
+        span
+    };
+    let prepare = pdo(
+        "PDO::prepare",
+        Some(statement),
+        2,
+        start_ns,
+        start_ns + 7_000,
+    );
+    let execute = pdo(
+        "PDOStatement::execute",
+        None,
+        3,
+        start_ns + 26_000,
+        start_ns + 26_000 + execute_ns,
+    );
+    let fetch_start = start_ns + 30_000 + execute_ns;
+    let fetch = pdo(
+        "PDOStatement::fetchAll",
+        None,
+        4,
+        fetch_start,
+        fetch_start + 9_000,
+    );
+    let mut watcher = stitch_span(
+        &sid(1),
+        parent,
+        vec![
+            make_kv("db.system.name", "postgresql"),
+            make_kv("db.operation.name", "SELECT"),
+            make_kv("db.query.text", statement),
+        ],
+        start_ns + 1_200,
+        fetch_start + 140_000,
+    );
+    watcher.name = "sql SELECT".to_string();
+    (vec![watcher], vec![prepare, execute, fetch])
+}
+
+#[test]
+fn laravel_watcher_and_pdo_twins_count_one_query() {
+    let statement = r#"select * from "payments" where "customer_id" = ?"#;
+    let kernel = make_parent_span(&[10; 8], "POST /api/fault/redundant-sql");
+    // `App\Models\Payment::get`, statement-less since auto-laravel 1.9.1.
+    let mut get_models = stitch_span(
+        &[11; 8],
+        &[10; 8],
+        vec![make_kv(
+            "code.function.name",
+            "Illuminate\\Database\\Eloquent\\Builder::getModels",
+        )],
+        1_000_000,
+        3_000_000,
+    );
+    get_models.name = "App\\Models\\Payment::get".to_string();
+    let (laravel, pdo) = laravel_pdo_query(1, &[11; 8], statement, 1_000_100, 196_864);
+    let mut laravel_spans = vec![kernel, get_models];
+    laravel_spans.extend(laravel);
+    let req = scoped_request(
+        "laravel-svc",
+        vec![(LARAVEL_SCOPE, laravel_spans), (PDO_SCOPE, pdo)],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1, "one event per executed query");
+    assert_eq!(events[0].target, statement);
+    assert_eq!(events[0].duration_us, 196, "duration from the pdo execute");
+    assert_eq!(events[0].span_id, "0103000000000000");
+    let scopes: Vec<&str> = events[0]
+        .instrumentation_scopes
+        .iter()
+        .map(AsRef::as_ref)
+        .collect();
+    assert_eq!(scopes, vec![PDO_SCOPE, LARAVEL_SCOPE]);
+    assert_eq!(
+        stats.filtered_merged_db_span, 2,
+        "watcher twin and consumed prepare"
+    );
+    assert_eq!(
+        stats.filtered_missing_db_statement, 1,
+        "fetchAll is not an execute or query span"
+    );
+}
+
+#[test]
+fn laravel_raw_query_loop_keeps_one_event_per_execution() {
+    // `DB::select` in a loop: every query's spans are siblings under the
+    // kernel span, with the identical statement each time.
+    let statement = "SELECT pg_sleep(?), orders.id FROM orders ORDER BY id OFFSET ? LIMIT 1";
+    let mut laravel_spans = vec![make_parent_span(&[10; 8], "POST /api/fault/slow-sql")];
+    let mut pdo_spans = Vec::new();
+    for k in 1..=3u8 {
+        let start = u64::from(k) * 1_000_000_000;
+        let (laravel, pdo) =
+            laravel_pdo_query(k, &[10; 8], statement, start, u64::from(k) * 100_000_000);
+        laravel_spans.extend(laravel);
+        pdo_spans.extend(pdo);
+    }
+    let req = scoped_request(
+        "laravel-svc",
+        vec![(LARAVEL_SCOPE, laravel_spans), (PDO_SCOPE, pdo_spans)],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    let durations: Vec<u64> = events.iter().map(|e| e.duration_us).collect();
+    assert_eq!(durations, vec![100_000, 200_000, 300_000]);
+    assert_eq!(stats.filtered_merged_db_span, 6);
+}
+
+#[test]
+fn laravel_watcher_without_pdo_twin_still_emits() {
+    // A pdo-only query (`set search_path` at connect) has no watcher span,
+    // and a watcher whose pdo spans landed in another export batch has no
+    // twin. Neither is collapsed.
+    let mut laravel_spans = vec![make_parent_span(&[10; 8], "GET /api/users")];
+    let (watcher, _) = laravel_pdo_query(1, &[10; 8], "SELECT 1", 1_000_000, 50_000);
+    laravel_spans.extend(watcher);
+    let (_, pdo) = laravel_pdo_query(
+        2,
+        &[10; 8],
+        r#"set search_path to "laravel", "public""#,
+        5_000_000,
+        170_000,
+    );
+    let req = scoped_request(
+        "laravel-svc",
+        vec![(LARAVEL_SCOPE, laravel_spans), (PDO_SCOPE, pdo)],
+    );
+
+    let (events, _) = convert_otlp_request_counted(&req);
+
+    let targets: Vec<&str> = events.iter().map(|e| e.target.as_str()).collect();
+    assert_eq!(
+        targets,
+        vec!["SELECT 1", r#"set search_path to "laravel", "public""#]
+    );
+}
+
+#[test]
+fn laravel_twins_without_execute_keep_the_watcher_duration() {
+    // The pdo execute left in another export batch: the event must not fall
+    // on the ~0 ms prepare.
+    let mut laravel_spans = vec![make_parent_span(&[10; 8], "GET /api/users")];
+    let (watcher, mut pdo) = laravel_pdo_query(1, &[10; 8], "SELECT 1", 1_000_000, 600_000_000);
+    laravel_spans.extend(watcher);
+    pdo.truncate(1);
+    let req = scoped_request(
+        "laravel-svc",
+        vec![(LARAVEL_SCOPE, laravel_spans), (PDO_SCOPE, pdo)],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].span_id, "0101000000000000", "the watcher span");
+    assert!(events[0].duration_us > 600_000);
+    assert_eq!(stats.filtered_merged_db_span, 1);
+}
+
+/// Statement-bearing sibling under `[10; 8]` for the twin-row tests.
+fn twin_span(id: u8, db_system: &str, start_ns: u64, end_ns: u64) -> Span {
+    stitch_span(
+        &[id; 8],
+        &[10; 8],
+        vec![
+            make_kv("db.statement", "SELECT * FROM users WHERE id = ?"),
+            make_kv("db.system", db_system),
+        ],
+        start_ns,
+        end_ns,
+    )
+}
+
+#[test]
+fn twin_row_keeps_the_longest_of_three_scopes() {
+    let req = scoped_request(
+        "svc",
+        vec![
+            ("http", vec![make_parent_span(&[10; 8], "GET /api/users")]),
+            ("orm", vec![twin_span(1, "postgresql", 1_000, 900_000)]),
+            ("listener", vec![twin_span(2, "postgresql", 2_000, 800_000)]),
+            ("driver", vec![twin_span(3, "postgresql", 3_000, 700_000)]),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].span_id, "0101010101010101", "the wrapping span");
+    assert_eq!(stats.filtered_merged_db_span, 2);
+}
+
+#[test]
+fn siblings_on_two_engines_are_two_queries() {
+    // A shadow read sends the same statement to two databases.
+    let req = scoped_request(
+        "svc",
+        vec![
+            ("http", vec![make_parent_span(&[10; 8], "GET /api/users")]),
+            ("pymysql", vec![twin_span(1, "mysql", 1_000, 900_000)]),
+            (
+                "psycopg2",
+                vec![twin_span(2, "postgresql", 1_000_000, 1_800_000)],
+            ),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(stats.filtered_merged_db_span, 0);
+}
+
+#[test]
+fn statement_less_span_ignores_a_donor_of_another_scope() {
+    // Active Record `X query` spans carry no attribute. A `pg` span beside
+    // them (schema introspection) is not the other half of a split query.
+    let mut ar_query = stitch_span(&[20; 8], &[10; 8], vec![], 2_000_000, 2_500_000);
+    ar_query.name = "Payment query".to_string();
+    let introspection = twin_span(21, "postgresql", 1_000_000, 1_400_000);
+    let req = scoped_request(
+        "rails-svc",
+        vec![
+            ("rack", vec![make_parent_span(&[10; 8], "GET /api/users")]),
+            (
+                "OpenTelemetry::Instrumentation::ActiveRecord",
+                vec![ar_query],
+            ),
+            ("OpenTelemetry::Instrumentation::PG", vec![introspection]),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].span_id, "1515151515151515", "the pg span");
+    assert_eq!(stats.filtered_merged_db_span, 0);
+}
+
+/// Statement-bearing `pg` span under `[10; 8]` naming its operation, as the
+/// Ruby `pg` instrumentation emits `PREPARE lab` and `EXECUTE lab`.
+fn pg_operation_span(id: u8, operation: &str, start_ns: u64, end_ns: u64) -> Span {
+    let mut span = twin_span(id, "postgresql", start_ns, end_ns);
+    span.name = format!("{operation} lab");
+    span.attributes.push(make_kv("db.operation", operation));
+    span
+}
+
+#[test]
+fn declared_prepare_and_its_execute_sibling_count_once() {
+    // First use of a prepared statement on a connection, then a reuse.
+    let req = make_request(
+        "rails-svc",
+        vec![
+            make_parent_span(&[10; 8], "GET /api/users"),
+            pg_operation_span(1, "PREPARE", 1_000_000, 1_600_000),
+            pg_operation_span(2, "EXECUTE", 3_000_000, 3_800_000),
+            pg_operation_span(3, "EXECUTE", 5_000_000, 5_200_000),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    let durations: Vec<u64> = events.iter().map(|e| e.duration_us).collect();
+    assert_eq!(durations, vec![800, 200], "the two executions");
+    assert_eq!(stats.filtered_merged_db_span, 1);
+}
+
+#[test]
+fn declared_prepare_without_an_execute_donor_still_emits() {
+    let req = make_request(
+        "rails-svc",
+        vec![
+            make_parent_span(&[10; 8], "GET /api/users"),
+            pg_operation_span(1, "PREPARE", 1_000_000, 1_600_000),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(stats.filtered_merged_db_span, 0);
+}
+
+#[test]
+fn declared_prepare_still_gives_its_statement_to_a_statement_less_execute() {
+    let execute = stitch_span(
+        &[2; 8],
+        &[10; 8],
+        vec![make_kv("db.system", "postgresql")],
+        3_000_000,
+        3_800_000,
+    );
+    let req = make_request(
+        "svc",
+        vec![
+            make_parent_span(&[10; 8], "GET /api/users"),
+            pg_operation_span(1, "PREPARE", 1_000_000, 1_600_000),
+            execute,
+        ],
+    );
+
+    let (events, _) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].duration_us, 800, "the execute span");
+    assert_eq!(events[0].target, "SELECT * FROM users WHERE id = ?");
 }
 
 #[test]
@@ -5195,4 +5576,127 @@ fn source_context_retains_consumer_entry_points() {
         consumer.consumer_endpoint.as_deref(),
         Some("rabbitmq crm.dossiers")
     );
+}
+
+#[test]
+fn join_resource_blocks_merges_one_resource_and_keeps_anonymous_apart() {
+    let block = |service: Option<&str>, span_id: u8| {
+        let mut request = match service {
+            Some(service) => make_request(service, vec![]),
+            None => make_request("x", vec![]),
+        };
+        let mut block = request.resource_spans.remove(0);
+        if service.is_none() {
+            block.resource = None;
+        }
+        block.scope_spans[0].spans = vec![make_sql_span(
+            &[1; 16],
+            &[span_id; 8],
+            &[9; 8],
+            "SELECT 1",
+            0,
+            1_000,
+        )];
+        block
+    };
+    let mut request = ExportTraceServiceRequest {
+        resource_spans: vec![
+            block(Some("a"), 1),
+            block(None, 2),
+            block(Some("b"), 3),
+            block(Some("a"), 4),
+            block(None, 5),
+        ],
+    };
+
+    join_resource_blocks(&mut request);
+
+    let shape: Vec<(String, usize)> = request
+        .resource_spans
+        .iter()
+        .map(|block| {
+            let spans = block.scope_spans.iter().map(|s| s.spans.len()).sum();
+            (resource_service_name(block).to_string(), spans)
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            ("a".to_string(), 2),
+            ("unknown".to_string(), 1),
+            ("b".to_string(), 1),
+            ("unknown".to_string(), 1),
+        ]
+    );
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn an_attribute_less_execute_that_adopted_is_recorded() {
+    // Its donor is consumed, and the daemon's second pass must see who took it.
+    let mut execute = stitch_span(&[2; 8], &[10; 8], vec![], 3_000_000, 3_800_000);
+    execute.name = "X execute".to_string();
+    let prepare = stitch_span(
+        &[1; 8],
+        &[10; 8],
+        vec![make_kv("db.query.text", "SELECT 1")],
+        1_000_000,
+        1_100_000,
+    );
+    let request = scoped_request(
+        "svc",
+        vec![
+            ("http", vec![make_parent_span(&[10; 8], "GET /x")]),
+            ("orm", vec![prepare, execute]),
+        ],
+    );
+
+    let (events, _, records) = convert_otlp_request_stitchable(&request, None);
+
+    assert_eq!(events.len(), 1, "the execute adopted the prepare");
+    let roles: Vec<bool> = records
+        .iter()
+        .map(|record| matches!(record.role, StitchRole::Orphan { .. }))
+        .collect();
+    assert_eq!(roles, vec![false, true], "donor and adopter both recorded");
+}
+
+#[test]
+fn join_resource_blocks_stops_at_the_span_budget() {
+    // Joined past the budget, the last spans would lose the classification
+    // and scopes a block of their own gives them.
+    let block = |spans: usize| {
+        let mut request = make_request("a", vec![]);
+        request.resource_spans[0].scope_spans[0].spans = vec![Span::default(); spans];
+        request.resource_spans.remove(0)
+    };
+    let mut request = ExportTraceServiceRequest {
+        resource_spans: vec![block(MAX_SPANS_PER_SERVICE - 1), block(2), block(3)],
+    };
+
+    join_resource_blocks(&mut request);
+
+    let sizes: Vec<usize> = request
+        .resource_spans
+        .iter()
+        .map(|block| block.scope_spans.iter().map(|s| s.spans.len()).sum())
+        .collect();
+    assert_eq!(sizes, vec![MAX_SPANS_PER_SERVICE - 1, 5]);
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn an_anonymous_block_keeps_no_stitch_record() {
+    // Two anonymous blocks can be two processes: the daemon never stitches
+    // them together, so it keeps none of their spans.
+    let prepare = make_sql_span(&[1; 16], &[1; 8], &[9; 8], "SELECT 1", 0, 1_000);
+    let mut request = make_request("svc", vec![prepare]);
+    let (_, _, named) = convert_otlp_request_stitchable(&request, None);
+    assert_eq!(named.len(), 1);
+
+    request.resource_spans[0].resource = None;
+    let (events, _, anonymous) = convert_otlp_request_stitchable(&request, None);
+
+    assert_eq!(events.len(), 1);
+    assert!(anonymous.is_empty());
 }

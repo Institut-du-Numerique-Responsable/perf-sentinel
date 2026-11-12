@@ -1198,7 +1198,7 @@
     },
     {
       "title": "Events processed rate",
-      "description": "Spans accepted into the analysis pipeline per second, from `perf_sentinel_events_processed_total`, after non-I/O spans have been filtered out.\n\nCompare with the OTLP intake panel: a large gap is normal, most spans in a trace are not I/O. A drop to zero while intake continues means the pipeline stopped consuming.",
+      "description": "I/O events of analyzed traces per second, from `perf_sentinel_events_processed_total`, after non-I/O spans have been filtered out. A trace is counted when it leaves the window, 30 to 45 s after its last span by default.\n\nCompare with the OTLP intake panel: a large gap is normal, most spans in a trace are not I/O, and this curve follows intake with that delay. A drop to zero while intake continues past that delay means the pipeline stopped consuming.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,

@@ -204,7 +204,8 @@ pub struct MetricsState {
     pub hub_export_correlations_dropped_total: IntCounter,
     /// Total traces analyzed since daemon start.
     pub traces_analyzed_total: Counter,
-    /// Total events processed since daemon start.
+    /// Total events of analyzed traces since start. The daemon counts them
+    /// when a trace leaves the window.
     pub events_processed_total: Counter,
     /// Currently active traces in the sliding window.
     pub active_traces: Gauge,

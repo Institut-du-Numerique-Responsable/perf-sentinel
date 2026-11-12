@@ -698,6 +698,13 @@ mod tests {
         assert!(has_orm_scope(&[
             "io.opentelemetry.contrib.php.laravel".to_string()
         ]));
+        // auto-laravel 1.10.0 splits the scope per hooked component.
+        assert!(has_orm_scope(&[
+            "io.opentelemetry.contrib.php.laravel.database.eloquent.model".to_string()
+        ]));
+        assert!(has_orm_scope(&[
+            "io.opentelemetry.contrib.php.laravel.query".to_string()
+        ]));
         assert!(has_orm_scope(&[
             "io.opentelemetry.contrib.php.doctrine".to_string()
         ]));

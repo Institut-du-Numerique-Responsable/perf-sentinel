@@ -65,14 +65,19 @@ pub(crate) struct SourceEndpointUpdate {
     pub(crate) endpoint: Option<String>,
     /// CONSUMER destination, read only where no route answers.
     pub(crate) consumer_endpoint: Option<String>,
+    /// Instrumentation scope of the span. An event whose ancestors export in
+    /// a later request takes their scopes from here.
+    pub(crate) scope: Option<Arc<str>>,
 }
 
 /// One bounded daemon ingest message. JSON batches carry only `events`.
 /// OTLP can additionally carry endpoint and parent context from spans that do
-/// not themselves normalize into I/O events.
+/// not themselves normalize into I/O events, and the SQL spans its stitch
+/// looked at.
 pub(crate) struct IngestBatch {
     pub(crate) events: Vec<SpanEvent>,
     pub(crate) source_endpoint_updates: Vec<SourceEndpointUpdate>,
+    pub(crate) stitch_records: Vec<crate::ingest::otlp::StitchRecord>,
 }
 
 impl From<Vec<SpanEvent>> for IngestBatch {
@@ -80,6 +85,7 @@ impl From<Vec<SpanEvent>> for IngestBatch {
         Self {
             events,
             source_endpoint_updates: Vec::new(),
+            stitch_records: Vec::new(),
         }
     }
 }
@@ -1219,14 +1225,14 @@ total_applications_declared = 1
         client.write_all(b"\n").await.unwrap();
         client.shutdown().await.unwrap();
 
-        // Poll the HTTP /metrics endpoint with retries. The daemon
-        // flushes processed traces on every eviction tick (ttl/2 = 100ms),
-        // so we give it up to 1.5s to update the counters. Using a
+        // Poll the HTTP /metrics endpoint with retries. The events counter
+        // moves once the trace is evicted (ttl 200ms, tick every 100ms) and
+        // analyzed, so we give it up to 5s on a loaded runner. Using a
         // minimal hand-rolled HTTP/1.0 GET avoids pulling hyper into the
         // test just for this.
         let metrics_addr = format!("127.0.0.1:{http_port}");
         let mut observed_events = false;
-        for _ in 0..60 {
+        for _ in 0..200 {
             tokio::time::sleep(Duration::from_millis(25)).await;
             let Ok(mut stream) = TcpStream::connect(&metrics_addr).await else {
                 continue;

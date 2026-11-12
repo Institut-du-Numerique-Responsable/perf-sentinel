@@ -568,8 +568,10 @@ async fn context_only_batch_repairs_source_without_io_metric_inflation() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
@@ -616,8 +618,10 @@ async fn consumer_context_batch_names_an_unknown_event() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
                 span_id: "consumer-1".to_string(),
@@ -653,8 +657,10 @@ async fn late_outer_server_replaces_known_nested_route_within_service() {
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
 
     let first = super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: vec![nested_sql.event],
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: "trace-nested".to_string(),
             service: Arc::from("laravel-svc"),
@@ -680,8 +686,10 @@ async fn late_outer_server_replaces_known_nested_route_within_service() {
     );
 
     let outer = super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: "trace-nested".to_string(),
             service: Arc::from("laravel-svc"),
@@ -719,9 +727,11 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
 
     let first = super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: vec![nested_sql.event],
         source_endpoint_updates: vec![
             super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-internal".to_string(),
                 service: Arc::from("laravel-svc"),
@@ -730,6 +740,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
                 endpoint: Some("/api/payments/history".to_string()),
             },
             super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-internal".to_string(),
                 service: Arc::from("laravel-svc"),
@@ -743,11 +754,16 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
         ingest_event_batch(first, 1.0, &window, &metrics, &mut service_meter).await,
         []
     );
-    assert!((metrics.events_processed_total.get() - 1.0).abs() < f64::EPSILON);
+    assert!(
+        metrics.events_processed_total.get().abs() < f64::EPSILON,
+        "counted at completion"
+    );
 
     let outer = super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: "trace-internal".to_string(),
             service: Arc::from("laravel-svc"),
@@ -760,7 +776,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
         ingest_event_batch(outer, 1.0, &window, &metrics, &mut service_meter).await,
         []
     );
-    assert!((metrics.events_processed_total.get() - 1.0).abs() < f64::EPSILON);
+    assert!(metrics.events_processed_total.get().abs() < f64::EPSILON);
 
     let trace = window
         .lock()
@@ -769,6 +785,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
         .expect("trace retained");
     assert_eq!(trace[0].event.source.endpoint, "/api/fault/pool-saturation");
     let finished = window.lock().await.drain_all();
+    assert_eq!(finished[0].1.len(), 1, "context updates add no event");
     assert_eq!(
         finished[0].1[0].event.source.endpoint,
         "/api/fault/pool-saturation"
@@ -788,8 +805,10 @@ async fn late_caller_root_does_not_cross_the_service_boundary() {
     assert_eq!(
         ingest_event_batch(
             super::super::IngestBatch {
+                stitch_records: Vec::new(),
                 events: vec![callee_sql.event],
                 source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                    scope: None,
                     consumer_endpoint: None,
                     trace_id: "trace-cross".to_string(),
                     service: Arc::from("payments-svc"),
@@ -809,8 +828,10 @@ async fn late_caller_root_does_not_cross_the_service_boundary() {
     assert_eq!(
         ingest_event_batch(
             super::super::IngestBatch {
+                stitch_records: Vec::new(),
                 events: Vec::new(),
                 source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                    scope: None,
                     consumer_endpoint: None,
                     trace_id: "trace-cross".to_string(),
                     service: Arc::from("orders-svc"),
@@ -856,8 +877,10 @@ async fn zero_sampling_drops_root_context_without_evicting_a_kept_trace() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "dropped".to_string(),
                 service: Arc::from("orders-svc"),
@@ -900,8 +923,10 @@ async fn partial_sampling_keeps_only_matching_root_context() {
     })));
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
     let root_batch = |trace_id: &str, endpoint: &str| super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: trace_id.to_string(),
             service: Arc::from("orders-svc"),
@@ -954,8 +979,10 @@ async fn same_batch_root_reconciles_new_trace_before_detection() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-new".to_string(),
                 service: Arc::from("orders-svc"),
@@ -987,7 +1014,10 @@ async fn same_batch_root_reconciles_new_trace_before_detection() {
     );
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].source_endpoint, "/api/orders");
-    assert!((metrics.events_processed_total.get() - 3.0).abs() < f64::EPSILON);
+    assert!(
+        metrics.events_processed_total.get().abs() < f64::EPSILON,
+        "counted at completion"
+    );
     assert!((metrics.active_traces.get() - 1.0).abs() < f64::EPSILON);
 }
 
@@ -1004,8 +1034,10 @@ async fn same_batch_root_reconciles_existing_and_new_events() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: vec![event],
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1051,8 +1083,10 @@ async fn same_batch_root_reconciles_new_trace_evicted_during_ingest() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-a".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1098,8 +1132,10 @@ async fn same_batch_reconciliation_stays_within_the_bounded_work_budget() {
     let started = std::time::Instant::now();
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1151,6 +1187,7 @@ async fn oversized_root_group_is_reconciled_once_per_batch() {
         .collect();
     let source_endpoint_updates = (0..=CAP)
         .map(|index| super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: "trace-1".to_string(),
             service: Arc::from("orders-svc"),
@@ -1163,6 +1200,7 @@ async fn oversized_root_group_is_reconciled_once_per_batch() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events,
             source_endpoint_updates,
         },
@@ -1191,8 +1229,10 @@ async fn unresolved_io_only_batches_stay_within_the_bounded_work_budget() {
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
     ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1225,6 +1265,7 @@ async fn unresolved_io_only_batches_stay_within_the_bounded_work_budget() {
         assert_eq!(
             ingest_event_batch(
                 super::super::IngestBatch {
+                    stitch_records: Vec::new(),
                     events,
                     source_endpoint_updates: Vec::new(),
                 },
@@ -1277,8 +1318,10 @@ async fn source_update_precedes_lru_eviction_in_the_same_batch() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: vec![trace_b],
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-a".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1737,7 +1780,7 @@ async fn host_counters_sum_the_in_total_host_figures() {
     poisoned.regions[0].co2_gco2 = f64::NAN;
     let before = scored_counters(&metrics);
     let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
-    emit_findings_and_update_metrics(0, &[], &poisoned, &metrics, &mut meter, None::<Vec<u8>>);
+    emit_findings_and_update_metrics(0, 0, &[], &poisoned, &metrics, &mut meter, None::<Vec<u8>>);
     assert_eq!(scored_counters(&metrics), before);
 }
 
@@ -3452,7 +3495,7 @@ async fn graceful_shutdown_ingests_queued_root_context_before_final_drain() {
     assert_eq!(finding.finding_type, detect::FindingType::SlowMessaging);
     assert_eq!(finding.pattern.occurrences, 3);
     assert_eq!(finding.source_endpoint, "/api/shutdown");
-    assert!(metrics.events_processed_total.get().abs() < f64::EPSILON);
+    assert!((metrics.events_processed_total.get() - 3.0).abs() < f64::EPSILON);
     assert!((metrics.traces_analyzed_total.get() - 1.0).abs() < f64::EPSILON);
 }
 
@@ -3888,7 +3931,15 @@ fn emitted_findings_reach_the_writer_one_ndjson_line_each() {
     let summary = GreenSummary::disabled(0);
 
     let mut out = Vec::new();
-    emit_findings_and_update_metrics(1, &findings, &summary, &metrics, &mut meter, Some(&mut out));
+    emit_findings_and_update_metrics(
+        1,
+        1,
+        &findings,
+        &summary,
+        &metrics,
+        &mut meter,
+        Some(&mut out),
+    );
     let lines: Vec<&str> = std::str::from_utf8(&out).expect("utf-8").lines().collect();
     assert_eq!(lines.len(), 2, "one line per finding");
     for (line, finding) in lines.iter().zip(&findings) {
@@ -3900,6 +3951,7 @@ fn emitted_findings_reach_the_writer_one_ndjson_line_each() {
     let metrics = MetricsState::new();
     let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
     emit_findings_and_update_metrics(
+        1,
         1,
         &findings,
         &summary,
@@ -3966,6 +4018,7 @@ async fn ingest_event_batch_labels_io_ops_with_the_spans_grouping() {
 
     ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: vec![event],
             source_endpoint_updates: vec![],
         },
@@ -4077,6 +4130,7 @@ async fn event_loop_honours_per_grouping_labels_off_on_ingest() {
     let (tx, mut rx) = mpsc::channel::<super::super::IngestBatch>(1);
     let shutdown_fut = async move {
         tx.send(super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: vec![event],
             source_endpoint_updates: vec![],
         })
@@ -4193,4 +4247,584 @@ fn histogram_pair_cap_keys_on_the_folded_service() {
     assert_eq!(metrics.slow_duration_grouping_overflow_total.get(), 0);
     assert_eq!(metrics.slow_duration_service_overflow_total.get(), 2);
     assert_eq!(meter.hist_pairs.len, 1);
+}
+
+type OtlpRequest = opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+
+/// Send export requests through the daemon ingest path, one batch each, and
+/// drain the window.
+async fn replay_requests(
+    requests: &[OtlpRequest],
+) -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
+    let window = test_window();
+    let metrics = MetricsState::new();
+    let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
+    for request in requests {
+        let source_endpoint_updates = crate::ingest::otlp::source_endpoint_updates(request);
+        let (events, _, stitch_records) =
+            crate::ingest::otlp::convert_otlp_request_stitchable(request, None);
+        ingest_event_batch(
+            super::super::IngestBatch {
+                events,
+                source_endpoint_updates,
+                stitch_records,
+            },
+            1.0,
+            &window,
+            &metrics,
+            &mut service_meter,
+        )
+        .await;
+    }
+    window.lock().await.drain_all()
+}
+
+/// Replay an OTLP JSON dump as the listeners receive it, one export request
+/// per line, and drain the window.
+async fn replay_export_batches(fixture: &str) -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
+    replay_requests(&export_requests(fixture)).await
+}
+
+/// An OTLP JSON dump's export requests, one per line.
+fn export_requests(fixture: &str) -> Vec<OtlpRequest> {
+    let path = format!(
+        "{}/../../tests/fixtures/{fixture}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    raw.lines()
+        .map(|line| serde_json::from_str(line).expect("one OTLP request per line"))
+        .collect()
+}
+
+/// A postgres span of trace `[9; 16]` under span `parent`, 1 ms after
+/// `start_ms`.
+fn otlp_sql_span(
+    span_id: u8,
+    parent: u8,
+    name: &str,
+    statement: Option<&str>,
+    start_ms: u64,
+    duration_ms: u64,
+) -> opentelemetry_proto::tonic::trace::v1::Span {
+    use opentelemetry_proto::tonic::trace::v1::{Span, span::SpanKind};
+
+    let start = 1_720_621_921_000_000_000 + start_ms * 1_000_000;
+    let mut attributes = vec![otlp_kv("db.system", "postgresql")];
+    if let Some(statement) = statement {
+        attributes.push(otlp_kv("db.statement", statement));
+    }
+    Span {
+        trace_id: vec![9; 16],
+        span_id: vec![span_id; 8],
+        parent_span_id: vec![parent; 8],
+        name: name.to_string(),
+        kind: SpanKind::Client as i32,
+        start_time_unix_nano: start,
+        end_time_unix_nano: start + duration_ms * 1_000_000,
+        attributes,
+        ..Span::default()
+    }
+}
+
+/// Replay `requests` (span lists of one service) one export request each,
+/// and check the window ends with the events a single request holding every
+/// span converts to. Returns those events as `(span id, duration µs)`.
+async fn assert_split_matches_one_request(
+    requests: Vec<Vec<opentelemetry_proto::tonic::trace::v1::Span>>,
+) -> Vec<(String, u64)> {
+    let whole = otlp_request("orders-svc", requests.concat());
+    let mut expected: Vec<(String, u64, String)> =
+        crate::ingest::otlp::convert_otlp_request_counted(&whole)
+            .0
+            .into_iter()
+            .map(|event| (event.span_id, event.duration_us, event.target))
+            .collect();
+    expected.sort();
+    let split: Vec<OtlpRequest> = requests
+        .into_iter()
+        .map(|spans| otlp_request("orders-svc", spans))
+        .collect();
+    let mut settled: Vec<(String, u64, String)> = replay_requests(&split)
+        .await
+        .into_iter()
+        .flat_map(|(_, events)| events)
+        .map(|event| {
+            let event = event.event;
+            (event.span_id, event.duration_us, event.target)
+        })
+        .collect();
+    settled.sort();
+    assert_eq!(settled, expected, "same events as one request");
+    settled
+        .into_iter()
+        .map(|(span_id, duration_us, _)| (span_id, duration_us))
+        .collect()
+}
+
+const STATEMENT: &str = "SELECT * FROM orders WHERE id = ?";
+
+#[tokio::test]
+async fn execute_span_exported_after_its_prepare_keeps_the_query_duration() {
+    // The prepare span ends at once, the execute span with the query: an
+    // exporter flushes them in two requests.
+    let events = assert_split_matches_one_request(vec![
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0),
+        ],
+        vec![otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600)],
+    ])
+    .await;
+
+    assert_eq!(events, vec![("0303030303030303".to_string(), 600_000)]);
+}
+
+#[tokio::test]
+async fn declared_prepare_and_execute_in_two_requests_count_once() {
+    let operation = |mut span: opentelemetry_proto::tonic::trace::v1::Span, name: &str| {
+        span.attributes.push(otlp_kv("db.operation", name));
+        span
+    };
+    let events = assert_split_matches_one_request(vec![
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            operation(
+                otlp_sql_span(2, 1, "PREPARE lab", Some(STATEMENT), 1, 1),
+                "PREPARE",
+            ),
+        ],
+        vec![operation(
+            otlp_sql_span(3, 1, "EXECUTE lab", Some(STATEMENT), 3, 400),
+            "EXECUTE",
+        )],
+    ])
+    .await;
+
+    assert_eq!(events, vec![("0303030303030303".to_string(), 400_000)]);
+}
+
+#[tokio::test]
+async fn outer_span_exported_after_its_inner_duplicates_wins_as_in_one_request() {
+    // A wrapper span repeats the statement of the two queries it retries.
+    let events = assert_split_matches_one_request(vec![
+        vec![
+            otlp_sql_span(3, 2, "query", Some(STATEMENT), 2, 100),
+            otlp_sql_span(4, 2, "query", Some(STATEMENT), 200, 100),
+        ],
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            otlp_sql_span(2, 1, "retrying query", Some(STATEMENT), 1, 350),
+        ],
+    ])
+    .await;
+
+    assert_eq!(events, vec![("0202020202020202".to_string(), 350_000)]);
+}
+
+#[tokio::test]
+async fn two_blocks_of_one_request_are_stitched_as_one() {
+    // A collector can cut one resource into two `ResourceSpans` blocks of
+    // the same request. Conversion stitches a block at a time.
+    let mut request = otlp_request(
+        "orders-svc",
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0),
+        ],
+    );
+    let second = otlp_request(
+        "orders-svc",
+        vec![otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600)],
+    );
+    request.resource_spans.extend(second.resource_spans);
+
+    let traces = replay_requests(&[request]).await;
+
+    let events = &traces[0].1;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event.span_id, "0303030303030303");
+    assert_eq!(events[0].event.duration_us, 600_000);
+    assert_eq!(events[0].event.target, STATEMENT);
+    assert_eq!(events[0].event.source.endpoint, "/api/orders");
+}
+
+#[tokio::test]
+async fn each_service_of_a_trace_is_stitched_on_its_own() {
+    // Two services of one trace each split a query over two requests. Their
+    // spans never mix: the same span id on both sides stays apart.
+    let both = |spans: fn() -> Vec<opentelemetry_proto::tonic::trace::v1::Span>| {
+        let mut request = otlp_request("orders-svc", spans());
+        request
+            .resource_spans
+            .extend(otlp_request("billing-svc", spans()).resource_spans);
+        request
+    };
+    let traces = replay_requests(&[
+        both(|| vec![otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0)]),
+        both(|| vec![otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600)]),
+    ])
+    .await;
+
+    let mut events: Vec<(&str, &str, u64)> = traces[0]
+        .1
+        .iter()
+        .map(|event| {
+            let event = &event.event;
+            (
+                event.service.as_ref(),
+                event.span_id.as_str(),
+                event.duration_us,
+            )
+        })
+        .collect();
+    events.sort_unstable();
+    assert_eq!(
+        events,
+        vec![
+            ("billing-svc", "0303030303030303", 600_000),
+            ("orders-svc", "0303030303030303", 600_000),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn second_pass_keeps_what_a_request_already_stitched() {
+    // Request 2 stitched its execute span to its own prepare ('SELECT b').
+    // Seen whole, the nearest donor is the 'SET a' span of request 1. The
+    // pass must not drop 'SET a' while the execute keeps 'SELECT b'.
+    let traces = replay_requests(&[
+        otlp_request(
+            "orders-svc",
+            vec![
+                otlp_server_root(1, "/api/orders"),
+                otlp_sql_span(2, 1, "query", Some("SET a"), 5, 1),
+            ],
+        ),
+        otlp_request(
+            "orders-svc",
+            vec![
+                otlp_sql_span(3, 1, "PDO::prepare", Some("SELECT b"), 1, 0),
+                otlp_sql_span(4, 1, "PDOStatement::execute", None, 10, 300),
+            ],
+        ),
+    ])
+    .await;
+
+    let mut targets: Vec<&str> = traces[0]
+        .1
+        .iter()
+        .map(|event| event.event.target.as_str())
+        .collect();
+    targets.sort_unstable();
+    assert_eq!(targets, vec!["SELECT b", "SET a"]);
+}
+
+#[tokio::test]
+async fn second_pass_keeps_a_twin_query_a_stitched_span_passed_over() {
+    use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
+    use opentelemetry_proto::tonic::trace::v1::ScopeSpans;
+    let scoped = |scope: &str, spans| ScopeSpans {
+        scope: Some(InstrumentationScope {
+            name: scope.to_string(),
+            ..InstrumentationScope::default()
+        }),
+        spans,
+        ..ScopeSpans::default()
+    };
+    // Request 1 stitched its execute span to 'SELECT a'. Request 2 holds
+    // the two layers of 'SELECT b'. Seen whole, the execute span's nearest
+    // donor is the shorter 'SELECT b' twin: 'SELECT b' must keep its event.
+    let mut first = otlp_request("orders-svc", vec![otlp_server_root(1, "/api/orders")]);
+    first.resource_spans[0].scope_spans.push(scoped(
+        "pdo",
+        vec![
+            otlp_sql_span(2, 1, "PDO::prepare", Some("SELECT a"), 1, 0),
+            otlp_sql_span(4, 1, "PDOStatement::execute", None, 10, 300),
+        ],
+    ));
+    let mut second = otlp_request("orders-svc", vec![]);
+    second.resource_spans[0].scope_spans = vec![
+        scoped(
+            "pdo",
+            vec![otlp_sql_span(3, 1, "PDO::prepare", Some("SELECT b"), 5, 0)],
+        ),
+        scoped(
+            "laravel",
+            vec![otlp_sql_span(5, 1, "sql SELECT", Some("SELECT b"), 4, 2)],
+        ),
+    ];
+
+    let traces = replay_requests(&[first, second]).await;
+
+    let mut targets: Vec<&str> = traces[0]
+        .1
+        .iter()
+        .map(|event| event.event.target.as_str())
+        .collect();
+    targets.sort_unstable();
+    assert_eq!(targets, vec!["SELECT a", "SELECT b"]);
+}
+
+#[tokio::test]
+async fn inner_execute_stitched_alone_yields_to_its_outer_execute() {
+    // The inner execute span stitched to its sibling prepare before the
+    // outer execute span that wraps both reached the daemon. As in one
+    // request, the outer span carries the query.
+    let events = assert_split_matches_one_request(vec![
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            otlp_sql_span(5, 3, "PDO::prepare", Some(STATEMENT), 2, 0),
+            otlp_sql_span(4, 3, "PDOStatement::execute", None, 3, 400),
+        ],
+        vec![otlp_sql_span(3, 1, "Doctrine::execute", None, 1, 500)],
+    ])
+    .await;
+
+    assert_eq!(events, vec![("0303030303030303".to_string(), 500_000)]);
+}
+
+/// [`otlp_request`] with each span list under its own instrumentation scope.
+fn otlp_scoped_request(
+    service: &str,
+    scoped: Vec<(&str, Vec<opentelemetry_proto::tonic::trace::v1::Span>)>,
+) -> OtlpRequest {
+    use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
+    use opentelemetry_proto::tonic::trace::v1::ScopeSpans;
+
+    let mut request = otlp_request(service, Vec::new());
+    request.resource_spans[0].scope_spans = scoped
+        .into_iter()
+        .map(|(name, spans)| ScopeSpans {
+            scope: Some(InstrumentationScope {
+                name: name.to_string(),
+                ..Default::default()
+            }),
+            spans,
+            ..Default::default()
+        })
+        .collect();
+    request
+}
+
+#[tokio::test]
+async fn a_twin_paired_with_the_wrong_query_comes_back() {
+    // Query 1: prepare P1 and execute E1 in request 1, its Laravel span K1 in
+    // request 2. Query 2: prepare P2 in request 2, its execute never arrives.
+    // Request 2 alone pairs K1 with P2 and drops P2. The whole trace pairs K1
+    // with P1, so P2 must come back, as in one request.
+    let events = assert_split_matches_one_request_scoped(vec![
+        vec![
+            ("http", vec![otlp_server_root(1, "/api/orders")]),
+            (
+                "pdo",
+                vec![
+                    otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0),
+                    otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600),
+                ],
+            ),
+        ],
+        vec![
+            (
+                "laravel",
+                vec![otlp_sql_span(4, 1, "sql SELECT", Some(STATEMENT), 1, 610)],
+            ),
+            (
+                "pdo",
+                vec![otlp_sql_span(5, 1, "PDO::prepare", Some(STATEMENT), 700, 0)],
+            ),
+        ],
+    ])
+    .await;
+
+    assert_eq!(
+        events,
+        vec![
+            ("0303030303030303".to_string(), 600_000),
+            ("0505050505050505".to_string(), 0),
+        ]
+    );
+}
+
+/// [`assert_split_matches_one_request`] for requests whose spans carry
+/// instrumentation scopes.
+async fn assert_split_matches_one_request_scoped(
+    requests: Vec<Vec<(&str, Vec<opentelemetry_proto::tonic::trace::v1::Span>)>>,
+) -> Vec<(String, u64)> {
+    let mut whole = otlp_scoped_request("orders-svc", Vec::new());
+    for scoped in &requests {
+        let request = otlp_scoped_request("orders-svc", scoped.clone());
+        whole.resource_spans[0]
+            .scope_spans
+            .extend(request.resource_spans[0].scope_spans.clone());
+    }
+    let mut expected: Vec<(String, u64, String)> =
+        crate::ingest::otlp::convert_otlp_request_counted(&whole)
+            .0
+            .into_iter()
+            .map(|event| (event.span_id, event.duration_us, event.target))
+            .collect();
+    expected.sort();
+    let split: Vec<OtlpRequest> = requests
+        .into_iter()
+        .map(|scoped| otlp_scoped_request("orders-svc", scoped))
+        .collect();
+    let mut settled: Vec<(String, u64, String)> = replay_requests(&split)
+        .await
+        .into_iter()
+        .flat_map(|(_, events)| events)
+        .map(|event| {
+            let event = event.event;
+            (event.span_id, event.duration_us, event.target)
+        })
+        .collect();
+    settled.sort();
+    assert_eq!(settled, expected, "same events as one request");
+    settled
+        .into_iter()
+        .map(|(span_id, duration_us, _)| (span_id, duration_us))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_statement_less_span_with_no_statement_in_its_trace_is_not_kept() {
+    // An instrumentation that drops statements: nothing can ever give these
+    // spans one, so the window must not hold their pending events.
+    let window = test_window();
+    let metrics = MetricsState::new();
+    let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
+    for start in [1, 2] {
+        let request = otlp_request(
+            "orders-svc",
+            vec![
+                otlp_server_root(1, "/api/orders"),
+                otlp_sql_span(10 + start as u8, 1, "query", None, start, 5),
+            ],
+        );
+        let source_endpoint_updates = crate::ingest::otlp::source_endpoint_updates(&request);
+        let (events, _, stitch_records) =
+            crate::ingest::otlp::convert_otlp_request_stitchable(&request, None);
+        assert_eq!(stitch_records.len(), 1, "conversion records the span");
+        ingest_event_batch(
+            super::super::IngestBatch {
+                events,
+                source_endpoint_updates,
+                stitch_records,
+            },
+            1.0,
+            &window,
+            &metrics,
+            &mut service_meter,
+        )
+        .await;
+    }
+
+    assert_eq!(
+        window
+            .lock()
+            .await
+            .stitch_record_count("0909090909090909090909090909090909"[..32].as_ref()),
+        0
+    );
+}
+
+#[tokio::test]
+async fn trace_from_one_request_is_not_stitched_again() {
+    let events = assert_split_matches_one_request(vec![vec![
+        otlp_server_root(1, "/api/orders"),
+        otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0),
+        otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600),
+        otlp_sql_span(4, 1, "query", Some("SELECT 1"), 700, 5),
+    ]])
+    .await;
+
+    assert_eq!(events.len(), 2);
+}
+
+#[tokio::test]
+async fn laravel_trace_split_over_export_requests_counts_each_query_once() {
+    // A 12 s laravel-svc trace, six export requests. The kernel span (route,
+    // laravel scope) comes last and the `sql SELECT` of the last query one
+    // request after its pdo spans.
+    let traces = replay_export_batches("otlp_php_laravel_slow_sql_batches.ndjson").await;
+
+    assert_eq!(traces.len(), 1);
+    let events = &traces[0].1;
+    assert_eq!(
+        events.len(),
+        7,
+        "six pg_sleep queries and the connection's search_path"
+    );
+    for event in events {
+        assert_eq!(event.event.source.endpoint, "/api/fault/slow-sql");
+        assert!(
+            event
+                .event
+                .instrumentation_scopes
+                .iter()
+                .any(|scope| scope.as_ref() == "io.opentelemetry.contrib.php.laravel"),
+            "the kernel scope reaches {:?}",
+            event.event.instrumentation_scopes
+        );
+    }
+}
+
+#[tokio::test]
+async fn events_processed_counts_the_twins_left_after_the_trace_completion_stitch() {
+    let requests = export_requests("otlp_php_laravel_slow_sql_batches.ndjson");
+    let ingested: usize = requests
+        .iter()
+        .map(|request| {
+            crate::ingest::otlp::convert_otlp_request_stitchable(request, None)
+                .0
+                .len()
+        })
+        .sum();
+    let traces = replay_requests(&requests).await;
+    let metrics = MetricsState::new();
+    let carbon = empty_carbon_ctx();
+    let store = findings_store::FindingsStore::new(100);
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+
+    process_traces(
+        traces,
+        test_ctx(&detect_config, &carbon, &metrics, &store, true, &cell),
+    )
+    .await;
+
+    assert_eq!(ingested, 8, "the requests emit the split twin twice");
+    assert!((metrics.events_processed_total.get() - 7.0).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn symfony_trace_split_over_export_requests_keeps_one_event_per_query() {
+    // A symfony-svc slow-sql trace, six export requests. A manual span of the
+    // controller repeats each statement above the Doctrine spans and ends
+    // with the query, so it exports one request after them.
+    let traces = replay_export_batches("otlp_php_symfony_slow_sql_batches.ndjson").await;
+
+    assert_eq!(traces.len(), 1);
+    let events = &traces[0].1;
+    assert_eq!(events.len(), 7);
+    for event in events {
+        assert_eq!(event.event.source.endpoint, "/api/fault/slow-sql");
+        assert_eq!(
+            event
+                .event
+                .instrumentation_scopes
+                .first()
+                .map(AsRef::as_ref),
+            Some("io.opentelemetry.contrib.php.doctrine"),
+            "the Doctrine event stays, not the span above it"
+        );
+    }
+    // Five of the six Doctrine events are ~0 ms prepare spans whose execute
+    // half arrived one request later, without a statement. The manual span
+    // above each one timed the query.
+    let slow = events
+        .iter()
+        .filter(|event| event.event.duration_us >= 600_000)
+        .count();
+    assert_eq!(slow, 6, "each pg_sleep query keeps its duration");
 }

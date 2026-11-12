@@ -10,6 +10,7 @@ use std::sync::Arc;
 use lru::LruCache;
 
 use crate::ingest::ANCESTOR_WALK_MAX_DEPTH;
+use crate::ingest::otlp::{RecordDecision, StitchRecord, StitchRole, restitch_records};
 use crate::normalize::NormalizedEvent;
 
 /// Configuration for the trace window.
@@ -52,10 +53,14 @@ struct ResolvedEndpoint {
 struct AncestryEntry {
     parent_span_id: Option<String>,
     resolution: Option<ResolvedEndpoint>,
+    /// Instrumentation scope of the span, when its request named one.
+    scope: Option<Arc<str>>,
 }
 
 type SourceEndpointGroups = HashMap<Arc<str>, HashMap<String, String>>;
 type SourceEndpointParentGroups = HashMap<Arc<str>, HashMap<String, Option<String>>>;
+/// Instrumentation scope by service and span id.
+type SpanScopeGroups = HashMap<Arc<str>, HashMap<String, Arc<str>>>;
 
 /// One trace's retained endpoint context, borrowed for a walk. Named fields,
 /// so the two same-typed maps cannot swap places at a call site.
@@ -64,6 +69,24 @@ struct SourceContext<'a> {
     roots: &'a SourceEndpointGroups,
     parents: &'a SourceEndpointParentGroups,
     consumers: &'a SourceEndpointGroups,
+}
+
+/// The SQL spans conversion looked at for one trace, kept to stitch it again
+/// over all its export requests once it leaves the window.
+#[derive(Default)]
+struct StitchState {
+    /// In arrival order, for [`restitch_trace`].
+    records: Vec<StitchRecord>,
+    /// A service's records came from more than one `ResourceSpans` block.
+    /// A trace with none was stitched whole by its requests.
+    split: bool,
+    /// Services that brought records, to tell a later block of one of them.
+    /// At most one per kept record, so bounded by the same cap.
+    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+    services: HashSet<Arc<str>>,
+    /// Records were dropped at the per-trace cap: stitching again would
+    /// decide on a partial view.
+    overflow: bool,
 }
 
 /// Buffer for a single trace.
@@ -83,6 +106,11 @@ struct TraceBuffer {
     resolved_ancestry_cap: usize,
     needs_reconciliation: bool,
     source_endpoint_generation: u64,
+    /// What the whole-trace SQL stitch needs, see [`StitchState`].
+    stitch: StitchState,
+    /// Span scopes arrived in more than one export request: an event may
+    /// lack the scope of an ancestor exported after it.
+    late_scopes: bool,
     /// Absolute timestamp (ms since epoch) of the last event pushed to this trace.
     /// Used for TTL eviction: the LRU cache handles relative access ordering.
     last_seen_ms: u64,
@@ -199,6 +227,29 @@ impl TraceWindow {
         service_consumer_endpoints: &HashMap<Arc<str>, HashMap<String, String>>,
         now_ms: u64,
     ) -> Option<(String, Vec<NormalizedEvent>)> {
+        self.retain_source_context(
+            trace_id,
+            service_root_endpoints,
+            service_root_parents,
+            service_consumer_endpoints,
+            &HashMap::new(),
+            now_ms,
+        )
+    }
+
+    /// [`Self::retain_source_endpoint_context_groups`] with the instrumentation
+    /// scope of the spans that carry a parent link. A finished trace gives
+    /// each event the scopes of ancestors exported in a later request (a
+    /// framework root ends after its children).
+    pub(crate) fn retain_source_context(
+        &mut self,
+        trace_id: &str,
+        service_root_endpoints: &HashMap<Arc<str>, HashMap<String, String>>,
+        service_root_parents: &SourceEndpointParentGroups,
+        service_consumer_endpoints: &HashMap<Arc<str>, HashMap<String, String>>,
+        service_span_scopes: &SpanScopeGroups,
+        now_ms: u64,
+    ) -> Option<(String, Vec<NormalizedEvent>)> {
         if service_root_endpoints.is_empty()
             && service_root_parents.is_empty()
             && service_consumer_endpoints.is_empty()
@@ -209,11 +260,14 @@ impl TraceWindow {
         self.next_source_endpoint_generation = self.next_source_endpoint_generation.wrapping_add(1);
         let source_endpoint_generation = self.next_source_endpoint_generation;
         if let Some(buf) = self.traces.peek_mut(trace_id) {
+            // The trace is already here, so this request is not its first.
+            buf.late_scopes |= !service_span_scopes.is_empty();
             merge_source_endpoint_groups(
                 buf,
                 service_root_endpoints,
                 service_root_parents,
                 service_consumer_endpoints,
+                service_span_scopes,
                 root_cap,
             );
             buf.source_endpoint_generation = source_endpoint_generation;
@@ -231,6 +285,7 @@ impl TraceWindow {
             service_root_endpoints,
             service_root_parents,
             service_consumer_endpoints,
+            service_span_scopes,
             root_cap,
         );
         if buf.source_endpoint_count == 0
@@ -245,6 +300,43 @@ impl TraceWindow {
         buf.source_endpoint_generation = source_endpoint_generation;
         let evicted = self.traces.push(trace_id.to_string(), buf);
         #[cfg(all(test, feature = "daemon"))]
+        if evicted
+            .as_ref()
+            .is_some_and(|(_, buffer)| buffer.needs_reconciliation)
+        {
+            self.reconciliation_passes += 1;
+        }
+        evicted.and_then(finish_trace_buffer)
+    }
+
+    /// Keep the SQL spans one export request's conversion looked at, so the
+    /// trace is stitched again once it leaves the window if other requests
+    /// bring more. Uses `peek_mut` like the endpoint context: it neither
+    /// extends the trace TTL nor promotes it.
+    #[cfg(feature = "daemon")]
+    pub(crate) fn retain_stitch_records(
+        &mut self,
+        trace_id: &str,
+        records: Vec<StitchRecord>,
+        now_ms: u64,
+    ) -> Option<(String, Vec<NormalizedEvent>)> {
+        if records.is_empty() {
+            return None;
+        }
+        let cap = self.config.max_events_per_trace;
+        if let Some(buffer) = self.traces.peek_mut(trace_id) {
+            keep_stitch_records(buffer, records, cap);
+            return None;
+        }
+        let mut buffer = new_trace_buffer(now_ms, cap);
+        keep_stitch_records(&mut buffer, records, cap);
+        // Every record waited alone: an empty trace would only take an LRU
+        // slot, and could evict a live trace to get it.
+        if buffer.stitch.records.is_empty() {
+            return None;
+        }
+        let evicted = self.traces.push(trace_id.to_string(), buffer);
+        #[cfg(test)]
         if evicted
             .as_ref()
             .is_some_and(|(_, buffer)| buffer.needs_reconciliation)
@@ -278,6 +370,7 @@ impl TraceWindow {
         merge_source_endpoint_groups(
             buf,
             service_root_endpoints,
+            &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
             root_cap,
@@ -363,6 +456,13 @@ impl TraceWindow {
     }
 
     #[cfg(all(test, feature = "daemon"))]
+    pub(crate) fn stitch_record_count(&self, trace_id: &str) -> usize {
+        self.traces
+            .peek(trace_id)
+            .map_or(0, |buffer| buffer.stitch.records.len())
+    }
+
+    #[cfg(all(test, feature = "daemon"))]
     pub(crate) fn reconciliation_passes(&self) -> usize {
         self.reconciliation_passes
     }
@@ -373,6 +473,14 @@ impl TraceWindow {
     pub fn peek_clone(&self, trace_id: &str) -> Option<Vec<NormalizedEvent>> {
         self.traces.peek(trace_id).map(|buf| {
             let mut events: Vec<_> = buf.events.iter().cloned().collect();
+            if needs_restitch(buf) {
+                restitch_trace(
+                    trace_id,
+                    &mut events,
+                    &buf.stitch.records,
+                    buf.resolved_ancestry.as_ref(),
+                );
+            }
             reconcile_cloned_events(
                 &mut events,
                 SourceContext {
@@ -384,6 +492,9 @@ impl TraceWindow {
                 buf.resolved_ancestry.as_ref(),
                 buf.resolved_ancestry_cap,
             );
+            if buf.late_scopes {
+                fill_ancestor_scopes(&mut events, buf.resolved_ancestry.as_ref());
+            }
             events
         })
     }
@@ -402,6 +513,8 @@ fn new_trace_buffer(now_ms: u64, per_trace_cap: usize) -> TraceBuffer {
         resolved_ancestry_cap: per_trace_cap,
         needs_reconciliation: false,
         source_endpoint_generation: 0,
+        stitch: StitchState::default(),
+        late_scopes: false,
         last_seen_ms: now_ms,
     }
 }
@@ -445,9 +558,10 @@ fn merge_source_endpoint_groups(
     incoming: &HashMap<Arc<str>, HashMap<String, String>>,
     incoming_parents: &SourceEndpointParentGroups,
     incoming_consumers: &SourceEndpointGroups,
+    incoming_scopes: &SpanScopeGroups,
     root_cap: usize,
 ) {
-    index_incoming_ancestry(buffer, incoming_parents);
+    index_incoming_ancestry(buffer, incoming_parents, incoming_scopes);
     merge_incoming_roots(buffer, incoming, incoming_parents, root_cap);
     merge_incoming_consumers(buffer, incoming_consumers, incoming_parents, root_cap);
 }
@@ -484,13 +598,17 @@ fn merge_incoming_consumers(
     }
 }
 
-/// Record the batch's parent links in the ancestry cache, refreshing an
-/// entry already there rather than evicting it.
+/// Record the batch's parent links and span scopes in the ancestry cache,
+/// refreshing an entry already there rather than evicting it.
 fn index_incoming_ancestry(
     buffer: &mut TraceBuffer,
     incoming_parents: &SourceEndpointParentGroups,
+    incoming_scopes: &SpanScopeGroups,
 ) {
     for (service, span_id, parent_span_id) in by_service_and_span(incoming_parents) {
+        let scope = incoming_scopes
+            .get(service)
+            .and_then(|span_scopes| span_scopes.get(span_id));
         let key = (Arc::clone(service), span_id.clone());
         if let Some(entry) = buffer
             .resolved_ancestry
@@ -498,6 +616,9 @@ fn index_incoming_ancestry(
             .and_then(|ancestry| ancestry.get_mut(&key))
         {
             entry.parent_span_id.clone_from(parent_span_id);
+            if scope.is_some() {
+                entry.scope = scope.cloned();
+            }
         } else {
             cache_ancestry_entry(
                 &mut buffer.resolved_ancestry,
@@ -506,6 +627,7 @@ fn index_incoming_ancestry(
                 AncestryEntry {
                     parent_span_id: parent_span_id.clone(),
                     resolution: None,
+                    scope: scope.cloned(),
                 },
             );
         }
@@ -616,6 +738,7 @@ fn resolve_and_index_event(
         AncestryEntry {
             parent_span_id: event.event.parent_span_id.clone(),
             resolution,
+            scope: event.event.instrumentation_scopes.first().cloned(),
         },
     );
     updated
@@ -950,6 +1073,16 @@ fn peek_parent_endpoint(
 fn finish_trace_buffer(
     (trace_id, mut buffer): (String, TraceBuffer),
 ) -> Option<(String, Vec<NormalizedEvent>)> {
+    if needs_restitch(&buffer) {
+        let mut events = Vec::from(std::mem::take(&mut buffer.events));
+        buffer.needs_reconciliation |= restitch_trace(
+            &trace_id,
+            &mut events,
+            &buffer.stitch.records,
+            buffer.resolved_ancestry.as_ref(),
+        );
+        buffer.events = VecDeque::from(events);
+    }
     if buffer.needs_reconciliation {
         reconcile_trace_buffer(&mut buffer);
     }
@@ -967,7 +1100,232 @@ fn finish_trace_buffer(
             buffer.resolved_ancestry_cap,
         );
     }
+    if buffer.late_scopes {
+        fill_ancestor_scopes(&mut events, buffer.resolved_ancestry.as_ref());
+    }
     (!events.is_empty()).then_some((trace_id, events))
+}
+
+/// Whether a trace's records span several blocks of one service, and the
+/// whole of them and of its ancestry is at hand: a capped view would decide
+/// on missing spans.
+fn needs_restitch(buffer: &TraceBuffer) -> bool {
+    buffer.stitch.split
+        && !buffer.stitch.overflow
+        && buffer
+            .resolved_ancestry
+            .as_ref()
+            .is_some_and(|ancestry| ancestry.len() < buffer.resolved_ancestry_cap)
+}
+
+/// Append one export request's records under the per-trace cap.
+#[cfg(feature = "daemon")]
+fn keep_stitch_records(buffer: &mut TraceBuffer, records: Vec<StitchRecord>, cap: usize) {
+    // The cap first: what follows is linear in the records kept.
+    let room = cap.saturating_sub(buffer.stitch.records.len());
+    buffer.stitch.overflow |= records.len() > room;
+    let mut records: Vec<StitchRecord> = records.into_iter().take(room).collect();
+    // A statement-less span waits for a statement only where its service
+    // has statement-bearing spans in the trace. Elsewhere (an
+    // instrumentation that drops statements) it would hold memory for an
+    // event that never comes.
+    let donor_services: HashSet<Arc<str>> = buffer
+        .stitch
+        .records
+        .iter()
+        .chain(&records)
+        .filter(|record| matches!(record.role, StitchRole::Donor { .. }))
+        .map(|record| Arc::clone(&record.service))
+        .collect();
+    records.retain(|record| {
+        !matches!(
+            record.role,
+            StitchRole::Orphan {
+                pending: Some(_),
+                ..
+            }
+        ) || donor_services.contains(&record.service)
+    });
+    // A service split over two blocks of this request, or seen in an earlier
+    // one.
+    let mut first_block: HashMap<&Arc<str>, usize> = HashMap::new();
+    for record in &records {
+        let block = *first_block.entry(&record.service).or_insert(record.block);
+        buffer.stitch.split |= block != record.block;
+    }
+    for service in first_block.into_keys() {
+        buffer.stitch.split |= !buffer.stitch.services.insert(Arc::clone(service));
+    }
+    buffer.stitch.records.extend(records);
+}
+
+/// Append to each event the scopes of its retained ancestors, nearest first,
+/// as OTLP conversion does within one request. An ancestor exported in a
+/// later request (a framework root ends after its children) is only known
+/// here.
+fn fill_ancestor_scopes(
+    events: &mut [NormalizedEvent],
+    ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
+) {
+    let Some(ancestry) = ancestry else {
+        return;
+    };
+    // Borrowed keys, so a walk allocates nothing per hop.
+    let entries: HashMap<(&str, &str), &AncestryEntry> = ancestry
+        .iter()
+        .map(|((service, span_id), entry)| ((service.as_ref(), span_id.as_str()), entry))
+        .collect();
+    for event in events {
+        let service = Arc::clone(&event.event.service);
+        let mut late: Vec<Arc<str>> = Vec::new();
+        let mut ancestor = event.event.parent_span_id.as_deref();
+        for _ in 0..ANCESTOR_WALK_MAX_DEPTH {
+            let Some(entry) = ancestor.and_then(|span_id| entries.get(&(&*service, span_id)))
+            else {
+                break;
+            };
+            if let Some(scope) = &entry.scope
+                && !event.event.instrumentation_scopes.contains(scope)
+                && !late.contains(scope)
+            {
+                late.push(Arc::clone(scope));
+            }
+            ancestor = entry.parent_span_id.as_deref();
+        }
+        let scopes = &mut event.event.instrumentation_scopes;
+        let room = crate::event::MAX_INSTRUMENTATION_SCOPES.saturating_sub(scopes.len());
+        scopes.extend(late.into_iter().take(room));
+    }
+}
+
+/// Stitch a trace again once its SQL spans arrived over several export
+/// requests, with the conversion's own rules over every span it looked at
+/// ([`restitch_records`]). Each request already merged what it could see, so
+/// this only adds what crossing requests hid: a donor that turns out to be
+/// another span's duplicate loses its event, and a statement-less span whose
+/// statement sat in another request becomes an event. Returns whether
+/// `events` changed.
+fn restitch_trace(
+    trace_id: &str,
+    events: &mut Vec<NormalizedEvent>,
+    records: &[StitchRecord],
+    ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
+) -> bool {
+    // One pass over each collection, whatever the number of services: a
+    // crafted trace can name a service per record.
+    let mut slots: HashMap<&str, usize> = HashMap::new();
+    let mut by_service: Vec<(&str, Vec<&StitchRecord>)> = Vec::new();
+    for record in records {
+        let service = record.service.as_ref();
+        let slot = *slots.entry(service).or_insert_with(|| {
+            by_service.push((service, Vec::new()));
+            by_service.len() - 1
+        });
+        by_service[slot].1.push(record);
+    }
+    let event_of: HashMap<(&str, &str), usize> = events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| {
+            let key = (event.event.service.as_ref(), event.event.span_id.as_str());
+            (key, index)
+        })
+        .collect();
+    let mut links: HashMap<&str, Vec<(&str, Option<&str>)>> = HashMap::new();
+    for ((service, span_id), entry) in ancestry.into_iter().flat_map(LruCache::iter) {
+        links
+            .entry(service.as_ref())
+            .or_default()
+            .push((span_id.as_str(), entry.parent_span_id.as_deref()));
+    }
+
+    let mut dropped = vec![false; events.len()];
+    let mut adopted = Vec::new();
+    for (service, records) in &by_service {
+        let event_indexes: Vec<Option<usize>> = records
+            .iter()
+            .map(|record| {
+                event_of
+                    .get(&(*service, record.span_id_hex().as_str()))
+                    .copied()
+            })
+            .collect();
+        restitch_service(
+            trace_id,
+            events,
+            records,
+            &event_indexes,
+            links.get(service).map_or(&[], Vec::as_slice),
+            &mut dropped,
+            &mut adopted,
+        );
+    }
+    drop(event_of);
+    let changed = !adopted.is_empty() || dropped.contains(&true);
+    let mut kept = dropped.iter().map(|&dropped| !dropped);
+    events.retain(|_| kept.next().unwrap_or(true));
+    events.extend(adopted);
+    changed
+}
+
+/// [`restitch_trace`] for the records of one service: mark the events to
+/// drop and build the events of statement-less spans that found a statement.
+/// `event_indexes[i]` is the event of record `i`, if it has one.
+fn restitch_service(
+    trace_id: &str,
+    events: &[NormalizedEvent],
+    records: &[&StitchRecord],
+    event_indexes: &[Option<usize>],
+    links: &[(&str, Option<&str>)],
+    dropped: &mut [bool],
+    adopted: &mut Vec<NormalizedEvent>,
+) {
+    // An emitted donor's statement is its event's target.
+    let statements: Vec<Option<&str>> = records
+        .iter()
+        .zip(event_indexes)
+        .map(|(record, event)| match &record.role {
+            StitchRole::Donor {
+                statement: Some(statement),
+                ..
+            } => Some(&**statement),
+            // An orphan its own request stitched holds that statement.
+            StitchRole::Donor { .. } | StitchRole::Orphan { .. } => {
+                event.map(|index| events[index].event.target.as_str())
+            }
+        })
+        .collect();
+    let decisions = restitch_records(trace_id, records, &statements, links);
+    for ((record, decision), event) in records.iter().zip(decisions).zip(event_indexes) {
+        match (decision, &record.role, *event) {
+            (RecordDecision::Suppress, _, Some(index)) => dropped[index] = true,
+            (
+                RecordDecision::Adopt(statement),
+                StitchRole::Orphan {
+                    pending: Some(pending),
+                    ..
+                },
+                None,
+            ) => {
+                let mut event = (**pending).clone();
+                event.target = statement;
+                crate::event::sanitize_span_event(&mut event);
+                adopted.push(crate::normalize::normalize(event));
+            }
+            // A twin its request suppressed while its pairing was unsure.
+            (
+                RecordDecision::Keep,
+                StitchRole::Donor {
+                    pending: Some(pending),
+                    ..
+                },
+                None,
+            ) => adopted.push(crate::normalize::normalize((**pending).clone())),
+            // Another donor its own request suppressed has no event to bring
+            // back, and `restitch_records` keeps what a request decided.
+            _ => {}
+        }
+    }
 }
 
 /// Fill unresolved source endpoints in one trace's event slice: the nearest

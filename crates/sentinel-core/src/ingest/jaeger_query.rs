@@ -462,26 +462,26 @@ struct V3Result<'a> {
     result: &'a serde_json::value::RawValue,
 }
 
-/// Unwrap every `result` and convert it through the OTLP JSON parser, the
-/// same one file input uses, protojson shape repairs included. An answer
-/// with no message carries no trace, like an empty v1 `data`.
+/// Unwrap every `result` and convert them through the OTLP JSON parser, the
+/// same one file input uses, protojson shape repairs included. The messages
+/// go through it as one stream of documents, so a trace spread over two of
+/// them is joined like the lines of a file. An answer with no message
+/// carries no trace, like an empty v1 `data`.
 fn convert_v3_results(
     body: &[u8],
     grouping_attributes: Option<&[Arc<str>]>,
 ) -> Result<Vec<SpanEvent>, JaegerQueryError> {
-    let mut events = Vec::new();
-    let mut messages = 0_usize;
+    let mut documents = Vec::with_capacity(body.len());
     for message in serde_json::Deserializer::from_slice(body).into_iter::<V3Result<'_>>() {
         let message = message.map_err(|e| JaegerQueryError::JsonParse(e.to_string()))?;
-        let (converted, _) =
-            JsonIngest::ingest_otlp(message.result.get().as_bytes(), grouping_attributes)
-                .map_err(|e| JaegerQueryError::JsonParse(e.to_string()))?;
-        events.extend(converted);
-        messages += 1;
+        documents.extend_from_slice(message.result.get().as_bytes());
+        documents.push(b'\n');
     }
-    if messages == 0 {
+    if documents.is_empty() {
         return Err(JaegerQueryError::NoTracesFound);
     }
+    let (events, _) = JsonIngest::ingest_otlp(&documents, grouping_attributes)
+        .map_err(|e| JaegerQueryError::JsonParse(e.to_string()))?;
     Ok(events)
 }
 

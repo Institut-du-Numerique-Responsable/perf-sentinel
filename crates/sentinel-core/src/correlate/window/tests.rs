@@ -1956,3 +1956,73 @@ fn consumer_http_route_parents(service: Arc<str>) -> SourceEndpointParentGroups 
         ]),
     )])
 }
+
+#[test]
+fn late_ancestor_gives_its_scope_to_the_events_below_it() {
+    // The root span reaches the window after its children: its scope is
+    // only known through the retained context.
+    let mut window = TraceWindow::new(WindowConfig::default());
+    let mut event = make_event("trace-1", "SELECT 1");
+    event.event.parent_span_id = Some("root".to_string());
+    event.event.instrumentation_scopes = vec![Arc::from("doctrine")];
+    window.push(event, 1_000);
+    let service: Arc<str> = Arc::from("test");
+    let links = HashMap::from([(
+        Arc::clone(&service),
+        HashMap::from([("root".to_string(), None)]),
+    )]);
+    window.retain_source_context(
+        "trace-1",
+        &HashMap::new(),
+        &links,
+        &HashMap::new(),
+        &HashMap::from([(
+            service,
+            HashMap::from([("root".to_string(), Arc::from("symfony"))]),
+        )]),
+        1_000,
+    );
+
+    let (_, events) = window.drain_all().pop().expect("one trace");
+
+    let scopes: Vec<&str> = events[0]
+        .event
+        .instrumentation_scopes
+        .iter()
+        .map(AsRef::as_ref)
+        .collect();
+    assert_eq!(scopes, vec!["doctrine", "symfony"]);
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn records_that_all_wait_alone_do_not_open_a_trace() {
+    // A parentless statement-less execute span brings no endpoint context,
+    // so its records are the only thing naming the trace. With no donor in
+    // the trace they are all dropped, and no empty trace may take a slot.
+    let mut window = TraceWindow::new(WindowConfig {
+        max_active_traces: NonZeroUsize::new(1).unwrap(),
+        ..WindowConfig::default()
+    });
+    window.push(make_event("live", "SELECT 1"), 1_000);
+    let orphan = StitchRecord {
+        trace_id: Arc::from("other"),
+        service: Arc::from("test"),
+        span_id: [1; 8],
+        parent_span_id: None,
+        start_ns: 0,
+        end_ns: 1,
+        scope: Arc::from(""),
+        block: 0,
+        role: StitchRole::Orphan {
+            has_sql_db_system: true,
+            pending: Some(Box::new(make_event("other", "").event)),
+        },
+    };
+
+    let evicted = window.retain_stitch_records("other", vec![orphan], 1_000);
+
+    assert!(evicted.is_none(), "the live trace stays in the window");
+    assert!(window.contains_trace("live"));
+    assert!(!window.contains_trace("other"));
+}

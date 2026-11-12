@@ -290,6 +290,8 @@ docker compose -f examples/docker-compose-collector.yml up -d
 curl -s http://localhost:14318/metrics | grep perf_sentinel_events_processed_total
 ```
 
+The counter moves when a trace leaves the window, about `trace_ttl_ms` (30 s by default) after its last span.
+
 4. View findings emitted by Perf Sentinel on stdout:
 
 ```bash
@@ -1251,7 +1253,7 @@ composer require \
 
 **Framework mapping.**
 
-- Laravel/Eloquent: the SQL leaf span is PDO-scoped, but the app-wide `io.opentelemetry.contrib.php.laravel` scope appears on the span chain, so findings carry `php_laravel_eloquent` fixes (`with()` / `load()` eager loading) across every anti-pattern.
+- Laravel/Eloquent: the SQL leaf span is PDO-scoped, but the app-wide `io.opentelemetry.contrib.php.laravel` scope appears on the span chain, so findings carry `php_laravel_eloquent` fixes (`with()` / `load()` eager loading) across every anti-pattern. auto-laravel records each query as a `sql SELECT` span, and auto-pdo records it again as `PDO::prepare` and `PDOStatement::execute` siblings. Perf Sentinel counts them as one query on every auto-laravel version.
 - Symfony/Doctrine: the `io.opentelemetry.contrib.php.doctrine` scope is emitted directly on the SQL span (DBAL is instrumented), so SQL findings carry `php_doctrine` fixes (DQL fetch-join). A Symfony app that uses raw PDO instead of Doctrine falls to `php_generic`.
 
 The PDO instrumentation emits the obfuscated SQL template by default, which is enough for detection. The `io.opentelemetry.contrib.php.pdo` scope alone (no Laravel/Doctrine scope) routes to `php_generic`.
