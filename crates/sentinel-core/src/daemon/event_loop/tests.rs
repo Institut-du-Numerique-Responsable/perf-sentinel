@@ -4431,6 +4431,45 @@ async fn two_blocks_of_one_request_are_stitched_as_one() {
 }
 
 #[tokio::test]
+async fn each_service_of_a_trace_is_stitched_on_its_own() {
+    // Two services of one trace each split a query over two requests. Their
+    // spans never mix: the same span id on both sides stays apart.
+    let both = |spans: fn() -> Vec<opentelemetry_proto::tonic::trace::v1::Span>| {
+        let mut request = otlp_request("orders-svc", spans());
+        request
+            .resource_spans
+            .extend(otlp_request("billing-svc", spans()).resource_spans);
+        request
+    };
+    let traces = replay_requests(&[
+        both(|| vec![otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0)]),
+        both(|| vec![otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600)]),
+    ])
+    .await;
+
+    let mut events: Vec<(&str, &str, u64)> = traces[0]
+        .1
+        .iter()
+        .map(|event| {
+            let event = &event.event;
+            (
+                event.service.as_ref(),
+                event.span_id.as_str(),
+                event.duration_us,
+            )
+        })
+        .collect();
+    events.sort_unstable();
+    assert_eq!(
+        events,
+        vec![
+            ("billing-svc", "0303030303030303", 600_000),
+            ("orders-svc", "0303030303030303", 600_000),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn trace_from_one_request_is_not_stitched_again() {
     let events = assert_split_matches_one_request(vec![vec![
         otlp_server_root(1, "/api/orders"),

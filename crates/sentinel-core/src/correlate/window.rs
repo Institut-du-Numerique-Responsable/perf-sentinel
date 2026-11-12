@@ -1133,25 +1133,56 @@ fn restitch_trace(
     records: &[StitchRecord],
     ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
 ) -> bool {
-    let mut services: Vec<&Arc<str>> = Vec::new();
+    // One pass over each collection, whatever the number of services: a
+    // crafted trace can name a service per record.
+    let mut slots: HashMap<&str, usize> = HashMap::new();
+    let mut by_service: Vec<(&str, Vec<&StitchRecord>)> = Vec::new();
     for record in records {
-        if !services.contains(&&record.service) {
-            services.push(&record.service);
-        }
+        let service = record.service.as_ref();
+        let slot = *slots.entry(service).or_insert_with(|| {
+            by_service.push((service, Vec::new()));
+            by_service.len() - 1
+        });
+        by_service[slot].1.push(record);
     }
+    let event_of: HashMap<(&str, &str), usize> = events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| {
+            let key = (event.event.service.as_ref(), event.event.span_id.as_str());
+            (key, index)
+        })
+        .collect();
+    let mut links: HashMap<&str, Vec<(&str, Option<&str>)>> = HashMap::new();
+    for ((service, span_id), entry) in ancestry.into_iter().flat_map(LruCache::iter) {
+        links
+            .entry(service.as_ref())
+            .or_default()
+            .push((span_id.as_str(), entry.parent_span_id.as_deref()));
+    }
+
     let mut dropped = vec![false; events.len()];
     let mut adopted = Vec::new();
-    for service in services {
+    for (service, records) in &by_service {
+        let event_indexes: Vec<Option<usize>> = records
+            .iter()
+            .map(|record| {
+                event_of
+                    .get(&(*service, record.span_id_hex().as_str()))
+                    .copied()
+            })
+            .collect();
         restitch_service(
             trace_id,
-            service,
             events,
             records,
-            ancestry,
+            &event_indexes,
+            links.get(service).map_or(&[], Vec::as_slice),
             &mut dropped,
             &mut adopted,
         );
     }
+    drop(event_of);
     let changed = !adopted.is_empty() || dropped.contains(&true);
     let mut kept = dropped.iter().map(|&dropped| !dropped);
     events.retain(|_| kept.next().unwrap_or(true));
@@ -1161,33 +1192,20 @@ fn restitch_trace(
 
 /// [`restitch_trace`] for the records of one service: mark the events to
 /// drop and build the events of statement-less spans that found a statement.
+/// `event_indexes[i]` is the event of record `i`, if it has one.
 fn restitch_service(
     trace_id: &str,
-    service: &Arc<str>,
     events: &[NormalizedEvent],
-    records: &[StitchRecord],
-    ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
+    records: &[&StitchRecord],
+    event_indexes: &[Option<usize>],
+    links: &[(&str, Option<&str>)],
     dropped: &mut [bool],
     adopted: &mut Vec<NormalizedEvent>,
 ) {
-    let records: Vec<&StitchRecord> = records
-        .iter()
-        .filter(|record| &record.service == service)
-        .collect();
-    let event_of: HashMap<&str, usize> = events
-        .iter()
-        .enumerate()
-        .filter(|(_, event)| &event.event.service == service)
-        .map(|(index, event)| (event.event.span_id.as_str(), index))
-        .collect();
-    let event_indexes: Vec<Option<usize>> = records
-        .iter()
-        .map(|record| event_of.get(record.span_id_hex().as_str()).copied())
-        .collect();
     // An emitted donor's statement is its event's target.
     let statements: Vec<Option<&str>> = records
         .iter()
-        .zip(&event_indexes)
+        .zip(event_indexes)
         .map(|(record, event)| match &record.role {
             StitchRole::Donor {
                 statement: Some(statement),
@@ -1197,15 +1215,9 @@ fn restitch_service(
             StitchRole::Orphan { .. } => None,
         })
         .collect();
-    let links: Vec<(&str, Option<&str>)> = ancestry
-        .into_iter()
-        .flat_map(LruCache::iter)
-        .filter(|((owner, _), _)| owner == service)
-        .map(|((_, span_id), entry)| (span_id.as_str(), entry.parent_span_id.as_deref()))
-        .collect();
-    let decisions = restitch_records(trace_id, &records, &statements, &links);
+    let decisions = restitch_records(trace_id, records, &statements, links);
     for ((record, decision), event) in records.iter().zip(decisions).zip(event_indexes) {
-        match (decision, &record.role, event) {
+        match (decision, &record.role, *event) {
             (RecordDecision::Suppress, _, Some(index)) => dropped[index] = true,
             (
                 RecordDecision::Adopt(statement),
