@@ -1993,3 +1993,36 @@ fn late_ancestor_gives_its_scope_to_the_events_below_it() {
         .collect();
     assert_eq!(scopes, vec!["doctrine", "symfony"]);
 }
+
+#[cfg(feature = "daemon")]
+#[test]
+fn records_that_all_wait_alone_do_not_open_a_trace() {
+    // A parentless statement-less execute span brings no endpoint context,
+    // so its records are the only thing naming the trace. With no donor in
+    // the trace they are all dropped, and no empty trace may take a slot.
+    let mut window = TraceWindow::new(WindowConfig {
+        max_active_traces: NonZeroUsize::new(1).unwrap(),
+        ..WindowConfig::default()
+    });
+    window.push(make_event("live", "SELECT 1"), 1_000);
+    let orphan = StitchRecord {
+        trace_id: Arc::from("other"),
+        service: Arc::from("test"),
+        span_id: [1; 8],
+        parent_span_id: None,
+        start_ns: 0,
+        end_ns: 1,
+        scope: Arc::from(""),
+        block: 0,
+        role: StitchRole::Orphan {
+            has_sql_db_system: true,
+            pending: Some(Box::new(make_event("other", "").event)),
+        },
+    };
+
+    let evicted = window.retain_stitch_records("other", vec![orphan], 1_000);
+
+    assert!(evicted.is_none(), "the live trace stays in the window");
+    assert!(window.contains_trace("live"));
+    assert!(!window.contains_trace("other"));
+}

@@ -1984,7 +1984,6 @@ fn span_endpoint_update<'a>(
 
 /// Convert one `ResourceSpans` block, appending to `events` and `stats`, and
 /// to `records` when the caller keeps them.
-#[allow(clippy::too_many_arguments)]
 fn convert_resource_spans<'a>(
     resource_spans: &'a opentelemetry_proto::tonic::trace::v1::ResourceSpans,
     grouping_attributes: Option<&[Arc<str>]>,

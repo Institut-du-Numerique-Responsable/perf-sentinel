@@ -822,8 +822,8 @@ mod tests {
 
     #[test]
     fn twin_rows_looks_past_anchors_that_share_a_start() {
-        // The window reads starts at millisecond precision, so the fast
-        // queries of a loop share one. The late twin belongs to the last one.
+        // The fast queries of a loop can share one start. The late twin
+        // belongs to the last one.
         let lanes = vec![vec![(100, 0), (100, 1), (250, 2)], vec![(250, 9)]];
         assert_eq!(super::twin_rows(&lanes), vec![vec![0], vec![1], vec![2, 9]]);
         // Among equal starts the first free anchor takes the entry.

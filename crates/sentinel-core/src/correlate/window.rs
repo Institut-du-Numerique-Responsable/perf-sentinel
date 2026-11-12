@@ -330,6 +330,11 @@ impl TraceWindow {
         }
         let mut buffer = new_trace_buffer(now_ms, cap);
         keep_stitch_records(&mut buffer, records, cap);
+        // Every record waited alone: an empty trace would only take an LRU
+        // slot, and could evict a live trace to get it.
+        if buffer.stitch.records.is_empty() {
+            return None;
+        }
         let evicted = self.traces.push(trace_id.to_string(), buffer);
         #[cfg(test)]
         if evicted
@@ -1124,27 +1129,23 @@ fn keep_stitch_records(buffer: &mut TraceBuffer, records: Vec<StitchRecord>, cap
     // has statement-bearing spans in the trace. Elsewhere (an
     // instrumentation that drops statements) it would hold memory for an
     // event that never comes.
-    let donor_services: HashSet<&Arc<str>> = buffer
+    let donor_services: HashSet<Arc<str>> = buffer
         .stitch
         .records
         .iter()
         .chain(&records)
         .filter(|record| matches!(record.role, StitchRole::Donor { .. }))
-        .map(|record| &record.service)
+        .map(|record| Arc::clone(&record.service))
         .collect();
-    let waiting_alone = |record: &StitchRecord| {
-        matches!(
+    records.retain(|record| {
+        !matches!(
             record.role,
             StitchRole::Orphan {
                 pending: Some(_),
                 ..
             }
-        ) && !donor_services.contains(&record.service)
-    };
-    let alone: Vec<bool> = records.iter().map(waiting_alone).collect();
-    drop(donor_services);
-    let mut alone = alone.into_iter();
-    records.retain(|_| !alone.next().unwrap_or(false));
+        ) || donor_services.contains(&record.service)
+    });
     // A service split over two blocks of this request, or seen in an earlier
     // one.
     let mut first_block: HashMap<&Arc<str>, usize> = HashMap::new();
