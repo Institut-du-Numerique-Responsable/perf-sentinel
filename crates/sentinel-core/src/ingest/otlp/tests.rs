@@ -4314,8 +4314,8 @@ fn orphan_without_donor_stays_missing_db_statement() {
 
 #[test]
 fn laravel_sibling_prepare_and_execute_both_emit_unchanged() {
-    // Single-layer emitters (Laravel/PDO) put the statement on both the
-    // prepare and the execute span, as siblings. Sibling donors are never
+    // A single-layer emitter can put the statement on both the prepare and
+    // the execute span, as siblings. Same-scope sibling donors are never
     // collapsed, so both spans still emit their own event.
     let root = make_parent_span(&[10; 8], "GET /api/users");
     let prepare = make_sql_span(
@@ -4342,6 +4342,173 @@ fn laravel_sibling_prepare_and_execute_both_emit_unchanged() {
     assert_eq!(events[0].duration_us, 500);
     assert_eq!(events[1].duration_us, 600_000);
     assert_eq!(stats.filtered_merged_db_span, 0);
+}
+
+const LARAVEL_SCOPE: &str = "io.opentelemetry.contrib.php.laravel";
+const PDO_SCOPE: &str = "io.opentelemetry.contrib.php.pdo";
+
+/// One Laravel query as auto-laravel >= 1.9.1 + auto-pdo emit it (shape
+/// from a laravel-svc capture): under `parent`, the `QueryWatcher` span
+/// `sql SELECT` (laravel scope, whole-query time, starting just after the
+/// prepare) and the pdo `PDO::prepare` (statement, ~0 ms),
+/// `PDOStatement::execute` (duration, no statement) and `fetchAll`
+/// siblings. Returns `(laravel_spans, pdo_spans)`.
+fn laravel_pdo_query(
+    idx: u8,
+    parent: &[u8],
+    statement: &str,
+    start_ns: u64,
+    execute_ns: u64,
+) -> (Vec<Span>, Vec<Span>) {
+    let sid = |tag: u8| vec![idx, tag, 0, 0, 0, 0, 0, 0];
+    let pdo = |name: &str, extra: Option<&str>, id: u8, start: u64, end: u64| {
+        let mut attrs = vec![
+            make_kv("code.function.name", name),
+            make_kv("db.system.name", "postgresql"),
+        ];
+        if let Some(text) = extra {
+            attrs.push(make_kv("db.query.text", text));
+        }
+        let mut span = stitch_span(&sid(id), parent, attrs, start, end);
+        span.name = name.to_string();
+        span
+    };
+    let prepare = pdo(
+        "PDO::prepare",
+        Some(statement),
+        2,
+        start_ns,
+        start_ns + 7_000,
+    );
+    let execute = pdo(
+        "PDOStatement::execute",
+        None,
+        3,
+        start_ns + 26_000,
+        start_ns + 26_000 + execute_ns,
+    );
+    let fetch_start = start_ns + 30_000 + execute_ns;
+    let fetch = pdo(
+        "PDOStatement::fetchAll",
+        None,
+        4,
+        fetch_start,
+        fetch_start + 9_000,
+    );
+    let mut watcher = stitch_span(
+        &sid(1),
+        parent,
+        vec![
+            make_kv("db.system.name", "postgresql"),
+            make_kv("db.operation.name", "SELECT"),
+            make_kv("db.query.text", statement),
+        ],
+        start_ns + 1_200,
+        fetch_start + 140_000,
+    );
+    watcher.name = "sql SELECT".to_string();
+    (vec![watcher], vec![prepare, execute, fetch])
+}
+
+#[test]
+fn laravel_watcher_and_pdo_twins_count_one_query() {
+    let statement = r#"select * from "payments" where "customer_id" = ?"#;
+    let kernel = make_parent_span(&[10; 8], "POST /api/fault/redundant-sql");
+    // `App\Models\Payment::get`, statement-less since auto-laravel 1.9.1.
+    let mut get_models = stitch_span(
+        &[11; 8],
+        &[10; 8],
+        vec![make_kv(
+            "code.function.name",
+            "Illuminate\\Database\\Eloquent\\Builder::getModels",
+        )],
+        1_000_000,
+        3_000_000,
+    );
+    get_models.name = "App\\Models\\Payment::get".to_string();
+    let (laravel, pdo) = laravel_pdo_query(1, &[11; 8], statement, 1_000_100, 196_864);
+    let mut laravel_spans = vec![kernel, get_models];
+    laravel_spans.extend(laravel);
+    let req = scoped_request(
+        "laravel-svc",
+        vec![(LARAVEL_SCOPE, laravel_spans), (PDO_SCOPE, pdo)],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1, "one event per executed query");
+    assert_eq!(events[0].target, statement);
+    assert_eq!(events[0].duration_us, 196, "duration from the pdo execute");
+    assert_eq!(events[0].span_id, "0103000000000000");
+    let scopes: Vec<&str> = events[0]
+        .instrumentation_scopes
+        .iter()
+        .map(AsRef::as_ref)
+        .collect();
+    assert_eq!(scopes, vec![PDO_SCOPE, LARAVEL_SCOPE]);
+    assert_eq!(
+        stats.filtered_merged_db_span, 2,
+        "watcher twin and consumed prepare"
+    );
+    assert_eq!(
+        stats.filtered_missing_db_statement, 1,
+        "fetchAll is not an execute or query span"
+    );
+}
+
+#[test]
+fn laravel_raw_query_loop_keeps_one_event_per_execution() {
+    // `DB::select` in a loop: every query's spans are siblings under the
+    // kernel span, with the identical statement each time.
+    let statement = "SELECT pg_sleep(?), orders.id FROM orders ORDER BY id OFFSET ? LIMIT 1";
+    let mut laravel_spans = vec![make_parent_span(&[10; 8], "POST /api/fault/slow-sql")];
+    let mut pdo_spans = Vec::new();
+    for k in 1..=3u8 {
+        let start = u64::from(k) * 1_000_000_000;
+        let (laravel, pdo) =
+            laravel_pdo_query(k, &[10; 8], statement, start, u64::from(k) * 100_000_000);
+        laravel_spans.extend(laravel);
+        pdo_spans.extend(pdo);
+    }
+    let req = scoped_request(
+        "laravel-svc",
+        vec![(LARAVEL_SCOPE, laravel_spans), (PDO_SCOPE, pdo_spans)],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    let durations: Vec<u64> = events.iter().map(|e| e.duration_us).collect();
+    assert_eq!(durations, vec![100_000, 200_000, 300_000]);
+    assert_eq!(stats.filtered_merged_db_span, 6);
+}
+
+#[test]
+fn laravel_watcher_without_pdo_twin_still_emits() {
+    // A pdo-only query (`set search_path` at connect) has no watcher span,
+    // and a watcher whose pdo spans landed in another export batch has no
+    // twin. Neither is collapsed.
+    let mut laravel_spans = vec![make_parent_span(&[10; 8], "GET /api/users")];
+    let (watcher, _) = laravel_pdo_query(1, &[10; 8], "SELECT 1", 1_000_000, 50_000);
+    laravel_spans.extend(watcher);
+    let (_, pdo) = laravel_pdo_query(
+        2,
+        &[10; 8],
+        r#"set search_path to "laravel", "public""#,
+        5_000_000,
+        170_000,
+    );
+    let req = scoped_request(
+        "laravel-svc",
+        vec![(LARAVEL_SCOPE, laravel_spans), (PDO_SCOPE, pdo)],
+    );
+
+    let (events, _) = convert_otlp_request_counted(&req);
+
+    let targets: Vec<&str> = events.iter().map(|e| e.target.as_str()).collect();
+    assert_eq!(
+        targets,
+        vec!["SELECT 1", r#"set search_path to "laravel", "public""#]
+    );
 }
 
 #[test]

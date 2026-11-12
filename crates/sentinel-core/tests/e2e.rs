@@ -742,6 +742,53 @@ fn php_doctrine_split_fixture_detects_slow_sql_not_redundant() {
 }
 
 #[test]
+fn php_laravel_pdo_siblings_fixture_counts_each_query_once() {
+    // Two laravel-svc traces captured with auto-laravel + auto-pdo, the
+    // `db.query.text` removed from the `*::get` spans as auto-laravel 1.9.1
+    // does. Each query arrives twice, as the laravel `sql SELECT` span and
+    // the pdo `PDO::prepare`/`PDOStatement::execute` siblings.
+    let mut config = Config::default();
+    config.detection.sanitizer_aware_classification =
+        sentinel_core::detect::sanitizer_aware::SanitizerAwareMode::Strict;
+    let events = load_fixture("otlp_php_laravel_pdo_siblings.json");
+    // 20 OrderItem loads + 10 Payment loads + one count(*), plus the
+    // pdo-only `set search_path` of each trace's connection.
+    assert_eq!(events.len(), 33, "one SQL event per executed query");
+
+    let report = pipeline::analyze(events, &config);
+
+    let found: Vec<_> = report
+        .findings
+        .iter()
+        .map(|f| {
+            (
+                f.finding_type.clone(),
+                f.source_endpoint.as_str(),
+                f.pattern.occurrences,
+                f.suggested_fix.as_ref().map(|s| s.framework.as_str()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                FindingType::NPlusOneSql,
+                "/api/fault/n-plus-one-sql",
+                20,
+                Some("php_laravel_eloquent"),
+            ),
+            (
+                FindingType::RedundantSql,
+                "/api/fault/redundant-sql",
+                10,
+                Some("php_laravel_eloquent"),
+            ),
+        ]
+    );
+}
+
+#[test]
 fn full_pipeline_runs_on_new_fixtures() {
     let config = Config::default();
     for fixture in [
@@ -751,6 +798,7 @@ fn full_pipeline_runs_on_new_fixtures() {
         "fanout.json",
         "n_plus_one_sql_java_mutiny_reactive.json",
         "otlp_php_doctrine_split.json",
+        "otlp_php_laravel_pdo_siblings.json",
     ] {
         let events = load_fixture(fixture);
         let report = pipeline::analyze(events, &config);

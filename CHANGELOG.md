@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Fixed
+
+- PHP services instrumented with `opentelemetry-auto-laravel` and `opentelemetry-auto-pdo` no longer count every SQL query twice. Since auto-laravel 1.9.1 the `*::get` span no longer carries `db.query.text`, so the laravel `sql SELECT` span and its pdo `PDO::prepare` sibling were both kept, which doubled N+1 and redundant occurrences and turned redundant reads into `n_plus_one_sql` under the strict classifier. Aggregates and raw `DB::` queries were already doubled on 1.9.0. Sibling spans with the same parent and statement from two instrumentation scopes now pair off in start order and keep one event each, so a real loop keeps one event per execution. The event stays the pdo execute span, as on 1.9.0. A pair split across two export batches still yields two events. The `io.opentelemetry.contrib.php.laravel.*` scopes of auto-laravel 1.10.0 still map to `php_laravel_eloquent` ([#257](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/257)).
+
 ## [0.44.1] - 2026-11-11
 
 ### Changed

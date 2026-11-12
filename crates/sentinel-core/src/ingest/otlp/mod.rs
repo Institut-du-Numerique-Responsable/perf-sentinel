@@ -941,6 +941,8 @@ enum StitchDecision<'a> {
 struct StitchDonor<'a> {
     span: &'a Span,
     statement: &'a str,
+    /// Instrumentation scope name, empty when the block records none.
+    scope: &'a str,
 }
 
 /// Bounded look-back for an unconsumed sibling donor, so batch-prepared
@@ -1074,13 +1076,18 @@ fn collect_stitch_participants<'a>(
     let mut provisional: Vec<(&'a Span, bool)> = Vec::new();
     let mut idx = 0usize;
     'outer: for scope_spans in &resource_spans.scope_spans {
+        let scope = scope_spans.scope.as_ref().map_or("", |s| s.name.as_str());
         for span in &scope_spans.spans {
             let Some(c) = classified.get(idx) else {
                 break 'outer;
             };
             idx += 1;
             match classify_stitch_role(span, c) {
-                SpanRole::Donor(statement) => donors.push(StitchDonor { span, statement }),
+                SpanRole::Donor(statement) => donors.push(StitchDonor {
+                    span,
+                    statement,
+                    scope,
+                }),
                 SpanRole::Orphan { has_sql_db_system } => {
                     provisional.push((span, has_sql_db_system));
                 }
@@ -1134,6 +1141,46 @@ fn suppress_layered_duplicates<'a>(
         }
     }
     suppressed
+}
+
+/// Rule 1b: collapse cross-scope sibling twins. Two instrumentation layers
+/// that record one query as siblings (Laravel's `QueryWatcher` span and the
+/// `PDO::prepare` it wraps) carry the same parent and statement under
+/// different scopes. Each layer's donors pair off in start order, so a loop
+/// of N queries keeps N, and in each pair the longer span (the framework
+/// re-record) is suppressed. The short prepare survives for its execute
+/// sibling to adopt. Same-scope siblings are never collapsed.
+fn suppress_cross_scope_twins(donors: &[StitchDonor<'_>], suppressed: &mut [bool]) {
+    let mut groups: HashMap<(SpanKey<'_>, &str), Vec<usize>> = HashMap::new();
+    for (i, donor) in donors.iter().enumerate() {
+        if suppressed[i] || donor.scope.is_empty() || donor.span.parent_span_id.is_empty() {
+            continue;
+        }
+        let parent = (
+            donor.span.trace_id.as_slice(),
+            donor.span.parent_span_id.as_slice(),
+        );
+        groups.entry((parent, donor.statement)).or_default().push(i);
+    }
+    // Groups are disjoint, so the map's iteration order cannot change the result.
+    for mut group in groups.into_values() {
+        group.sort_unstable_by_key(|&i| (donors[i].scope, donors[i].span.start_time_unix_nano, i));
+        let lanes: Vec<&[usize]> = group
+            .chunk_by(|&a, &b| donors[a].scope == donors[b].scope)
+            .collect();
+        // shortcut: only two sibling layers are paired, widen if an emitter shows three.
+        let [first, second] = lanes.as_slice() else {
+            continue;
+        };
+        for (&a, &b) in first.iter().zip(second.iter()) {
+            let duration = |i: usize| {
+                let span = donors[i].span;
+                span.end_time_unix_nano
+                    .saturating_sub(span.start_time_unix_nano)
+            };
+            suppressed[(duration(a), a).max((duration(b), b)).1] = true;
+        }
+    }
 }
 
 /// Rule 2 split: a layered orphan defers to its outermost same-trace orphan
@@ -1323,10 +1370,12 @@ fn collect_orphan_candidates<'a>(
 /// block, allowlisted SQL engines only, other engines unchanged):
 /// 1. A donor (statement-bearing span) whose same-trace ancestor is a donor
 ///    with the identical statement is suppressed: layered duplicate.
-///    Siblings are never collapsed (single-layer emitters like Laravel/PDO
+///    Same-scope siblings are never collapsed (a single-layer emitter can
 ///    legitimately emit prepare and execute as siblings), and mutual
 ///    ancestry (a malformed parent cycle, which has no outermost span)
-///    suppresses neither.
+///    suppresses neither. Sibling twins from two different scopes (Laravel
+///    `QueryWatcher` + PDO) pair off and keep one each, see
+///    [`suppress_cross_scope_twins`].
 /// 2. An orphan whose same-trace ancestor is an orphan defers to the
 ///    outermost one: only the outermost carries the stitched event.
 /// 3. Each remaining orphan adopts the statement of the nearest related
@@ -1336,7 +1385,9 @@ fn collect_orphan_candidates<'a>(
 ///
 /// Fail-open: an orphan with no related preceding donor (for example a
 /// prepare/execute pair split across collector batches) gets no decision
-/// and still counts `missing_db_statement`.
+/// and still counts `missing_db_statement`. Twins split the same way both
+/// emit: the PHP SDK can export a `QueryWatcher` span one batch after its
+/// `PDO::prepare`, so a long, batch-split trace can keep an extra event.
 ///
 /// Known limit: pairing is a nearest-start heuristic. Interleaved
 /// same-parent queries can swap params and durations between events, and
@@ -1358,7 +1409,8 @@ fn compute_stitch_decisions<'a>(
         .enumerate()
         .map(|(i, d)| (span_key(d.span), i))
         .collect();
-    let donor_suppressed = suppress_layered_duplicates(&donors, &donor_by_id, span_index);
+    let mut donor_suppressed = suppress_layered_duplicates(&donors, &donor_by_id, span_index);
+    suppress_cross_scope_twins(&donors, &mut donor_suppressed);
 
     // Rule 2: deferred spans are only suppressed if the carrier stitches, so
     // the no-donor case stays byte-identical to the output without stitching.
