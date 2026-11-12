@@ -703,6 +703,9 @@ mod tests {
             "io.opentelemetry.contrib.php.laravel.database.eloquent.model".to_string()
         ]));
         assert!(has_orm_scope(&[
+            "io.opentelemetry.contrib.php.laravel.query".to_string()
+        ]));
+        assert!(has_orm_scope(&[
             "io.opentelemetry.contrib.php.doctrine".to_string()
         ]));
         // The bare PDO scope is a driver, not an ORM, and must not match.

@@ -943,6 +943,8 @@ struct StitchDonor<'a> {
     statement: &'a str,
     /// Instrumentation scope name, empty when the block records none.
     scope: &'a str,
+    /// Canonical `db.system`, `None` when the layer records none.
+    db_system: Option<&'a str>,
 }
 
 /// Bounded look-back for an unconsumed sibling donor, so batch-prepared
@@ -1012,8 +1014,9 @@ fn classify_resource_spans(
 
 /// One span's role in the stitch pre-pass.
 enum SpanRole<'a> {
-    /// Statement-bearing SQL span, statement borrowed for adoption.
-    Donor(&'a str),
+    /// Statement-bearing SQL span: the statement, borrowed for adoption, and
+    /// its canonical `db.system`.
+    Donor(&'a str, Option<&'a str>),
     /// Statement-less execute/query span. `has_sql_db_system` false means the
     /// engine sits only on a child layer (PHP Doctrine), so it is admitted
     /// only with a sibling donor (checked by the caller).
@@ -1036,7 +1039,7 @@ fn classify_stitch_role<'a>(span: &Span, c: &ClassifiedAttrs<'a>) -> SpanRole<'a
         return SpanRole::Skip;
     }
     if let Some(statement) = resolve_sql_statement(c, db_system) {
-        SpanRole::Donor(statement)
+        SpanRole::Donor(statement, db_system)
     } else if !is_driver_ping(c)
         && !has_http_signal(c)
         && c.rpc_system.is_none()
@@ -1061,8 +1064,11 @@ fn classify_stitch_role<'a>(span: &Span, c: &ClassifiedAttrs<'a>) -> SpanRole<'a
 /// `SELECT orders` span must be usable as a donor for its `Doctrine::execute`
 /// sibling. An orphan with a SQL `db.system` is admitted directly. An orphan
 /// with no `db.system` (again the doctrine layer) is admitted only when it
-/// has a statement-bearing sibling, so ORM logical-op spans that wrap their
-/// own SQL child (Ruby `ActiveRecord`) do not adopt a descendant's statement.
+/// has a statement-bearing sibling of its own scope: the two halves of a
+/// split query come from one instrumentation. ORM logical-op spans (Ruby
+/// `ActiveRecord`, attribute-less, over a driver child or a query-cache hit)
+/// therefore take neither a descendant's statement nor that of a driver
+/// span that happens to sit beside them.
 ///
 /// `classified` is the capped per-resource cache: spans beyond it never
 /// participate and convert without stitching.
@@ -1071,9 +1077,10 @@ fn collect_stitch_participants<'a>(
     classified: &[ClassifiedAttrs<'a>],
 ) -> (Vec<StitchDonor<'a>>, Vec<&'a Span>) {
     let mut donors = Vec::new();
-    // (span, has_sql_db_system): orphans without a db.system are kept only
-    // if a sibling donor exists (resolved after the full pass).
-    let mut provisional: Vec<(&'a Span, bool)> = Vec::new();
+    // (span, has_sql_db_system, scope): orphans without a db.system are kept
+    // only if a sibling donor of their own scope exists (resolved after the
+    // full pass).
+    let mut provisional: Vec<(&'a Span, bool, &'a str)> = Vec::new();
     let mut idx = 0usize;
     'outer: for scope_spans in &resource_spans.scope_spans {
         let scope = scope_spans.scope.as_ref().map_or("", |s| s.name.as_str());
@@ -1083,32 +1090,35 @@ fn collect_stitch_participants<'a>(
             };
             idx += 1;
             match classify_stitch_role(span, c) {
-                SpanRole::Donor(statement) => donors.push(StitchDonor {
+                SpanRole::Donor(statement, db_system) => donors.push(StitchDonor {
                     span,
                     statement,
                     scope,
+                    db_system,
                 }),
                 SpanRole::Orphan { has_sql_db_system } => {
-                    provisional.push((span, has_sql_db_system));
+                    provisional.push((span, has_sql_db_system, scope));
                 }
                 SpanRole::Skip => {}
             }
         }
     }
 
-    let donor_parents: HashSet<SpanKey<'a>> = donors
+    let donor_parents: HashSet<(SpanKey<'a>, &'a str)> = donors
         .iter()
         .filter(|d| !d.span.parent_span_id.is_empty())
-        .map(|d| (d.span.trace_id.as_slice(), d.span.parent_span_id.as_slice()))
+        .map(|d| {
+            let parent = (d.span.trace_id.as_slice(), d.span.parent_span_id.as_slice());
+            (parent, d.scope)
+        })
         .collect();
     let orphans = provisional
         .into_iter()
-        .filter(|&(span, is_sql)| {
-            is_sql
-                || donor_parents
-                    .contains(&(span.trace_id.as_slice(), span.parent_span_id.as_slice()))
+        .filter(|&(span, is_sql, scope)| {
+            let parent = (span.trace_id.as_slice(), span.parent_span_id.as_slice());
+            is_sql || donor_parents.contains(&(parent, scope))
         })
-        .map(|(span, _)| span)
+        .map(|(span, _, _)| span)
         .collect();
     (donors, orphans)
 }
@@ -1143,17 +1153,21 @@ fn suppress_layered_duplicates<'a>(
     suppressed
 }
 
-/// Rule 1b: collapse cross-scope sibling twins. Two instrumentation layers
-/// that record one query as siblings (Laravel's `QueryWatcher` span and the
-/// `PDO::prepare` it wraps) carry the same parent and statement under
-/// different scopes. Each layer's donors pair off in start order, so a loop
-/// of N queries keeps N, and in each pair the longer span (the framework
-/// re-record) is suppressed. The short prepare survives for its execute
-/// sibling to adopt. Same-scope siblings are never collapsed.
-fn suppress_cross_scope_twins(donors: &[StitchDonor<'_>], suppressed: &mut [bool]) {
+/// Rule 1b: pair cross-scope sibling twins. Two instrumentation layers that
+/// record one query as siblings (Laravel's `QueryWatcher` span and the
+/// `PDO::prepare` it wraps, `SQLAlchemy` and asyncpg) carry the same parent
+/// and statement under different scopes. Each layer's donors line up in
+/// start order, so a loop of N queries keeps N rows, and the longest span of
+/// a row (the layer wrapping the others) is its keeper. Returns each shorter
+/// twin's keeper, `None` for every other donor.
+///
+/// Same-scope siblings never pair, and neither do donors naming two
+/// different engines (a shadow read against two databases is two queries).
+fn pair_cross_scope_twins(donors: &[StitchDonor<'_>], suppressed: &[bool]) -> Vec<Option<usize>> {
+    let mut keeper = vec![None; donors.len()];
     // Twins need two scopes, so single-scope resources (most emitters) skip the grouping.
     if donors.windows(2).all(|w| w[0].scope == w[1].scope) {
-        return;
+        return keeper;
     }
     let mut groups: HashMap<(SpanKey<'_>, &str), Vec<usize>> = HashMap::new();
     for (i, donor) in donors.iter().enumerate() {
@@ -1172,17 +1186,59 @@ fn suppress_cross_scope_twins(donors: &[StitchDonor<'_>], suppressed: &mut [bool
         let lanes: Vec<&[usize]> = group
             .chunk_by(|&a, &b| donors[a].scope == donors[b].scope)
             .collect();
-        // shortcut: only two sibling layers are paired, widen if an emitter shows three.
-        let [first, second] = lanes.as_slice() else {
-            continue;
-        };
-        for (&a, &b) in first.iter().zip(second.iter()) {
-            let duration = |i: usize| {
-                let span = donors[i].span;
-                span.end_time_unix_nano
-                    .saturating_sub(span.start_time_unix_nano)
-            };
-            suppressed[(duration(a), a).max((duration(b), b)).1] = true;
+        let rows = lanes.iter().map(|lane| lane.len()).max().unwrap_or(0);
+        for row in 0..rows {
+            let twins: Vec<usize> = lanes.iter().filter_map(|l| l.get(row).copied()).collect();
+            keep_longest_twin(donors, &twins, &mut keeper);
+        }
+    }
+    keeper
+}
+
+/// Point every twin of one row at the longest of them, the first in span
+/// order on a tie. A row of one, or one naming two engines, pairs nothing.
+fn keep_longest_twin(donors: &[StitchDonor<'_>], twins: &[usize], keeper: &mut [Option<usize>]) {
+    let mut engines = twins.iter().filter_map(|&i| donors[i].db_system);
+    let two_engines = engines
+        .next()
+        .is_some_and(|first| engines.any(|engine| engine != first));
+    if twins.len() < 2 || two_engines {
+        return;
+    }
+    let duration = |i: usize| {
+        let span = donors[i].span;
+        span.end_time_unix_nano
+            .saturating_sub(span.start_time_unix_nano)
+    };
+    let Some(&longest) = twins
+        .iter()
+        .max_by_key(|&&i| (duration(i), std::cmp::Reverse(i)))
+    else {
+        return;
+    };
+    for &twin in twins.iter().filter(|&&twin| twin != longest) {
+        keeper[twin] = Some(longest);
+    }
+}
+
+/// Settle rule 1b once rule 3 has run: one event per twin row. A shorter twin
+/// that an execute span adopted hands the event to that span, and the keeper
+/// is suppressed with it. Otherwise the keeper emits, with the whole query's
+/// duration, and the shorter twins are suppressed.
+fn settle_twins(keeper: &[Option<usize>], consumed: &[bool], suppressed: &mut [bool]) {
+    let pairs = || {
+        keeper
+            .iter()
+            .enumerate()
+            .filter_map(|(twin, longest)| longest.map(|longest| (twin, longest)))
+    };
+    for (_, longest) in pairs() {
+        suppressed[longest] = false;
+    }
+    for (twin, longest) in pairs() {
+        suppressed[twin] = true;
+        if consumed[twin] {
+            suppressed[longest] = true;
         }
     }
 }
@@ -1378,8 +1434,8 @@ fn collect_orphan_candidates<'a>(
 ///    legitimately emit prepare and execute as siblings), and mutual
 ///    ancestry (a malformed parent cycle, which has no outermost span)
 ///    suppresses neither. Sibling twins from two different scopes (Laravel
-///    `QueryWatcher` + PDO) pair off and keep one each, see
-///    [`suppress_cross_scope_twins`].
+///    `QueryWatcher` + PDO) pair off and keep one event each, see
+///    [`pair_cross_scope_twins`] and [`settle_twins`].
 /// 2. An orphan whose same-trace ancestor is an orphan defers to the
 ///    outermost one: only the outermost carries the stitched event.
 /// 3. Each remaining orphan adopts the statement of the nearest related
@@ -1415,7 +1471,11 @@ fn compute_stitch_decisions<'a>(
         .map(|(i, d)| (span_key(d.span), i))
         .collect();
     let mut donor_suppressed = suppress_layered_duplicates(&donors, &donor_by_id, span_index);
-    suppress_cross_scope_twins(&donors, &mut donor_suppressed);
+    let twin_keeper = pair_cross_scope_twins(&donors, &donor_suppressed);
+    // A keeper stays out of rule 3: an execute sibling adopts the shorter twin.
+    for &longest in twin_keeper.iter().flatten() {
+        donor_suppressed[longest] = true;
+    }
 
     // Rule 2: deferred spans are only suppressed if the carrier stitches, so
     // the no-donor case stays byte-identical to the output without stitching.
@@ -1456,6 +1516,7 @@ fn compute_stitch_decisions<'a>(
         }
     }
 
+    settle_twins(&twin_keeper, &donor_consumed, &mut donor_suppressed);
     for (i, donor) in donors.iter().enumerate() {
         if donor_suppressed[i] || donor_consumed[i] {
             decisions.insert(span_key(donor.span), StitchDecision::Suppress);

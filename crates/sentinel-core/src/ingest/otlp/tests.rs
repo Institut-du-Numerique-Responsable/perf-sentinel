@@ -4512,6 +4512,107 @@ fn laravel_watcher_without_pdo_twin_still_emits() {
 }
 
 #[test]
+fn laravel_twins_without_execute_keep_the_watcher_duration() {
+    // The pdo execute left in another export batch: the event must not fall
+    // on the ~0 ms prepare.
+    let mut laravel_spans = vec![make_parent_span(&[10; 8], "GET /api/users")];
+    let (watcher, mut pdo) = laravel_pdo_query(1, &[10; 8], "SELECT 1", 1_000_000, 600_000_000);
+    laravel_spans.extend(watcher);
+    pdo.truncate(1);
+    let req = scoped_request(
+        "laravel-svc",
+        vec![(LARAVEL_SCOPE, laravel_spans), (PDO_SCOPE, pdo)],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].span_id, "0101000000000000", "the watcher span");
+    assert!(events[0].duration_us > 600_000);
+    assert_eq!(stats.filtered_merged_db_span, 1);
+}
+
+/// Statement-bearing sibling under `[10; 8]` for the twin-row tests.
+fn twin_span(id: u8, db_system: &str, start_ns: u64, end_ns: u64) -> Span {
+    stitch_span(
+        &[id; 8],
+        &[10; 8],
+        vec![
+            make_kv("db.statement", "SELECT * FROM users WHERE id = ?"),
+            make_kv("db.system", db_system),
+        ],
+        start_ns,
+        end_ns,
+    )
+}
+
+#[test]
+fn twin_row_keeps_the_longest_of_three_scopes() {
+    let req = scoped_request(
+        "svc",
+        vec![
+            ("http", vec![make_parent_span(&[10; 8], "GET /api/users")]),
+            ("orm", vec![twin_span(1, "postgresql", 1_000, 900_000)]),
+            ("listener", vec![twin_span(2, "postgresql", 2_000, 800_000)]),
+            ("driver", vec![twin_span(3, "postgresql", 3_000, 700_000)]),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].span_id, "0101010101010101", "the wrapping span");
+    assert_eq!(stats.filtered_merged_db_span, 2);
+}
+
+#[test]
+fn siblings_on_two_engines_are_two_queries() {
+    // A shadow read sends the same statement to two databases.
+    let req = scoped_request(
+        "svc",
+        vec![
+            ("http", vec![make_parent_span(&[10; 8], "GET /api/users")]),
+            ("pymysql", vec![twin_span(1, "mysql", 1_000, 900_000)]),
+            (
+                "psycopg2",
+                vec![twin_span(2, "postgresql", 1_000_000, 1_800_000)],
+            ),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(stats.filtered_merged_db_span, 0);
+}
+
+#[test]
+fn statement_less_span_ignores_a_donor_of_another_scope() {
+    // Active Record `X query` spans carry no attribute. A `pg` span beside
+    // them (schema introspection) is not the other half of a split query.
+    let mut ar_query = stitch_span(&[20; 8], &[10; 8], vec![], 2_000_000, 2_500_000);
+    ar_query.name = "Payment query".to_string();
+    let introspection = twin_span(21, "postgresql", 1_000_000, 1_400_000);
+    let req = scoped_request(
+        "rails-svc",
+        vec![
+            ("rack", vec![make_parent_span(&[10; 8], "GET /api/users")]),
+            (
+                "OpenTelemetry::Instrumentation::ActiveRecord",
+                vec![ar_query],
+            ),
+            ("OpenTelemetry::Instrumentation::PG", vec![introspection]),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].span_id, "1515151515151515", "the pg span");
+    assert_eq!(stats.filtered_merged_db_span, 0);
+}
+
+#[test]
 fn nested_duplicate_statement_collapses_to_outermost() {
     let outer = make_sql_span(
         &[1; 16],
