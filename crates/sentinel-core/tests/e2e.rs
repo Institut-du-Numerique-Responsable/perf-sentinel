@@ -789,6 +789,39 @@ fn php_laravel_pdo_siblings_fixture_counts_each_query_once() {
 }
 
 #[test]
+fn php_laravel_slow_sql_batches_fixture_joins_export_batches() {
+    // One 12 s laravel-svc trace as the Collector file exporter wrote it,
+    // one line per export batch. The kernel span (route, laravel scope) sits
+    // in the last line and each `sql SELECT` one line after its
+    // `PDO::prepare`.
+    let events = load_fixture("otlp_php_laravel_slow_sql_batches.ndjson");
+    assert_eq!(
+        events.len(),
+        7,
+        "six pg_sleep queries and the connection's search_path"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|e| e.source.endpoint == "/api/fault/slow-sql")
+    );
+
+    let report = pipeline::analyze(events, &Config::default());
+
+    let slow: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.finding_type == FindingType::SlowSql)
+        .collect();
+    assert_eq!(slow.len(), 1);
+    assert_eq!(slow[0].pattern.occurrences, 6);
+    assert_eq!(
+        slow[0].suggested_fix.as_ref().map(|f| f.framework.as_str()),
+        Some("php_laravel_eloquent")
+    );
+}
+
+#[test]
 fn full_pipeline_runs_on_new_fixtures() {
     let config = Config::default();
     for fixture in [

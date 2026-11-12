@@ -4313,7 +4313,7 @@ fn orphan_without_donor_stays_missing_db_statement() {
 }
 
 #[test]
-fn laravel_sibling_prepare_and_execute_both_emit_unchanged() {
+fn same_scope_sibling_prepare_and_execute_both_emit_unchanged() {
     // A single-layer emitter can put the statement on both the prepare and
     // the execute span, as siblings. Same-scope sibling donors are never
     // collapsed, so both spans still emit their own event.

@@ -103,6 +103,72 @@ pub enum InputFormat {
     Zipkin,
 }
 
+type OtlpRequest = opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+
+/// Joins the documents of one OTLP JSON stream before conversion.
+///
+/// A file exporter writes one request per export batch, so the spans of one
+/// trace (its root, the twin spans of one query) spread over several
+/// documents. Blocks with the identical resource are joined, and parents,
+/// scopes and the SQL stitch then resolve as they do inside one request.
+/// Blocks whose resources differ (two pods) stay apart.
+struct OtlpDocuments<'g> {
+    pending: OtlpRequest,
+    /// Encoded resource to its index in `pending.resource_spans`.
+    blocks: std::collections::HashMap<Vec<u8>, usize>,
+    pending_spans: usize,
+    events: Vec<SpanEvent>,
+    stats: SpanConversionStats,
+    grouping_attributes: Option<&'g [std::sync::Arc<str>]>,
+}
+
+impl OtlpDocuments<'_> {
+    fn push(&mut self, request: OtlpRequest) {
+        use std::collections::hash_map::Entry;
+        let spans: usize = request
+            .resource_spans
+            .iter()
+            .flat_map(|block| &block.scope_spans)
+            .map(|scope| scope.spans.len())
+            .sum();
+        // A joined request never outgrows the span budget one document has.
+        if self.pending_spans > 0
+            && self.pending_spans + spans > crate::ingest::otlp::MAX_SPANS_PER_SERVICE
+        {
+            self.flush();
+        }
+        self.pending_spans += spans;
+        for block in request.resource_spans {
+            let key = block
+                .resource
+                .as_ref()
+                .map(prost::Message::encode_to_vec)
+                .unwrap_or_default();
+            match self.blocks.entry(key) {
+                Entry::Occupied(slot) => self.pending.resource_spans[*slot.get()]
+                    .scope_spans
+                    .extend(block.scope_spans),
+                Entry::Vacant(slot) => {
+                    slot.insert(self.pending.resource_spans.len());
+                    self.pending.resource_spans.push(block);
+                }
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        let (converted, stats) = crate::ingest::otlp::convert_otlp_request_counted_with_grouping(
+            &self.pending,
+            self.grouping_attributes,
+        );
+        self.events.extend(converted);
+        self.stats.merge(&stats);
+        self.pending = OtlpRequest::default();
+        self.blocks.clear();
+        self.pending_spans = 0;
+    }
+}
+
 /// Ingests span events from JSON input with auto-format detection.
 pub struct JsonIngest {
     max_size: usize,
@@ -206,17 +272,22 @@ impl JsonIngest {
     /// streaming memory. Only a document that trips protojson's
     /// omitted-`values` case (empty arrayValue/kvlistValue) is
     /// re-parsed through a normalized Value, so the common case pays
-    /// nothing. `convert_otlp_request_counted` sanitizes each event, same
-    /// code path as the daemon listeners. The Jaeger v3 search hands each
+    /// nothing. The documents convert together (see [`OtlpDocuments`]), and
+    /// `convert_otlp_request_counted` sanitizes each event, same code path
+    /// as the daemon listeners. The Jaeger v3 search hands each
     /// unwrapped `result` document to this same function.
     pub(crate) fn ingest_otlp(
         raw: &[u8],
         grouping_attributes: Option<&[std::sync::Arc<str>]>,
     ) -> Result<(Vec<SpanEvent>, SpanConversionStats), JsonIngestError> {
-        type OtlpRequest =
-            opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-        let mut events = Vec::new();
-        let mut stats = SpanConversionStats::default();
+        let mut documents = OtlpDocuments {
+            pending: OtlpRequest::default(),
+            blocks: std::collections::HashMap::new(),
+            pending_spans: 0,
+            events: Vec::new(),
+            stats: SpanConversionStats::default(),
+            grouping_attributes,
+        };
         let mut parsed_any = false;
         let mut offset = 0;
         while offset < raw.len() {
@@ -232,13 +303,7 @@ impl JsonIngest {
                         return Err(err);
                     }
                     parsed_any = true;
-                    let (converted, request_stats) =
-                        crate::ingest::otlp::convert_otlp_request_counted_with_grouping(
-                            &request,
-                            grouping_attributes,
-                        );
-                    events.extend(converted);
-                    stats.merge(&request_stats);
+                    documents.push(request);
                     offset += stream.byte_offset();
                 }
                 // Empty list (`{"arrayValue":{}}`) and valueless attribute
@@ -257,13 +322,7 @@ impl JsonIngest {
                     let request: OtlpRequest =
                         serde_json::from_value(value).map_err(|_| JsonIngestError::Parse(e))?;
                     parsed_any = true;
-                    let (converted, request_stats) =
-                        crate::ingest::otlp::convert_otlp_request_counted_with_grouping(
-                            &request,
-                            grouping_attributes,
-                        );
-                    events.extend(converted);
-                    stats.merge(&request_stats);
+                    documents.push(request);
                     offset += retry.byte_offset();
                 }
                 // A truncated trailing document is routine on a live or
@@ -281,7 +340,8 @@ impl JsonIngest {
                 Some(Err(e)) => return Err(JsonIngestError::Parse(e)),
             }
         }
-        Ok((events, stats))
+        documents.flush();
+        Ok((documents.events, documents.stats))
     }
 
     /// The native arm of [`Self::ingest_with_stats`].
@@ -936,6 +996,80 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].target, "SELECT 1");
         assert_eq!(events[1].target, "SELECT 2");
+    }
+
+    /// One-span OTLP document: a statement-bearing SQL span under a shared
+    /// parent, emitted by `scope` on `host`.
+    fn twin_document(host: &str, scope: &str, span_id: &str, end_ns: &str) -> String {
+        format!(
+            r#"{{"resourceSpans":[{{"resource":{{"attributes":[{{"key":"service.name","value":{{"stringValue":"svc"}}}},{{"key":"host.name","value":{{"stringValue":"{host}"}}}}]}},"scopeSpans":[{{"scope":{{"name":"{scope}"}},"spans":[{{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"{span_id}","parentSpanId":"aaaaaaaaaaaaaaaa","name":"db","kind":3,"startTimeUnixNano":"1720621921000000000","endTimeUnixNano":"{end_ns}","attributes":[{{"key":"db.query.text","value":{{"stringValue":"SELECT 1"}}}},{{"key":"db.system.name","value":{{"stringValue":"postgresql"}}}}]}}]}}]}}]}}"#
+        )
+    }
+
+    #[test]
+    fn otlp_ndjson_joins_documents_of_one_resource() {
+        // An exporter can write the two layers of one query in two export
+        // batches. Joined, the cross-scope twins count once.
+        let json = format!(
+            "{}\n{}\n",
+            twin_document("pod-a", "pdo", "eee19b7ec3c1b174", "1720621921000007000"),
+            twin_document(
+                "pod-a",
+                "laravel",
+                "eee19b7ec3c1b175",
+                "1720621921000300000"
+            ),
+        );
+        let (events, stats) = JsonIngest::new(1_048_576)
+            .ingest_with_stats(json.as_bytes())
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(stats.unwrap().filtered_merged_db_span, 1);
+    }
+
+    #[test]
+    fn otlp_ndjson_keeps_different_resources_apart() {
+        let json = format!(
+            "{}\n{}\n",
+            twin_document("pod-a", "pdo", "eee19b7ec3c1b174", "1720621921000007000"),
+            twin_document(
+                "pod-b",
+                "laravel",
+                "eee19b7ec3c1b175",
+                "1720621921000300000"
+            ),
+        );
+        let events = JsonIngest::new(1_048_576).ingest(json.as_bytes()).unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn otlp_documents_convert_before_outgrowing_the_span_budget() {
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+        let request = |spans: usize| OtlpRequest {
+            resource_spans: vec![ResourceSpans {
+                scope_spans: vec![ScopeSpans {
+                    spans: vec![Span::default(); spans],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let mut documents = OtlpDocuments {
+            pending: OtlpRequest::default(),
+            blocks: std::collections::HashMap::new(),
+            pending_spans: 0,
+            events: Vec::new(),
+            stats: SpanConversionStats::default(),
+            grouping_attributes: None,
+        };
+        let budget = crate::ingest::otlp::MAX_SPANS_PER_SERVICE;
+        documents.push(request(budget - 1));
+        documents.push(request(1));
+        assert_eq!(documents.stats.received, 0, "still within one budget");
+        documents.push(request(1));
+        assert_eq!(documents.stats.received, budget as u64);
+        assert_eq!(documents.pending_spans, 1);
     }
 
     #[test]

@@ -261,7 +261,7 @@ use super::ANCESTOR_WALK_MAX_DEPTH as CODE_ATTRS_MAX_DEPTH;
 /// Bounds memory and avoids quadratic walks on pathological payloads. Spans
 /// beyond the cap lose parent/scope attribution but are still converted into
 /// events.
-const MAX_SPANS_PER_SERVICE: usize = 100_000;
+pub(crate) const MAX_SPANS_PER_SERVICE: usize = 100_000;
 
 /// Byte length of a valid `OTel` trace id. The proto bounds nothing.
 const TRACE_ID_LEN: usize = 16;
@@ -1151,6 +1151,10 @@ fn suppress_layered_duplicates<'a>(
 /// re-record) is suppressed. The short prepare survives for its execute
 /// sibling to adopt. Same-scope siblings are never collapsed.
 fn suppress_cross_scope_twins(donors: &[StitchDonor<'_>], suppressed: &mut [bool]) {
+    // Twins need two scopes, so single-scope resources (most emitters) skip the grouping.
+    if donors.windows(2).all(|w| w[0].scope == w[1].scope) {
+        return;
+    }
     let mut groups: HashMap<(SpanKey<'_>, &str), Vec<usize>> = HashMap::new();
     for (i, donor) in donors.iter().enumerate() {
         if suppressed[i] || donor.scope.is_empty() || donor.span.parent_span_id.is_empty() {
@@ -1387,7 +1391,8 @@ fn collect_orphan_candidates<'a>(
 /// prepare/execute pair split across collector batches) gets no decision
 /// and still counts `missing_db_statement`. Twins split the same way both
 /// emit: the PHP SDK can export a `QueryWatcher` span one batch after its
-/// `PDO::prepare`, so a long, batch-split trace can keep an extra event.
+/// `PDO::prepare`. Batch file ingest joins the batches first (see
+/// `ingest::json`), so this only reaches the daemon listeners.
 ///
 /// Known limit: pairing is a nearest-start heuristic. Interleaved
 /// same-parent queries can swap params and durations between events, and
