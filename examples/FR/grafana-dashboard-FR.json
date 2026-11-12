@@ -1198,7 +1198,7 @@
     },
     {
       "title": "Débit d'événements traités",
-      "description": "Spans admis dans le pipeline d'analyse par seconde, d'après `perf_sentinel_events_processed_total`, une fois les spans sans I/O filtrés.\n\nÀ comparer au panneau d'admission OTLP : un écart important est normal, la plupart des spans d'une trace ne sont pas des I/O. Une chute à zéro alors que l'admission continue veut dire que le pipeline ne consomme plus.",
+      "description": "Événements I/O des traces analysées par seconde, d'après `perf_sentinel_events_processed_total`, une fois les spans sans I/O filtrés. Une trace est comptée quand elle quitte la fenêtre, 30 à 45 s après son dernier span par défaut.\n\nÀ comparer au panneau d'admission OTLP : un écart important est normal, la plupart des spans d'une trace ne sont pas des I/O, et cette courbe suit l'admission avec ce délai. Une chute à zéro alors que l'admission continue au-delà de ce délai veut dire que le pipeline ne consomme plus.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
