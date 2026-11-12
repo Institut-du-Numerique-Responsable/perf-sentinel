@@ -976,7 +976,6 @@ async fn ingest_event_batch(
         stitch_records,
     } = batch;
     let events = apply_sampling(events, sampling_rate);
-    let event_count = events.len();
     // Normalize OUTSIDE the lock to minimize lock hold time.
     let normalized: Vec<_> = events.into_iter().map(normalize::normalize).collect();
     let now_ms = current_time_ms();
@@ -1066,7 +1065,6 @@ async fn ingest_event_batch(
         }
         metrics.active_traces.set(w.active_traces() as f64);
     }
-    metrics.events_processed_total.inc_by(event_count as f64);
     lru_evicted
 }
 
@@ -1525,6 +1523,7 @@ fn inc_scored(total: &prometheus::Counter, value: f64, parts: [(&prometheus::Cou
 /// `None` when `findings_stdout` is off.
 fn emit_findings_and_update_metrics(
     trace_count: usize,
+    event_count: usize,
     findings: &[detect::Finding],
     green_summary: &GreenSummary,
     metrics: &MetricsState,
@@ -1532,6 +1531,7 @@ fn emit_findings_and_update_metrics(
     mut findings_out: Option<impl std::io::Write>,
 ) {
     metrics.traces_analyzed_total.inc_by(trace_count as f64);
+    metrics.events_processed_total.inc_by(event_count as f64);
     metrics
         .total_io_ops
         .inc_by(green_summary.total_io_ops as f64);
@@ -1831,6 +1831,8 @@ async fn process_traces(
         .into_iter()
         .map(|(trace_id, spans)| Trace { trace_id, spans })
         .collect();
+    // Counted here, not at ingest: the trace-completion stitch drops twins.
+    let events_processed: usize = trace_structs.iter().map(|t| t.spans.len()).sum();
 
     let watch = ctx.detection_ledger.map(DetectionLedger::watch);
     let (mut findings, passes) =
@@ -1901,6 +1903,7 @@ async fn process_traces(
 
     emit_findings_and_update_metrics(
         trace_count,
+        events_processed,
         &findings,
         &green_summary,
         ctx.metrics,
@@ -1909,7 +1912,6 @@ async fn process_traces(
     );
 
     if let Some(archive_tx) = ctx.archive_tx {
-        let events_processed = trace_structs.iter().map(|t| t.spans.len()).sum();
         // Operator + canonical avoidable tiers, archived side by side.
         // Skipped when green scoring produced no carbon: the tiers would
         // carry avoidable ops with zero energy/carbon, and the extra

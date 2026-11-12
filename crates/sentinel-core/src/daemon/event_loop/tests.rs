@@ -754,7 +754,10 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
         ingest_event_batch(first, 1.0, &window, &metrics, &mut service_meter).await,
         []
     );
-    assert!((metrics.events_processed_total.get() - 1.0).abs() < f64::EPSILON);
+    assert!(
+        metrics.events_processed_total.get().abs() < f64::EPSILON,
+        "counted at completion"
+    );
 
     let outer = super::super::IngestBatch {
         stitch_records: Vec::new(),
@@ -773,7 +776,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
         ingest_event_batch(outer, 1.0, &window, &metrics, &mut service_meter).await,
         []
     );
-    assert!((metrics.events_processed_total.get() - 1.0).abs() < f64::EPSILON);
+    assert!(metrics.events_processed_total.get().abs() < f64::EPSILON);
 
     let trace = window
         .lock()
@@ -1010,7 +1013,10 @@ async fn same_batch_root_reconciles_new_trace_before_detection() {
     );
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].source_endpoint, "/api/orders");
-    assert!((metrics.events_processed_total.get() - 3.0).abs() < f64::EPSILON);
+    assert!(
+        metrics.events_processed_total.get().abs() < f64::EPSILON,
+        "counted at completion"
+    );
     assert!((metrics.active_traces.get() - 1.0).abs() < f64::EPSILON);
 }
 
@@ -1773,7 +1779,7 @@ async fn host_counters_sum_the_in_total_host_figures() {
     poisoned.regions[0].co2_gco2 = f64::NAN;
     let before = scored_counters(&metrics);
     let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
-    emit_findings_and_update_metrics(0, &[], &poisoned, &metrics, &mut meter, None::<Vec<u8>>);
+    emit_findings_and_update_metrics(0, 0, &[], &poisoned, &metrics, &mut meter, None::<Vec<u8>>);
     assert_eq!(scored_counters(&metrics), before);
 }
 
@@ -3488,7 +3494,7 @@ async fn graceful_shutdown_ingests_queued_root_context_before_final_drain() {
     assert_eq!(finding.finding_type, detect::FindingType::SlowMessaging);
     assert_eq!(finding.pattern.occurrences, 3);
     assert_eq!(finding.source_endpoint, "/api/shutdown");
-    assert!(metrics.events_processed_total.get().abs() < f64::EPSILON);
+    assert!((metrics.events_processed_total.get() - 3.0).abs() < f64::EPSILON);
     assert!((metrics.traces_analyzed_total.get() - 1.0).abs() < f64::EPSILON);
 }
 
@@ -3924,7 +3930,15 @@ fn emitted_findings_reach_the_writer_one_ndjson_line_each() {
     let summary = GreenSummary::disabled(0);
 
     let mut out = Vec::new();
-    emit_findings_and_update_metrics(1, &findings, &summary, &metrics, &mut meter, Some(&mut out));
+    emit_findings_and_update_metrics(
+        1,
+        1,
+        &findings,
+        &summary,
+        &metrics,
+        &mut meter,
+        Some(&mut out),
+    );
     let lines: Vec<&str> = std::str::from_utf8(&out).expect("utf-8").lines().collect();
     assert_eq!(lines.len(), 2, "one line per finding");
     for (line, finding) in lines.iter().zip(&findings) {
@@ -3936,6 +3950,7 @@ fn emitted_findings_reach_the_writer_one_ndjson_line_each() {
     let metrics = MetricsState::new();
     let mut meter = AnalysisServiceMeter::new(true, true, &metrics);
     emit_findings_and_update_metrics(
+        1,
         1,
         &findings,
         &summary,
@@ -4748,6 +4763,41 @@ async fn laravel_trace_split_over_export_requests_counts_each_query_once() {
             event.event.instrumentation_scopes
         );
     }
+}
+
+#[tokio::test]
+async fn events_processed_counts_the_twins_left_after_the_trace_completion_stitch() {
+    let fixture = "otlp_php_laravel_slow_sql_batches.ndjson";
+    let path = format!(
+        "{}/../../tests/fixtures/{fixture}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let ingested: usize = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{path}: {e}"))
+        .lines()
+        .map(|line| {
+            let request: OtlpRequest =
+                serde_json::from_str(line).expect("one OTLP request per line");
+            crate::ingest::otlp::convert_otlp_request_stitchable(&request, None)
+                .0
+                .len()
+        })
+        .sum();
+    let traces = replay_export_batches(fixture).await;
+    let metrics = MetricsState::new();
+    let carbon = empty_carbon_ctx();
+    let store = findings_store::FindingsStore::new(100);
+    let detect_config = default_detect_config();
+    let cell = fresh_green_cell();
+
+    process_traces(
+        traces,
+        test_ctx(&detect_config, &carbon, &metrics, &store, true, &cell),
+    )
+    .await;
+
+    assert_eq!(ingested, 8, "the requests emit the split twin twice");
+    assert!((metrics.events_processed_total.get() - 7.0).abs() < f64::EPSILON);
 }
 
 #[tokio::test]
