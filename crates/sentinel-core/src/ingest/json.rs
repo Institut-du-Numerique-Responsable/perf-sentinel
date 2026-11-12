@@ -268,14 +268,17 @@ impl JsonIngest {
     /// Deserializes each document (a single pretty-printed request or
     /// the Collector file exporter's NDJSON, one request per line)
     /// straight into the typed `ExportTraceServiceRequest`: that keeps
-    /// strict duplicate-key rejection, positioned parse errors, and
-    /// streaming memory. Only a document that trips protojson's
-    /// omitted-`values` case (empty arrayValue/kvlistValue) is
-    /// re-parsed through a normalized Value, so the common case pays
-    /// nothing. The documents convert together (see [`OtlpDocuments`]), and
+    /// strict duplicate-key rejection and positioned parse errors. Only a
+    /// document that trips a protojson shape the derived Deserialize
+    /// rejects (see [`is_recoverable_attribute_shape`]) is re-parsed
+    /// through a normalized Value. Every line of an `OTel` Java SDK 1.67
+    /// dump is one, and a document that needs no repair pays nothing. The
+    /// documents convert together (see [`OtlpDocuments`]), so the parsed
+    /// requests stay in memory up to one span budget at a time, and
     /// `convert_otlp_request_counted` sanitizes each event, same code path
     /// as the daemon listeners. The Jaeger v3 search hands each
-    /// unwrapped `result` document to this same function.
+    /// unwrapped `result` document to this same function, so a join never
+    /// spans two messages of its stream.
     pub(crate) fn ingest_otlp(
         raw: &[u8],
         grouping_attributes: Option<&[std::sync::Arc<str>]>,
@@ -411,9 +414,8 @@ fn is_recoverable_attribute_shape(e: &serde_json::Error) -> bool {
 fn normalize_otlp_json(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
-            // Scoped to Resource (the object that carries `attributes`).
-            if map.contains_key("attributes") {
-                map.remove("entityRefs");
+            if let Some(serde_json::Value::Object(resource)) = map.get_mut("resource") {
+                resource.remove("entityRefs");
             }
             for key in ["arrayValue", "kvlistValue"] {
                 if let Some(serde_json::Value::Object(inner)) = map.get_mut(key)
@@ -947,6 +949,14 @@ mod tests {
         let events = ingest.ingest(line.as_bytes()).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].service.as_ref(), "svc");
+
+        // protojson also omits an empty `attributes` list.
+        let bare = otlp_request_json("0af7651916cd43dd8448eb211c80319c", "SELECT 1").replace(
+            r#""resource":{"attributes":[{"key":"service.name","value":{"stringValue":"svc"}}]}"#,
+            r#""resource":{"entityRefs":[{"type":"service","idKeys":["service.name"]}]}"#,
+        );
+        assert!(bare.contains("entityRefs") && !bare.contains("service.name\",\"value"));
+        assert_eq!(ingest.ingest(bare.as_bytes()).unwrap().len(), 1);
     }
 
     #[test]
