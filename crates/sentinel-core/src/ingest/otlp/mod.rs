@@ -945,6 +945,8 @@ struct StitchDonor<'a> {
     scope: &'a str,
     /// Canonical `db.system`, `None` when the layer records none.
     db_system: Option<&'a str>,
+    /// The span names its operation `PREPARE`: a parse round trip.
+    is_prepare: bool,
 }
 
 /// Bounded look-back for an unconsumed sibling donor, so batch-prepared
@@ -1014,9 +1016,9 @@ fn classify_resource_spans(
 
 /// One span's role in the stitch pre-pass.
 enum SpanRole<'a> {
-    /// Statement-bearing SQL span: the statement, borrowed for adoption, and
-    /// its canonical `db.system`.
-    Donor(&'a str, Option<&'a str>),
+    /// Statement-bearing SQL span: the statement, borrowed for adoption, its
+    /// canonical `db.system`, and whether it names its operation `PREPARE`.
+    Donor(&'a str, Option<&'a str>, bool),
     /// Statement-less execute/query span. `has_sql_db_system` false means the
     /// engine sits only on a child layer (PHP Doctrine), so it is admitted
     /// only with a sibling donor (checked by the caller).
@@ -1039,7 +1041,11 @@ fn classify_stitch_role<'a>(span: &Span, c: &ClassifiedAttrs<'a>) -> SpanRole<'a
         return SpanRole::Skip;
     }
     if let Some(statement) = resolve_sql_statement(c, db_system) {
-        SpanRole::Donor(statement, db_system)
+        let is_prepare = c
+            .db_operation
+            .or(c.db_operation_name)
+            .is_some_and(|operation| operation.eq_ignore_ascii_case("PREPARE"));
+        SpanRole::Donor(statement, db_system, is_prepare)
     } else if !is_driver_ping(c)
         && !has_http_signal(c)
         && c.rpc_system.is_none()
@@ -1090,11 +1096,12 @@ fn collect_stitch_participants<'a>(
             };
             idx += 1;
             match classify_stitch_role(span, c) {
-                SpanRole::Donor(statement, db_system) => donors.push(StitchDonor {
+                SpanRole::Donor(statement, db_system, is_prepare) => donors.push(StitchDonor {
                     span,
                     statement,
                     scope,
                     db_system,
+                    is_prepare,
                 }),
                 SpanRole::Orphan { has_sql_db_system } => {
                     provisional.push((span, has_sql_db_system, scope));
@@ -1151,6 +1158,44 @@ fn suppress_layered_duplicates<'a>(
         }
     }
     suppressed
+}
+
+/// Rule 1a: a donor that names its operation `PREPARE` is the parse round
+/// trip of a prepared statement, not an execution. When a sibling of its own
+/// scope carries the same statement without that name and starts no earlier
+/// (the Ruby `pg` instrumentation's `EXECUTE` span), the prepare is
+/// suppressed. A prepare with no such sibling stays: a statement-less execute
+/// span may adopt it (rule 3), or it is all the trace has.
+fn suppress_declared_prepares(donors: &[StitchDonor<'_>], suppressed: &mut [bool]) {
+    if !donors.iter().any(|donor| donor.is_prepare) {
+        return;
+    }
+    // Latest start of an executing donor per (parent, statement, scope).
+    let mut executes: HashMap<_, u64> = HashMap::new();
+    for donor in donors.iter().filter(|donor| !donor.is_prepare) {
+        let latest = executes.entry(sibling_group(donor)).or_default();
+        *latest = (*latest).max(donor.span.start_time_unix_nano);
+    }
+    for (i, donor) in donors.iter().enumerate() {
+        if donor.is_prepare
+            && !donor.span.parent_span_id.is_empty()
+            && executes
+                .get(&sibling_group(donor))
+                .is_some_and(|&latest| latest >= donor.span.start_time_unix_nano)
+        {
+            suppressed[i] = true;
+        }
+    }
+}
+
+/// `(parent, statement, scope)` of a donor: the siblings one instrumentation
+/// emits for one statement.
+fn sibling_group<'a>(donor: &StitchDonor<'a>) -> (SpanKey<'a>, &'a str, &'a str) {
+    let parent = (
+        donor.span.trace_id.as_slice(),
+        donor.span.parent_span_id.as_slice(),
+    );
+    (parent, donor.statement, donor.scope)
 }
 
 /// Rule 1b: pair cross-scope sibling twins. Two instrumentation layers that
@@ -1434,9 +1479,11 @@ fn collect_orphan_candidates<'a>(
 /// 1. A donor (statement-bearing span) whose same-trace ancestor is a donor
 ///    with the identical statement is suppressed: layered duplicate.
 ///    Same-scope siblings are never collapsed (a single-layer emitter can
-///    legitimately emit prepare and execute as siblings), and mutual
-///    ancestry (a malformed parent cycle, which has no outermost span)
-///    suppresses neither. Sibling twins from two different scopes (Laravel
+///    legitimately emit prepare and execute as siblings), except a span
+///    that names its operation `PREPARE` beside the execution of the same
+///    statement, see [`suppress_declared_prepares`]. Mutual ancestry (a
+///    malformed parent cycle, which has no outermost span) suppresses
+///    neither. Sibling twins from two different scopes (Laravel
 ///    `QueryWatcher` + PDO) pair off and keep one event each, see
 ///    [`pair_cross_scope_twins`] and [`settle_twins`].
 /// 2. An orphan whose same-trace ancestor is an orphan defers to the
@@ -1475,6 +1522,7 @@ fn compute_stitch_decisions<'a>(
         .map(|(i, d)| (span_key(d.span), i))
         .collect();
     let mut donor_suppressed = suppress_layered_duplicates(&donors, &donor_by_id, span_index);
+    suppress_declared_prepares(&donors, &mut donor_suppressed);
     let twin_keeper = pair_cross_scope_twins(&donors, &donor_suppressed);
     // A keeper stays out of rule 3: an execute sibling adopts the shorter twin.
     for &longest in twin_keeper.iter().flatten() {

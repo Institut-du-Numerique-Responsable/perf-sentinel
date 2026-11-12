@@ -848,11 +848,13 @@ fn ruby_active_record_first_request_fixture_adopts_no_neighbour_statement() {
     // sit beside ten attribute-less Active Record `Payment query` spans, nine
     // of them query-cache hits with no `pg` child. None of those may take a
     // neighbour's statement.
+    // The one real query is prepared on this request: `PREPARE` and `EXECUTE`
+    // siblings carry its statement, and only the execution counts.
     let events = load_fixture("otlp_ruby_active_record_first_request.ndjson");
     assert_eq!(
         events.len(),
-        4,
-        "two introspection statements, then PREPARE and EXECUTE of the one query"
+        3,
+        "two introspection statements and the one executed query"
     );
 
     let report = pipeline::analyze(events, &Config::default());

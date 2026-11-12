@@ -4612,6 +4612,76 @@ fn statement_less_span_ignores_a_donor_of_another_scope() {
     assert_eq!(stats.filtered_merged_db_span, 0);
 }
 
+/// Statement-bearing `pg` span under `[10; 8]` naming its operation, as the
+/// Ruby `pg` instrumentation emits `PREPARE lab` and `EXECUTE lab`.
+fn pg_operation_span(id: u8, operation: &str, start_ns: u64, end_ns: u64) -> Span {
+    let mut span = twin_span(id, "postgresql", start_ns, end_ns);
+    span.name = format!("{operation} lab");
+    span.attributes.push(make_kv("db.operation", operation));
+    span
+}
+
+#[test]
+fn declared_prepare_and_its_execute_sibling_count_once() {
+    // First use of a prepared statement on a connection, then a reuse.
+    let req = make_request(
+        "rails-svc",
+        vec![
+            make_parent_span(&[10; 8], "GET /api/users"),
+            pg_operation_span(1, "PREPARE", 1_000_000, 1_600_000),
+            pg_operation_span(2, "EXECUTE", 3_000_000, 3_800_000),
+            pg_operation_span(3, "EXECUTE", 5_000_000, 5_200_000),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    let durations: Vec<u64> = events.iter().map(|e| e.duration_us).collect();
+    assert_eq!(durations, vec![800, 200], "the two executions");
+    assert_eq!(stats.filtered_merged_db_span, 1);
+}
+
+#[test]
+fn declared_prepare_without_an_execute_donor_still_emits() {
+    let req = make_request(
+        "rails-svc",
+        vec![
+            make_parent_span(&[10; 8], "GET /api/users"),
+            pg_operation_span(1, "PREPARE", 1_000_000, 1_600_000),
+        ],
+    );
+
+    let (events, stats) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(stats.filtered_merged_db_span, 0);
+}
+
+#[test]
+fn declared_prepare_still_gives_its_statement_to_a_statement_less_execute() {
+    let execute = stitch_span(
+        &[2; 8],
+        &[10; 8],
+        vec![make_kv("db.system", "postgresql")],
+        3_000_000,
+        3_800_000,
+    );
+    let req = make_request(
+        "svc",
+        vec![
+            make_parent_span(&[10; 8], "GET /api/users"),
+            pg_operation_span(1, "PREPARE", 1_000_000, 1_600_000),
+            execute,
+        ],
+    );
+
+    let (events, _) = convert_otlp_request_counted(&req);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].duration_us, 800, "the execute span");
+    assert_eq!(events[0].target, "SELECT * FROM users WHERE id = ?");
+}
+
 #[test]
 fn nested_duplicate_statement_collapses_to_outermost() {
     let outer = make_sql_span(
