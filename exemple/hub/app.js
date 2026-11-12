@@ -339,6 +339,9 @@
         recapRowError: {},
         recapBusy: {},
         recapNaming: null,
+        // The row whose assign field is open, and what it held when the Hub refused it.
+        recapAssigning: null,
+        recapAssignDraft: null,
         // What was typed in the name field when the Hub refused it, so a refusal does not eat it.
         recapNameDraft: null,
         recapSeq: 0,
@@ -7683,6 +7686,8 @@
             state.recapRowError = {};
             state.recapNaming = null;
             state.recapNameDraft = null;
+            state.recapAssigning = null;
+            state.recapAssignDraft = null;
             state.recapShowAll = false;
             state.recapMovesOpen = {};
             state.recapMovesFailed = null;
@@ -8644,6 +8649,7 @@
         kids.push(recapFoot(priority, management, route, namesService));
         const naming = management ? null : recapNamingTarget(priority);
         if (naming) kids.push(recapNameEditor(naming));
+        if (!management && state.recapAssigning === priority.signature) kids.push(recapAssignEditor(priority));
         const failure = management ? null : state.recapRowError[priority.signature];
         if (failure) kids.push(el('p', {class: 'recap-alert', role: 'alert', text: failure}));
         return el('li', {class: 'run-card recap-row'}, kids);
@@ -8929,7 +8935,7 @@
             take.addEventListener('click', function () {
                 recapWrite(priority.signature, 'POST', '/api/actions', {signature: priority.signature, take: true});
             });
-            return [take, ack];
+            return [take, recapAssignButton(priority), ack];
         }
         const select = el('select', {
                 class: 'refresh-select',
@@ -8948,8 +8954,118 @@
             });
         });
         const confirmation = PSL.confirmationLabel(action.confirmation);
-        return [recapOwner(action), select,
+        return [recapOwner(action), ...recapOwnerButtons(priority, busy), select,
             confirmation ? recapStateChip(action.confirmation, confirmation) : null, recapWhen(action), ack];
+    }
+
+    /**
+     * Who holds an action, changed in place: taken over from its owner, dropped by them or by
+     * anyone else, or handed to someone. `/api/status` names the caller as the Hub records them.
+     * @param {RecapPriority} priority
+     * @param {boolean} busy
+     */
+    function recapOwnerButtons(priority, busy) {
+        const action = /** @type {RecapAction} */ (priority.action);
+        const signature = /** @type {string} */ (priority.signature);
+        const mine = Boolean(action.owner) && action.owner === (state.status && state.status.identity);
+        const name = PSL.ownerLabel(action.owner, action.owner_display).text;
+        const button = (/** @type {string} */ text, /** @type {string | null} */ label, /** @type {object} */ body) => {
+            const element = el('button', {
+                class: 'recap-link', type: 'button', text: text, 'aria-label': label,
+                disabled: busy ? 'disabled' : null
+            });
+            element.addEventListener('click', function () {
+                recapWrite(signature, 'PATCH', '/api/actions', Object.assign({signature: signature}, body));
+            });
+            return element;
+        };
+        return [
+            mine ? null : action.owner
+                ? button(t('recap.action.take_over'), t('recap.action.take_over.aria', {owner: name}), {take: true})
+                : button(t('recap.action.take'), null, {take: true}),
+            !action.owner ? null : mine
+                ? button(t('recap.action.release'), null, {owner: null})
+                : button(t('recap.action.unassign'), t('recap.action.unassign.aria', {owner: name}), {owner: null}),
+            recapAssignButton(priority)
+        ];
+    }
+
+    /**
+     * @param {RecapPriority} priority
+     */
+    function recapAssignButton(priority) {
+        const button = el('button', {
+            class: 'recap-link', type: 'button', text: t('recap.action.assign'),
+            'aria-label': t('recap.action.assign.aria', {subject: priority.service + ' ' + (priority.endpoint || '')})
+        });
+        button.addEventListener('click', function () {
+            state.recapAssigning = state.recapAssigning === priority.signature ? null : priority.signature;
+            state.recapAssignDraft = null;
+            state.recapNaming = null;
+            renderFocus('.recap-owner-input');
+        });
+        return button;
+    }
+
+    /**
+     * Who to hand the action to, in a line of its own under the row, offering the people the recap
+     * already names. A finding with no action yet gets one to do; an empty name unassigns.
+     * @param {RecapPriority} priority
+     */
+    function recapAssignEditor(priority) {
+        const signature = /** @type {string} */ (priority.signature);
+        const choices = PSL.recapOwnerChoices(state.recap ? state.recap.priorities : [],
+            state.status && state.status.identity);
+        const input = el('input', {
+            class: 'recap-input recap-owner-input',
+            type: 'text',
+            maxlength: '256',
+            list: 'recap-owner-choices',
+            value: state.recapAssignDraft !== null ? state.recapAssignDraft : '',
+            placeholder: t('recap.assign.placeholder'),
+            'aria-label': t('recap.assign.input', {subject: priority.service + ' ' + (priority.endpoint || '')}),
+            autocomplete: 'off',
+            spellcheck: 'false'
+        });
+        const options = el('datalist', {id: 'recap-owner-choices'}, choices.map(function (choice) {
+            return el('option', {value: choice.value, label: choice.label});
+        }));
+        const save = el('button', {class: 'pill-button pill-sm', type: 'submit', text: t('recap.assign.save')});
+        const cancel = el('button', {class: 'recap-link', type: 'button', text: t('recap.name.cancel')});
+        cancel.addEventListener('click', function () {
+            state.recapAssigning = null;
+            state.recapAssignDraft = null;
+            render();
+        });
+        const form = el('form', {class: 'recap-name'}, [input, options, save, cancel]);
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            const owner = input.value.trim() || null;
+            if (!priority.action && owner === null) {
+                cancel.click();
+                return;
+            }
+            // A second Enter while the first is out would POST again and show a 409 over an assignment that landed.
+            if (state.recapBusy[signature]) return;
+            state.recapBusy[signature] = true;
+            recapSend(priority.action ? 'PATCH' : 'POST', '/api/actions', priority.action
+                ? {signature: signature, owner: owner}
+                : {signature: signature, status: 'todo', owner: owner})
+                .then(function (failure) {
+                    delete state.recapBusy[signature];
+                    if (failure) {
+                        state.recapRowError[signature] = failure;
+                        state.recapAssignDraft = owner || '';
+                        render();
+                        return;
+                    }
+                    delete state.recapRowError[signature];
+                    state.recapAssigning = null;
+                    state.recapAssignDraft = null;
+                    loadRecap(true, true);
+                });
+        });
+        return form;
     }
 
     /**
@@ -9081,6 +9197,7 @@
         button.addEventListener('click', function () {
             state.recapNaming = state.recapNaming === target.key ? null : target.key;
             state.recapNameDraft = null;
+            state.recapAssigning = null;
             renderFocus('.recap-name-input');
         });
         return button;
@@ -9617,7 +9734,7 @@
             ].concat(report.deliveries.map(function (/** @type {import('../types').RecapDelivery} */ delivery) {
                 return el('span', {
                     class: 'status-pill', 'data-status': RECAP_DELIVERY_STATUS[delivery.state] || 'queued',
-                    text: PSL.recapDeliveryText(delivery)
+                    text: PSL.recapDeliveryText(delivery, report.generated_at_ms)
                 });
             })))
         ]);
