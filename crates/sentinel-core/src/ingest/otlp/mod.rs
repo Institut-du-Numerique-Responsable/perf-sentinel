@@ -949,6 +949,87 @@ struct StitchDonor<'a> {
     is_prepare: bool,
 }
 
+/// A statement-less execute/query span, before admission.
+struct StitchOrphan<'a> {
+    span: &'a Span,
+    /// False when the engine sits only on a child layer (PHP Doctrine): the
+    /// span is admitted only beside a donor of its own scope.
+    has_sql_db_system: bool,
+    scope: &'a str,
+    /// The span carries a `db.*` operation key, so it belongs to a database
+    /// layer even without a `db.system`.
+    names_db_operation: bool,
+    /// Position in the per-resource attribute cache.
+    index: usize,
+}
+
+/// One SQL span the stitch looked at, kept by the daemon. A trace that
+/// arrives over several export requests is stitched again from these once it
+/// leaves the window, with the rules of [`decide_stitch`].
+#[derive(Debug, Clone)]
+pub(crate) struct StitchRecord {
+    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+    pub(crate) trace_id: Arc<str>,
+    pub(crate) service: Arc<str>,
+    /// Raw ids: the hex text is only built when a trace is stitched again.
+    pub(crate) span_id: [u8; 8],
+    pub(crate) parent_span_id: Option<[u8; 8]>,
+    pub(crate) start_ns: u64,
+    pub(crate) end_ns: u64,
+    /// Instrumentation scope name, empty when the block records none.
+    pub(crate) scope: Arc<str>,
+    /// Position of the span's `ResourceSpans` block in its request: the
+    /// stitch works one block at a time.
+    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+    pub(crate) block: usize,
+    pub(crate) role: StitchRole,
+}
+
+impl StitchRecord {
+    /// The span id as events and the ancestry cache spell it.
+    pub(crate) fn span_id_hex(&self) -> String {
+        bytes_to_hex(&self.span_id)
+    }
+
+    fn parent_span_id_hex(&self) -> Option<String> {
+        self.parent_span_id.as_ref().map(|id| bytes_to_hex(id))
+    }
+}
+
+/// What a [`StitchRecord`] span is to the stitch.
+#[derive(Debug, Clone)]
+pub(crate) enum StitchRole {
+    /// Statement-bearing span. `statement` is kept only when its request
+    /// suppressed the span: an emitted donor's statement is its event's
+    /// target.
+    Donor {
+        statement: Option<Arc<str>>,
+        db_system: Option<Arc<str>>,
+        is_prepare: bool,
+    },
+    /// Statement-less execute/query span. `pending` is the event it becomes
+    /// once a statement is found, target left empty. `None` when its request
+    /// already gave it one: the event is in the window.
+    Orphan {
+        has_sql_db_system: bool,
+        pending: Option<Box<SpanEvent>>,
+    },
+}
+
+/// What stitching the whole trace again decides for one [`StitchRecord`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RecordDecision {
+    /// Nothing to change: a donor emits as itself, an orphan stays as it is.
+    Keep,
+    /// Merged into another span's event.
+    Suppress,
+    /// Statement-less span that takes this statement.
+    Adopt(String),
+}
+
+/// Statement placeholder for the event a statement-less span would become.
+const PENDING_STATEMENT: &str = "?";
+
 /// Bounded look-back for an unconsumed sibling donor, so batch-prepared
 /// statements pair off while crafted payloads stay linear.
 const SIBLING_DONOR_LOOKBACK: usize = 8;
@@ -1022,7 +1103,10 @@ enum SpanRole<'a> {
     /// Statement-less execute/query span. `has_sql_db_system` false means the
     /// engine sits only on a child layer (PHP Doctrine), so it is admitted
     /// only with a sibling donor (checked by the caller).
-    Orphan { has_sql_db_system: bool },
+    Orphan {
+        has_sql_db_system: bool,
+        names_db_operation: bool,
+    },
     /// Not a stitch participant (empty id, non-SQL store, HTTP/RPC, or not an
     /// execute/query span).
     Skip,
@@ -1054,6 +1138,7 @@ fn classify_stitch_role<'a>(span: &Span, c: &ClassifiedAttrs<'a>) -> SpanRole<'a
     {
         SpanRole::Orphan {
             has_sql_db_system: db_system.is_some_and(crate::ingest::is_sql_db_system),
+            names_db_operation: c.db_operation.or(c.db_operation_name).is_some(),
         }
     } else {
         SpanRole::Skip
@@ -1078,23 +1163,19 @@ fn classify_stitch_role<'a>(span: &Span, c: &ClassifiedAttrs<'a>) -> SpanRole<'a
 ///
 /// `classified` is the capped per-resource cache: spans beyond it never
 /// participate and convert without stitching.
-fn collect_stitch_participants<'a>(
+fn collect_stitch_candidates<'a>(
     resource_spans: &'a opentelemetry_proto::tonic::trace::v1::ResourceSpans,
     classified: &[ClassifiedAttrs<'a>],
-) -> (Vec<StitchDonor<'a>>, Vec<&'a Span>) {
+) -> (Vec<StitchDonor<'a>>, Vec<StitchOrphan<'a>>) {
     let mut donors = Vec::new();
-    // (span, has_sql_db_system, scope): orphans without a db.system are kept
-    // only if a sibling donor of their own scope exists (resolved after the
-    // full pass).
-    let mut provisional: Vec<(&'a Span, bool, &'a str)> = Vec::new();
-    let mut idx = 0usize;
+    let mut provisional = Vec::new();
+    let mut index = 0usize;
     'outer: for scope_spans in &resource_spans.scope_spans {
         let scope = scope_spans.scope.as_ref().map_or("", |s| s.name.as_str());
         for span in &scope_spans.spans {
-            let Some(c) = classified.get(idx) else {
+            let Some(c) = classified.get(index) else {
                 break 'outer;
             };
-            idx += 1;
             match classify_stitch_role(span, c) {
                 SpanRole::Donor(statement, db_system, is_prepare) => donors.push(StitchDonor {
                     span,
@@ -1103,14 +1184,30 @@ fn collect_stitch_participants<'a>(
                     db_system,
                     is_prepare,
                 }),
-                SpanRole::Orphan { has_sql_db_system } => {
-                    provisional.push((span, has_sql_db_system, scope));
-                }
+                SpanRole::Orphan {
+                    has_sql_db_system,
+                    names_db_operation,
+                } => provisional.push(StitchOrphan {
+                    span,
+                    has_sql_db_system,
+                    scope,
+                    names_db_operation,
+                    index,
+                }),
                 SpanRole::Skip => {}
             }
+            index += 1;
         }
     }
+    (donors, provisional)
+}
 
+/// The orphans the stitch works on: those with a SQL `db.system`, and those
+/// without one that sit beside a donor of their own scope.
+fn admit_orphans<'a>(
+    donors: &[StitchDonor<'a>],
+    provisional: &[StitchOrphan<'a>],
+) -> Vec<&'a Span> {
     let donor_parents: HashSet<(SpanKey<'a>, &'a str)> = donors
         .iter()
         .filter(|d| !d.span.parent_span_id.is_empty())
@@ -1119,15 +1216,15 @@ fn collect_stitch_participants<'a>(
             (parent, d.scope)
         })
         .collect();
-    let orphans = provisional
-        .into_iter()
-        .filter(|&(span, is_sql, scope)| {
+    provisional
+        .iter()
+        .filter(|orphan| {
+            let span = orphan.span;
             let parent = (span.trace_id.as_slice(), span.parent_span_id.as_slice());
-            is_sql || donor_parents.contains(&(parent, scope))
+            orphan.has_sql_db_system || donor_parents.contains(&(parent, orphan.scope))
         })
-        .map(|(span, _, _)| span)
-        .collect();
-    (donors, orphans)
+        .map(|orphan| orphan.span)
+        .collect()
 }
 
 /// Rule 1: collapse layered duplicate statements onto the outermost span.
@@ -1497,21 +1594,20 @@ fn collect_orphan_candidates<'a>(
 /// prepare/execute pair split across collector batches) gets no decision
 /// and still counts `missing_db_statement`. Twins split the same way both
 /// emit: the PHP SDK can export a `QueryWatcher` span one batch after its
-/// `PDO::prepare`. Batch file ingest joins the batches first (see
-/// `ingest::json`), and the daemon pairs them when the trace leaves the
-/// window (see `correlate::window`).
+/// `PDO::prepare`. Neither split lasts: batch file ingest joins the batches
+/// first (see `ingest::json`), and the daemon runs these rules again over
+/// the whole trace when it leaves the window ([`restitch_records`]).
 ///
 /// Known limit: pairing is a nearest-start heuristic. Interleaved
 /// same-parent queries can swap params and durations between events, and
 /// batch-prepared statements can attribute an execution to the wrong
 /// template. Nothing is dropped or double-emitted. Real emitters are
 /// per-query sequential.
-fn compute_stitch_decisions<'a>(
-    resource_spans: &'a opentelemetry_proto::tonic::trace::v1::ResourceSpans,
+fn decide_stitch<'a>(
+    donors: &[StitchDonor<'a>],
+    orphans: &[&'a Span],
     span_index: &HashMap<SpanKey<'a>, &'a Span>,
-    classified: &[ClassifiedAttrs<'a>],
 ) -> HashMap<SpanKey<'a>, StitchDecision<'a>> {
-    let (donors, orphans) = collect_stitch_participants(resource_spans, classified);
     if donors.is_empty() {
         return HashMap::new();
     }
@@ -1521,9 +1617,9 @@ fn compute_stitch_decisions<'a>(
         .enumerate()
         .map(|(i, d)| (span_key(d.span), i))
         .collect();
-    let mut donor_suppressed = suppress_layered_duplicates(&donors, &donor_by_id, span_index);
-    suppress_declared_prepares(&donors, &mut donor_suppressed);
-    let twin_keeper = pair_cross_scope_twins(&donors, &donor_suppressed);
+    let mut donor_suppressed = suppress_layered_duplicates(donors, &donor_by_id, span_index);
+    suppress_declared_prepares(donors, &mut donor_suppressed);
+    let twin_keeper = pair_cross_scope_twins(donors, &donor_suppressed);
     // A keeper stays out of rule 3: an execute sibling adopts the shorter twin.
     for &longest in twin_keeper.iter().flatten() {
         donor_suppressed[longest] = true;
@@ -1531,7 +1627,7 @@ fn compute_stitch_decisions<'a>(
 
     // Rule 2: deferred spans are only suppressed if the carrier stitches, so
     // the no-donor case stays byte-identical to the output without stitching.
-    let (deferred, carriers) = split_layered_orphans(&orphans, span_index);
+    let (deferred, carriers) = split_layered_orphans(orphans, span_index);
 
     let mut decisions: HashMap<SpanKey<'a>, StitchDecision<'a>> = HashMap::new();
     let mut donor_consumed = vec![false; donors.len()];
@@ -1540,13 +1636,13 @@ fn compute_stitch_decisions<'a>(
     // Rule 3: each carrier adopts the nearest related donor's statement.
     if !carriers.is_empty() {
         let (donors_by_parent, donors_by_ancestor) =
-            bucket_surviving_donors(&donors, &donor_suppressed, span_index);
+            bucket_surviving_donors(donors, &donor_suppressed, span_index);
         let mut candidates: Vec<usize> = Vec::new();
         for orphan in carriers {
             candidates.clear();
             collect_orphan_candidates(
                 orphan,
-                &donors,
+                donors,
                 &donor_by_id,
                 &donor_suppressed,
                 &donor_consumed,
@@ -1556,7 +1652,7 @@ fn compute_stitch_decisions<'a>(
                 &mut candidates,
             );
             if let Some(i) = nearest_donor(
-                &donors,
+                donors,
                 &donor_consumed,
                 &candidates,
                 orphan.start_time_unix_nano,
@@ -1587,7 +1683,7 @@ fn compute_stitch_decisions<'a>(
 /// Per resource: a first pass builds a span index for parent lookup (needed
 /// to resolve `source.endpoint` from parent attributes), a stitch pre-pass
 /// re-joins SQL queries that layered instrumentation split across spans
-/// (see [`compute_stitch_decisions`]), and the final pass converts I/O
+/// (see [`decide_stitch`]), and the final pass converts I/O
 /// spans into events.
 ///
 /// Spans that resolve none of a statement (legacy `db.statement`, stable
@@ -1623,6 +1719,26 @@ pub fn convert_otlp_request_counted_with_grouping(
     request: &ExportTraceServiceRequest,
     grouping_attributes: Option<&[Arc<str>]>,
 ) -> (Vec<SpanEvent>, SpanConversionStats) {
+    convert_request(request, grouping_attributes, None)
+}
+
+/// [`convert_otlp_request_counted_with_grouping`] for the daemon listeners,
+/// with one [`StitchRecord`] per SQL span the stitch looked at.
+#[cfg(feature = "daemon")]
+pub(crate) fn convert_otlp_request_stitchable(
+    request: &ExportTraceServiceRequest,
+    grouping_attributes: Option<&[Arc<str>]>,
+) -> (Vec<SpanEvent>, SpanConversionStats, Vec<StitchRecord>) {
+    let mut records = Vec::new();
+    let (events, stats) = convert_request(request, grouping_attributes, Some(&mut records));
+    (events, stats, records)
+}
+
+fn convert_request(
+    request: &ExportTraceServiceRequest,
+    grouping_attributes: Option<&[Arc<str>]>,
+    mut records: Option<&mut Vec<StitchRecord>>,
+) -> (Vec<SpanEvent>, SpanConversionStats) {
     let mut events = Vec::new();
     let mut stats = SpanConversionStats::default();
 
@@ -1639,7 +1755,7 @@ pub fn convert_otlp_request_counted_with_grouping(
         HashMap::new()
     };
 
-    for resource_spans in &request.resource_spans {
+    for (block, resource_spans) in request.resource_spans.iter().enumerate() {
         let service_name = resource_service_name(resource_spans);
         let anonymous_index = if service_name == crate::event::UNKNOWN_SERVICE {
             let mut index = HashMap::new();
@@ -1660,6 +1776,7 @@ pub fn convert_otlp_request_counted_with_grouping(
                 .unwrap_or(&empty_consumers),
             &mut events,
             &mut stats,
+            records.as_deref_mut().map(|records| (records, block)),
         );
     }
 
@@ -1760,7 +1877,9 @@ fn span_endpoint_update<'a>(
     })
 }
 
-/// Convert one `ResourceSpans` block, appending to `events` and `stats`.
+/// Convert one `ResourceSpans` block, appending to `events` and `stats`, and
+/// to `records` when the caller keeps them.
+#[allow(clippy::too_many_arguments)]
 fn convert_resource_spans<'a>(
     resource_spans: &'a opentelemetry_proto::tonic::trace::v1::ResourceSpans,
     grouping_attributes: Option<&[Arc<str>]>,
@@ -1768,6 +1887,7 @@ fn convert_resource_spans<'a>(
     consumer_index: &HashMap<SpanKey<'a>, Vec<&'a Span>>,
     events: &mut Vec<SpanEvent>,
     stats: &mut SpanConversionStats,
+    records: Option<(&mut Vec<StitchRecord>, usize)>,
 ) {
     // Build the per-Resource Arc<str> once, then Arc::clone into each span.
     // A resource_spans block routinely carries hundreds of spans for the
@@ -1806,7 +1926,36 @@ fn convert_resource_spans<'a>(
 
     let scope_index = build_scope_index(resource_spans);
     let classified = classify_resource_spans(resource_spans);
-    let stitch = compute_stitch_decisions(resource_spans, span_index, &classified);
+    let (donors, provisional) = collect_stitch_candidates(resource_spans, &classified);
+    let orphans = admit_orphans(&donors, &provisional);
+    let stitch = decide_stitch(&donors, &orphans, span_index);
+    if let Some((records, block)) = records {
+        // The event a statement-less span becomes once a statement is found.
+        let pending_event = |orphan: &StitchOrphan<'a>| {
+            let mut event = convert_span(
+                orphan.span,
+                &service_arc,
+                &resource_grouping,
+                resource_cloud_region.as_ref(),
+                span_index,
+                &scope_index,
+                Some(PENDING_STATEMENT),
+                classified.get(orphan.index),
+                consumer_index,
+            )
+            .ok()?;
+            event.target.clear();
+            Some(Box::new(event))
+        };
+        push_stitch_records(
+            records,
+            (&service_arc, block),
+            &donors,
+            &provisional,
+            &stitch,
+            pending_event,
+        );
+    }
 
     let mut span_idx = 0usize;
     for scope_spans in &resource_spans.scope_spans {
@@ -1843,6 +1992,186 @@ fn convert_resource_spans<'a>(
             }
         }
     }
+}
+
+/// Span and parent ids of a span whose identifiers are well formed, `None`
+/// otherwise.
+fn record_ids(span: &Span) -> Option<([u8; 8], Option<[u8; 8]>)> {
+    if span.trace_id.len() != TRACE_ID_LEN {
+        return None;
+    }
+    let span_id = span.span_id.as_slice().try_into().ok()?;
+    let parent = if span.parent_span_id.is_empty() {
+        None
+    } else {
+        Some(span.parent_span_id.as_slice().try_into().ok()?)
+    };
+    Some((span_id, parent))
+}
+
+/// One [`StitchRecord`] per donor and per statement-less span of a database
+/// layer, with what this request decided for it.
+fn push_stitch_records<'a>(
+    records: &mut Vec<StitchRecord>,
+    (service, block): (&Arc<str>, usize),
+    donors: &[StitchDonor<'a>],
+    provisional: &[StitchOrphan<'a>],
+    stitch: &HashMap<SpanKey<'a>, StitchDecision<'a>>,
+    pending_event: impl Fn(&StitchOrphan<'a>) -> Option<Box<SpanEvent>>,
+) {
+    // A block names a few traces, scopes and engines over many spans.
+    let mut trace_ids: HashMap<&'a [u8], Arc<str>> = HashMap::new();
+    let mut scopes: HashMap<&str, Arc<str>> = HashMap::new();
+    let mut engines: HashMap<&str, Arc<str>> = HashMap::new();
+    // A loop repeats one statement: its suppressed donors share the copy.
+    let mut statements: HashMap<&str, Arc<str>> = HashMap::new();
+    let mut record = |span: &'a Span, scope: &'a str, role: StitchRole| {
+        let Some((span_id, parent_span_id)) = record_ids(span) else {
+            return;
+        };
+        let trace_id = trace_ids
+            .entry(span.trace_id.as_slice())
+            .or_insert_with(|| Arc::from(bytes_to_hex(&span.trace_id)));
+        let scope = scopes.entry(scope).or_insert_with(|| {
+            let mut name = scope.to_string();
+            crate::event::truncate_field(&mut name, crate::event::MAX_SCOPE_NAME_LENGTH);
+            Arc::from(name)
+        });
+        records.push(StitchRecord {
+            trace_id: Arc::clone(trace_id),
+            service: Arc::clone(service),
+            span_id,
+            parent_span_id,
+            start_ns: span.start_time_unix_nano,
+            end_ns: span.end_time_unix_nano,
+            scope: Arc::clone(scope),
+            block,
+            role,
+        });
+    };
+    for donor in donors {
+        let suppressed = matches!(
+            stitch.get(&span_key(donor.span)),
+            Some(StitchDecision::Suppress)
+        );
+        let statement = suppressed.then(|| {
+            Arc::clone(statements.entry(donor.statement).or_insert_with(|| {
+                let mut statement = donor.statement.to_string();
+                crate::event::truncate_field(&mut statement, crate::event::MAX_TARGET_LENGTH);
+                Arc::from(statement)
+            }))
+        });
+        let db_system = donor
+            .db_system
+            .map(|engine| Arc::clone(engines.entry(engine).or_insert_with(|| Arc::from(engine))));
+        let role = StitchRole::Donor {
+            statement,
+            db_system,
+            is_prepare: donor.is_prepare,
+        };
+        record(donor.span, donor.scope, role);
+    }
+    for orphan in provisional {
+        // An attribute-less span named like a query (Active Record) belongs
+        // to no database layer: no later request can give it a statement.
+        if !orphan.has_sql_db_system && !orphan.names_db_operation {
+            continue;
+        }
+        let decided = stitch.contains_key(&span_key(orphan.span));
+        let role = StitchRole::Orphan {
+            has_sql_db_system: orphan.has_sql_db_system,
+            pending: if decided { None } else { pending_event(orphan) },
+        };
+        record(orphan.span, orphan.scope, role);
+    }
+}
+
+/// Stitch one service's records of one trace as [`decide_stitch`] would have
+/// stitched a single request holding all its spans.
+///
+/// `statements[i]` is the statement of donor record `i`, `None` for a donor
+/// that has lost it (its event left the window) and for an orphan. `links`
+/// are the parent links of the trace's other spans, for the ancestor walks.
+/// Returns one decision per record.
+pub(crate) fn restitch_records(
+    trace_id: &str,
+    records: &[&StitchRecord],
+    statements: &[Option<&str>],
+    links: &[(&str, Option<&str>)],
+) -> Vec<RecordDecision> {
+    // The rules only compare and hash ids, so the hex text stands for the bytes.
+    let span = |span_id: &str, parent: Option<&str>, start_ns: u64, end_ns: u64| Span {
+        trace_id: trace_id.as_bytes().to_vec(),
+        span_id: span_id.as_bytes().to_vec(),
+        parent_span_id: parent.map(|p| p.as_bytes().to_vec()).unwrap_or_default(),
+        start_time_unix_nano: start_ns,
+        end_time_unix_nano: end_ns,
+        ..Default::default()
+    };
+    let record_spans: Vec<Span> = records
+        .iter()
+        .map(|r| {
+            span(
+                &r.span_id_hex(),
+                r.parent_span_id_hex().as_deref(),
+                r.start_ns,
+                r.end_ns,
+            )
+        })
+        .collect();
+    let link_spans: Vec<Span> = links
+        .iter()
+        .map(|&(span_id, parent)| span(span_id, parent, 0, 0))
+        .collect();
+    let mut span_index: HashMap<SpanKey<'_>, &Span> =
+        link_spans.iter().map(|s| (span_key(s), s)).collect();
+    span_index.extend(record_spans.iter().map(|s| (span_key(s), s)));
+
+    let mut donors = Vec::new();
+    let mut provisional = Vec::new();
+    for (index, (record, span)) in records.iter().zip(&record_spans).enumerate() {
+        match (&record.role, statements.get(index).copied().flatten()) {
+            (
+                StitchRole::Donor {
+                    db_system,
+                    is_prepare,
+                    ..
+                },
+                Some(statement),
+            ) => donors.push(StitchDonor {
+                span,
+                statement,
+                scope: &record.scope,
+                db_system: db_system.as_deref(),
+                is_prepare: *is_prepare,
+            }),
+            (
+                StitchRole::Orphan {
+                    has_sql_db_system, ..
+                },
+                _,
+            ) => provisional.push(StitchOrphan {
+                span,
+                has_sql_db_system: *has_sql_db_system,
+                scope: &record.scope,
+                names_db_operation: true,
+                index,
+            }),
+            (StitchRole::Donor { .. }, None) => {}
+        }
+    }
+    let orphans = admit_orphans(&donors, &provisional);
+    let stitch = decide_stitch(&donors, &orphans, &span_index);
+    record_spans
+        .iter()
+        .map(|span| match stitch.get(&span_key(span)) {
+            Some(StitchDecision::Suppress) => RecordDecision::Suppress,
+            Some(StitchDecision::Adopt(statement)) => {
+                RecordDecision::Adopt((*statement).to_string())
+            }
+            None => RecordDecision::Keep,
+        })
+        .collect()
 }
 
 /// A connection-validation ping: the statement key is present and exactly

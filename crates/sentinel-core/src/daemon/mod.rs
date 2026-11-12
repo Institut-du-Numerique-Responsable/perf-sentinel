@@ -72,10 +72,12 @@ pub(crate) struct SourceEndpointUpdate {
 
 /// One bounded daemon ingest message. JSON batches carry only `events`.
 /// OTLP can additionally carry endpoint and parent context from spans that do
-/// not themselves normalize into I/O events.
+/// not themselves normalize into I/O events, and the SQL spans its stitch
+/// looked at.
 pub(crate) struct IngestBatch {
     pub(crate) events: Vec<SpanEvent>,
     pub(crate) source_endpoint_updates: Vec<SourceEndpointUpdate>,
+    pub(crate) stitch_records: Vec<crate::ingest::otlp::StitchRecord>,
 }
 
 impl From<Vec<SpanEvent>> for IngestBatch {
@@ -83,6 +85,7 @@ impl From<Vec<SpanEvent>> for IngestBatch {
         Self {
             events,
             source_endpoint_updates: Vec::new(),
+            stitch_records: Vec::new(),
         }
     }
 }

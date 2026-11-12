@@ -973,6 +973,7 @@ async fn ingest_event_batch(
     let super::IngestBatch {
         events,
         source_endpoint_updates,
+        stitch_records,
     } = batch;
     let events = apply_sampling(events, sampling_rate);
     let event_count = events.len();
@@ -1051,10 +1052,38 @@ async fn ingest_event_batch(
                 lru_evicted.push(evicted);
             }
         }
+        // After the events, so each trace already has its buffer.
+        for (trace_id, records) in group_stitch_records(stitch_records, sampling_rate) {
+            if let Some(evicted) = w.retain_stitch_records(&trace_id, records, now_ms) {
+                lru_evicted.push(evicted);
+            }
+        }
         metrics.active_traces.set(w.active_traces() as f64);
     }
     metrics.events_processed_total.inc_by(event_count as f64);
     lru_evicted
+}
+
+/// A batch's sampled stitch records per trace, traces in order of first
+/// appearance and records in arrival order.
+fn group_stitch_records(
+    records: Vec<crate::ingest::otlp::StitchRecord>,
+    sampling_rate: f64,
+) -> Vec<(Arc<str>, Vec<crate::ingest::otlp::StitchRecord>)> {
+    let mut slots: HashMap<Arc<str>, usize> = HashMap::new();
+    let mut groups: Vec<(Arc<str>, Vec<crate::ingest::otlp::StitchRecord>)> = Vec::new();
+    for record in records
+        .into_iter()
+        .filter(|record| should_sample(&record.trace_id, sampling_rate))
+    {
+        if let Some(&slot) = slots.get(&record.trace_id) {
+            groups[slot].1.push(record);
+        } else {
+            slots.insert(Arc::clone(&record.trace_id), groups.len());
+            groups.push((Arc::clone(&record.trace_id), vec![record]));
+        }
+    }
+    groups
 }
 
 /// Pop TTL-expired traces under the lock and refresh the active gauge.

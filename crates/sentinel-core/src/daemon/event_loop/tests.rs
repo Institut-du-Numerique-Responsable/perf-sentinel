@@ -568,6 +568,7 @@ async fn context_only_batch_repairs_source_without_io_metric_inflation() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -617,6 +618,7 @@ async fn consumer_context_batch_names_an_unknown_event() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -655,6 +657,7 @@ async fn late_outer_server_replaces_known_nested_route_within_service() {
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
 
     let first = super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: vec![nested_sql.event],
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
             scope: None,
@@ -683,6 +686,7 @@ async fn late_outer_server_replaces_known_nested_route_within_service() {
     );
 
     let outer = super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
             scope: None,
@@ -723,6 +727,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
 
     let first = super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: vec![nested_sql.event],
         source_endpoint_updates: vec![
             super::super::SourceEndpointUpdate {
@@ -752,6 +757,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
     assert!((metrics.events_processed_total.get() - 1.0).abs() < f64::EPSILON);
 
     let outer = super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
             scope: None,
@@ -795,6 +801,7 @@ async fn late_caller_root_does_not_cross_the_service_boundary() {
     assert_eq!(
         ingest_event_batch(
             super::super::IngestBatch {
+                stitch_records: Vec::new(),
                 events: vec![callee_sql.event],
                 source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                     scope: None,
@@ -817,6 +824,7 @@ async fn late_caller_root_does_not_cross_the_service_boundary() {
     assert_eq!(
         ingest_event_batch(
             super::super::IngestBatch {
+                stitch_records: Vec::new(),
                 events: Vec::new(),
                 source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                     scope: None,
@@ -865,6 +873,7 @@ async fn zero_sampling_drops_root_context_without_evicting_a_kept_trace() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -910,6 +919,7 @@ async fn partial_sampling_keeps_only_matching_root_context() {
     })));
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
     let root_batch = |trace_id: &str, endpoint: &str| super::super::IngestBatch {
+        stitch_records: Vec::new(),
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
             scope: None,
@@ -965,6 +975,7 @@ async fn same_batch_root_reconciles_new_trace_before_detection() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -1016,6 +1027,7 @@ async fn same_batch_root_reconciles_existing_and_new_events() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: vec![event],
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -1064,6 +1076,7 @@ async fn same_batch_root_reconciles_new_trace_evicted_during_ingest() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -1112,6 +1125,7 @@ async fn same_batch_reconciliation_stays_within_the_bounded_work_budget() {
     let started = std::time::Instant::now();
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -1179,6 +1193,7 @@ async fn oversized_root_group_is_reconciled_once_per_batch() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events,
             source_endpoint_updates,
         },
@@ -1207,6 +1222,7 @@ async fn unresolved_io_only_batches_stay_within_the_bounded_work_budget() {
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
     ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -1242,6 +1258,7 @@ async fn unresolved_io_only_batches_stay_within_the_bounded_work_budget() {
         assert_eq!(
             ingest_event_batch(
                 super::super::IngestBatch {
+                    stitch_records: Vec::new(),
                     events,
                     source_endpoint_updates: Vec::new(),
                 },
@@ -1294,6 +1311,7 @@ async fn source_update_precedes_lru_eviction_in_the_same_batch() {
 
     let evicted = ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: vec![trace_b],
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
                 scope: None,
@@ -3984,6 +4002,7 @@ async fn ingest_event_batch_labels_io_ops_with_the_spans_grouping() {
 
     ingest_event_batch(
         super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: vec![event],
             source_endpoint_updates: vec![],
         },
@@ -4095,6 +4114,7 @@ async fn event_loop_honours_per_grouping_labels_off_on_ingest() {
     let (tx, mut rx) = mpsc::channel::<super::super::IngestBatch>(1);
     let shutdown_fut = async move {
         tx.send(super::super::IngestBatch {
+            stitch_records: Vec::new(),
             events: vec![event],
             source_endpoint_updates: vec![],
         })
@@ -4213,26 +4233,25 @@ fn histogram_pair_cap_keys_on_the_folded_service() {
     assert_eq!(meter.hist_pairs.len, 1);
 }
 
-/// Replay an OTLP JSON dump as the listeners receive it, one export request
-/// per line, and drain the window.
-async fn replay_export_batches(fixture: &str) -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
-    let path = format!(
-        "{}/../../tests/fixtures/{fixture}",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+type OtlpRequest = opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+
+/// Send export requests through the daemon ingest path, one batch each, and
+/// drain the window.
+async fn replay_requests(
+    requests: &[OtlpRequest],
+) -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
     let window = test_window();
     let metrics = MetricsState::new();
     let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
-    for line in raw.lines() {
-        let request: opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest =
-            serde_json::from_str(line).expect("one OTLP request per line");
-        let source_endpoint_updates = crate::ingest::otlp::source_endpoint_updates(&request);
-        let (events, _) = crate::ingest::otlp::convert_otlp_request_counted(&request);
+    for request in requests {
+        let source_endpoint_updates = crate::ingest::otlp::source_endpoint_updates(request);
+        let (events, _, stitch_records) =
+            crate::ingest::otlp::convert_otlp_request_stitchable(request, None);
         ingest_event_batch(
             super::super::IngestBatch {
                 events,
                 source_endpoint_updates,
+                stitch_records,
             },
             1.0,
             &window,
@@ -4242,6 +4261,186 @@ async fn replay_export_batches(fixture: &str) -> Vec<(String, Vec<normalize::Nor
         .await;
     }
     window.lock().await.drain_all()
+}
+
+/// Replay an OTLP JSON dump as the listeners receive it, one export request
+/// per line, and drain the window.
+async fn replay_export_batches(fixture: &str) -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
+    let path = format!(
+        "{}/../../tests/fixtures/{fixture}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let requests: Vec<OtlpRequest> = raw
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("one OTLP request per line"))
+        .collect();
+    replay_requests(&requests).await
+}
+
+/// A postgres span of trace `[9; 16]` under span `parent`, 1 ms after
+/// `start_ms`.
+fn otlp_sql_span(
+    span_id: u8,
+    parent: u8,
+    name: &str,
+    statement: Option<&str>,
+    start_ms: u64,
+    duration_ms: u64,
+) -> opentelemetry_proto::tonic::trace::v1::Span {
+    use opentelemetry_proto::tonic::trace::v1::{Span, span::SpanKind};
+
+    let start = 1_720_621_921_000_000_000 + start_ms * 1_000_000;
+    let mut attributes = vec![otlp_kv("db.system", "postgresql")];
+    if let Some(statement) = statement {
+        attributes.push(otlp_kv("db.statement", statement));
+    }
+    Span {
+        trace_id: vec![9; 16],
+        span_id: vec![span_id; 8],
+        parent_span_id: vec![parent; 8],
+        name: name.to_string(),
+        kind: SpanKind::Client as i32,
+        start_time_unix_nano: start,
+        end_time_unix_nano: start + duration_ms * 1_000_000,
+        attributes,
+        ..Span::default()
+    }
+}
+
+/// Replay `requests` (span lists of one service) one export request each,
+/// and check the window ends with the events a single request holding every
+/// span converts to. Returns those events as `(span id, duration µs)`.
+async fn assert_split_matches_one_request(
+    requests: Vec<Vec<opentelemetry_proto::tonic::trace::v1::Span>>,
+) -> Vec<(String, u64)> {
+    let whole = otlp_request("orders-svc", requests.concat());
+    let mut expected: Vec<(String, u64, String)> =
+        crate::ingest::otlp::convert_otlp_request_counted(&whole)
+            .0
+            .into_iter()
+            .map(|event| (event.span_id, event.duration_us, event.target))
+            .collect();
+    expected.sort();
+    let split: Vec<OtlpRequest> = requests
+        .into_iter()
+        .map(|spans| otlp_request("orders-svc", spans))
+        .collect();
+    let mut settled: Vec<(String, u64, String)> = replay_requests(&split)
+        .await
+        .into_iter()
+        .flat_map(|(_, events)| events)
+        .map(|event| {
+            let event = event.event;
+            (event.span_id, event.duration_us, event.target)
+        })
+        .collect();
+    settled.sort();
+    assert_eq!(settled, expected, "same events as one request");
+    settled
+        .into_iter()
+        .map(|(span_id, duration_us, _)| (span_id, duration_us))
+        .collect()
+}
+
+const STATEMENT: &str = "SELECT * FROM orders WHERE id = ?";
+
+#[tokio::test]
+async fn execute_span_exported_after_its_prepare_keeps_the_query_duration() {
+    // The prepare span ends at once, the execute span with the query: an
+    // exporter flushes them in two requests.
+    let events = assert_split_matches_one_request(vec![
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0),
+        ],
+        vec![otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600)],
+    ])
+    .await;
+
+    assert_eq!(events, vec![("0303030303030303".to_string(), 600_000)]);
+}
+
+#[tokio::test]
+async fn declared_prepare_and_execute_in_two_requests_count_once() {
+    let operation = |mut span: opentelemetry_proto::tonic::trace::v1::Span, name: &str| {
+        span.attributes.push(otlp_kv("db.operation", name));
+        span
+    };
+    let events = assert_split_matches_one_request(vec![
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            operation(
+                otlp_sql_span(2, 1, "PREPARE lab", Some(STATEMENT), 1, 1),
+                "PREPARE",
+            ),
+        ],
+        vec![operation(
+            otlp_sql_span(3, 1, "EXECUTE lab", Some(STATEMENT), 3, 400),
+            "EXECUTE",
+        )],
+    ])
+    .await;
+
+    assert_eq!(events, vec![("0303030303030303".to_string(), 400_000)]);
+}
+
+#[tokio::test]
+async fn outer_span_exported_after_its_inner_duplicates_wins_as_in_one_request() {
+    // A wrapper span repeats the statement of the two queries it retries.
+    let events = assert_split_matches_one_request(vec![
+        vec![
+            otlp_sql_span(3, 2, "query", Some(STATEMENT), 2, 100),
+            otlp_sql_span(4, 2, "query", Some(STATEMENT), 200, 100),
+        ],
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            otlp_sql_span(2, 1, "retrying query", Some(STATEMENT), 1, 350),
+        ],
+    ])
+    .await;
+
+    assert_eq!(events, vec![("0202020202020202".to_string(), 350_000)]);
+}
+
+#[tokio::test]
+async fn two_blocks_of_one_request_are_stitched_as_one() {
+    // A collector can cut one resource into two `ResourceSpans` blocks of
+    // the same request. Conversion stitches a block at a time.
+    let mut request = otlp_request(
+        "orders-svc",
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0),
+        ],
+    );
+    let second = otlp_request(
+        "orders-svc",
+        vec![otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600)],
+    );
+    request.resource_spans.extend(second.resource_spans);
+
+    let traces = replay_requests(&[request]).await;
+
+    let events = &traces[0].1;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event.span_id, "0303030303030303");
+    assert_eq!(events[0].event.duration_us, 600_000);
+    assert_eq!(events[0].event.target, STATEMENT);
+    assert_eq!(events[0].event.source.endpoint, "/api/orders");
+}
+
+#[tokio::test]
+async fn trace_from_one_request_is_not_stitched_again() {
+    let events = assert_split_matches_one_request(vec![vec![
+        otlp_server_root(1, "/api/orders"),
+        otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0),
+        otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600),
+        otlp_sql_span(4, 1, "query", Some("SELECT 1"), 700, 5),
+    ]])
+    .await;
+
+    assert_eq!(events.len(), 2);
 }
 
 #[tokio::test]

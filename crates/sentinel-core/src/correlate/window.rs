@@ -10,6 +10,7 @@ use std::sync::Arc;
 use lru::LruCache;
 
 use crate::ingest::ANCESTOR_WALK_MAX_DEPTH;
+use crate::ingest::otlp::{RecordDecision, StitchRecord, StitchRole, restitch_records};
 use crate::normalize::NormalizedEvent;
 
 /// Configuration for the trace window.
@@ -87,6 +88,15 @@ struct TraceBuffer {
     resolved_ancestry_cap: usize,
     needs_reconciliation: bool,
     source_endpoint_generation: u64,
+    /// The SQL spans conversion looked at, in arrival order, for
+    /// [`restitch_trace`].
+    stitch_records: Vec<StitchRecord>,
+    /// `ResourceSpans` blocks, over all export requests, that brought
+    /// `stitch_records`. A trace stitched from one block is already whole.
+    stitch_batches: u32,
+    /// Records were dropped at the per-trace cap: stitching again would
+    /// decide on a partial view.
+    stitch_overflow: bool,
     /// Absolute timestamp (ms since epoch) of the last event pushed to this trace.
     /// Used for TTL eviction: the LRU cache handles relative access ordering.
     last_seen_ms: u64,
@@ -283,6 +293,38 @@ impl TraceWindow {
         evicted.and_then(finish_trace_buffer)
     }
 
+    /// Keep the SQL spans one export request's conversion looked at, so the
+    /// trace is stitched again once it leaves the window if other requests
+    /// bring more. Uses `peek_mut` like the endpoint context: it neither
+    /// extends the trace TTL nor promotes it.
+    #[cfg(feature = "daemon")]
+    pub(crate) fn retain_stitch_records(
+        &mut self,
+        trace_id: &str,
+        records: Vec<StitchRecord>,
+        now_ms: u64,
+    ) -> Option<(String, Vec<NormalizedEvent>)> {
+        if records.is_empty() {
+            return None;
+        }
+        let cap = self.config.max_events_per_trace;
+        if let Some(buffer) = self.traces.peek_mut(trace_id) {
+            keep_stitch_records(buffer, records, cap);
+            return None;
+        }
+        let mut buffer = new_trace_buffer(now_ms, cap);
+        keep_stitch_records(&mut buffer, records, cap);
+        let evicted = self.traces.push(trace_id.to_string(), buffer);
+        #[cfg(test)]
+        if evicted
+            .as_ref()
+            .is_some_and(|(_, buffer)| buffer.needs_reconciliation)
+        {
+            self.reconciliation_passes += 1;
+        }
+        evicted.and_then(finish_trace_buffer)
+    }
+
     /// Fill unresolved source endpoints below retained entry spans in one trace.
     ///
     /// Uses `peek_mut` so a context-only update neither extends the trace TTL
@@ -403,6 +445,14 @@ impl TraceWindow {
     pub fn peek_clone(&self, trace_id: &str) -> Option<Vec<NormalizedEvent>> {
         self.traces.peek(trace_id).map(|buf| {
             let mut events: Vec<_> = buf.events.iter().cloned().collect();
+            if buf.stitch_batches > 1 && !buf.stitch_overflow {
+                restitch_trace(
+                    trace_id,
+                    &mut events,
+                    &buf.stitch_records,
+                    buf.resolved_ancestry.as_ref(),
+                );
+            }
             reconcile_cloned_events(
                 &mut events,
                 SourceContext {
@@ -414,8 +464,7 @@ impl TraceWindow {
                 buf.resolved_ancestry.as_ref(),
                 buf.resolved_ancestry_cap,
             );
-            settle_late_ancestors(&mut events, buf.resolved_ancestry.as_ref());
-            collapse_split_twins(&mut events);
+            fill_ancestor_scopes(&mut events, buf.resolved_ancestry.as_ref());
             events
         })
     }
@@ -434,6 +483,9 @@ fn new_trace_buffer(now_ms: u64, per_trace_cap: usize) -> TraceBuffer {
         resolved_ancestry_cap: per_trace_cap,
         needs_reconciliation: false,
         source_endpoint_generation: 0,
+        stitch_records: Vec::new(),
+        stitch_batches: 0,
+        stitch_overflow: false,
         last_seen_ms: now_ms,
     }
 }
@@ -992,6 +1044,16 @@ fn peek_parent_endpoint(
 fn finish_trace_buffer(
     (trace_id, mut buffer): (String, TraceBuffer),
 ) -> Option<(String, Vec<NormalizedEvent>)> {
+    if buffer.stitch_batches > 1 && !buffer.stitch_overflow {
+        let mut events = Vec::from(std::mem::take(&mut buffer.events));
+        buffer.needs_reconciliation |= restitch_trace(
+            &trace_id,
+            &mut events,
+            &buffer.stitch_records,
+            buffer.resolved_ancestry.as_ref(),
+        );
+        buffer.events = VecDeque::from(events);
+    }
     if buffer.needs_reconciliation {
         reconcile_trace_buffer(&mut buffer);
     }
@@ -1009,222 +1071,159 @@ fn finish_trace_buffer(
             buffer.resolved_ancestry_cap,
         );
     }
-    settle_late_ancestors(&mut events, buffer.resolved_ancestry.as_ref());
-    collapse_split_twins(&mut events);
+    fill_ancestor_scopes(&mut events, buffer.resolved_ancestry.as_ref());
     (!events.is_empty()).then_some((trace_id, events))
 }
 
-/// What one event learns from its retained ancestors once the trace is whole.
-struct LateAncestry {
-    /// Ancestor scopes the event does not carry yet, nearest first.
-    scopes: Vec<Arc<str>>,
-    /// SQL ancestor events carrying the event's own statement: the outer
-    /// layers of one query.
-    duplicate_ancestors: Vec<usize>,
+/// Append one export request's records under the per-trace cap.
+#[cfg(feature = "daemon")]
+fn keep_stitch_records(buffer: &mut TraceBuffer, records: Vec<StitchRecord>, cap: usize) {
+    let mut blocks: Vec<usize> = records.iter().map(|record| record.block).collect();
+    blocks.sort_unstable();
+    blocks.dedup();
+    let blocks = u32::try_from(blocks.len()).unwrap_or(u32::MAX);
+    buffer.stitch_batches = buffer.stitch_batches.saturating_add(blocks);
+    let room = cap.saturating_sub(buffer.stitch_records.len());
+    buffer.stitch_overflow |= records.len() > room;
+    buffer.stitch_records.extend(records.into_iter().take(room));
 }
 
-/// `(service, span id)` of every SQL event to its index and statement.
-type SqlEventIndex<'a> = HashMap<(&'a str, &'a str), (usize, &'a str)>;
-
-/// Walk one event's retained ancestors, as OTLP conversion does within one
-/// request. A parent cycle that leads back to the event names no duplicate.
-fn late_ancestry(
-    event: &NormalizedEvent,
-    sql_events: &SqlEventIndex<'_>,
-    ancestry: &LruCache<(Arc<str>, String), AncestryEntry>,
-) -> LateAncestry {
-    let is_sql = event.event.event_type == crate::event::EventType::Sql;
-    let mut found = LateAncestry {
-        scopes: Vec::new(),
-        duplicate_ancestors: Vec::new(),
-    };
-    let mut ancestor = event.event.parent_span_id.clone();
-    for _ in 0..ANCESTOR_WALK_MAX_DEPTH {
-        let Some(span_id) = ancestor.take() else {
-            break;
-        };
-        if span_id == event.event.span_id {
-            found.duplicate_ancestors.clear();
-            break;
-        }
-        if let Some(&(index, target)) =
-            sql_events.get(&(event.event.service.as_ref(), span_id.as_str()))
-            && is_sql
-            && target == event.event.target
-        {
-            found.duplicate_ancestors.push(index);
-        }
-        let Some(entry) = ancestry.peek(&(Arc::clone(&event.event.service), span_id)) else {
-            break;
-        };
-        if let Some(scope) = &entry.scope
-            && !event.event.instrumentation_scopes.contains(scope)
-            && !found.scopes.contains(scope)
-        {
-            found.scopes.push(Arc::clone(scope));
-        }
-        ancestor.clone_from(&entry.parent_span_id);
-    }
-    found
-}
-
-/// Give each event what an ancestor exported in a later request brings (a
-/// wrapping span ends after its children). Its scopes are appended, nearest
-/// first. A SQL ancestor event with the event's own statement is the outer
-/// layer of the same query (rule 1 of the conversion stitch): it is dropped
-/// and the innermost event, which now carries every layer's scope, stays.
-/// That event also takes the outer layer's duration when it is the only one
-/// left below it: the outer span timed the whole query, and the inner event
-/// can be a ~0 ms prepare span whose execute half converted without it.
-fn settle_late_ancestors(
-    events: &mut Vec<NormalizedEvent>,
+/// Append to each event the scopes of its retained ancestors, nearest first,
+/// as OTLP conversion does within one request. An ancestor exported in a
+/// later request (a framework root ends after its children) is only known
+/// here.
+fn fill_ancestor_scopes(
+    events: &mut [NormalizedEvent],
     ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
 ) {
     let Some(ancestry) = ancestry else {
         return;
     };
-    let sql_events: SqlEventIndex<'_> = events
+    for event in events {
+        let mut ancestor = event.event.parent_span_id.clone();
+        for _ in 0..ANCESTOR_WALK_MAX_DEPTH {
+            let Some(span_id) = ancestor.take() else {
+                break;
+            };
+            let Some(entry) = ancestry.peek(&(Arc::clone(&event.event.service), span_id)) else {
+                break;
+            };
+            let scopes = &mut event.event.instrumentation_scopes;
+            if let Some(scope) = &entry.scope
+                && scopes.len() < crate::event::MAX_INSTRUMENTATION_SCOPES
+                && !scopes.contains(scope)
+            {
+                scopes.push(Arc::clone(scope));
+            }
+            ancestor.clone_from(&entry.parent_span_id);
+        }
+    }
+}
+
+/// Stitch a trace again once its SQL spans arrived over several export
+/// requests, with the conversion's own rules over every span it looked at
+/// ([`restitch_records`]). Each request already merged what it could see, so
+/// this only adds what crossing requests hid: a donor that turns out to be
+/// another span's duplicate loses its event, and a statement-less span whose
+/// statement sat in another request becomes an event. Returns whether
+/// `events` changed.
+fn restitch_trace(
+    trace_id: &str,
+    events: &mut Vec<NormalizedEvent>,
+    records: &[StitchRecord],
+    ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
+) -> bool {
+    let mut services: Vec<&Arc<str>> = Vec::new();
+    for record in records {
+        if !services.contains(&&record.service) {
+            services.push(&record.service);
+        }
+    }
+    let mut dropped = vec![false; events.len()];
+    let mut adopted = Vec::new();
+    for service in services {
+        restitch_service(
+            trace_id,
+            service,
+            events,
+            records,
+            ancestry,
+            &mut dropped,
+            &mut adopted,
+        );
+    }
+    let changed = !adopted.is_empty() || dropped.contains(&true);
+    let mut kept = dropped.iter().map(|&dropped| !dropped);
+    events.retain(|_| kept.next().unwrap_or(true));
+    events.extend(adopted);
+    changed
+}
+
+/// [`restitch_trace`] for the records of one service: mark the events to
+/// drop and build the events of statement-less spans that found a statement.
+fn restitch_service(
+    trace_id: &str,
+    service: &Arc<str>,
+    events: &[NormalizedEvent],
+    records: &[StitchRecord],
+    ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
+    dropped: &mut [bool],
+    adopted: &mut Vec<NormalizedEvent>,
+) {
+    let records: Vec<&StitchRecord> = records
+        .iter()
+        .filter(|record| &record.service == service)
+        .collect();
+    let event_of: HashMap<&str, usize> = events
         .iter()
         .enumerate()
-        .filter(|(_, event)| event.event.event_type == crate::event::EventType::Sql)
-        .map(|(index, event)| {
-            let key = (event.event.service.as_ref(), event.event.span_id.as_str());
-            (key, (index, event.event.target.as_str()))
+        .filter(|(_, event)| &event.event.service == service)
+        .map(|(index, event)| (event.event.span_id.as_str(), index))
+        .collect();
+    let event_indexes: Vec<Option<usize>> = records
+        .iter()
+        .map(|record| event_of.get(record.span_id_hex().as_str()).copied())
+        .collect();
+    // An emitted donor's statement is its event's target.
+    let statements: Vec<Option<&str>> = records
+        .iter()
+        .zip(&event_indexes)
+        .map(|(record, event)| match &record.role {
+            StitchRole::Donor {
+                statement: Some(statement),
+                ..
+            } => Some(&**statement),
+            StitchRole::Donor { .. } => event.map(|index| events[index].event.target.as_str()),
+            StitchRole::Orphan { .. } => None,
         })
         .collect();
-    let found: Vec<LateAncestry> = events
-        .iter()
-        .map(|event| late_ancestry(event, &sql_events, ancestry))
+    let links: Vec<(&str, Option<&str>)> = ancestry
+        .into_iter()
+        .flat_map(LruCache::iter)
+        .filter(|((owner, _), _)| owner == service)
+        .map(|((_, span_id), entry)| (span_id.as_str(), entry.parent_span_id.as_deref()))
         .collect();
-    drop(sql_events);
-    let mut dropped = vec![false; events.len()];
-    for &outer in found.iter().flat_map(|late| &late.duplicate_ancestors) {
-        dropped[outer] = true;
-    }
-    // Events that stay below each dropped layer. Two queries under one span
-    // must not both take its duration, so only a sole heir does.
-    let mut heirs = vec![0_usize; events.len()];
-    for (index, late) in found.iter().enumerate() {
-        if !dropped[index] {
-            for &outer in &late.duplicate_ancestors {
-                heirs[outer] += 1;
+    let decisions = restitch_records(trace_id, &records, &statements, &links);
+    for ((record, decision), event) in records.iter().zip(decisions).zip(event_indexes) {
+        match (decision, &record.role, event) {
+            (RecordDecision::Suppress, _, Some(index)) => dropped[index] = true,
+            (
+                RecordDecision::Adopt(statement),
+                StitchRole::Orphan {
+                    pending: Some(pending),
+                    ..
+                },
+                None,
+            ) => {
+                let mut event = (**pending).clone();
+                event.target = statement;
+                crate::event::sanitize_span_event(&mut event);
+                adopted.push(crate::normalize::normalize(event));
             }
-        }
-    }
-    for (index, late) in found.into_iter().enumerate() {
-        let whole_query = late
-            .duplicate_ancestors
-            .iter()
-            .filter(|&&outer| heirs[outer] == 1)
-            .map(|&outer| events[outer].event.duration_us)
-            .max();
-        let event = &mut events[index].event;
-        event.duration_us = event.duration_us.max(whole_query.unwrap_or(0));
-        let scopes = &mut event.instrumentation_scopes;
-        let room = crate::event::MAX_INSTRUMENTATION_SCOPES.saturating_sub(scopes.len());
-        scopes.extend(late.scopes.into_iter().take(room));
-    }
-    let mut kept = dropped.iter().map(|&dropped| !dropped);
-    events.retain(|_| kept.next().unwrap_or(true));
-}
-
-/// Leaf scope of a SQL event that can be one half of a twin pair: it names
-/// its parent and its instrumentation.
-fn twin_candidate_scope(event: &NormalizedEvent) -> Option<&str> {
-    if event.event.event_type != crate::event::EventType::Sql {
-        return None;
-    }
-    event.event.parent_span_id.as_ref()?;
-    event
-        .event
-        .instrumentation_scopes
-        .first()
-        .map(AsRef::as_ref)
-        .filter(|scope: &&str| !scope.is_empty())
-}
-
-/// Collapse twin SQL events that reached the window in two export requests.
-///
-/// OTLP conversion pairs the two layers of one query when one request holds
-/// both (`pair_cross_scope_twins` in `ingest::otlp`). A wrapping span exported
-/// one batch after its driver twin converts alone, so the pair meets here:
-/// same service, parent and statement, different leaf scopes. Rows line up as
-/// at conversion and keep their longest event.
-fn collapse_split_twins(events: &mut Vec<NormalizedEvent>) {
-    let mut scopes = events.iter().filter_map(twin_candidate_scope);
-    let two_scopes = scopes
-        .next()
-        .is_some_and(|first| scopes.any(|scope| scope != first));
-    if !two_scopes {
-        return;
-    }
-    let mut groups: HashMap<(&str, &str, &str), Vec<usize>> = HashMap::new();
-    for (index, event) in events.iter().enumerate() {
-        if twin_candidate_scope(event).is_some()
-            && let Some(parent) = event.event.parent_span_id.as_deref()
-        {
-            let key = (
-                event.event.service.as_ref(),
-                parent,
-                event.event.target.as_str(),
-            );
-            groups.entry(key).or_default().push(index);
-        }
-    }
-    let mut dropped = vec![false; events.len()];
-    // Groups are disjoint, so the map's iteration order cannot change the result.
-    for group in groups.into_values() {
-        mark_split_twins(events, group, &mut dropped);
-    }
-    let mut kept = dropped.iter().map(|&dropped| !dropped);
-    events.retain(|_| kept.next().unwrap_or(true));
-}
-
-/// Mark every event of one `(service, parent, statement)` group that is the
-/// shorter twin of another. Events naming two SQL engines are two queries, and
-/// so are events that do not overlap in time: conversion already kept those
-/// apart (an ORM query, then the same statement sent through the bare
-/// driver).
-fn mark_split_twins(events: &[NormalizedEvent], mut group: Vec<usize>, dropped: &mut [bool]) {
-    let scope = |index: usize| twin_candidate_scope(&events[index]).unwrap_or("");
-    let start = |index: usize| {
-        crate::time::parse_iso8601_utc_to_ms(&events[index].event.timestamp).unwrap_or(0)
-    };
-    // Starts are read at millisecond precision, so two spans of one query
-    // can look up to 1 ms apart.
-    let overlap = |a: usize, b: usize| {
-        let span = |index: usize| {
-            let from = start(index).saturating_mul(1000);
-            (from, from.saturating_add(events[index].event.duration_us))
-        };
-        let (a, b) = (span(a), span(b));
-        a.0 <= b.1.saturating_add(1000) && b.0 <= a.1.saturating_add(1000)
-    };
-    group.sort_by_cached_key(|&index| (scope(index), start(index), index));
-    let lanes: Vec<Vec<(u64, usize)>> = group
-        .chunk_by(|&a, &b| scope(a) == scope(b))
-        .map(|lane| lane.iter().map(|&index| (start(index), index)).collect())
-        .collect();
-    if lanes.len() < 2 {
-        return;
-    }
-    for twins in crate::ingest::twin_rows(&lanes) {
-        // `sql` is the label of a layer that names no engine.
-        let mut engines = twins
-            .iter()
-            .map(|&index| events[index].event.operation.as_str())
-            .filter(|&engine| engine != "sql");
-        let two_engines = engines
-            .next()
-            .is_some_and(|first| engines.any(|engine| engine != first));
-        let longest = twins
-            .iter()
-            .copied()
-            .max_by_key(|&index| (events[index].event.duration_us, std::cmp::Reverse(index)));
-        if let Some(longest) = longest.filter(|_| !two_engines) {
-            for &twin in twins.iter().filter(|&&twin| twin != longest) {
-                dropped[twin] = overlap(twin, longest);
-            }
+            // shortcut: a donor its own request suppressed has no event to
+            // bring back, and an adopted span keeps the statement its
+            // request gave it. Both need the span's full event to revisit.
+            _ => {}
         }
     }
 }

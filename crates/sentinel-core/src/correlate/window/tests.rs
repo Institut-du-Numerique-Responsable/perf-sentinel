@@ -1957,143 +1957,15 @@ fn consumer_http_route_parents(service: Arc<str>) -> SourceEndpointParentGroups 
     )])
 }
 
-/// SQL event under parent `root`, emitted by `scope` on `engine`.
-fn twin_event(
-    span_id: &str,
-    scope: &str,
-    engine: &str,
-    ts: &str,
-    duration_us: u64,
-) -> NormalizedEvent {
-    let mut event = make_event("trace-1", "SELECT * FROM users WHERE id = ?");
-    event.event.span_id = span_id.to_string();
-    event.event.parent_span_id = Some("root".to_string());
-    event.event.instrumentation_scopes = vec![Arc::from(scope)];
-    event.event.operation = engine.to_string();
-    event.event.timestamp = ts.to_string();
-    event.event.duration_us = duration_us;
-    event
-}
-
-fn span_ids(events: &[NormalizedEvent]) -> Vec<&str> {
-    events.iter().map(|e| e.event.span_id.as_str()).collect()
-}
-
 #[test]
-fn split_twins_collapse_onto_the_nearest_execution() {
-    // Three driver events, and the wrapper of the last query, converted alone
-    // in a later request.
-    let mut events = vec![
-        twin_event(
-            "e1",
-            "pdo",
-            "postgresql",
-            "2025-07-10T14:32:01.000Z",
-            600_000,
-        ),
-        twin_event(
-            "e2",
-            "pdo",
-            "postgresql",
-            "2025-07-10T14:32:02.000Z",
-            700_000,
-        ),
-        twin_event(
-            "e3",
-            "pdo",
-            "postgresql",
-            "2025-07-10T14:32:03.000Z",
-            800_000,
-        ),
-        twin_event(
-            "w3",
-            "laravel",
-            "postgresql",
-            "2025-07-10T14:32:03.000Z",
-            801_000,
-        ),
-    ];
-
-    collapse_split_twins(&mut events);
-
-    assert_eq!(span_ids(&events), vec!["e1", "e2", "w3"]);
-}
-
-#[test]
-fn events_that_do_not_overlap_stay_two_queries() {
-    // An ORM query, then the same statement sent through the bare driver
-    // 10 ms later. Conversion kept both, so the window must too.
-    let mut events = vec![
-        twin_event(
-            "orm",
-            "sqlalchemy",
-            "postgresql",
-            "2025-07-10T14:32:01.000Z",
-            500,
-        ),
-        twin_event(
-            "raw",
-            "asyncpg",
-            "postgresql",
-            "2025-07-10T14:32:01.010Z",
-            300,
-        ),
-    ];
-
-    collapse_split_twins(&mut events);
-
-    assert_eq!(span_ids(&events), vec!["orm", "raw"]);
-}
-
-#[test]
-fn same_scope_events_and_two_engines_never_collapse() {
-    let mut same_scope = vec![
-        twin_event("a", "pdo", "postgresql", "2025-07-10T14:32:01.000Z", 500),
-        twin_event("b", "pdo", "postgresql", "2025-07-10T14:32:01.000Z", 600),
-    ];
-    collapse_split_twins(&mut same_scope);
-    assert_eq!(span_ids(&same_scope), vec!["a", "b"]);
-
-    let mut shadow_read = vec![
-        twin_event("a", "pymysql", "mysql", "2025-07-10T14:32:01.000Z", 500),
-        twin_event(
-            "b",
-            "psycopg2",
-            "postgresql",
-            "2025-07-10T14:32:01.000Z",
-            600,
-        ),
-    ];
-    collapse_split_twins(&mut shadow_read);
-    assert_eq!(span_ids(&shadow_read), vec!["a", "b"]);
-}
-
-#[test]
-fn late_ancestor_gives_its_scope_and_yields_to_the_inner_duplicate() {
-    // `outer` wraps `inner` with the same statement and reaches the window
-    // after it. `plain` sits under the same root with another statement.
+fn late_ancestor_gives_its_scope_to_the_events_below_it() {
+    // The root span reaches the window after its children: its scope is
+    // only known through the retained context.
     let mut window = TraceWindow::new(WindowConfig::default());
-    let mut inner = twin_event(
-        "inner",
-        "doctrine",
-        "sql",
-        "2025-07-10T14:32:01.000Z",
-        600_000,
-    );
-    inner.event.parent_span_id = Some("outer".to_string());
-    let mut plain = twin_event("plain", "doctrine", "sql", "2025-07-10T14:32:02.000Z", 500);
-    plain.event.target = "SELECT 1".to_string();
-    window.push(inner, 1_000);
-    window.push(plain, 1_000);
-    let mut outer = twin_event(
-        "outer",
-        "manual",
-        "sql",
-        "2025-07-10T14:32:01.000Z",
-        601_000,
-    );
-    outer.event.instrumentation_scopes = vec![Arc::from("manual")];
-    window.push(outer, 1_000);
+    let mut event = make_event("trace-1", "SELECT 1");
+    event.event.parent_span_id = Some("root".to_string());
+    event.event.instrumentation_scopes = vec![Arc::from("doctrine")];
+    window.push(event, 1_000);
     let service: Arc<str> = Arc::from("test");
     let links = HashMap::from([(
         Arc::clone(&service),
@@ -2113,49 +1985,11 @@ fn late_ancestor_gives_its_scope_and_yields_to_the_inner_duplicate() {
 
     let (_, events) = window.drain_all().pop().expect("one trace");
 
-    assert_eq!(span_ids(&events), vec!["inner", "plain"]);
-    let scopes = |index: usize| -> Vec<&str> {
-        events[index]
-            .event
-            .instrumentation_scopes
-            .iter()
-            .map(AsRef::as_ref)
-            .collect()
-    };
-    assert_eq!(scopes(0), vec!["doctrine", "manual", "symfony"]);
-    assert_eq!(scopes(1), vec!["doctrine", "symfony"]);
-}
-
-#[test]
-fn dropped_outer_layer_hands_its_duration_to_a_sole_inner_event() {
-    // `outer` timed the whole query and its only inner event is a ~0 ms
-    // prepare span. Under `shared`, two inner events repeat the statement:
-    // neither may take a duration that covers both.
-    let mut window = TraceWindow::new(WindowConfig::default());
-    let under = |span_id: &str, parent: &str, duration_us: u64| {
-        let ts = "2025-07-10T14:32:01.000Z";
-        let mut event = twin_event(span_id, "doctrine", "sql", ts, duration_us);
-        event.event.parent_span_id = Some(parent.to_string());
-        event
-    };
-    for event in [
-        under("prepare", "outer", 30),
-        under("first", "shared", 40),
-        under("second", "shared", 50),
-        under("outer", "root", 900_000),
-        under("shared", "root", 800_000),
-    ] {
-        window.push(event, 1_000);
-    }
-
-    let (_, events) = window.drain_all().pop().expect("one trace");
-
-    let durations: Vec<_> = events
+    let scopes: Vec<&str> = events[0]
+        .event
+        .instrumentation_scopes
         .iter()
-        .map(|event| (event.event.span_id.as_str(), event.event.duration_us))
+        .map(AsRef::as_ref)
         .collect();
-    assert_eq!(
-        durations,
-        vec![("prepare", 900_000), ("first", 40), ("second", 50)]
-    );
+    assert_eq!(scopes, vec!["doctrine", "symfony"]);
 }

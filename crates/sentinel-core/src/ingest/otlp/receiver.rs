@@ -98,12 +98,15 @@ impl ReceiverSink {
             #[cfg(feature = "daemon")]
             Self::Daemon(tx) => {
                 let source_endpoint_updates = source_endpoint_updates(&request);
-                let (events, stats) =
-                    convert_otlp_request_counted_with_grouping(&request, grouping_attributes);
+                let (events, stats, stitch_records) =
+                    super::convert_otlp_request_stitchable(&request, grouping_attributes);
                 if let Some(m) = metrics {
                     m.record_otlp_spans(stats);
                 }
-                if events.is_empty() && source_endpoint_updates.is_empty() {
+                if events.is_empty()
+                    && source_endpoint_updates.is_empty()
+                    && stitch_records.is_empty()
+                {
                     return Ok(());
                 }
                 Ok(tx
@@ -111,6 +114,7 @@ impl ReceiverSink {
                         crate::daemon::IngestBatch {
                             events,
                             source_endpoint_updates,
+                            stitch_records,
                         },
                         INGEST_ENQUEUE_TIMEOUT,
                     )
