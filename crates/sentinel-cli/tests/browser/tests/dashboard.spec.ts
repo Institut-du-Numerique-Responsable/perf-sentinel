@@ -675,6 +675,40 @@ test("29. grouping filters and occurrence evidence fit a narrow viewport", async
   await expect(page.locator("#explain-tree .ps-span.hilite .ps-span-time").first()).toBeVisible();
 });
 
+test("29b. a long query in the trace tree scrolls inside its own row", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await loadDashboard(page, "#findings");
+  await page.locator("#findings-list .ps-row").first().click();
+  await expect(page.locator("#explain-tree .ps-span").nth(1)).toBeVisible();
+
+  const layout = await page.evaluate(() => {
+    const tree = document.getElementById("explain-tree")!;
+    const texts = Array.from(tree.querySelectorAll<HTMLElement>(".ps-span-text"));
+    const long = texts[0];
+    long.textContent = "SELECT " + Array.from({ length: 40 }, (_, i) => `t.column_${i}`).join(", ")
+      + " FROM very_long_table_name t WHERE t.id = ?";
+    const row = long.closest<HTMLElement>(".ps-span")!;
+    const duration = row.querySelector<HTMLElement>(".ps-span-dur")!;
+    long.scrollLeft = long.scrollWidth;
+    const de = document.documentElement;
+    return {
+      rowScrolls: long.scrollWidth > long.clientWidth && getComputedStyle(long).overflowX === "auto",
+      reachedEnd: long.scrollLeft > 0,
+      othersStill: texts.slice(1).every((text) => text.scrollLeft === 0),
+      durationInRow: duration.getBoundingClientRect().right <= row.getBoundingClientRect().right + 1,
+      treeScrolls: tree.scrollWidth > tree.clientWidth,
+      pageOverflow: de.scrollWidth - de.clientWidth,
+    };
+  });
+
+  expect(layout.rowScrolls, "the long row must offer its own horizontal scroll").toBe(true);
+  expect(layout.reachedEnd, "the end of the query must be reachable").toBe(true);
+  expect(layout.othersStill, "scrolling one row leaves the others in place").toBe(true);
+  expect(layout.durationInRow, "the duration stays visible beside the query").toBe(true);
+  expect(layout.treeScrolls, "the tree itself does not scroll").toBe(false);
+  expect(layout.pageOverflow, "the page does not widen").toBeLessThanOrEqual(1);
+});
+
 test("30. occurrence timestamps accept short fractional seconds", async ({ page }) => {
   await loadDashboard(page, `#findings&type=n_plus_one_sql&grouping=${encodeURIComponent(K8S_PROD_EU)}`);
   await page.locator("#findings-list .ps-row").first().click();

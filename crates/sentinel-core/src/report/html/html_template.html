@@ -435,9 +435,15 @@
   [data-fsev="info"] .ps-span.hilite .ps-span-time,
   [data-fsev="info"] .ps-span.hilite .ps-span-flag,
   [data-fsev="info"] .ps-span.hilite .ps-span-count { color: var(--info-fg); }
-  /* min-width: 0 is what lets the ellipsis fire: a flex child defaults to
-     min-width: auto, so a long template would push the whole panel wider. */
-  .ps-span-text { font-family: var(--font-mono); font-size: 12px; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A long query scrolls inside its own row rather than being cut, while the
+     time and duration beside it stay in place. min-width: 0 lets the text
+     shrink to the room left: a flex child defaults to min-width: auto, so a
+     long template would push the whole panel wider. */
+  .ps-span-text { font-family: var(--font-mono); font-size: 12px; color: var(--text); min-width: 0; overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
+  /* The styled bar stays drawn where the system hides scrollbars, so a cut
+     query shows it can scroll. Firefox has no such pseudo-element: thin bar. */
+  .ps-span-text::-webkit-scrollbar { height: 6px; }
+  @supports not selector(::-webkit-scrollbar) { .ps-span-text { scrollbar-width: thin; } }
   .ps-span-flag { padding: 1px 6px; border-radius: 4px; font-size: 11.5px; }
   .ps-span-time { flex: none; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
   .ps-span-dur { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); margin-left: auto; white-space: nowrap; }
@@ -3583,7 +3589,8 @@
     if (isFinding) text.classList.add("ps-span-find");
     var described = describeSpan(span);
     highlightInto(text, described);
-    // The row ellipsizes, so the whole operation lives in the tooltip.
+    // A long operation scrolls inside its row, the tooltip shows it without
+    // scrolling.
     text.title = described;
     row.appendChild(text);
 
