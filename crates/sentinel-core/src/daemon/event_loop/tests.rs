@@ -4502,6 +4502,70 @@ async fn second_pass_keeps_what_a_request_already_stitched() {
 }
 
 #[tokio::test]
+async fn second_pass_keeps_a_twin_query_a_stitched_span_passed_over() {
+    use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
+    use opentelemetry_proto::tonic::trace::v1::ScopeSpans;
+    let scoped = |scope: &str, spans| ScopeSpans {
+        scope: Some(InstrumentationScope {
+            name: scope.to_string(),
+            ..InstrumentationScope::default()
+        }),
+        spans,
+        ..ScopeSpans::default()
+    };
+    // Request 1 stitched its execute span to 'SELECT a'. Request 2 holds
+    // the two layers of 'SELECT b'. Seen whole, the execute span's nearest
+    // donor is the shorter 'SELECT b' twin: 'SELECT b' must keep its event.
+    let mut first = otlp_request("orders-svc", vec![otlp_server_root(1, "/api/orders")]);
+    first.resource_spans[0].scope_spans.push(scoped(
+        "pdo",
+        vec![
+            otlp_sql_span(2, 1, "PDO::prepare", Some("SELECT a"), 1, 0),
+            otlp_sql_span(4, 1, "PDOStatement::execute", None, 10, 300),
+        ],
+    ));
+    let mut second = otlp_request("orders-svc", vec![]);
+    second.resource_spans[0].scope_spans = vec![
+        scoped(
+            "pdo",
+            vec![otlp_sql_span(3, 1, "PDO::prepare", Some("SELECT b"), 5, 0)],
+        ),
+        scoped(
+            "laravel",
+            vec![otlp_sql_span(5, 1, "sql SELECT", Some("SELECT b"), 4, 2)],
+        ),
+    ];
+
+    let traces = replay_requests(&[first, second]).await;
+
+    let mut targets: Vec<&str> = traces[0]
+        .1
+        .iter()
+        .map(|event| event.event.target.as_str())
+        .collect();
+    targets.sort_unstable();
+    assert_eq!(targets, vec!["SELECT a", "SELECT b"]);
+}
+
+#[tokio::test]
+async fn inner_execute_stitched_alone_yields_to_its_outer_execute() {
+    // The inner execute span stitched to its sibling prepare before the
+    // outer execute span that wraps both reached the daemon. As in one
+    // request, the outer span carries the query.
+    let events = assert_split_matches_one_request(vec![
+        vec![
+            otlp_server_root(1, "/api/orders"),
+            otlp_sql_span(5, 3, "PDO::prepare", Some(STATEMENT), 2, 0),
+            otlp_sql_span(4, 3, "PDOStatement::execute", None, 3, 400),
+        ],
+        vec![otlp_sql_span(3, 1, "Doctrine::execute", None, 1, 500)],
+    ])
+    .await;
+
+    assert_eq!(events, vec![("0303030303030303".to_string(), 500_000)]);
+}
+
+#[tokio::test]
 async fn trace_from_one_request_is_not_stitched_again() {
     let events = assert_split_matches_one_request(vec![vec![
         otlp_server_root(1, "/api/orders"),

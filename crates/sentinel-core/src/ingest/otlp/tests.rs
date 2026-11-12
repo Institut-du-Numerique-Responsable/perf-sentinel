@@ -5660,3 +5660,43 @@ fn an_attribute_less_execute_that_adopted_is_recorded() {
         .collect();
     assert_eq!(roles, vec![false, true], "donor and adopter both recorded");
 }
+
+#[test]
+fn join_resource_blocks_stops_at_the_span_budget() {
+    // Joined past the budget, the last spans would lose the classification
+    // and scopes a block of their own gives them.
+    let block = |spans: usize| {
+        let mut request = make_request("a", vec![]);
+        request.resource_spans[0].scope_spans[0].spans = vec![Span::default(); spans];
+        request.resource_spans.remove(0)
+    };
+    let mut request = ExportTraceServiceRequest {
+        resource_spans: vec![block(MAX_SPANS_PER_SERVICE - 1), block(2), block(3)],
+    };
+
+    join_resource_blocks(&mut request);
+
+    let sizes: Vec<usize> = request
+        .resource_spans
+        .iter()
+        .map(|block| block.scope_spans.iter().map(|s| s.spans.len()).sum())
+        .collect();
+    assert_eq!(sizes, vec![MAX_SPANS_PER_SERVICE - 1, 5]);
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn an_anonymous_block_keeps_no_stitch_record() {
+    // Two anonymous blocks can be two processes: the daemon never stitches
+    // them together, so it keeps none of their spans.
+    let prepare = make_sql_span(&[1; 16], &[1; 8], &[9; 8], "SELECT 1", 0, 1_000);
+    let mut request = make_request("svc", vec![prepare]);
+    let (_, _, named) = convert_otlp_request_stitchable(&request, None);
+    assert_eq!(named.len(), 1);
+
+    request.resource_spans[0].resource = None;
+    let (events, _, anonymous) = convert_otlp_request_stitchable(&request, None);
+
+    assert_eq!(events.len(), 1);
+    assert!(anonymous.is_empty());
+}

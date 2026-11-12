@@ -991,6 +991,7 @@ async fn ingest_event_batch(
         );
     }
     let source_context = group_source_endpoint_updates(source_endpoint_updates, sampling_rate);
+    let stitch_groups = group_stitch_records(stitch_records, sampling_rate);
     let mut lru_evicted = Vec::new();
     let mut source_endpoint_generations = HashMap::new();
     {
@@ -1034,10 +1035,9 @@ async fn ingest_event_batch(
         // Before the events, as the endpoint context: a trace this batch's
         // pushes evict leaves with its records, and existing traces go first
         // so a new records-only trace cannot evict them.
-        let (existing, missing): (Vec<_>, Vec<_>) =
-            group_stitch_records(stitch_records, sampling_rate)
-                .into_iter()
-                .partition(|(trace_id, _)| w.contains_trace(trace_id));
+        let (existing, missing): (Vec<_>, Vec<_>) = stitch_groups
+            .into_iter()
+            .partition(|(trace_id, _)| w.contains_trace(trace_id));
         for (trace_id, records) in existing.into_iter().chain(missing) {
             if let Some(evicted) = w.retain_stitch_records(&trace_id, records, now_ms) {
                 lru_evicted.push(evicted);

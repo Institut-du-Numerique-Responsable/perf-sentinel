@@ -114,8 +114,8 @@ type OtlpRequest = opentelemetry_proto::tonic::collector::trace::v1::ExportTrace
 /// Blocks whose resources differ (two pods) stay apart.
 struct OtlpDocuments<'g> {
     pending: OtlpRequest,
-    /// Encoded resource to its index in `pending.resource_spans`.
-    blocks: std::collections::HashMap<Vec<u8>, usize>,
+    /// The blocks of `pending` other documents join.
+    blocks: crate::ingest::otlp::JoinedBlocks,
     pending_spans: usize,
     events: Vec<SpanEvent>,
     stats: SpanConversionStats,
@@ -124,7 +124,6 @@ struct OtlpDocuments<'g> {
 
 impl OtlpDocuments<'_> {
     fn push(&mut self, request: OtlpRequest) {
-        use std::collections::hash_map::Entry;
         let spans: usize = request
             .resource_spans
             .iter()
@@ -139,26 +138,7 @@ impl OtlpDocuments<'_> {
         }
         self.pending_spans += spans;
         for block in request.resource_spans {
-            // Conversion never lets two anonymous blocks share a parent
-            // index (they can be two processes), so the join keeps them apart.
-            if crate::ingest::otlp::resource_service_name(&block) == crate::event::UNKNOWN_SERVICE {
-                self.pending.resource_spans.push(block);
-                continue;
-            }
-            let key = block
-                .resource
-                .as_ref()
-                .map(prost::Message::encode_to_vec)
-                .unwrap_or_default();
-            match self.blocks.entry(key) {
-                Entry::Occupied(slot) => self.pending.resource_spans[*slot.get()]
-                    .scope_spans
-                    .extend(block.scope_spans),
-                Entry::Vacant(slot) => {
-                    slot.insert(self.pending.resource_spans.len());
-                    self.pending.resource_spans.push(block);
-                }
-            }
+            crate::ingest::otlp::join_resource_block(&mut self.pending, &mut self.blocks, block);
         }
     }
 

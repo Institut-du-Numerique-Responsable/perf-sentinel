@@ -812,7 +812,7 @@ fn index_resource_spans<'a>(
 /// Non-blank `service.name` from the resource attributes, or `"unknown"`.
 /// Shared by the span index and the emitted events so both agree. The blank
 /// check does not trim a useful display value.
-pub(crate) fn resource_service_name(
+fn resource_service_name(
     resource_spans: &opentelemetry_proto::tonic::trace::v1::ResourceSpans,
 ) -> &str {
     resource_spans
@@ -1617,8 +1617,11 @@ struct StitchOutcome<'a> {
     /// The donor each adopting orphan took its statement from.
     adopted_from: HashMap<SpanKey<'a>, usize>,
     /// Donors suppressed by a rule other than being adopted (layered
-    /// duplicate, declared prepare, shorter twin).
+    /// duplicate, declared prepare, shorter twin), and twin keepers whose
+    /// shorter twin an orphan adopted.
     merged: Vec<bool>,
+    /// Rule 1b pairing, as [`pair_cross_scope_twins`] returns it.
+    twin_keeper: Vec<Option<usize>>,
 }
 
 fn decide_stitch_traced<'a>(
@@ -1631,6 +1634,7 @@ fn decide_stitch_traced<'a>(
             decisions: HashMap::new(),
             adopted_from: HashMap::new(),
             merged: Vec::new(),
+            twin_keeper: Vec::new(),
         };
     }
 
@@ -1701,6 +1705,7 @@ fn decide_stitch_traced<'a>(
         decisions,
         adopted_from,
         merged: donor_suppressed,
+        twin_keeper,
     }
 }
 
@@ -1802,7 +1807,12 @@ fn convert_request(
                 .unwrap_or(&empty_consumers),
             &mut events,
             &mut stats,
-            records.as_deref_mut().map(|records| (records, block)),
+            // An anonymous block is never stitched with another one (two of
+            // them can be two processes), so the daemon keeps none of it.
+            records
+                .as_deref_mut()
+                .filter(|_| anonymous_index.is_none())
+                .map(|records| (records, block)),
         );
     }
 
@@ -1813,37 +1823,61 @@ fn convert_request(
 /// first of them. The stitch works one block at a time, and a sender that
 /// batches spans (a Collector, Tempo's storage blocks) can split one
 /// resource's spans, and the two halves of a query, over several blocks.
-/// Blocks with no service name stay apart: two of them can be two
-/// processes. Applied where the request is owned (daemon listeners, Tempo);
-/// file ingest joins across documents in `ingest::json`.
+/// Applied where the request is owned (daemon listeners, Tempo); file ingest
+/// joins across documents in `ingest::json`.
 #[cfg_attr(not(any(feature = "daemon", feature = "tempo")), allow(dead_code))]
 pub(crate) fn join_resource_blocks(request: &mut ExportTraceServiceRequest) {
-    use std::collections::hash_map::Entry;
     if request.resource_spans.len() < 2 {
         return;
     }
     let blocks = std::mem::take(&mut request.resource_spans);
-    let mut first: HashMap<Vec<u8>, usize> = HashMap::new();
+    let mut joined = JoinedBlocks::new();
     for block in blocks {
-        if resource_service_name(&block) == crate::event::UNKNOWN_SERVICE {
-            request.resource_spans.push(block);
-            continue;
-        }
+        join_resource_block(request, &mut joined, block);
+    }
+}
+
+/// Encoded resource of a joined block to its index in the request and its
+/// span count.
+pub(crate) type JoinedBlocks = HashMap<Vec<u8>, (usize, usize)>;
+
+/// Append `block` to `request`, joined into the first block of the identical
+/// resource while that block stays within [`MAX_SPANS_PER_SERVICE`] spans:
+/// conversion classifies, stitches and scopes a block only up to that cap.
+/// Blocks with no service name stay apart: two of them can be two processes.
+pub(crate) fn join_resource_block(
+    request: &mut ExportTraceServiceRequest,
+    joined: &mut JoinedBlocks,
+    block: opentelemetry_proto::tonic::trace::v1::ResourceSpans,
+) {
+    use std::collections::hash_map::Entry;
+    let index = request.resource_spans.len();
+    if resource_service_name(&block) != crate::event::UNKNOWN_SERVICE {
+        let spans: usize = block.scope_spans.iter().map(|s| s.spans.len()).sum();
         let key = block
             .resource
             .as_ref()
             .map(prost::Message::encode_to_vec)
             .unwrap_or_default();
-        match first.entry(key) {
-            Entry::Occupied(slot) => request.resource_spans[*slot.get()]
-                .scope_spans
-                .extend(block.scope_spans),
+        match joined.entry(key) {
+            Entry::Occupied(mut slot) if slot.get().1 + spans <= MAX_SPANS_PER_SERVICE => {
+                let (first, count) = slot.get_mut();
+                *count += spans;
+                request.resource_spans[*first]
+                    .scope_spans
+                    .extend(block.scope_spans);
+                return;
+            }
+            // Full: later blocks of the resource join this one instead.
+            Entry::Occupied(mut slot) => {
+                slot.insert((index, spans));
+            }
             Entry::Vacant(slot) => {
-                slot.insert(request.resource_spans.len());
-                request.resource_spans.push(block);
+                slot.insert((index, spans));
             }
         }
     }
+    request.resource_spans.push(block);
 }
 
 #[cfg(feature = "daemon")]
@@ -2171,9 +2205,10 @@ fn push_stitch_records<'a>(
 /// walks. Returns one decision per record.
 ///
 /// The pass only adds to what each request decided. An orphan its request
-/// stitched keeps that statement, and a donor loses its event to adoption
-/// only when an orphan the pass newly stitches, or one that already holds
-/// the donor's statement, took it.
+/// stitched keeps that statement, and yields its event only to the
+/// outermost orphan above it, as rule 2 does in one request. A donor loses
+/// its event to adoption only when an orphan the pass newly stitches, or one
+/// that already holds the donor's statement, took it.
 pub(crate) fn restitch_records(
     trace_id: &str,
     records: &[&StitchRecord],
@@ -2274,6 +2309,10 @@ fn record_decisions(
             .is_none_or(|statement| statement == donors[donor].statement);
         taken[donor] |= agrees;
     }
+    // A twin keeper yields its event only to an adoption the requests agree
+    // with: a pinned orphan that took its shorter twin keeps another query.
+    let mut merged = outcome.merged.clone();
+    settle_twins(&outcome.twin_keeper, &taken, &mut merged);
     let donor_of: HashMap<SpanKey<'_>, usize> = donors
         .iter()
         .enumerate()
@@ -2285,10 +2324,15 @@ fn record_decisions(
         .map(|(index, span)| {
             let key = span_key(span);
             if pinned(index).is_some() {
-                return RecordDecision::Keep;
+                // It keeps its statement, and yields its event to the
+                // outermost orphan above it that stitches (rule 2).
+                return match outcome.decisions.get(&key) {
+                    Some(StitchDecision::Suppress) => RecordDecision::Suppress,
+                    _ => RecordDecision::Keep,
+                };
             }
             if let Some(&donor) = donor_of.get(&key) {
-                return if outcome.merged[donor] || taken[donor] {
+                return if merged[donor] || taken[donor] {
                     RecordDecision::Suppress
                 } else {
                     RecordDecision::Keep
