@@ -290,6 +290,8 @@ docker compose -f examples/docker-compose-collector.yml up -d
 curl -s http://localhost:14318/metrics | grep perf_sentinel_events_processed_total
 ```
 
+Le compteur bouge quand une trace quitte la fenêtre, environ `trace_ttl_ms` (30 s par défaut) après son dernier span.
+
 4. Voir les findings émis par Perf Sentinel sur stdout :
 
 ```bash

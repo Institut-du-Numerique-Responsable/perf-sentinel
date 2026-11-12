@@ -338,7 +338,7 @@ curl -sf http://perf-sentinel:4318/metrics
 3. **Politique réseau.** Un `NetworkPolicy` Kubernetes ou un security group peut bloquer le trafic cross-namespace. Désactivez temporairement ou autorisez explicitement le chemin du service vers le daemon.
 4. **Service non instrumenté.** Vérifiez `OTEL_SDK_DISABLED=false` et que le service produit bien des spans (la plupart des SDKs OTel ont des compteurs internes ou des logs debug).
 5. **Faute de frappe sur l'endpoint OTLP.** `OTEL_EXPORTER_OTLP_ENDPOINT` doit être `http://<host>:4318`. Pas de suffixe `/v1/traces`, le SDK l'ajoute. La propriété Spring Boot `management.opentelemetry.tracing.export.otlp.endpoint` fait exception : elle prend l'URL complète, `/v1/traces` compris.
-6. **Les spans arrivent mais aucun n'est analysable.** `perf_sentinel_otlp_spans_received_total` qui monte pendant que `events_processed_total` reste plat signifie que le daemon reçoit des spans mais que chacun est filtré (pas de `db.statement`, pas de `http.url`). Examinez `perf_sentinel_otlp_spans_filtered_total` par `reason` : un `missing_db_statement` dominant pointe vers des drivers configurés pour omettre le texte des requêtes (voir [LIMITATIONS-FR.md](./LIMITATIONS-FR.md#la-qualité-de-linstrumentation-borne-les-findings) et les réglages par langage dans [INSTRUMENTATION-FR.md](./INSTRUMENTATION-FR.md#attributs-de-span-requis)).
+6. **Les spans arrivent mais aucun n'est analysable.** `perf_sentinel_otlp_spans_received_total` qui monte pendant que `events_processed_total` reste plat plus de `trace_ttl_ms` signifie que le daemon reçoit des spans mais que chacun est filtré (pas de `db.statement`, pas de `http.url`). Examinez `perf_sentinel_otlp_spans_filtered_total` par `reason` : un `missing_db_statement` dominant pointe vers des drivers configurés pour omettre le texte des requêtes (voir [LIMITATIONS-FR.md](./LIMITATIONS-FR.md#la-qualité-de-linstrumentation-borne-les-findings) et les réglages par langage dans [INSTRUMENTATION-FR.md](./INSTRUMENTATION-FR.md#attributs-de-span-requis)).
 
 **Vérification après correctif.** Déclenchez une requête via un service instrumenté et observez :
 
@@ -346,7 +346,7 @@ curl -sf http://perf-sentinel:4318/metrics
 watch -n 1 'curl -s http://perf-sentinel:4318/metrics | grep events_processed_total'
 ```
 
-Le compteur doit incrémenter en quelques secondes.
+Le compteur bouge quand la trace de la requête quitte la fenêtre, entre `trace_ttl_ms` et 1,5 × `trace_ttl_ms` après son dernier span (30 à 45 s par défaut). `perf_sentinel_otlp_spans_received_total` bouge en quelques secondes.
 
 ---
 

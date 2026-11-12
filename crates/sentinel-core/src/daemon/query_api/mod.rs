@@ -1117,8 +1117,7 @@ async fn handle_export_report(State(state): State<Arc<QueryApiState>>) -> Json<R
     // via `as` is safe. The two reads are not atomic as a pair: a
     // concurrent `inc_by` in the event loop could race between them.
     // The values are monotonic and informational, so the worst case is
-    // a report where `events_processed > 0` and `traces_analyzed = 0`
-    // for a few microseconds around the first batch.
+    // a report whose two counts come from adjacent batches.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let events_processed = state.metrics.events_processed_total.get() as u64;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

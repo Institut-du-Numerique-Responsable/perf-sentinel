@@ -785,6 +785,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
         .expect("trace retained");
     assert_eq!(trace[0].event.source.endpoint, "/api/fault/pool-saturation");
     let finished = window.lock().await.drain_all();
+    assert_eq!(finished[0].1.len(), 1, "context updates add no event");
     assert_eq!(
         finished[0].1[0].event.source.endpoint,
         "/api/fault/pool-saturation"
@@ -4281,16 +4282,19 @@ async fn replay_requests(
 /// Replay an OTLP JSON dump as the listeners receive it, one export request
 /// per line, and drain the window.
 async fn replay_export_batches(fixture: &str) -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
+    replay_requests(&export_requests(fixture)).await
+}
+
+/// An OTLP JSON dump's export requests, one per line.
+fn export_requests(fixture: &str) -> Vec<OtlpRequest> {
     let path = format!(
         "{}/../../tests/fixtures/{fixture}",
         env!("CARGO_MANIFEST_DIR")
     );
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let requests: Vec<OtlpRequest> = raw
-        .lines()
+    raw.lines()
         .map(|line| serde_json::from_str(line).expect("one OTLP request per line"))
-        .collect();
-    replay_requests(&requests).await
+        .collect()
 }
 
 /// A postgres span of trace `[9; 16]` under span `parent`, 1 ms after
@@ -4767,23 +4771,16 @@ async fn laravel_trace_split_over_export_requests_counts_each_query_once() {
 
 #[tokio::test]
 async fn events_processed_counts_the_twins_left_after_the_trace_completion_stitch() {
-    let fixture = "otlp_php_laravel_slow_sql_batches.ndjson";
-    let path = format!(
-        "{}/../../tests/fixtures/{fixture}",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    let ingested: usize = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{path}: {e}"))
-        .lines()
-        .map(|line| {
-            let request: OtlpRequest =
-                serde_json::from_str(line).expect("one OTLP request per line");
-            crate::ingest::otlp::convert_otlp_request_stitchable(&request, None)
+    let requests = export_requests("otlp_php_laravel_slow_sql_batches.ndjson");
+    let ingested: usize = requests
+        .iter()
+        .map(|request| {
+            crate::ingest::otlp::convert_otlp_request_stitchable(request, None)
                 .0
                 .len()
         })
         .sum();
-    let traces = replay_export_batches(fixture).await;
+    let traces = replay_requests(&requests).await;
     let metrics = MetricsState::new();
     let carbon = empty_carbon_ctx();
     let store = findings_store::FindingsStore::new(100);
