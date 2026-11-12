@@ -276,9 +276,8 @@ impl JsonIngest {
     /// documents convert together (see [`OtlpDocuments`]), so the parsed
     /// requests stay in memory up to one span budget at a time, and
     /// `convert_otlp_request_counted` sanitizes each event, same code path
-    /// as the daemon listeners. The Jaeger v3 search hands each
-    /// unwrapped `result` document to this same function, so a join never
-    /// spans two messages of its stream.
+    /// as the daemon listeners. The Jaeger v3 search hands its
+    /// unwrapped `result` documents to this same function in one call.
     pub(crate) fn ingest_otlp(
         raw: &[u8],
         grouping_attributes: Option<&[std::sync::Arc<str>]>,
