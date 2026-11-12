@@ -195,6 +195,44 @@ pub(crate) fn canonical_db_system(system: &str) -> &str {
     system
 }
 
+/// Line the twin candidates of one query template up into rows, one row per
+/// real execution.
+///
+/// `lanes` holds one `(start, id)` list per instrumentation scope, each sorted
+/// by start. The longest lane has an entry for every execution and anchors
+/// the rows. Each other lane hands its entries, in order, to the
+/// nearest-starting anchor still free, so lanes of equal length pair index by
+/// index and a lone late twin finds the execution it belongs to.
+pub(crate) fn twin_rows(lanes: &[Vec<(u64, usize)>]) -> Vec<Vec<usize>> {
+    let Some(anchor_lane) =
+        (0..lanes.len()).max_by_key(|&lane| (lanes[lane].len(), std::cmp::Reverse(lane)))
+    else {
+        return Vec::new();
+    };
+    let anchors = &lanes[anchor_lane];
+    let mut rows: Vec<Vec<usize>> = anchors.iter().map(|&(_, id)| vec![id]).collect();
+    for lane in lanes
+        .iter()
+        .enumerate()
+        .filter(|&(index, _)| index != anchor_lane)
+        .map(|(_, lane)| lane)
+    {
+        let mut free = 0;
+        for (placed, &(start, id)) in lane.iter().enumerate() {
+            // Anchors the entries still to place need after this one.
+            let reserved = lane.len() - placed - 1;
+            while free + 1 + reserved < anchors.len()
+                && anchors[free + 1].0.abs_diff(start) < anchors[free].0.abs_diff(start)
+            {
+                free += 1;
+            }
+            rows[free].push(id);
+            free += 1;
+        }
+    }
+    rows
+}
+
 /// Maximum parent hops for any ancestor walk, shared by the OTLP, Jaeger and
 /// Zipkin paths. Java auto-instrumented stacks chain up to 8 layers (HTTP
 /// server, Filter, `DispatcherServlet`, Controller, Service, Repository,
@@ -736,5 +774,40 @@ mod tests {
                 "{input} -> {canonical} classified as neither or both (sql={sql}, non_sql={non_sql})"
             );
         }
+    }
+
+    #[test]
+    fn twin_rows_pairs_equal_lanes_index_by_index() {
+        // The second lane starts each query a little before the first one.
+        let lanes = vec![
+            vec![(100, 0), (200, 1), (300, 2)],
+            vec![(90, 3), (190, 4), (290, 5)],
+        ];
+        assert_eq!(
+            super::twin_rows(&lanes),
+            vec![vec![0, 3], vec![1, 4], vec![2, 5]]
+        );
+    }
+
+    #[test]
+    fn twin_rows_sends_a_lone_twin_to_the_nearest_execution() {
+        let lanes = vec![vec![(295, 9)], vec![(100, 0), (200, 1), (300, 2)]];
+        assert_eq!(super::twin_rows(&lanes), vec![vec![0], vec![1], vec![2, 9]]);
+    }
+
+    #[test]
+    fn twin_rows_keeps_an_anchor_free_for_each_later_entry() {
+        // Both entries start nearest the last anchor. The first one must
+        // leave it to the second.
+        let lanes = vec![vec![(100, 0), (200, 1), (300, 2)], vec![(290, 7), (295, 8)]];
+        assert_eq!(
+            super::twin_rows(&lanes),
+            vec![vec![0], vec![1, 7], vec![2, 8]]
+        );
+    }
+
+    #[test]
+    fn twin_rows_of_nothing_is_empty() {
+        assert_eq!(super::twin_rows(&[]), Vec::<Vec<usize>>::new());
     }
 }

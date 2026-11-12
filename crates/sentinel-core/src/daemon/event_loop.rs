@@ -868,13 +868,14 @@ impl AnalysisServiceMeter {
     }
 }
 
-/// A batch's grouped endpoint context: route roots, parent links and consumer
-/// destinations, each keyed by trace id. Every update writes a parent link,
-/// so `parents` holds every trace id the other two do.
+/// A batch's grouped endpoint context: route roots, parent links, consumer
+/// destinations and span scopes, each keyed by trace id. Every update writes
+/// a parent link, so `parents` holds every trace id the other three do.
 struct BatchSourceContext {
     roots: TraceSourceEndpointGroups<String>,
     parents: TraceSourceEndpointGroups<Option<String>>,
     consumers: TraceSourceEndpointGroups<String>,
+    scopes: TraceSourceEndpointGroups<Arc<str>>,
 }
 
 /// Merge one trace's sampled endpoint context and collect any LRU eviction.
@@ -896,6 +897,9 @@ fn retain_source_endpoint_context(
     ) {
         lru_evicted.push(evicted);
     }
+    if let Some(scopes) = context.scopes.get(trace_id) {
+        window.retain_span_scopes(trace_id, scopes);
+    }
     if let Some(generation) = window.source_endpoint_generation(trace_id) {
         source_endpoint_generations.insert(trace_id.to_string(), generation);
     }
@@ -908,6 +912,7 @@ fn group_source_endpoint_updates(
     let mut roots: TraceSourceEndpointGroups<String> = HashMap::new();
     let mut parents: TraceSourceEndpointGroups<Option<String>> = HashMap::new();
     let mut consumers: TraceSourceEndpointGroups<String> = HashMap::new();
+    let mut scopes: TraceSourceEndpointGroups<Arc<str>> = HashMap::new();
     for update in updates
         .into_iter()
         .filter(|update| should_sample(&update.trace_id, sampling_rate))
@@ -928,6 +933,18 @@ fn group_source_endpoint_updates(
                 .or_default()
                 .insert(update.span_id.clone(), endpoint);
         }
+        if let Some(scope) = update.scope {
+            // One trace id clone per trace, not per span.
+            if !scopes.contains_key(&update.trace_id) {
+                scopes.insert(update.trace_id.clone(), HashMap::new());
+            }
+            if let Some(trace_scopes) = scopes.get_mut(&update.trace_id) {
+                trace_scopes
+                    .entry(Arc::clone(&update.service))
+                    .or_default()
+                    .insert(update.span_id.clone(), scope);
+            }
+        }
         // Unconditional, and last, so the common child span moves its
         // strings here instead of cloning them.
         parents
@@ -941,6 +958,7 @@ fn group_source_endpoint_updates(
         roots,
         parents,
         consumers,
+        scopes,
     }
 }
 

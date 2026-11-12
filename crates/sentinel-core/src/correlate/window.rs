@@ -52,6 +52,8 @@ struct ResolvedEndpoint {
 struct AncestryEntry {
     parent_span_id: Option<String>,
     resolution: Option<ResolvedEndpoint>,
+    /// Instrumentation scope of the span, when its request named one.
+    scope: Option<Arc<str>>,
 }
 
 type SourceEndpointGroups = HashMap<Arc<str>, HashMap<String, String>>;
@@ -254,6 +256,32 @@ impl TraceWindow {
         evicted.and_then(finish_trace_buffer)
     }
 
+    /// Record the instrumentation scope of spans whose ancestry is retained,
+    /// so a finished trace gives each event the scopes of ancestors exported
+    /// in a later request (a framework root ends after its children). Spans
+    /// the ancestry cache does not hold are skipped. Neither refreshes the
+    /// trace TTL nor reorders the cache.
+    pub fn retain_span_scopes(
+        &mut self,
+        trace_id: &str,
+        service_span_scopes: &HashMap<Arc<str>, HashMap<String, Arc<str>>>,
+    ) {
+        let Some(ancestry) = self
+            .traces
+            .peek_mut(trace_id)
+            .and_then(|buffer| buffer.resolved_ancestry.as_mut())
+        else {
+            return;
+        };
+        for (service, span_scopes) in service_span_scopes {
+            for (span_id, scope) in span_scopes {
+                if let Some(entry) = ancestry.peek_mut(&(Arc::clone(service), span_id.clone())) {
+                    entry.scope = Some(Arc::clone(scope));
+                }
+            }
+        }
+    }
+
     /// Fill unresolved source endpoints below retained entry spans in one trace.
     ///
     /// Uses `peek_mut` so a context-only update neither extends the trace TTL
@@ -384,6 +412,8 @@ impl TraceWindow {
                 buf.resolved_ancestry.as_ref(),
                 buf.resolved_ancestry_cap,
             );
+            settle_late_ancestors(&mut events, buf.resolved_ancestry.as_ref());
+            collapse_split_twins(&mut events);
             events
         })
     }
@@ -506,6 +536,7 @@ fn index_incoming_ancestry(
                 AncestryEntry {
                     parent_span_id: parent_span_id.clone(),
                     resolution: None,
+                    scope: None,
                 },
             );
         }
@@ -616,6 +647,7 @@ fn resolve_and_index_event(
         AncestryEntry {
             parent_span_id: event.event.parent_span_id.clone(),
             resolution,
+            scope: event.event.instrumentation_scopes.first().cloned(),
         },
     );
     updated
@@ -967,7 +999,190 @@ fn finish_trace_buffer(
             buffer.resolved_ancestry_cap,
         );
     }
+    settle_late_ancestors(&mut events, buffer.resolved_ancestry.as_ref());
+    collapse_split_twins(&mut events);
     (!events.is_empty()).then_some((trace_id, events))
+}
+
+/// What one event learns from its retained ancestors once the trace is whole.
+struct LateAncestry {
+    /// Ancestor scopes the event does not carry yet, nearest first.
+    scopes: Vec<Arc<str>>,
+    /// SQL ancestor events carrying the event's own statement: the outer
+    /// layers of one query.
+    duplicate_ancestors: Vec<usize>,
+}
+
+/// `(service, span id)` of every SQL event to its index and statement.
+type SqlEventIndex<'a> = HashMap<(&'a str, &'a str), (usize, &'a str)>;
+
+/// Walk one event's retained ancestors, as OTLP conversion does within one
+/// request. A parent cycle that leads back to the event names no duplicate.
+fn late_ancestry(
+    event: &NormalizedEvent,
+    sql_events: &SqlEventIndex<'_>,
+    ancestry: &LruCache<(Arc<str>, String), AncestryEntry>,
+) -> LateAncestry {
+    let is_sql = event.event.event_type == crate::event::EventType::Sql;
+    let mut found = LateAncestry {
+        scopes: Vec::new(),
+        duplicate_ancestors: Vec::new(),
+    };
+    let mut ancestor = event.event.parent_span_id.clone();
+    for _ in 0..ANCESTOR_WALK_MAX_DEPTH {
+        let Some(span_id) = ancestor.take() else {
+            break;
+        };
+        if span_id == event.event.span_id {
+            found.duplicate_ancestors.clear();
+            break;
+        }
+        if let Some(&(index, target)) =
+            sql_events.get(&(event.event.service.as_ref(), span_id.as_str()))
+            && is_sql
+            && target == event.event.target
+        {
+            found.duplicate_ancestors.push(index);
+        }
+        let Some(entry) = ancestry.peek(&(Arc::clone(&event.event.service), span_id)) else {
+            break;
+        };
+        if let Some(scope) = &entry.scope
+            && !event.event.instrumentation_scopes.contains(scope)
+            && !found.scopes.contains(scope)
+        {
+            found.scopes.push(Arc::clone(scope));
+        }
+        ancestor.clone_from(&entry.parent_span_id);
+    }
+    found
+}
+
+/// Give each event what an ancestor exported in a later request brings (a
+/// wrapping span ends after its children). Its scopes are appended, nearest
+/// first. A SQL ancestor event with the event's own statement is the outer
+/// layer of the same query (rule 1 of the conversion stitch): it is dropped
+/// and the innermost event, which now carries every layer's scope, stays.
+fn settle_late_ancestors(
+    events: &mut Vec<NormalizedEvent>,
+    ancestry: Option<&LruCache<(Arc<str>, String), AncestryEntry>>,
+) {
+    let Some(ancestry) = ancestry else {
+        return;
+    };
+    let sql_events: SqlEventIndex<'_> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.event.event_type == crate::event::EventType::Sql)
+        .map(|(index, event)| {
+            let key = (event.event.service.as_ref(), event.event.span_id.as_str());
+            (key, (index, event.event.target.as_str()))
+        })
+        .collect();
+    let found: Vec<LateAncestry> = events
+        .iter()
+        .map(|event| late_ancestry(event, &sql_events, ancestry))
+        .collect();
+    drop(sql_events);
+    let mut dropped = vec![false; events.len()];
+    for (event, late) in events.iter_mut().zip(found) {
+        let scopes = &mut event.event.instrumentation_scopes;
+        let room = crate::event::MAX_INSTRUMENTATION_SCOPES.saturating_sub(scopes.len());
+        scopes.extend(late.scopes.into_iter().take(room));
+        for outer in late.duplicate_ancestors {
+            dropped[outer] = true;
+        }
+    }
+    let mut kept = dropped.iter().map(|&dropped| !dropped);
+    events.retain(|_| kept.next().unwrap_or(true));
+}
+
+/// Leaf scope of a SQL event that can be one half of a twin pair: it names
+/// its parent and its instrumentation.
+fn twin_candidate_scope(event: &NormalizedEvent) -> Option<&str> {
+    if event.event.event_type != crate::event::EventType::Sql {
+        return None;
+    }
+    event.event.parent_span_id.as_ref()?;
+    event
+        .event
+        .instrumentation_scopes
+        .first()
+        .map(AsRef::as_ref)
+        .filter(|scope: &&str| !scope.is_empty())
+}
+
+/// Collapse twin SQL events that reached the window in two export requests.
+///
+/// OTLP conversion pairs the two layers of one query when one request holds
+/// both (`pair_cross_scope_twins` in `ingest::otlp`). A wrapping span exported
+/// one batch after its driver twin converts alone, so the pair meets here:
+/// same service, parent and statement, different leaf scopes. Rows line up as
+/// at conversion and keep their longest event.
+fn collapse_split_twins(events: &mut Vec<NormalizedEvent>) {
+    let mut scopes = events.iter().filter_map(twin_candidate_scope);
+    let two_scopes = scopes
+        .next()
+        .is_some_and(|first| scopes.any(|scope| scope != first));
+    if !two_scopes {
+        return;
+    }
+    let mut groups: HashMap<(&str, &str, &str), Vec<usize>> = HashMap::new();
+    for (index, event) in events.iter().enumerate() {
+        if twin_candidate_scope(event).is_some()
+            && let Some(parent) = event.event.parent_span_id.as_deref()
+        {
+            let key = (
+                event.event.service.as_ref(),
+                parent,
+                event.event.target.as_str(),
+            );
+            groups.entry(key).or_default().push(index);
+        }
+    }
+    let mut dropped = vec![false; events.len()];
+    // Groups are disjoint, so the map's iteration order cannot change the result.
+    for group in groups.into_values() {
+        mark_split_twins(events, group, &mut dropped);
+    }
+    let mut kept = dropped.iter().map(|&dropped| !dropped);
+    events.retain(|_| kept.next().unwrap_or(true));
+}
+
+/// Mark every event of one `(service, parent, statement)` group that is the
+/// shorter twin of another. Events naming two SQL engines are two queries.
+fn mark_split_twins(events: &[NormalizedEvent], mut group: Vec<usize>, dropped: &mut [bool]) {
+    let scope = |index: usize| twin_candidate_scope(&events[index]).unwrap_or("");
+    let start = |index: usize| {
+        crate::time::parse_iso8601_utc_to_ms(&events[index].event.timestamp).unwrap_or(0)
+    };
+    group.sort_by_cached_key(|&index| (scope(index), start(index), index));
+    let lanes: Vec<Vec<(u64, usize)>> = group
+        .chunk_by(|&a, &b| scope(a) == scope(b))
+        .map(|lane| lane.iter().map(|&index| (start(index), index)).collect())
+        .collect();
+    if lanes.len() < 2 {
+        return;
+    }
+    for twins in crate::ingest::twin_rows(&lanes) {
+        // `sql` is the label of a layer that names no engine.
+        let mut engines = twins
+            .iter()
+            .map(|&index| events[index].event.operation.as_str())
+            .filter(|&engine| engine != "sql");
+        let two_engines = engines
+            .next()
+            .is_some_and(|first| engines.any(|engine| engine != first));
+        let longest = twins
+            .iter()
+            .copied()
+            .max_by_key(|&index| (events[index].event.duration_us, std::cmp::Reverse(index)));
+        if let Some(longest) = longest.filter(|_| !two_engines) {
+            for &twin in twins.iter().filter(|&&twin| twin != longest) {
+                dropped[twin] = true;
+            }
+        }
+    }
 }
 
 /// Fill unresolved source endpoints in one trace's event slice: the nearest

@@ -1183,12 +1183,15 @@ fn pair_cross_scope_twins(donors: &[StitchDonor<'_>], suppressed: &[bool]) -> Ve
     // Groups are disjoint, so the map's iteration order cannot change the result.
     for mut group in groups.into_values() {
         group.sort_unstable_by_key(|&i| (donors[i].scope, donors[i].span.start_time_unix_nano, i));
-        let lanes: Vec<&[usize]> = group
+        let lanes: Vec<Vec<(u64, usize)>> = group
             .chunk_by(|&a, &b| donors[a].scope == donors[b].scope)
+            .map(|lane| {
+                lane.iter()
+                    .map(|&i| (donors[i].span.start_time_unix_nano, i))
+                    .collect()
+            })
             .collect();
-        let rows = lanes.iter().map(|lane| lane.len()).max().unwrap_or(0);
-        for row in 0..rows {
-            let twins: Vec<usize> = lanes.iter().filter_map(|l| l.get(row).copied()).collect();
+        for twins in crate::ingest::twin_rows(&lanes) {
             keep_longest_twin(donors, &twins, &mut keeper);
         }
     }
@@ -1448,7 +1451,8 @@ fn collect_orphan_candidates<'a>(
 /// and still counts `missing_db_statement`. Twins split the same way both
 /// emit: the PHP SDK can export a `QueryWatcher` span one batch after its
 /// `PDO::prepare`. Batch file ingest joins the batches first (see
-/// `ingest::json`), so this only reaches the daemon listeners.
+/// `ingest::json`), and the daemon pairs them when the trace leaves the
+/// window (see `correlate::window`).
 ///
 /// Known limit: pairing is a nearest-start heuristic. Interleaved
 /// same-parent queries can swap params and durations between events, and
@@ -1615,7 +1619,7 @@ pub fn convert_otlp_request_counted_with_grouping(
 }
 
 #[cfg(feature = "daemon")]
-fn source_endpoint_updates(
+pub(crate) fn source_endpoint_updates(
     request: &ExportTraceServiceRequest,
 ) -> Vec<crate::daemon::SourceEndpointUpdate> {
     let mut updates = Vec::new();
@@ -1630,24 +1634,30 @@ fn source_endpoint_updates(
         let mut service = service_name.to_string();
         crate::event::truncate_field(&mut service, crate::event::MAX_SERVICE_LENGTH);
         let service: Arc<str> = Arc::from(service);
-        updates.extend(
-            resource_spans
-                .scope_spans
-                .iter()
-                .flat_map(|scope| &scope.spans)
-                .filter_map(|span| span_endpoint_update(span, &service, span_index)),
-        );
+        for scope_spans in &resource_spans.scope_spans {
+            let mut scope = scope_spans
+                .scope
+                .as_ref()
+                .map(|scope| scope.name.clone())
+                .unwrap_or_default();
+            crate::event::truncate_field(&mut scope, crate::event::MAX_SCOPE_NAME_LENGTH);
+            let scope: Option<Arc<str>> = (!scope.is_empty()).then(|| Arc::from(scope));
+            updates.extend(scope_spans.spans.iter().filter_map(|span| {
+                span_endpoint_update(span, &service, span_index, scope.as_ref())
+            }));
+        }
     }
     updates
 }
 
 /// The endpoint update one span carries, or `None` when its identifiers are
-/// malformed or it holds neither an endpoint nor a parent link.
+/// malformed or it holds none of an endpoint, a parent link or a scope.
 #[cfg(feature = "daemon")]
 fn span_endpoint_update<'a>(
     span: &'a Span,
     service: &Arc<str>,
     span_index: &HashMap<SpanKey<'a>, &'a Span>,
+    scope: Option<&Arc<str>>,
 ) -> Option<crate::daemon::SourceEndpointUpdate> {
     if span.trace_id.len() != TRACE_ID_LEN
         || span.span_id.len() != SPAN_ID_LEN
@@ -1684,7 +1694,11 @@ fn span_endpoint_update<'a>(
     }
     let parent_span_id =
         (!span.parent_span_id.is_empty()).then(|| bytes_to_hex(&span.parent_span_id));
-    if endpoint.is_none() && parent_span_id.is_none() && consumer_endpoint.is_none() {
+    if endpoint.is_none()
+        && parent_span_id.is_none()
+        && consumer_endpoint.is_none()
+        && scope.is_none()
+    {
         return None;
     }
     Some(crate::daemon::SourceEndpointUpdate {
@@ -1694,6 +1708,7 @@ fn span_endpoint_update<'a>(
         parent_span_id,
         endpoint,
         consumer_endpoint,
+        scope: scope.cloned(),
     })
 }
 

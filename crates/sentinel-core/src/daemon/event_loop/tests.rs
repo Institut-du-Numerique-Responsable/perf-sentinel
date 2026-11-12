@@ -570,6 +570,7 @@ async fn context_only_batch_repairs_source_without_io_metric_inflation() {
         super::super::IngestBatch {
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
@@ -618,6 +619,7 @@ async fn consumer_context_batch_names_an_unknown_event() {
         super::super::IngestBatch {
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
                 span_id: "consumer-1".to_string(),
@@ -655,6 +657,7 @@ async fn late_outer_server_replaces_known_nested_route_within_service() {
     let first = super::super::IngestBatch {
         events: vec![nested_sql.event],
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: "trace-nested".to_string(),
             service: Arc::from("laravel-svc"),
@@ -682,6 +685,7 @@ async fn late_outer_server_replaces_known_nested_route_within_service() {
     let outer = super::super::IngestBatch {
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: "trace-nested".to_string(),
             service: Arc::from("laravel-svc"),
@@ -722,6 +726,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
         events: vec![nested_sql.event],
         source_endpoint_updates: vec![
             super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-internal".to_string(),
                 service: Arc::from("laravel-svc"),
@@ -730,6 +735,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
                 endpoint: Some("/api/payments/history".to_string()),
             },
             super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-internal".to_string(),
                 service: Arc::from("laravel-svc"),
@@ -748,6 +754,7 @@ async fn late_outer_route_crosses_a_retained_internal_edge() {
     let outer = super::super::IngestBatch {
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: "trace-internal".to_string(),
             service: Arc::from("laravel-svc"),
@@ -790,6 +797,7 @@ async fn late_caller_root_does_not_cross_the_service_boundary() {
             super::super::IngestBatch {
                 events: vec![callee_sql.event],
                 source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                    scope: None,
                     consumer_endpoint: None,
                     trace_id: "trace-cross".to_string(),
                     service: Arc::from("payments-svc"),
@@ -811,6 +819,7 @@ async fn late_caller_root_does_not_cross_the_service_boundary() {
             super::super::IngestBatch {
                 events: Vec::new(),
                 source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                    scope: None,
                     consumer_endpoint: None,
                     trace_id: "trace-cross".to_string(),
                     service: Arc::from("orders-svc"),
@@ -858,6 +867,7 @@ async fn zero_sampling_drops_root_context_without_evicting_a_kept_trace() {
         super::super::IngestBatch {
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "dropped".to_string(),
                 service: Arc::from("orders-svc"),
@@ -902,6 +912,7 @@ async fn partial_sampling_keeps_only_matching_root_context() {
     let root_batch = |trace_id: &str, endpoint: &str| super::super::IngestBatch {
         events: Vec::new(),
         source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: trace_id.to_string(),
             service: Arc::from("orders-svc"),
@@ -956,6 +967,7 @@ async fn same_batch_root_reconciles_new_trace_before_detection() {
         super::super::IngestBatch {
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-new".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1006,6 +1018,7 @@ async fn same_batch_root_reconciles_existing_and_new_events() {
         super::super::IngestBatch {
             events: vec![event],
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1053,6 +1066,7 @@ async fn same_batch_root_reconciles_new_trace_evicted_during_ingest() {
         super::super::IngestBatch {
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-a".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1100,6 +1114,7 @@ async fn same_batch_reconciliation_stays_within_the_bounded_work_budget() {
         super::super::IngestBatch {
             events,
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1151,6 +1166,7 @@ async fn oversized_root_group_is_reconciled_once_per_batch() {
         .collect();
     let source_endpoint_updates = (0..=CAP)
         .map(|index| super::super::SourceEndpointUpdate {
+            scope: None,
             consumer_endpoint: None,
             trace_id: "trace-1".to_string(),
             service: Arc::from("orders-svc"),
@@ -1193,6 +1209,7 @@ async fn unresolved_io_only_batches_stay_within_the_bounded_work_budget() {
         super::super::IngestBatch {
             events: Vec::new(),
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-1".to_string(),
                 service: Arc::from("orders-svc"),
@@ -1279,6 +1296,7 @@ async fn source_update_precedes_lru_eviction_in_the_same_batch() {
         super::super::IngestBatch {
             events: vec![trace_b],
             source_endpoint_updates: vec![super::super::SourceEndpointUpdate {
+                scope: None,
                 consumer_endpoint: None,
                 trace_id: "trace-a".to_string(),
                 service: Arc::from("orders-svc"),
@@ -4193,4 +4211,87 @@ fn histogram_pair_cap_keys_on_the_folded_service() {
     assert_eq!(metrics.slow_duration_grouping_overflow_total.get(), 0);
     assert_eq!(metrics.slow_duration_service_overflow_total.get(), 2);
     assert_eq!(meter.hist_pairs.len, 1);
+}
+
+/// Replay an OTLP JSON dump as the listeners receive it, one export request
+/// per line, and drain the window.
+async fn replay_export_batches(fixture: &str) -> Vec<(String, Vec<normalize::NormalizedEvent>)> {
+    let path = format!(
+        "{}/../../tests/fixtures/{fixture}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let window = test_window();
+    let metrics = MetricsState::new();
+    let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
+    for line in raw.lines() {
+        let request: opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest =
+            serde_json::from_str(line).expect("one OTLP request per line");
+        let source_endpoint_updates = crate::ingest::otlp::source_endpoint_updates(&request);
+        let (events, _) = crate::ingest::otlp::convert_otlp_request_counted(&request);
+        ingest_event_batch(
+            super::super::IngestBatch {
+                events,
+                source_endpoint_updates,
+            },
+            1.0,
+            &window,
+            &metrics,
+            &mut service_meter,
+        )
+        .await;
+    }
+    window.lock().await.drain_all()
+}
+
+#[tokio::test]
+async fn laravel_trace_split_over_export_requests_counts_each_query_once() {
+    // A 12 s laravel-svc trace, six export requests. The kernel span (route,
+    // laravel scope) comes last and the `sql SELECT` of the last query one
+    // request after its pdo spans.
+    let traces = replay_export_batches("otlp_php_laravel_slow_sql_batches.ndjson").await;
+
+    assert_eq!(traces.len(), 1);
+    let events = &traces[0].1;
+    assert_eq!(
+        events.len(),
+        7,
+        "six pg_sleep queries and the connection's search_path"
+    );
+    for event in events {
+        assert_eq!(event.event.source.endpoint, "/api/fault/slow-sql");
+        assert!(
+            event
+                .event
+                .instrumentation_scopes
+                .iter()
+                .any(|scope| scope.as_ref() == "io.opentelemetry.contrib.php.laravel"),
+            "the kernel scope reaches {:?}",
+            event.event.instrumentation_scopes
+        );
+    }
+}
+
+#[tokio::test]
+async fn symfony_trace_split_over_export_requests_keeps_one_event_per_query() {
+    // A symfony-svc slow-sql trace, six export requests. A manual span of the
+    // controller repeats each statement above the Doctrine spans and ends
+    // with the query, so it exports one request after them.
+    let traces = replay_export_batches("otlp_php_symfony_slow_sql_batches.ndjson").await;
+
+    assert_eq!(traces.len(), 1);
+    let events = &traces[0].1;
+    assert_eq!(events.len(), 7);
+    for event in events {
+        assert_eq!(event.event.source.endpoint, "/api/fault/slow-sql");
+        assert_eq!(
+            event
+                .event
+                .instrumentation_scopes
+                .first()
+                .map(AsRef::as_ref),
+            Some("io.opentelemetry.contrib.php.doctrine"),
+            "the Doctrine event stays, not the span above it"
+        );
+    }
 }

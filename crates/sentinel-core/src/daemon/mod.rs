@@ -65,6 +65,9 @@ pub(crate) struct SourceEndpointUpdate {
     pub(crate) endpoint: Option<String>,
     /// CONSUMER destination, read only where no route answers.
     pub(crate) consumer_endpoint: Option<String>,
+    /// Instrumentation scope of the span. An event whose ancestors export in
+    /// a later request takes their scopes from here.
+    pub(crate) scope: Option<Arc<str>>,
 }
 
 /// One bounded daemon ingest message. JSON batches carry only `events`.
