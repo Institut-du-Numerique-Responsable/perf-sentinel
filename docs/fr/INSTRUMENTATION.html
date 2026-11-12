@@ -362,6 +362,7 @@
 <li>Vérifier que Perf Sentinel reçoit des spans :</li>
 </ol>
 <div class="ps-code"><div class="ps-code-lang">bash</div><pre><code><span style="color:var(--code-cmd);font-weight:600">curl</span> <span style="color:var(--code-flag)">-s</span> http://localhost:14318/metrics | grep perf_sentinel_events_processed_total</code></pre></div>
+<p class="ps-p">Le compteur bouge quand une trace quitte la fenêtre, environ <code class="ps-ic">trace_ttl_ms</code> (30 s par défaut) après son dernier span.</p>
 <ol>
 <li>Voir les findings émis par Perf Sentinel sur stdout :</li>
 </ol>
@@ -981,7 +982,7 @@ tracing_subscriber::registry()
   <span style="color:var(--code-cmd);font-weight:600">open-telemetry/opentelemetry-auto-laravel</span>   <span style="color:var(--term-comment)"> # ou -auto-symfony + -auto-doctrine</span></code></pre></div>
 <p class="ps-p"><strong>Correspondance des frameworks.</strong></p>
 <ul>
-<li>Laravel/Eloquent : le span SQL feuille porte le scope PDO, mais le scope applicatif <code class="ps-ic">io.opentelemetry.contrib.php.laravel</code> apparaît dans la chaîne de spans, donc les findings portent des fixes <code class="ps-ic">php_laravel_eloquent</code> (eager loading <code class="ps-ic">with()</code> / <code class="ps-ic">load()</code>) sur tous les anti-patterns.</li>
+<li>Laravel/Eloquent : le span SQL feuille porte le scope PDO, mais le scope applicatif <code class="ps-ic">io.opentelemetry.contrib.php.laravel</code> apparaît dans la chaîne de spans, donc les findings portent des fixes <code class="ps-ic">php_laravel_eloquent</code> (eager loading <code class="ps-ic">with()</code> / <code class="ps-ic">load()</code>) sur tous les anti-patterns. auto-laravel enregistre chaque requête dans un span <code class="ps-ic">sql SELECT</code>, et auto-pdo l'enregistre à nouveau dans les spans frères <code class="ps-ic">PDO::prepare</code> et <code class="ps-ic">PDOStatement::execute</code>. Perf Sentinel les compte comme une seule requête sur toutes les versions d'auto-laravel.</li>
 <li>Symfony/Doctrine : le scope <code class="ps-ic">io.opentelemetry.contrib.php.doctrine</code> est émis directement sur le span SQL (DBAL est instrumenté), donc les findings SQL portent des fixes <code class="ps-ic">php_doctrine</code> (fetch-join DQL). Une application Symfony qui utilise du PDO brut au lieu de Doctrine se rabat sur <code class="ps-ic">php_generic</code>.</li>
 </ul>
 <p class="ps-p">L'instrumentation PDO émet le template SQL obfusqué par défaut, ce qui suffit pour la détection. Le scope <code class="ps-ic">io.opentelemetry.contrib.php.pdo</code> seul (sans scope Laravel/Doctrine) route vers <code class="ps-ic">php_generic</code>.</p>
