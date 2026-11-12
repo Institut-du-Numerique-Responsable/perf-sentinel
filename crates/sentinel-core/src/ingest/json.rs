@@ -306,7 +306,8 @@ impl JsonIngest {
                     documents.push(request);
                     offset += stream.byte_offset();
                 }
-                // Empty list (`{"arrayValue":{}}`) and valueless attribute
+                // Resource `entityRefs` without `descriptionKeys` (Java SDK
+                // 1.67), empty list (`{"arrayValue":{}}`) and valueless attribute
                 // (`{"key":"k","value":{}}`, seen from the Java stdout
                 // exporter): normalize_otlp_json repairs both, retry this
                 // document only.
@@ -386,27 +387,34 @@ impl IngestSource for JsonIngest {
     }
 }
 
-/// True for the two serde errors raised by attribute shapes canonical protojson
-/// allows but the derived Deserialize rejects: an empty list (missing field
-/// "values") and a valueless attribute (no known keys found).
+/// True for the serde errors raised by shapes canonical protojson allows but
+/// the derived Deserialize rejects: an omitted empty repeated field (missing
+/// field "values" on an empty list, "descriptionKeys" on a resource entity
+/// ref) and a valueless attribute (no known keys found).
 ///
-/// The first is unambiguous (only ArrayValue/KeyValueList have `values`), the
-/// second is not: any unrecognised flattened oneof takes the retry too. That
-/// costs one reparse on a document that fails either way, and the caller still
-/// gets the strict pass's positioned error.
+/// Any missing field or unrecognised flattened oneof takes the retry, repaired
+/// or not. That costs one reparse on a document that fails either way, and the
+/// caller still gets the strict pass's positioned error.
 fn is_recoverable_attribute_shape(e: &serde_json::Error) -> bool {
     e.classify() == serde_json::error::Category::Data
-        && (e.to_string().contains("missing field `values`")
+        && (e.to_string().contains("missing field `")
             || e.to_string().contains("no known keys found"))
 }
 
-/// Repair the protojson attribute shapes the derived Deserialize rejects: backfill
-/// the omitted `values` on empty `arrayValue`/`kvlistValue`, and drop a `"value": {}`
-/// so `AnyValue` stays `None` rather than matching no oneof variant. Recursion depth
-/// is bounded by the pre-dispatch `MAX_JSON_DEPTH` cap.
+/// Repair the protojson shapes the derived Deserialize rejects: backfill the
+/// omitted `values` on empty `arrayValue`/`kvlistValue`, drop a `"value": {}`
+/// so `AnyValue` stays `None` rather than matching no oneof variant, and drop
+/// a resource's `entityRefs`. The `OTel` Java SDK 1.67 writes them without
+/// their empty `descriptionKeys`, which `EntityRef` requires, and nothing
+/// here reads them. Recursion depth is bounded by the pre-dispatch
+/// `MAX_JSON_DEPTH` cap.
 fn normalize_otlp_json(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
+            // Scoped to Resource (the object that carries `attributes`).
+            if map.contains_key("attributes") {
+                map.remove("entityRefs");
+            }
             for key in ["arrayValue", "kvlistValue"] {
                 if let Some(serde_json::Value::Object(inner)) = map.get_mut(key)
                     && !inner.contains_key("values")
@@ -923,6 +931,22 @@ mod tests {
         let events = ingest.ingest(line.as_bytes()).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].target, "SELECT 1");
+    }
+
+    #[test]
+    fn otlp_resource_entity_refs_without_description_keys_ingest() {
+        // Resource shape of the OTel Java SDK 1.67 (agent 2.33.1), from a
+        // quarkus-svc Collector file-exporter dump: protojson omits the empty
+        // `descriptionKeys`.
+        let line = otlp_request_json("0af7651916cd43dd8448eb211c80319c", "SELECT 1").replace(
+            r#""resource":{"#,
+            r#""resource":{"entityRefs":[{"schemaUrl":"https://opentelemetry.io/schemas/1.40.0","type":"service.instance","idKeys":["service.instance.id"]},{"schemaUrl":"https://opentelemetry.io/schemas/1.40.0","type":"service","idKeys":["service.name"]}],"#,
+        );
+        assert!(line.contains("entityRefs"));
+        let ingest = JsonIngest::new(1_048_576);
+        let events = ingest.ingest(line.as_bytes()).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].service.as_ref(), "svc");
     }
 
     #[test]
