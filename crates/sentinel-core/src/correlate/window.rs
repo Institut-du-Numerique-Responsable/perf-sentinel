@@ -95,8 +95,9 @@ struct TraceBuffer {
     /// A trace with none was stitched whole by its requests.
     stitch_split: bool,
     /// Services that brought records, to tell a later block of one of them.
+    /// At most one per kept record, so bounded by the same cap.
     #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
-    stitch_services: Vec<Arc<str>>,
+    stitch_services: HashSet<Arc<str>>,
     /// Records were dropped at the per-trace cap: stitching again would
     /// decide on a partial view.
     stitch_overflow: bool,
@@ -488,7 +489,7 @@ fn new_trace_buffer(now_ms: u64, per_trace_cap: usize) -> TraceBuffer {
         source_endpoint_generation: 0,
         stitch_records: Vec::new(),
         stitch_split: false,
-        stitch_services: Vec::new(),
+        stitch_services: HashSet::new(),
         stitch_overflow: false,
         last_seen_ms: now_ms,
     }
@@ -1094,27 +1095,21 @@ fn needs_restitch(buffer: &TraceBuffer) -> bool {
 /// Append one export request's records under the per-trace cap.
 #[cfg(feature = "daemon")]
 fn keep_stitch_records(buffer: &mut TraceBuffer, records: Vec<StitchRecord>, cap: usize) {
-    // Blocks per service in this request, and services seen in an earlier one.
-    let mut blocks: Vec<(&Arc<str>, usize)> = Vec::new();
-    for record in &records {
-        let entry = (&record.service, record.block);
-        if !blocks.contains(&entry) {
-            blocks.push(entry);
-        }
-    }
-    for (index, &(service, _)) in blocks.iter().enumerate() {
-        let again = blocks[..index].iter().any(|&(seen, _)| seen == service)
-            || buffer.stitch_services.contains(service);
-        buffer.stitch_split |= again;
-    }
-    for (service, _) in blocks {
-        if !buffer.stitch_services.contains(service) {
-            buffer.stitch_services.push(Arc::clone(service));
-        }
-    }
+    // The cap first: what follows is linear in the records kept.
     let room = cap.saturating_sub(buffer.stitch_records.len());
     buffer.stitch_overflow |= records.len() > room;
-    buffer.stitch_records.extend(records.into_iter().take(room));
+    let records: Vec<StitchRecord> = records.into_iter().take(room).collect();
+    // A service split over two blocks of this request, or seen in an earlier
+    // one.
+    let mut first_block: HashMap<&Arc<str>, usize> = HashMap::new();
+    for record in &records {
+        let block = *first_block.entry(&record.service).or_insert(record.block);
+        buffer.stitch_split |= block != record.block;
+    }
+    for service in first_block.into_keys() {
+        buffer.stitch_split |= !buffer.stitch_services.insert(Arc::clone(service));
+    }
+    buffer.stitch_records.extend(records);
 }
 
 /// Append to each event the scopes of its retained ancestors, nearest first,
