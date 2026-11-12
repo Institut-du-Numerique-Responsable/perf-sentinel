@@ -4565,6 +4565,150 @@ async fn inner_execute_stitched_alone_yields_to_its_outer_execute() {
     assert_eq!(events, vec![("0303030303030303".to_string(), 500_000)]);
 }
 
+/// [`otlp_request`] with each span list under its own instrumentation scope.
+fn otlp_scoped_request(
+    service: &str,
+    scoped: Vec<(&str, Vec<opentelemetry_proto::tonic::trace::v1::Span>)>,
+) -> OtlpRequest {
+    use opentelemetry_proto::tonic::common::v1::InstrumentationScope;
+    use opentelemetry_proto::tonic::trace::v1::ScopeSpans;
+
+    let mut request = otlp_request(service, Vec::new());
+    request.resource_spans[0].scope_spans = scoped
+        .into_iter()
+        .map(|(name, spans)| ScopeSpans {
+            scope: Some(InstrumentationScope {
+                name: name.to_string(),
+                ..Default::default()
+            }),
+            spans,
+            ..Default::default()
+        })
+        .collect();
+    request
+}
+
+#[tokio::test]
+async fn a_twin_paired_with_the_wrong_query_comes_back() {
+    // Query 1: prepare P1 and execute E1 in request 1, its Laravel span K1 in
+    // request 2. Query 2: prepare P2 in request 2, its execute never arrives.
+    // Request 2 alone pairs K1 with P2 and drops P2. The whole trace pairs K1
+    // with P1, so P2 must come back, as in one request.
+    let events = assert_split_matches_one_request_scoped(vec![
+        vec![
+            ("http", vec![otlp_server_root(1, "/api/orders")]),
+            (
+                "pdo",
+                vec![
+                    otlp_sql_span(2, 1, "PDO::prepare", Some(STATEMENT), 1, 0),
+                    otlp_sql_span(3, 1, "PDOStatement::execute", None, 2, 600),
+                ],
+            ),
+        ],
+        vec![
+            (
+                "laravel",
+                vec![otlp_sql_span(4, 1, "sql SELECT", Some(STATEMENT), 1, 610)],
+            ),
+            (
+                "pdo",
+                vec![otlp_sql_span(5, 1, "PDO::prepare", Some(STATEMENT), 700, 0)],
+            ),
+        ],
+    ])
+    .await;
+
+    assert_eq!(
+        events,
+        vec![
+            ("0303030303030303".to_string(), 600_000),
+            ("0505050505050505".to_string(), 0),
+        ]
+    );
+}
+
+/// [`assert_split_matches_one_request`] for requests whose spans carry
+/// instrumentation scopes.
+async fn assert_split_matches_one_request_scoped(
+    requests: Vec<Vec<(&str, Vec<opentelemetry_proto::tonic::trace::v1::Span>)>>,
+) -> Vec<(String, u64)> {
+    let mut whole = otlp_scoped_request("orders-svc", Vec::new());
+    for scoped in &requests {
+        let request = otlp_scoped_request("orders-svc", scoped.clone());
+        whole.resource_spans[0]
+            .scope_spans
+            .extend(request.resource_spans[0].scope_spans.clone());
+    }
+    let mut expected: Vec<(String, u64, String)> =
+        crate::ingest::otlp::convert_otlp_request_counted(&whole)
+            .0
+            .into_iter()
+            .map(|event| (event.span_id, event.duration_us, event.target))
+            .collect();
+    expected.sort();
+    let split: Vec<OtlpRequest> = requests
+        .into_iter()
+        .map(|scoped| otlp_scoped_request("orders-svc", scoped))
+        .collect();
+    let mut settled: Vec<(String, u64, String)> = replay_requests(&split)
+        .await
+        .into_iter()
+        .flat_map(|(_, events)| events)
+        .map(|event| {
+            let event = event.event;
+            (event.span_id, event.duration_us, event.target)
+        })
+        .collect();
+    settled.sort();
+    assert_eq!(settled, expected, "same events as one request");
+    settled
+        .into_iter()
+        .map(|(span_id, duration_us, _)| (span_id, duration_us))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_statement_less_span_with_no_statement_in_its_trace_is_not_kept() {
+    // An instrumentation that drops statements: nothing can ever give these
+    // spans one, so the window must not hold their pending events.
+    let window = test_window();
+    let metrics = MetricsState::new();
+    let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
+    for start in [1, 2] {
+        let request = otlp_request(
+            "orders-svc",
+            vec![
+                otlp_server_root(1, "/api/orders"),
+                otlp_sql_span(10 + start as u8, 1, "query", None, start, 5),
+            ],
+        );
+        let source_endpoint_updates = crate::ingest::otlp::source_endpoint_updates(&request);
+        let (events, _, stitch_records) =
+            crate::ingest::otlp::convert_otlp_request_stitchable(&request, None);
+        assert_eq!(stitch_records.len(), 1, "conversion records the span");
+        ingest_event_batch(
+            super::super::IngestBatch {
+                events,
+                source_endpoint_updates,
+                stitch_records,
+            },
+            1.0,
+            &window,
+            &metrics,
+            &mut service_meter,
+        )
+        .await;
+    }
+
+    assert_eq!(
+        window
+            .lock()
+            .await
+            .stitch_record_count("0909090909090909090909090909090909"[..32].as_ref()),
+        0
+    );
+}
+
 #[tokio::test]
 async fn trace_from_one_request_is_not_stitched_again() {
     let events = assert_split_matches_one_request(vec![vec![

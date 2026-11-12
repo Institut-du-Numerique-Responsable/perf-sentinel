@@ -71,6 +71,24 @@ struct SourceContext<'a> {
     consumers: &'a SourceEndpointGroups,
 }
 
+/// The SQL spans conversion looked at for one trace, kept to stitch it again
+/// over all its export requests once it leaves the window.
+#[derive(Default)]
+struct StitchState {
+    /// In arrival order, for [`restitch_trace`].
+    records: Vec<StitchRecord>,
+    /// A service's records came from more than one `ResourceSpans` block.
+    /// A trace with none was stitched whole by its requests.
+    split: bool,
+    /// Services that brought records, to tell a later block of one of them.
+    /// At most one per kept record, so bounded by the same cap.
+    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+    services: HashSet<Arc<str>>,
+    /// Records were dropped at the per-trace cap: stitching again would
+    /// decide on a partial view.
+    overflow: bool,
+}
+
 /// Buffer for a single trace.
 struct TraceBuffer {
     events: VecDeque<NormalizedEvent>,
@@ -88,19 +106,11 @@ struct TraceBuffer {
     resolved_ancestry_cap: usize,
     needs_reconciliation: bool,
     source_endpoint_generation: u64,
-    /// The SQL spans conversion looked at, in arrival order, for
-    /// [`restitch_trace`].
-    stitch_records: Vec<StitchRecord>,
-    /// Services whose records came from more than one `ResourceSpans` block.
-    /// A trace with none was stitched whole by its requests.
-    stitch_split: bool,
-    /// Services that brought records, to tell a later block of one of them.
-    /// At most one per kept record, so bounded by the same cap.
-    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
-    stitch_services: HashSet<Arc<str>>,
-    /// Records were dropped at the per-trace cap: stitching again would
-    /// decide on a partial view.
-    stitch_overflow: bool,
+    /// What the whole-trace SQL stitch needs, see [`StitchState`].
+    stitch: StitchState,
+    /// Span scopes arrived in more than one export request: an event may
+    /// lack the scope of an ancestor exported after it.
+    late_scopes: bool,
     /// Absolute timestamp (ms since epoch) of the last event pushed to this trace.
     /// Used for TTL eviction: the LRU cache handles relative access ordering.
     last_seen_ms: u64,
@@ -250,6 +260,8 @@ impl TraceWindow {
         self.next_source_endpoint_generation = self.next_source_endpoint_generation.wrapping_add(1);
         let source_endpoint_generation = self.next_source_endpoint_generation;
         if let Some(buf) = self.traces.peek_mut(trace_id) {
+            // The trace is already here, so this request is not its first.
+            buf.late_scopes |= !service_span_scopes.is_empty();
             merge_source_endpoint_groups(
                 buf,
                 service_root_endpoints,
@@ -439,6 +451,13 @@ impl TraceWindow {
     }
 
     #[cfg(all(test, feature = "daemon"))]
+    pub(crate) fn stitch_record_count(&self, trace_id: &str) -> usize {
+        self.traces
+            .peek(trace_id)
+            .map_or(0, |buffer| buffer.stitch.records.len())
+    }
+
+    #[cfg(all(test, feature = "daemon"))]
     pub(crate) fn reconciliation_passes(&self) -> usize {
         self.reconciliation_passes
     }
@@ -453,7 +472,7 @@ impl TraceWindow {
                 restitch_trace(
                     trace_id,
                     &mut events,
-                    &buf.stitch_records,
+                    &buf.stitch.records,
                     buf.resolved_ancestry.as_ref(),
                 );
             }
@@ -468,7 +487,9 @@ impl TraceWindow {
                 buf.resolved_ancestry.as_ref(),
                 buf.resolved_ancestry_cap,
             );
-            fill_ancestor_scopes(&mut events, buf.resolved_ancestry.as_ref());
+            if buf.late_scopes {
+                fill_ancestor_scopes(&mut events, buf.resolved_ancestry.as_ref());
+            }
             events
         })
     }
@@ -487,10 +508,8 @@ fn new_trace_buffer(now_ms: u64, per_trace_cap: usize) -> TraceBuffer {
         resolved_ancestry_cap: per_trace_cap,
         needs_reconciliation: false,
         source_endpoint_generation: 0,
-        stitch_records: Vec::new(),
-        stitch_split: false,
-        stitch_services: HashSet::new(),
-        stitch_overflow: false,
+        stitch: StitchState::default(),
+        late_scopes: false,
         last_seen_ms: now_ms,
     }
 }
@@ -1054,7 +1073,7 @@ fn finish_trace_buffer(
         buffer.needs_reconciliation |= restitch_trace(
             &trace_id,
             &mut events,
-            &buffer.stitch_records,
+            &buffer.stitch.records,
             buffer.resolved_ancestry.as_ref(),
         );
         buffer.events = VecDeque::from(events);
@@ -1076,7 +1095,9 @@ fn finish_trace_buffer(
             buffer.resolved_ancestry_cap,
         );
     }
-    fill_ancestor_scopes(&mut events, buffer.resolved_ancestry.as_ref());
+    if buffer.late_scopes {
+        fill_ancestor_scopes(&mut events, buffer.resolved_ancestry.as_ref());
+    }
     (!events.is_empty()).then_some((trace_id, events))
 }
 
@@ -1084,8 +1105,8 @@ fn finish_trace_buffer(
 /// whole of them and of its ancestry is at hand: a capped view would decide
 /// on missing spans.
 fn needs_restitch(buffer: &TraceBuffer) -> bool {
-    buffer.stitch_split
-        && !buffer.stitch_overflow
+    buffer.stitch.split
+        && !buffer.stitch.overflow
         && buffer
             .resolved_ancestry
             .as_ref()
@@ -1096,20 +1117,45 @@ fn needs_restitch(buffer: &TraceBuffer) -> bool {
 #[cfg(feature = "daemon")]
 fn keep_stitch_records(buffer: &mut TraceBuffer, records: Vec<StitchRecord>, cap: usize) {
     // The cap first: what follows is linear in the records kept.
-    let room = cap.saturating_sub(buffer.stitch_records.len());
-    buffer.stitch_overflow |= records.len() > room;
-    let records: Vec<StitchRecord> = records.into_iter().take(room).collect();
+    let room = cap.saturating_sub(buffer.stitch.records.len());
+    buffer.stitch.overflow |= records.len() > room;
+    let mut records: Vec<StitchRecord> = records.into_iter().take(room).collect();
+    // A statement-less span waits for a statement only where its service
+    // has statement-bearing spans in the trace. Elsewhere (an
+    // instrumentation that drops statements) it would hold memory for an
+    // event that never comes.
+    let donor_services: HashSet<&Arc<str>> = buffer
+        .stitch
+        .records
+        .iter()
+        .chain(&records)
+        .filter(|record| matches!(record.role, StitchRole::Donor { .. }))
+        .map(|record| &record.service)
+        .collect();
+    let waiting_alone = |record: &StitchRecord| {
+        matches!(
+            record.role,
+            StitchRole::Orphan {
+                pending: Some(_),
+                ..
+            }
+        ) && !donor_services.contains(&record.service)
+    };
+    let alone: Vec<bool> = records.iter().map(waiting_alone).collect();
+    drop(donor_services);
+    let mut alone = alone.into_iter();
+    records.retain(|_| !alone.next().unwrap_or(false));
     // A service split over two blocks of this request, or seen in an earlier
     // one.
     let mut first_block: HashMap<&Arc<str>, usize> = HashMap::new();
     for record in &records {
         let block = *first_block.entry(&record.service).or_insert(record.block);
-        buffer.stitch_split |= block != record.block;
+        buffer.stitch.split |= block != record.block;
     }
     for service in first_block.into_keys() {
-        buffer.stitch_split |= !buffer.stitch_services.insert(Arc::clone(service));
+        buffer.stitch.split |= !buffer.stitch.services.insert(Arc::clone(service));
     }
-    buffer.stitch_records.extend(records);
+    buffer.stitch.records.extend(records);
 }
 
 /// Append to each event the scopes of its retained ancestors, nearest first,
@@ -1123,24 +1169,31 @@ fn fill_ancestor_scopes(
     let Some(ancestry) = ancestry else {
         return;
     };
+    // Borrowed keys, so a walk allocates nothing per hop.
+    let entries: HashMap<(&str, &str), &AncestryEntry> = ancestry
+        .iter()
+        .map(|((service, span_id), entry)| ((service.as_ref(), span_id.as_str()), entry))
+        .collect();
     for event in events {
-        let mut ancestor = event.event.parent_span_id.clone();
+        let service = Arc::clone(&event.event.service);
+        let mut late: Vec<Arc<str>> = Vec::new();
+        let mut ancestor = event.event.parent_span_id.as_deref();
         for _ in 0..ANCESTOR_WALK_MAX_DEPTH {
-            let Some(span_id) = ancestor.take() else {
+            let Some(entry) = ancestor.and_then(|span_id| entries.get(&(&*service, span_id)))
+            else {
                 break;
             };
-            let Some(entry) = ancestry.peek(&(Arc::clone(&event.event.service), span_id)) else {
-                break;
-            };
-            let scopes = &mut event.event.instrumentation_scopes;
             if let Some(scope) = &entry.scope
-                && scopes.len() < crate::event::MAX_INSTRUMENTATION_SCOPES
-                && !scopes.contains(scope)
+                && !event.event.instrumentation_scopes.contains(scope)
+                && !late.contains(scope)
             {
-                scopes.push(Arc::clone(scope));
+                late.push(Arc::clone(scope));
             }
-            ancestor.clone_from(&entry.parent_span_id);
+            ancestor = entry.parent_span_id.as_deref();
         }
+        let scopes = &mut event.event.instrumentation_scopes;
+        let room = crate::event::MAX_INSTRUMENTATION_SCOPES.saturating_sub(scopes.len());
+        scopes.extend(late.into_iter().take(room));
     }
 }
 
@@ -1258,7 +1311,16 @@ fn restitch_service(
                 crate::event::sanitize_span_event(&mut event);
                 adopted.push(crate::normalize::normalize(event));
             }
-            // A donor its own request suppressed has no event to bring
+            // A twin its request suppressed while its pairing was unsure.
+            (
+                RecordDecision::Keep,
+                StitchRole::Donor {
+                    pending: Some(pending),
+                    ..
+                },
+                None,
+            ) => adopted.push(crate::normalize::normalize((**pending).clone())),
+            // Another donor its own request suppressed has no event to bring
             // back, and `restitch_records` keeps what a request decided.
             _ => {}
         }

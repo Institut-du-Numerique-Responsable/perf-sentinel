@@ -947,6 +947,9 @@ struct StitchDonor<'a> {
     db_system: Option<&'a str>,
     /// The span names its operation `PREPARE`: a parse round trip.
     is_prepare: bool,
+    /// Position in the per-resource attribute cache (conversion), or of the
+    /// record (whole-trace pass).
+    index: usize,
 }
 
 /// A statement-less execute/query span, before admission.
@@ -1001,11 +1004,14 @@ impl StitchRecord {
 pub(crate) enum StitchRole {
     /// Statement-bearing span. `statement` is kept only when its request
     /// suppressed the span: an emitted donor's statement is its event's
-    /// target.
+    /// target. `pending` is the event of a shorter twin its request
+    /// suppressed while no execute span took it, so the whole-trace pass can
+    /// bring it back if the twin pairing changes.
     Donor {
         statement: Option<Arc<str>>,
         db_system: Option<Arc<str>>,
         is_prepare: bool,
+        pending: Option<Box<SpanEvent>>,
     },
     /// Statement-less execute/query span. `pending` is the event it becomes
     /// once a statement is found, target left empty. `None` when its request
@@ -1026,6 +1032,14 @@ pub(crate) enum RecordDecision {
     /// Statement-less span that takes this statement.
     Adopt(String),
 }
+
+/// Time between two twins' spans past which their pairing is unsure. On the
+/// lab captures, the two layers of one query overlap or sit at most 12 µs
+/// apart (Laravel 1.10.0, `SQLAlchemy` + asyncpg), and twins of consecutive
+/// queries at least 60 µs apart. Laravel 1.9.0 shifts its `sql SELECT` span
+/// 1.6 ms after the prepare of a slow query, so that pairing counts as
+/// unsure, which only costs one kept event.
+const TWIN_GAP_NS: u64 = 50_000;
 
 /// Statement placeholder for the event a statement-less span would become.
 const PENDING_STATEMENT: &str = "?";
@@ -1183,6 +1197,7 @@ fn collect_stitch_candidates<'a>(
                     scope,
                     db_system,
                     is_prepare,
+                    index,
                 }),
                 SpanRole::Orphan {
                     has_sql_db_system,
@@ -1561,6 +1576,20 @@ fn collect_orphan_candidates<'a>(
     }
 }
 
+/// What [`decide_stitch`] decided, with the reason behind each donor's
+/// suppression.
+struct StitchOutcome<'a> {
+    decisions: HashMap<SpanKey<'a>, StitchDecision<'a>>,
+    /// The donor each adopting orphan took its statement from.
+    adopted_from: HashMap<SpanKey<'a>, usize>,
+    /// Donors suppressed by a rule other than being adopted (layered
+    /// duplicate, declared prepare, shorter twin), and twin keepers whose
+    /// shorter twin an orphan adopted.
+    merged: Vec<bool>,
+    /// Rule 1b pairing, as [`pair_cross_scope_twins`] returns it.
+    twin_keeper: Vec<Option<usize>>,
+}
+
 /// Stitch SQL queries that layered instrumentation split across spans.
 ///
 /// The PHP `OTel` contrib packages (Doctrine + PDO) emit, per query, spans
@@ -1604,27 +1633,6 @@ fn collect_orphan_candidates<'a>(
 /// template. Nothing is dropped or double-emitted. Real emitters are
 /// per-query sequential.
 fn decide_stitch<'a>(
-    donors: &[StitchDonor<'a>],
-    orphans: &[&'a Span],
-    span_index: &HashMap<SpanKey<'a>, &'a Span>,
-) -> HashMap<SpanKey<'a>, StitchDecision<'a>> {
-    decide_stitch_traced(donors, orphans, span_index).decisions
-}
-
-/// [`decide_stitch`] with the reason behind each donor's suppression.
-struct StitchOutcome<'a> {
-    decisions: HashMap<SpanKey<'a>, StitchDecision<'a>>,
-    /// The donor each adopting orphan took its statement from.
-    adopted_from: HashMap<SpanKey<'a>, usize>,
-    /// Donors suppressed by a rule other than being adopted (layered
-    /// duplicate, declared prepare, shorter twin), and twin keepers whose
-    /// shorter twin an orphan adopted.
-    merged: Vec<bool>,
-    /// Rule 1b pairing, as [`pair_cross_scope_twins`] returns it.
-    twin_keeper: Vec<Option<usize>>,
-}
-
-fn decide_stitch_traced<'a>(
     donors: &[StitchDonor<'a>],
     orphans: &[&'a Span],
     span_index: &HashMap<SpanKey<'a>, &'a Span>,
@@ -2025,34 +2033,34 @@ fn convert_resource_spans<'a>(
     let classified = classify_resource_spans(resource_spans);
     let (donors, provisional) = collect_stitch_candidates(resource_spans, &classified);
     let orphans = admit_orphans(&donors, &provisional);
-    let stitch = decide_stitch(&donors, &orphans, span_index);
+    let outcome = decide_stitch(&donors, &orphans, span_index);
     if let Some((records, block)) = records {
-        // The event a statement-less span becomes once a statement is found.
-        let pending_event = |orphan: &StitchOrphan<'a>| {
-            let mut event = convert_span(
-                orphan.span,
+        // The event a span becomes, with `statement` when it has none of its
+        // own. Indexes into the per-resource attribute cache.
+        let event_of = |span: &'a Span, index: usize, statement: Option<&'a str>| {
+            convert_span(
+                span,
                 &service_arc,
                 &resource_grouping,
                 resource_cloud_region.as_ref(),
                 span_index,
                 &scope_index,
-                Some(PENDING_STATEMENT),
-                classified.get(orphan.index),
+                statement,
+                classified.get(index),
                 consumer_index,
             )
-            .ok()?;
-            event.target.clear();
-            Some(Box::new(event))
+            .ok()
+            .map(Box::new)
         };
         push_stitch_records(
             records,
             (&service_arc, block),
-            &donors,
-            &provisional,
-            &stitch,
-            pending_event,
+            (&donors, &provisional),
+            &outcome,
+            event_of,
         );
     }
+    let stitch = outcome.decisions;
 
     let mut span_idx = 0usize;
     for scope_spans in &resource_spans.scope_spans {
@@ -2111,11 +2119,16 @@ fn record_ids(span: &Span) -> Option<([u8; 8], Option<[u8; 8]>)> {
 fn push_stitch_records<'a>(
     records: &mut Vec<StitchRecord>,
     (service, block): (&Arc<str>, usize),
-    donors: &[StitchDonor<'a>],
-    provisional: &[StitchOrphan<'a>],
-    stitch: &HashMap<SpanKey<'a>, StitchDecision<'a>>,
-    pending_event: impl Fn(&StitchOrphan<'a>) -> Option<Box<SpanEvent>>,
+    (donors, provisional): (&[StitchDonor<'a>], &[StitchOrphan<'a>]),
+    outcome: &StitchOutcome<'a>,
+    event_of: impl Fn(&'a Span, usize, Option<&'a str>) -> Option<Box<SpanEvent>>,
 ) {
+    let stitch = &outcome.decisions;
+    let mut consumed = vec![false; donors.len()];
+    for &donor in outcome.adopted_from.values() {
+        consumed[donor] = true;
+    }
+
     // Truncated as `sanitize_span_event` truncates the events' service, so
     // the window finds a record's event and its ancestry.
     let service: Arc<str> = if service.len() > crate::event::MAX_SERVICE_LENGTH {
@@ -2155,11 +2168,16 @@ fn push_stitch_records<'a>(
             role,
         });
     };
-    for donor in donors {
+    for (i, donor) in donors.iter().enumerate() {
         let suppressed = matches!(
             stitch.get(&span_key(donor.span)),
             Some(StitchDecision::Suppress)
         );
+        let pending = if suppressed && !consumed[i] && unsure_twin(donors, outcome, i) {
+            event_of(donor.span, donor.index, None)
+        } else {
+            None
+        };
         let statement = suppressed.then(|| {
             Arc::clone(statements.entry(donor.statement).or_insert_with(|| {
                 let mut statement = donor.statement.to_string();
@@ -2174,6 +2192,7 @@ fn push_stitch_records<'a>(
             statement,
             db_system,
             is_prepare: donor.is_prepare,
+            pending,
         };
         record(donor.span, donor.scope, role);
     }
@@ -2187,12 +2206,40 @@ fn push_stitch_records<'a>(
         if (attributeless && !decided) || record_ids(orphan.span).is_none() {
             continue;
         }
+        let pending = if decided {
+            None
+        } else {
+            // The event it becomes once a statement is found.
+            let Some(mut event) = event_of(orphan.span, orphan.index, Some(PENDING_STATEMENT))
+            else {
+                // No event to bring, so it must not take a donor's either.
+                continue;
+            };
+            event.target.clear();
+            Some(event)
+        };
         let role = StitchRole::Orphan {
             has_sql_db_system: orphan.has_sql_db_system,
-            pending: if decided { None } else { pending_event(orphan) },
+            pending,
         };
         record(orphan.span, orphan.scope, role);
     }
+}
+
+/// Whether donor `i` is a shorter twin paired with a keeper it does not
+/// overlap: the request may have paired it with the twin of another query
+/// whose own half is elsewhere. If no execute took it, its event is kept so
+/// the whole-trace pass can bring it back.
+fn unsure_twin(donors: &[StitchDonor<'_>], outcome: &StitchOutcome<'_>, i: usize) -> bool {
+    let Some(&Some(keeper)) = outcome.twin_keeper.get(i) else {
+        return false;
+    };
+    let (a, b) = (donors[keeper].span, donors[i].span);
+    let gap = a
+        .start_time_unix_nano
+        .saturating_sub(b.end_time_unix_nano)
+        .max(b.start_time_unix_nano.saturating_sub(a.end_time_unix_nano));
+    gap > TWIN_GAP_NS
 }
 
 /// Stitch one service's records of one trace as [`decide_stitch`] would have
@@ -2260,6 +2307,7 @@ pub(crate) fn restitch_records(
                 scope: &record.scope,
                 db_system: db_system.as_deref(),
                 is_prepare: *is_prepare,
+                index,
             }),
             (
                 StitchRole::Orphan {
@@ -2277,7 +2325,7 @@ pub(crate) fn restitch_records(
         }
     }
     let orphans = admit_orphans(&donors, &provisional);
-    let outcome = decide_stitch_traced(&donors, &orphans, &span_index);
+    let outcome = decide_stitch(&donors, &orphans, &span_index);
     record_decisions(records, statements, &record_spans, &donors, &outcome)
 }
 
