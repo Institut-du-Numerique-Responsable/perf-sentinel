@@ -810,3 +810,4 @@ v0.44.0	469a396	2026-11-11	PASS
 # 0.44.0. Not run: the cluster scenarios, validate-findings,
 # verify-all-scenarios.
 v0.44.1	afa0437	2026-11-11	PASS
+v0.45.0	53bddc4	2026-11-12	PASS
