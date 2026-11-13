@@ -483,7 +483,7 @@
         
           <div data-dc-tpl="879" style="background: var(--surface); padding: 20px 22px;">
             <div data-dc-tpl="880" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--rust);">
-              <div data-dc-tpl="881" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 24px; font-weight: 600; letter-spacing: -0.01em;"><span class="sc-interp">576k–⁠1.2M</span></div>
+              <div data-dc-tpl="881" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;"><span class="sc-interp">576k–⁠1.2M</span></div>
               <span data-dc-tpl="882" data-ico="gauge" aria-hidden="true"></span>
             </div>
             <div data-dc-tpl="883" style="margin-top: 5px; font-size: 13.5px; color: var(--text-2);"><span class="sc-interp">events/s, pipeline throughput (GCP c3-standard-8 x86 to M4 Pro)</span></div>
@@ -491,7 +491,7 @@
         
           <div data-dc-tpl="879" style="background: var(--surface); padding: 20px 22px;">
             <div data-dc-tpl="880" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--rust);">
-              <div data-dc-tpl="881" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 24px; font-weight: 600; letter-spacing: -0.01em;"><span class="sc-interp">0.8–⁠1.9&nbsp;µs</span></div>
+              <div data-dc-tpl="881" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;"><span class="sc-interp">0.8–⁠1.9&nbsp;µs</span></div>
               <span data-dc-tpl="882" data-ico="timer" aria-hidden="true"></span>
             </div>
             <div data-dc-tpl="883" style="margin-top: 5px; font-size: 13.5px; color: var(--text-2);"><span class="sc-interp">per event, p50 to p99</span></div>
@@ -499,7 +499,7 @@
         
           <div data-dc-tpl="879" style="background: var(--surface); padding: 20px 22px;">
             <div data-dc-tpl="880" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--rust);">
-              <div data-dc-tpl="881" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 24px; font-weight: 600; letter-spacing: -0.01em;"><span class="sc-interp">17&nbsp;→&nbsp;1350&nbsp;MB</span></div>
+              <div data-dc-tpl="881" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;"><span class="sc-interp">17&nbsp;MB →&nbsp;1.26&nbsp;GB</span></div>
               <span data-dc-tpl="882" data-ico="memory" aria-hidden="true"></span>
             </div>
             <div data-dc-tpl="883" style="margin-top: 5px; font-size: 13.5px; color: var(--text-2);"><span class="sc-interp">daemon RSS: idle, then production peak, with 20 times the default finding pairs and 3 days of detection history</span></div>
@@ -507,7 +507,7 @@
         
           <div data-dc-tpl="879" style="background: var(--surface); padding: 20px 22px;">
             <div data-dc-tpl="880" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--rust);">
-              <div data-dc-tpl="881" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 24px; font-weight: 600; letter-spacing: -0.01em;"><span class="sc-interp">Rust 2024</span></div>
+              <div data-dc-tpl="881" style="font-family: &quot;JetBrains Mono&quot;, monospace; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;"><span class="sc-interp">Rust 2024</span></div>
               <span data-dc-tpl="882" data-ico="package" aria-hidden="true"></span>
             </div>
             <div data-dc-tpl="883" style="margin-top: 5px; font-size: 13.5px; color: var(--text-2);"><span class="sc-interp">with a static musl binary and a FROM scratch image</span></div>
@@ -1989,7 +1989,7 @@ shop/src/main/java/acme/cart/CartItemRepository.java:31</pre>
         <sc-for list="{{ perfStats }}" as="s" hint-placeholder-count="4">
           <div style="background:var(--surface);padding:20px 22px">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--rust)">
-              <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:600;letter-spacing:-.01em">{{ s.value }}</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:600;letter-spacing:-.01em">{{ s.value }}</div>
               <span data-ico="{{ s.icon }}" aria-hidden="true"></span>
             </div>
             <div style="margin-top:5px;font-size:13.5px;color:var(--text-2)">{{ s.label }}</div>
@@ -3130,7 +3130,7 @@ class Component extends DCLogic {
         perfStats: [
           { icon: 'gauge', value: '576k–\u20601.2M', label: 'events/s, pipeline throughput (GCP c3-standard-8 x86 to M4 Pro)' },
           { icon: 'timer', value: '0.8–\u20601.9\u00a0µs', label: 'per event, p50 to p99' },
-          { icon: 'memory', value: '17\u00a0→\u00a01350\u00a0MB', label: 'daemon RSS: idle, then production peak, with 20 times the default finding pairs and 3 days of detection history' },
+          { icon: 'memory', value: '17\u00a0MB →\u00a01.26\u00a0GB', label: 'daemon RSS: idle, then production peak, with 20 times the default finding pairs and 3 days of detection history' },
           { icon: 'package', value: 'Rust 2024', label: 'with a static musl binary and a FROM scratch image' },
         ],
         mesEyebrow: '// measurement sources',
@@ -3365,7 +3365,7 @@ class Component extends DCLogic {
         perfStats: [
           { icon: 'gauge', value: '576k–\u20601.2M', label: 'évts/s, débit pipeline (GCP c3-standard-8 x86 à M4 Pro)' },
           { icon: 'timer', value: '0.8–\u20601.9\u00a0µs', label: 'par évènement, p50 à p99' },
-          { icon: 'memory', value: '17\u00a0→\u00a01350\u00a0Mo', label: 'RSS du daemon : au repos, puis pic en production, avec 20 fois les paires de findings par défaut et 3 jours d’historique des détections' },
+          { icon: 'memory', value: '17\u00a0Mo →\u00a01,26\u00a0Go', label: 'RSS du daemon : au repos, puis pic en production, avec 20 fois les paires de findings par défaut et 3 jours d’historique des détections' },
           { icon: 'package', value: 'Rust 2024', label: 'avec binaire statique musl et image FROM scratch' },
         ],
         mesEyebrow: '// sources de mesure',
