@@ -464,7 +464,9 @@ Séparément, la mémoire du daemon de longue durée a été profilée sur le m�
 
 Un daemon en production a une tout autre allure, et le chiffre au repos est le mauvais point de départ pour dimensionner un pod. Sur un StatefulSet Kubernetes en 0.19.0 avec `max_retained_findings = 100000`, `process_resident_memory_bytes` démarre autour de 88 Mo, monte pendant que le tampon circulaire se remplit, puis se stabilise. Sur 7 jours, il affiche une **médiane à 980 Mo** et un **p90 à 1,2 Go** qui est le plafond du quotidien, avec une excursion à 1,8 Go résorbée le lendemain. Aucun redémarrage, aucun OOM, sous une limite de 2 Gio avec une requête de 1 Gio. Le débit d'ingestion ne l'a pas poussé là (médiane 30 évts/s, p95 520 évts/s, pic 2,1k évts/s). Ce sont les findings retenus qui l'ont fait, à peu près 3 à 6 Ko de RSS chacun selon les preuves que porte le finding.
 
-Dimensionnez le pod depuis `max_retained_findings` : quelques centaines de Mo au défaut de 10000, 1 à 2 Go à 100000, et `0` rend tout le store quand l'API de query est coupée.
+Un autre daemon de production, en 0.44.1 avec la rétention de findings par défaut, 20 fois les paires de findings par défaut (`max_tracked_pairs = 200000`) et 3 jours d'historique des détections (`[daemon.detections] retained_days = 3`), monte par paliers et culmine à 1,26 Gio : le palier de minuit UTC vient de l'historique des détections, qui ouvre un nouveau jour.
+
+Dimensionnez le pod depuis `max_retained_findings` : quelques centaines de Mo au défaut de 10000, 1 à 2 Go à 100000, et `0` rend tout le store quand l'API de query est coupée. Au-delà des valeurs par défaut, `max_tracked_pairs` et `[daemon.detections]` comptent aussi.
 
 </details>
 

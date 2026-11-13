@@ -464,7 +464,9 @@ Separately, the long-running daemon's memory was profiled on the same M4 Pro usi
 
 A production daemon is a different shape, and the idle figure is the wrong one to size a pod from. On a Kubernetes StatefulSet running 0.19.0 with `max_retained_findings = 100000`, `process_resident_memory_bytes` starts near 88 MB, climbs while the ring fills, then holds. Over 7 days it shows a **980 MB median** and a **1.2 GB p90** that is the day-to-day ceiling, with one excursion to 1.8 GB that decayed back over the following day. No restart and no OOM, under a 2 GiB limit with a 1 GiB request. Ingestion throughput did not drive it (30 evt/s median, 520 evt/s p95, 2.1k evt/s peak). The retained findings did, at roughly 3 to 6 KB of RSS each depending on how much evidence a finding carries.
 
-Size the pod from `max_retained_findings`: a few hundred MB at the 10000 default, 1 to 2 GB at 100000, and `0` hands the whole store back when the query API is off.
+Another production daemon, on 0.44.1 with the default findings retention, 20 times the default finding pairs (`max_tracked_pairs = 200000`) and 3 days of detection history (`[daemon.detections] retained_days = 3`), climbs in steps and peaks at 1.26 GiB: the step at UTC midnight comes from the detection history opening a new day.
+
+Size the pod from `max_retained_findings`: a few hundred MB at the 10000 default, 1 to 2 GB at 100000, and `0` hands the whole store back when the query API is off. Past the defaults, `max_tracked_pairs` and `[daemon.detections]` count too.
 
 </details>
 
