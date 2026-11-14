@@ -2175,8 +2175,8 @@ fn messaging_system_of(row: &Value) -> MessagingSystem {
 fn assert_one_row(rows: &[Value], kind: &str, tag: &str) {
     let count = rows.iter().filter(|r| r["engine"] == tag).count();
     assert!(count > 0, "{kind} tag `{tag}` has no row in {SITE_DATA}");
-    assert_eq!(
-        count, 1,
+    assert!(
+        count == 1,
         "{kind} tag `{tag}` has {count} rows in {SITE_DATA}, expected one"
     );
 }
