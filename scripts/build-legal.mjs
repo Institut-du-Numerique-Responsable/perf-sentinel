@@ -93,7 +93,7 @@ function verifierMain(lang) {
     `<div class="vf-res" id="verifier-result" data-state="empty" aria-live="polite"></div>` +
     `<label class="vf-drop" id="verifier-drop"><input type="file" id="verifier-file" accept=".png,.svg,.jxl,.pdf,.jpg,.jpeg,.webp,image/png,image/svg+xml,image/jxl,application/pdf,image/jpeg,image/webp">${vIco('upload')}<span><strong>${lead}<u>${action}</u></strong><small>${t.dropSub}</small></span></label>` +
     `<p class="vf-phone" id="verifier-phone">${t.phone}</p>` +
-    `<details class="vf-lim" id="verifier-limits"><summary>${vIco('chevron-right')}${t.limitsLink}</summary><p>${t.limitLevel1}</p><p>${t.limitStolenKey}</p><p>${t.limitSocial}</p><p>${t.limitRepost}</p><a class="vf-meth" href="${t.methodHref}">${t.method}</a></details>` +
+    `<details class="vf-lim" id="verifier-limits"><summary>${vIco('chevron-right')}${t.limitsLink}</summary><p>${t.limitLevel1}</p><p>${t.limitStolenKey}</p><p>${t.limitSocial}</p><p>${t.limitRepost}</p><a class="vf-meth" href="${t.methodHref}">${t.method}</a><a class="vf-meth" href="${t.usersHref}">${t.users}</a></details>` +
     `<script type="module" src="/assets/verifier/page.js"></script>`;
 }
 // The approved mockup (card-site Task 1), inside the .legal-main frame. Level 1 never uses the accent.
@@ -181,7 +181,7 @@ const verifierCss = `<style>${['shield-check', 'shield-alert', 'link-2-off', 'ci
   `.vf-lim>summary [data-ico]{width:16px;height:16px;color:var(--text-2);transition:transform .2s ease}` +
   `.vf-lim[open]>summary [data-ico]{transform:rotate(90deg)}` +
   `.legal-main .vf-lim p{margin:10px 0 0}` +
-  `.vf-lim .vf-meth{display:inline-block;margin-top:12px;font-size:14.5px}` +
+  `.vf-lim .vf-meth{display:inline-block;margin:12px 26px 0 0;font-size:14.5px}` +
   `@media(prefers-reduced-motion:reduce){.vf-btn,.vf-drop,.vf-lim>summary [data-ico]{transition:none}}` +
   `@media(max-width:560px){.legal-main{padding:36px 16px 64px}.vf-hd{padding:18px 18px 16px;gap:12px}.vf-dns,.vf-fig,.vf-det{padding-left:18px;padding-right:18px}` +
   `.vf-btn{display:flex;width:100%;align-items:flex-start}.vf-btn::before{margin-top:2px}.vf-ft{padding:14px 18px}` +

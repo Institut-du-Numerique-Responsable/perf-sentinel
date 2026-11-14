@@ -376,6 +376,26 @@ test('the contribution dialog of the synoptic links to the technologies page', a
   }
 });
 
+test('the verifier page links to the references page', async () => {
+  const V = {
+    '/verifier': { text: 'Who else uses Perf Sentinel', href: '/references' },
+    '/fr/verifier': { text: 'Qui d’autre utilise Perf Sentinel', href: '/fr/references' },
+  };
+  for (const [path, v] of Object.entries(V)) {
+    const html = await (await fetch(server.url + path + '.html')).text();
+    assert.ok(html.includes(`<a class="vf-meth" href="${v.href}">${v.text}</a></details>`), `${path} raw: link after the method link`);
+    const { page, close } = await open(path, { wait: '#verifier-limits' });
+    try {
+      await page.click('#verifier-limits > summary');
+      const a = page.locator(`#verifier-limits a[href="${v.href}"]`);
+      assert.ok(await a.isVisible(), `${path}: link visible in the open limits`);
+      assert.equal((await a.textContent()).trim(), v.text, `${path}: link text`);
+      const [meth, refs] = await page.$$eval('#verifier-limits .vf-meth', (as) => as.map((a) => getComputedStyle(a).fontSize));
+      assert.equal(refs, meth, `${path}: same style as the method link`);
+    } finally { await close(); }
+  }
+});
+
 test('no horizontal scroll at 390px on an open stage of the synoptic', async () => {
   for (const lang of ['fr', 'en']) {
     for (const n of Object.keys(STAGE_FAMS).map(Number)) {
