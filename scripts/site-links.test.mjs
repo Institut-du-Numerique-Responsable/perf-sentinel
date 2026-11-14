@@ -378,20 +378,25 @@ test('the contribution dialog of the synoptic links to the technologies page', a
 
 test('the verifier page links to the references page', async () => {
   const V = {
-    '/verifier': { text: 'Who else uses Perf Sentinel', href: '/references' },
-    '/fr/verifier': { text: 'Qui d’autre utilise Perf Sentinel', href: '/fr/references' },
+    '/verifier': { text: 'Who else uses Perf Sentinel →', href: '/references' },
+    '/fr/verifier': { text: 'Qui d’autre utilise Perf Sentinel →', href: '/fr/references' },
   };
   for (const [path, v] of Object.entries(V)) {
     const html = await (await fetch(server.url + path + '.html')).text();
-    assert.ok(html.includes(`<a class="vf-meth" href="${v.href}">${v.text}</a></details>`), `${path} raw: link after the method link`);
+    assert.ok(html.includes(`</details><p class="vf-refs"><a href="${v.href}">${v.text}</a></p>`), `${path} raw: own line right after the limits`);
     const { page, close } = await open(path, { wait: '#verifier-limits' });
     try {
-      await page.click('#verifier-limits > summary');
-      const a = page.locator(`#verifier-limits a[href="${v.href}"]`);
-      assert.ok(await a.isVisible(), `${path}: link visible in the open limits`);
+      assert.equal(await page.evaluate(() => document.querySelector('#verifier-limits').open), false, `${path}: limits closed`);
+      const a = page.locator(`.vf-refs a[href="${v.href}"]`);
+      assert.ok(await a.isVisible(), `${path}: link visible with the limits closed`);
       assert.equal((await a.textContent()).trim(), v.text, `${path}: link text`);
-      const [meth, refs] = await page.$$eval('#verifier-limits .vf-meth', (as) => as.map((a) => getComputedStyle(a).fontSize));
-      assert.equal(refs, meth, `${path}: same style as the method link`);
+      assert.equal(await page.locator(`#verifier-limits a[href="${v.href}"]`).count(), 0, `${path}: not inside the limits`);
+      await page.click('#verifier-limits > summary');
+      const [meth, refs] = await page.evaluate(() => [document.querySelector('#verifier-limits .vf-meth'), document.querySelector('.vf-refs a')].map((a) => {
+        const c = getComputedStyle(a);
+        return { size: c.fontSize, color: c.color, line: c.textDecorationLine };
+      }));
+      assert.deepEqual(refs, meth, `${path}: same style as the method link`);
     } finally { await close(); }
   }
 });
