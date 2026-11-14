@@ -29,8 +29,9 @@ after(async () => {
   server?.close();
 });
 
-async function open(path, { javaScriptEnabled = true, viewport = { width: 1280, height: 900 } } = {}) {
+async function open(path, { javaScriptEnabled = true, viewport = { width: 1280, height: 900 }, theme } = {}) {
   const context = await browser.newContext({ javaScriptEnabled, viewport });
+  if (theme) await context.addInitScript((t) => { try { localStorage.setItem('ps-theme', t); } catch { /* the page then follows the system */ } }, theme);
   const external = [];
   await context.route('**/*', (route) => {
     const url = new URL(route.request().url());
@@ -336,4 +337,66 @@ test('grid feed names stay on one line at 1280px', async () => {
     for (const [name, n] of lines) assert.equal(n, 1, `${name} wraps on ${n} lines`);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 1280);
   } finally { await close(); }
+});
+
+// WCAG 2 contrast ratio of two computed `rgb()` colours. No alpha blending: the page paints an
+// opaque background, and anything else throws instead of passing on a wrong number.
+function contrast(a, b) {
+  const lum = (css) => {
+    const m = /^rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)$/.exec(css);
+    if (!m || (m[4] !== undefined && Number(m[4]) !== 1)) throw new Error(`not an opaque rgb() colour: ${css}`);
+    const [r, g, bl] = m.slice(1, 4).map((v) => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+const computed = (locator, prop) => locator.evaluate((el, p) => getComputedStyle(el)[p], prop);
+// The background an element really sits on: its own, else the first opaque one up the tree.
+const backgroundUnder = (locator) => locator.evaluate((el) => {
+  while (getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)') el = el.parentElement;
+  return getComputedStyle(el).backgroundColor;
+});
+
+test('zone and difficulty colours keep 4.5:1 on the page background, light and dark', async () => {
+  for (const theme of ['light', 'dark']) {
+    const { page, close } = await open('/technologies', { theme });
+    const check = (what, fg, bg, min) => {
+      const ratio = contrast(fg, bg);
+      assert.ok(ratio >= min, `${theme} ${what}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, under ${min}:1`);
+    };
+    try {
+      assert.equal(await page.getAttribute('[data-ps-root]', 'data-theme'), theme);
+      // Zones: the text colour is the current rail entry (the only coloured text of a zone), the
+      // title square and the table accent are marks, held to the 3:1 of graphical objects.
+      const zoneText = [];
+      for (const id of IDS) {
+        await page.evaluate((i) => document.getElementById(i).scrollIntoView({ behavior: 'instant' }), id);
+        const link = page.locator(`.tp-rail a[aria-current][href="#${id}"]`);
+        await link.waitFor();
+        // The rail colour eases in: read it once settled, not mid-transition.
+        await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+        const color = await computed(link, 'color');
+        zoneText.push(color);
+        check(`${id} rail entry`, color, await backgroundUnder(link), 4.5);
+        const section = page.locator(`#${id}`);
+        const bg = await backgroundUnder(section.locator('h2'));
+        check(`${id} title square`, await computed(section.locator('h2 .sw'), 'backgroundColor'), bg, 3);
+        check(`${id} table accent`, await computed(section.locator('thead th').first(), 'borderBottomColor'), bg, 3);
+      }
+      assert.equal(new Set(zoneText).size, IDS.length, `${theme}: one colour per zone, not the ink: ${zoneText}`);
+      // Difficulty: the bold level of every "add" link, in all three levels.
+      const levels = {};
+      for (const level of ['f', 'm', 'e']) {
+        const all = await page.locator(`.tp .add b.df-${level}`).all();
+        assert.ok(all.length > 0, `${theme}: no df-${level} level on the page`);
+        for (const b of all) {
+          const color = await computed(b, 'color');
+          levels[level] = color;
+          check(`difficulty df-${level}`, color, await backgroundUnder(b), 4.5);
+        }
+      }
+      assert.equal(new Set(Object.values(levels)).size, 3, `${theme}: three distinct levels: ${JSON.stringify(levels)}`);
+    } finally { await close(); }
+  }
 });
