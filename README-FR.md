@@ -25,6 +25,8 @@
 > - **Ce que ce n'est *pas* :** un APM complet, un profiler continu, ni (pour le moment) une plateforme autonome de comptabilité carbone réglementaire. Voir [Ce que Perf Sentinel n'est pas](#ce-que-perf-sentinel-nest-pas).
 > - **Maturité :** bêta, pré-1.0. En production dans une équipe depuis juin 2026, sur un cluster Kubernetes. La surface CLI, les clés de configuration et les formats sur disque peuvent encore changer d'une release à l'autre avant la 1.0, les ruptures de compatibilité étant signalées dans les [notes de version](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases). Les enums de sortie JSON sont la seule partie couverte par un contrat de stabilité explicite (voir [Formats d'entrée et de sortie](#formats-dentrée-et-de-sortie)).
 
+**Votre stack est-elle prise en charge ?** Voir la [page technologies](https://perf-sentinel.dev/fr/technologies) : frameworks, bases de données, brokers, sources de traces, clouds, sondes d'énergie, flux de réseaux électriques et CI, avec ce qui manque encore à chacun.
+
 ---
 
 ## Aperçu rapide

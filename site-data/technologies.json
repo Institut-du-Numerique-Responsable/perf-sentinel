@@ -17,7 +17,7 @@
       ],
       "groups": [
         {"id": "java", "title": "Java", "logo": "java"},
-        {"id": "kotlin", "title": "Kotlin", "logo": null},
+        {"id": "kotlin", "title": "Kotlin", "logo": "kotlin"},
         {"id": "csharp", "title": "C#", "logo": "csharp"},
         {"id": "python", "title": "Python", "logo": "python"},
         {"id": "rust", "title": "Rust", "logo": "rust"},
@@ -25,7 +25,7 @@
         {"id": "nodejs", "title": "Node.js", "logo": "nodejs"},
         {"id": "ruby", "title": "Ruby", "logo": "ruby"},
         {"id": "php", "title": "PHP", "logo": "php"},
-        {"id": "elixir", "title": "Elixir", "logo": null}
+        {"id": "elixir", "title": "Elixir", "logo": "elixir"}
       ],
       "rows": [
         {

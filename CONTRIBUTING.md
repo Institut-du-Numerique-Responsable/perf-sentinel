@@ -116,9 +116,9 @@ Pick a row by what you want to add or change. The level reflects how many files 
 | Change the daemon, the streaming correlator or the TUI     | `daemon/`, `correlate/window.rs`, `crates/sentinel-cli/src/tui/`                           | Rust, async, memory budgets                                    | High   |
 | Change a share card or the disclosure schema               | `report/card/`, `report/periodic/`                                                         | Rust. Both are public contracts                                | High   |
 
-Paths that start with `crates/`, `docs/`, `tests/`, `scripts/`, `charts/` or `fuzz/` are relative to the repository root. The others, such as `detect/` or `score/`, are under `crates/sentinel-core/src/`. The Low rows need no Rust beyond a copied entry. The [framework coverage](#framework-coverage) and [cloud provider coverage](#cloud-provider-coverage) tables show what is missing today.
+Paths that start with `crates/`, `docs/`, `tests/`, `scripts/`, `charts/` or `fuzz/` are relative to the repository root. The others, such as `detect/` or `score/`, are under `crates/sentinel-core/src/`. The Low rows need no Rust beyond a copied entry. The [framework coverage](#framework-coverage) and [cloud provider coverage](#cloud-provider-coverage) sections show what is missing today.
 
-The technologies page will show the same levels. They already live in `site-data/technologies.json`, and a test keeps that file and this table in step.
+The technologies page shows the same levels. They already live in `site-data/technologies.json`, and a test keeps that file and this table in step.
 
 ### New to Rust
 
@@ -135,6 +135,8 @@ The parts that reward expertise: the hand-written SQL tokenizer (`normalize/sql.
 Read the conventions below before your first PR: this project rejects speculative abstraction (three duplicated lines beat a premature helper, traits only at the pipeline borders), and the CI gates are strict (`clippy -D warnings`, `cognitive_complexity` denied, bounded Prometheus label sets, no outbound network calls). A PR that introduces an unneeded trait or an unbounded label value will be rejected regardless of code quality.
 
 ### Framework coverage
+
+The [technologies page](https://perf-sentinel.dev/technologies#frameworks), built from `site-data/technologies.json`, is the living version of this table, but only this table gives the detail per finding type.
 
 A finding always carries a generic `suggestion` line. It also carries a `suggested_fix` when the trace reveals the framework or at least the language. The table shows what ships today for the SQL and pool findings:
 
@@ -169,29 +171,27 @@ Reading notes:
 - The HTTP, fanout, chatty and serialized findings have a generic entry in every language.
 - **Lab** means the [simulation lab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab) runs a real application on that stack and checks its findings. The `n_plus_one_sql_*` fixtures in `tests/fixtures/` are hand-written and do not count.
 
-To fill a cell, add an entry to `FIXES` in `detect/suggestions/fixes.rs` and a test in `detect/suggestions/tests.rs`, then update this table in the same change. Knowing the framework matters more than knowing Rust. A framework or a language that is not in the table needs a detection rule too: see the [extension path](docs/design/04-DETECTION.md#extension-path-for-contributors).
+To fill a cell, add an entry to `FIXES` in `detect/suggestions/fixes.rs` and a test in `detect/suggestions/tests.rs`, then update this table and the row's "Dedicated advice" criterion in `site-data/technologies.json` in the same change. Knowing the framework matters more than knowing Rust. A framework or a language that is not in the table needs a detection rule too: see the [extension path](docs/design/04-DETECTION.md#extension-path-for-contributors).
 
 ### Cloud provider coverage
 
-The carbon estimate reads three kinds of reference data per cloud provider. All of it ships embedded, each value with its source.
-
-| Provider           | PUE       | Regions           | Instance power                    |
-|--------------------|-----------|-------------------|-----------------------------------|
-| AWS                | published | yes               | yes, from Cloud Carbon Footprint  |
-| GCP                | published | yes               | yes, from Cloud Carbon Footprint  |
-| Azure              | published | yes               | yes, from Cloud Carbon Footprint  |
-| OVHcloud           | published | yes               | no                                |
-| Scaleway           | published | yes               | yes, derived from its catalog     |
-| OUTSCALE           | generic   | yes               | no                                |
-| Any other provider | generic   | country code only | no                                |
+The carbon estimate reads three kinds of reference data per cloud provider. All of it ships embedded, each value with its source. The [technologies page](https://perf-sentinel.dev/technologies#clouds) shows which of the three each provider has. Its data lives in `site-data/technologies.json`.
 
 Reading notes:
 
-- **published** is the fleet figure from the provider's sustainability report. **generic** is `GENERIC_PUE` in `score/carbon.rs`, used when the provider publishes none.
-- A provider outside the table is configured with a country code such as `fr` or `de`, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+- The page's "Published PUE" criterion means the fleet figure from the provider's sustainability report. A provider that publishes none gets `GENERIC_PUE` from `score/carbon.rs`.
+- A provider the page does not list is configured with a country code such as `fr` or `de`, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 - [docs/INSTANCE-TYPES.md](docs/INSTANCE-TYPES.md) explains why OVHcloud and OUTSCALE have no instance power rows.
 
-To add a provider or a region, every value needs a source a reader can check: a sustainability report for the PUE, a public list of datacenter locations for the regions. Regions on a national grid go through `scripts/refresh-carbon-data.py`, the others through `MANUAL_CARBON_ROWS` in `score/carbon.rs`. Update this table in the same change.
+To add a provider or a region, every value needs a source a reader can check: a sustainability report for the PUE, a public list of datacenter locations for the regions. Regions on a national grid go through `scripts/refresh-carbon-data.py`, the others through `MANUAL_CARBON_ROWS` in `score/carbon.rs`. Update `site-data/technologies.json` in the same change.
+
+### Listing who uses Perf Sentinel
+
+The [references page](https://perf-sentinel.dev/references#figurer) names an organisation only after its request passed the listing check. The request is opened through the `Reference request` issue form. A maintainer then adds the organisation to `site-data/references.json`.
+
+- A team that prefers not to be named sends the same signed proof in private. A maintainer checks it without publishing it, then adds an entry to `teams` in `site-data/technologies.json` and the team id to the `production` list of each row of its stack.
+- A maintainer may also add their own team, which they know first-hand.
+- Nothing else adds a "used in production" mark.
 
 ## Coding conventions
 
