@@ -1,10 +1,15 @@
-// Page tests for /references and /fr/references: the committed pages (built from
-// the engine's data, empty today) on the local static server, and a filled list
-// rendered in memory by referencesPage and served on a routed path. Never written
-// into the engine's data. Locale pinned: the English page redirects on navigator.language.
+// Page tests for /references and /fr/references: the committed pages on the local
+// static server for what does not depend on the data (language, links, no-JS
+// reading), and lists rendered in memory by referencesPage, empty or filled, served
+// on a routed path. Never written into the engine's data. Locale pinned: the English page redirects on navigator.language.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { startServer } from './static-server.mjs';
 import { referencesPage } from './build-technologies.mjs';
 import { CONTACT_EMAIL } from './site-chrome.mjs';
@@ -14,6 +19,7 @@ let chromium;
 try { ({ chromium } = require('playwright')); }
 catch { ({ chromium } = require('/Users/robintrassard/RustroverProjects/perf-sentinel/crates/sentinel-cli/tests/browser/node_modules/playwright')); }
 
+const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ISSUE_FORM = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/new?template=reference.yml';
 
 let server;
@@ -68,7 +74,13 @@ const FILLED = [
     request: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/125',
     proofs: { report: { url: 'https://exemple-mutuelle.fr/r.json?a=1&b="2"', period_from: '2026-09-01', period_to: '2026-09-30', environments: ['production', 'staging'], signed: false } },
   },
+  {
+    id: 'exemple-transport', name: 'Exemple Transport', domain: 'exemple-transport.fr', since: '2026-08',
+    request: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/126',
+    proofs: { report: { url: 'https://exemple-transport.fr/r.json', period_from: '2026-08-01', period_to: '2026-08-31', environments: [], signed: true } },
+  },
 ];
+const LINKS = FILLED.flatMap((r) => [r.proofs.card?.verify_url, r.proofs.report?.url].filter(Boolean));
 const TEAMS = [{ id: 't1', since: '2026-06' }];
 
 test('an empty list shows the empty state and the request button', async () => {
@@ -76,13 +88,20 @@ test('an empty list shows the empty state and the request button', async () => {
     const { page, close } = await open(path);
     try {
       assert.equal(await page.getAttribute('html', 'lang'), lang);
-      assert.equal(await page.locator('#liste table').count(), 0, 'no table without a row');
-      assert.equal(await page.isVisible('#liste .empty'), true);
-      assert.equal(await page.getAttribute('#liste .empty a', 'href'), '#figurer');
       assert.equal(await page.getAttribute('#figurer a.btn', 'href'), ISSUE_FORM);
       assert.equal(await page.getAttribute('#figurer a[href^="mailto:"]', 'href'), `mailto:${CONTACT_EMAIL}`);
       assert.equal(await page.locator('#figurer ol.steps li').count(), 3);
       assert.equal(await page.locator('dl.proofs dt').count(), 2);
+      const text = await page.textContent('main');
+      assert.ok(!/sans preuve|no proof/i.test(text), 'an anonymous team sends a proof too');
+    } finally { await close(); }
+  }
+  for (const [lang] of LANGS) {
+    const { page, close } = await open(null, { html: referencesPage([], TEAMS, lang) });
+    try {
+      assert.equal(await page.locator('#liste table').count(), 0, 'no table without a row');
+      assert.equal(await page.isVisible('#liste .empty'), true);
+      assert.equal(await page.getAttribute('#liste .empty a', 'href'), '#figurer');
     } finally { await close(); }
   }
 });
@@ -102,14 +121,14 @@ test('a listed organisation shows its proofs and verify links', async () => {
       assert.ok(rows[2].name.includes('<img src=x onerror=alert(1)>'), 'markup in the data reads as text');
       assert.equal(await page.locator('#liste img').count(), 0);
       const links = await page.$$eval('#liste tr.det a', (as) => as.map((a) => a.getAttribute('href')));
-      const expected = FILLED.flatMap((r) => [r.proofs.card?.verify_url, r.proofs.report?.url].filter(Boolean));
-      assert.deepEqual(links, expected);
+      assert.deepEqual(links, LINKS);
       const details = await page.$$eval('#liste tr.det', (trs) => trs.map((tr) => tr.textContent));
       const [signed, hashed] = lang === 'fr' ? ['signé', 'empreinte vérifiée'] : ['signed', 'fingerprint verified'];
       assert.ok(details[0].includes(signed) && !details[0].includes(hashed), details[0]);
       assert.ok(details[2].includes(hashed), details[2]);
       assert.ok(details[0].includes(lang === 'fr' ? 'septembre 2026' : 'September 2026'), details[0]);
       assert.ok(details[1].includes(lang === 'fr' ? 'd’octobre 2026' : 'October 2026'), details[1]);
+      assert.ok(!/undefined|environ/.test(details[3]), `no environments, no mention: ${details[3]}`);
       assert.deepEqual(dialogs, []);
     } finally { await close(); }
   }
@@ -139,7 +158,7 @@ test('the page reads without JavaScript', async () => {
   for (const [, path] of LANGS) {
     const { page, close } = await open(path, { javaScriptEnabled: false });
     try {
-      for (const sel of ['h1', '#liste .empty', '#liste .anon a', '#figurer a.btn', '#figurer a[href^="mailto:"]', 'dl.proofs', '.limit']) {
+      for (const sel of ['h1', '#liste h2', '#figurer a.btn', '#figurer a[href^="mailto:"]', 'dl.proofs', '.limit']) {
         assert.equal(await page.isVisible(sel), true, `${path}: ${sel}`);
       }
     } finally { await close(); }
@@ -148,7 +167,7 @@ test('the page reads without JavaScript', async () => {
     const { page, close } = await open(null, { html: referencesPage(FILLED, TEAMS, lang), javaScriptEnabled: false });
     try {
       assert.equal(await page.locator('#liste tr.det:visible').count(), FILLED.length, 'every detail open');
-      assert.equal(await page.locator('#liste tr.det a:visible').count(), 4);
+      assert.equal(await page.locator('#liste tr.det a:visible').count(), LINKS.length);
     } finally { await close(); }
   }
 });
@@ -164,3 +183,28 @@ test('no horizontal scroll at 390px', async () => {
   }
 });
 
+test('a proof link that is not https stops the build, no page written', (t) => {
+  const bad = (field, href) => {
+    const r = structuredClone(FILLED[0]);
+    if (field === 'verify_url') r.proofs.card.verify_url = href; else r.proofs.report.url = href;
+    return r;
+  };
+  for (const [field, href] of [['verify_url', 'javascript:alert(1)'], ['url', 'data:text/html,x']]) {
+    for (const [lang] of LANGS) {
+      assert.throws(() => referencesPage([bad(field, href)], TEAMS, lang), (e) => e.message.includes('exemple-energie') && e.message.includes(field), `${field} ${lang}`);
+    }
+  }
+  const root = mkdtempSync(join(tmpdir(), 'references-build-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const [engine, lab, out] = ['engine', 'lab', 'out'].map((d) => join(root, d));
+  for (const d of [join(engine, 'site-data'), lab, out]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(engine, 'Cargo.toml'), '[workspace.package]\nversion = "9.9.9"\n');
+  writeFileSync(join(engine, 'site-data', 'technologies.json'), JSON.stringify({ teams: [], families: [] }));
+  writeFileSync(join(engine, 'site-data', 'technologies-fr.json'), '{}');
+  writeFileSync(join(engine, 'site-data', 'references.json'), JSON.stringify({ references: [bad('verify_url', 'javascript:alert(1)')] }));
+  writeFileSync(join(lab, 'Makefile'), 'verify-all-scenarios:\n');
+  const run = spawnSync(process.execPath, [join(SITE, 'scripts', 'build-technologies.mjs'), engine, lab, out], { encoding: 'utf8' });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /exemple-energie.*verify_url/);
+  assert.deepEqual(readdirSync(out), []);
+});

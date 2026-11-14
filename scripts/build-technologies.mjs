@@ -147,16 +147,30 @@ function referenceHtml(r, t) {
   const lines = [];
   if (card) lines.push(`${t.ref.cardDetail(months(card.period_from, card.period_to, t), esc(r.domain))} <a href="${esc(card.verify_url)}">${t.ref.verify}</a>`);
   if (report) {
-    const envs = and(report.environments.map(esc), t.ref.and);
-    lines.push(`${t.ref.reportDetail(months(report.period_from, report.period_to, t), envs, report.environments.length, report.signed ? t.ref.signed : t.ref.hashed)} <a href="${esc(report.url)}">${t.ref.read}${EXT}</a>`);
+    const environments = report.environments ?? [];
+    const envs = environments.length ? and(environments.map(esc), t.ref.and) : '';
+    lines.push(`${t.ref.reportDetail(months(report.period_from, report.period_to, t), envs, environments.length, report.signed ? t.ref.signed : t.ref.hashed)} <a href="${esc(report.url)}">${t.ref.read}${EXT}</a>`);
   }
   return `<tr class="row"><th scope="row"><b>${esc(r.name)}</b><small>${esc(r.domain)}</small></th><td class="d">${month(r.since, t)}</td>` +
     `<td class="c">${mark(!!card, t)}</td><td class="c">${mark(!!report, t)}</td></tr>` +
     `<tr class="det"><td colspan="4">${lines.map((l) => `<p>${l}</p>`).join('')}</td></tr>`;
 }
 
+// Proof links become hrefs: only https://, whatever the engine's own data tests let through.
+function checkProofLinks(references) {
+  for (const r of references) {
+    for (const [proof, field] of [['card', 'verify_url'], ['report', 'url']]) {
+      const href = r.proofs?.[proof]?.[field];
+      if (href !== undefined && !String(href).startsWith('https://')) {
+        throw new Error(`reference ${r.id}: proofs.${proof}.${field} is not an https:// address`);
+      }
+    }
+  }
+}
+
 /** The HTML of <main> of the references page: references is site-data/references.json's list, teams the anonymous teams of technologies.json. */
 export function referencesMain(references, teams, lang) {
+  checkProofLinks(references);
   const t = COPY[lang];
   const r = t.ref;
   const list = references.length
@@ -198,6 +212,14 @@ function main([engineDir, labDir, outDir = SITE]) {
     console.error(`build-technologies: no page written\n${errors.join('\n')}`);
     process.exit(1);
   }
+  // Built before anything is written: a bad proof link stops the build like a missing lab proof.
+  let references;
+  try {
+    references = ['en', 'fr'].map((lang) => referencesPage(data.references.references, data.technologies.teams, lang));
+  } catch (e) {
+    console.error(`build-technologies: no page written\n${e.message}`);
+    process.exit(1);
+  }
   const engine = readFileSync(join(engineDir, 'Cargo.toml'), 'utf8').match(/\[workspace\.package\][^[]*?^version\s*=\s*"([^"]+)"/m)?.[1];
   if (!engine) throw new Error(`no [workspace.package].version in ${join(engineDir, 'Cargo.toml')}`);
   const lab = execFileSync('git', ['-C', labDir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -205,9 +227,8 @@ function main([engineDir, labDir, outDir = SITE]) {
   mkdirSync(join(outDir, 'fr'), { recursive: true });
   writeFileSync(join(outDir, 'technologies.html'), page('en', '/fr/technologies', COPY.en.title, COPY.en.desc, technologiesMain(data, 'en', provenance), { head: HEAD + redirect('/fr/technologies'), mainClass: 'tp' }));
   writeFileSync(join(outDir, 'fr', 'technologies.html'), page('fr', '/technologies', COPY.fr.title, COPY.fr.desc, technologiesMain(data, 'fr', provenance), { head: HEAD, mainClass: 'tp' }));
-  for (const [lang, file] of [['en', 'references.html'], ['fr', join('fr', 'references.html')]]) {
-    writeFileSync(join(outDir, file), referencesPage(data.references.references, data.technologies.teams, lang));
-  }
+  writeFileSync(join(outDir, 'references.html'), references[0]);
+  writeFileSync(join(outDir, 'fr', 'references.html'), references[1]);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));
