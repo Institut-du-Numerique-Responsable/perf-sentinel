@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_helpers::site_data_rows;
+use crate::test_helpers::{criterion, row_id, site_data_rows};
 use serde_json::Value;
 
 // --- hourly profile tests ---
@@ -1184,8 +1184,11 @@ const ALL_PROVIDERS: [(Provider, &str); 7] = [
     (Provider::Generic, "generic"),
 ];
 
-/// Exhaustive on purpose: a new variant stops compiling here, which points
-/// at `ALL_PROVIDERS`. The assertion below ties each slot to its entry.
+/// Exhaustive on purpose: a new variant stops compiling here, a reminder to
+/// extend `ALL_PROVIDERS`. The assertion below only checks that each listed
+/// entry sits at its own slot. It does not notice a variant missing from the
+/// list: `the_provider_list_covers_every_provider_the_carbon_tables_use`
+/// catches that for the variants the carbon rows use.
 const fn provider_slot(value: Provider) -> usize {
     match value {
         Provider::Aws => 0,
@@ -1206,18 +1209,17 @@ const _: () = {
     }
 };
 
-fn row_id(row: &Value) -> &str {
-    row["id"].as_str().unwrap_or("<no id>")
-}
-
-/// Criterion `index` of a row, with the row `id` in the failure message.
-fn criterion(row: &Value, index: usize) -> bool {
-    row["criteria"][index].as_bool().unwrap_or_else(|| {
-        panic!(
-            "row `{}`: criterion {index} is missing or not a boolean",
-            row_id(row)
-        )
-    })
+#[test]
+fn the_provider_list_covers_every_provider_the_carbon_tables_use() {
+    for &(key, _, provider) in super::super::carbon_data::GENERATED_CARBON_ROWS
+        .iter()
+        .chain(MANUAL_CARBON_ROWS)
+    {
+        assert!(
+            ALL_PROVIDERS.iter().any(|&(listed, _)| listed == provider),
+            "carbon row `{key}` names {provider:?}, which ALL_PROVIDERS does not list"
+        );
+    }
 }
 
 /// The provider rows of the clouds family, without the generic fallback row.

@@ -484,8 +484,7 @@ mod tests {
         code_frame_endpoint, consumer_entry_endpoint, http_route_endpoint, is_non_sql_db_system,
         is_sql_db_system,
     };
-    use crate::test_helpers::site_data_rows;
-    use serde_json::Value;
+    use crate::test_helpers::{row_id, site_data_rows};
 
     #[test]
     fn consumer_entry_endpoint_names_stable_destinations_only() {
@@ -836,10 +835,6 @@ mod tests {
     #[test]
     fn twin_rows_of_nothing_is_empty() {
         assert_eq!(super::twin_rows(&[]), Vec::<Vec<usize>>::new());
-    }
-
-    fn row_id(row: &Value) -> &str {
-        row["id"].as_str().unwrap_or("<no id>")
     }
 
     #[test]

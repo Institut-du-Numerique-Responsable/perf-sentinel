@@ -50,6 +50,21 @@ pub(crate) fn site_data_rows(family: &str) -> Vec<serde_json::Value> {
         .clone()
 }
 
+/// The `id` of a row of `site-data/technologies.json`, for failure messages.
+pub(crate) fn row_id(row: &serde_json::Value) -> &str {
+    row["id"].as_str().unwrap_or("<no id>")
+}
+
+/// Criterion `index` of a row, with the row `id` in the failure message.
+pub(crate) fn criterion(row: &serde_json::Value, index: usize) -> bool {
+    row["criteria"][index].as_bool().unwrap_or_else(|| {
+        panic!(
+            "row `{}`: criterion {index} is missing or not a boolean",
+            row_id(row)
+        )
+    })
+}
+
 /// Build a `Report` with every field at its empty / default state.
 /// Used by tests that exercise serialization or carry-through logic
 /// without needing real findings or scoring data, so the long

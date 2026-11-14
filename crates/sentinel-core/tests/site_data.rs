@@ -1,5 +1,8 @@
 //! Shape checks on the hand-written data under `site-data/`, which the
-//! technologies page renders. Every failure message names the faulty `id`.
+//! website renders: the technologies data (`technologies.json` and its French
+//! twin, tied to the engine tables and to CONTRIBUTING.md) and the references
+//! data (`references.json`, the organisations listed on a public request).
+//! Every failure message names the faulty `id`, key or row.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -154,12 +157,21 @@ fn keys_of(obj: &Map<String, Value>) -> BTreeSet<&str> {
     obj.keys().map(String::as_str).collect()
 }
 
-fn assert_keys_within(what: &str, obj: &Map<String, Value>, allowed: &[&str]) {
+fn check_keys_within(what: &str, obj: &Map<String, Value>, allowed: &[&str]) -> Result<(), String> {
     let unknown: Vec<&str> = keys_of(obj)
         .into_iter()
         .filter(|k| !allowed.contains(k))
         .collect();
-    assert!(unknown.is_empty(), "{what}: unknown keys {unknown:?}");
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    Err(format!("{what}: unknown keys {unknown:?}"))
+}
+
+fn assert_keys_within(what: &str, obj: &Map<String, Value>, allowed: &[&str]) {
+    if let Err(e) = check_keys_within(what, obj, allowed) {
+        panic!("{e}");
+    }
 }
 
 fn assert_same_ids(what: &str, expected: &BTreeSet<&str>, actual: &BTreeSet<&str>) {
@@ -329,13 +341,62 @@ fn production_refers_to_declared_teams() {
         let Some(production) = row.get("production") else {
             continue;
         };
-        for team in production.as_array().expect("`production` is an array") {
+        let production = production
+            .as_array()
+            .unwrap_or_else(|| panic!("row `{}`: `production` is not an array", id_of(row)));
+        for team in production {
             assert!(
                 team.as_str().is_some_and(|t| declared.contains(t)),
                 "row `{}`: production names the undeclared team {team}",
                 id_of(row)
             );
         }
+    }
+}
+
+/// Fails when `ids` repeats a value, naming it and what `what` holds it.
+fn assert_unique<'a>(what: &str, ids: impl Iterator<Item = &'a str>) {
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        assert!(seen.insert(id), "{what}: id `{id}` is declared twice");
+    }
+}
+
+#[test]
+fn group_and_team_ids_are_unique() {
+    let doc = load("technologies.json");
+    for family in families(&doc) {
+        let groups = family["groups"].as_array().into_iter().flatten();
+        assert_unique(
+            &format!("family `{}` groups", id_of(family)),
+            groups.map(id_of),
+        );
+    }
+    let teams = doc["teams"].as_array().expect("`teams` is an array");
+    assert_unique("teams", teams.iter().map(id_of));
+}
+
+fn assert_group(family: &Value, row: &Value) {
+    let id = id_of(row);
+    let group = row.get("group");
+    if id_of(family) != "frameworks" {
+        assert!(group.is_none(), "row `{id}`: `group` belongs to frameworks");
+        return;
+    }
+    let name = group
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("frameworks row `{id}` has no `group`"));
+    assert!(
+        group_ids(family).contains(name),
+        "row `{id}`: group `{name}` is not declared by family `frameworks`"
+    );
+}
+
+#[test]
+fn framework_rows_name_a_declared_group_and_others_have_none() {
+    let doc = load("technologies.json");
+    for (family, row) in all_rows(&doc) {
+        assert_group(family, row);
     }
 }
 
@@ -495,6 +556,20 @@ fn contributing_level<'a>(contributing: &'a str, row: &str) -> Option<&'a str> {
     })
 }
 
+#[test]
+fn a_contributing_row_matches_its_whole_first_cell() {
+    let table =
+        "| Add a database engine | `normalize/` | High |\n| Add a database | `docs/` | Low |\n";
+    assert_eq!(contributing_level(table, "Add a database"), Some("Low"));
+    assert_eq!(
+        contributing_level(table, "Add a database engine"),
+        Some("High")
+    );
+    // Only the longer title is in the table: `Add a database` must not match it.
+    let longer_only = "| Add a database engine | `normalize/` | High |\n";
+    assert_eq!(contributing_level(longer_only, "Add a database"), None);
+}
+
 fn assert_add_link_level(family: &Value, link: &Value, contributing: &str) {
     let (id, label) = (
         id_of(family),
@@ -523,7 +598,13 @@ fn add_links_show_the_difficulty_contributing_gives() {
     let contributing = std::fs::read_to_string(workspace_path("CONTRIBUTING.md"))
         .expect("failed to read CONTRIBUTING.md");
     for family in families(&doc) {
-        for link in family["add"].as_array().into_iter().flatten() {
+        let links = family["add"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+            .unwrap_or_else(|| {
+                panic!("family `{}`: `add` is not a non-empty array", id_of(family))
+            });
+        for link in links {
             assert_add_link_level(family, link, &contributing);
         }
     }
@@ -614,6 +695,84 @@ fn since_is_the_month_of_the_earliest_period_from() {
     assert_eq!(check_reference(&valid_reference()), Ok(()));
     assert_rejected(&changed("/since", json!("2026-09")), "`since`");
     assert_rejected(&changed("/since", json!("2026-7")), "`since`");
+}
+
+#[test]
+fn since_follows_the_card_when_the_card_starts_first() {
+    // The card now starts on 2026-05-01, before the report (2026-07-01):
+    // the rule is "earliest", not "the report's".
+    let early_card = changed("/proofs/card/period_from", json!("2026-05-01"));
+    assert_rejected(&early_card, "`since` 2026-07");
+    let mut r = early_card;
+    r["since"] = json!("2026-05");
+    assert_eq!(check_reference(&r), Ok(()));
+}
+
+#[test]
+fn domain_follows_the_rule_of_the_request_script() {
+    let label_of_63 = "a".repeat(63);
+    // 63 + 63 + 63 + 61 characters and three dots: exactly 253.
+    let longest = [63, 63, 63, 61].map(|n| "a".repeat(n)).join(".");
+    let ok = [
+        "exemple-energie.fr",
+        "sous.exemple-energie.fr",
+        "xn--exemple-9ya.fr",
+        "a.b",
+        "1.exemple",
+        &format!("{label_of_63}.fr"),
+        &longest,
+    ];
+    for domain in ok {
+        let r = changed("/domain", json!(domain));
+        // The report host must follow the domain, so move it with it.
+        let r = changed_report_url(r, domain);
+        assert_eq!(check_reference(&r), Ok(()), "{domain}");
+    }
+    let too_long = format!("{longest}a");
+    let bad = [
+        "not a domain",
+        "exemple..fr",
+        ".exemple.fr",
+        "exemple.fr.",
+        "localhost",
+        "Exemple.fr",
+        "exemple_energie.fr",
+        "-exemple.fr",
+        "exemple-.fr",
+        "exemple.-fr",
+        "exemple.1",
+        "1.2.3.4",
+        "exemple.fr/chemin",
+        "exémple.fr",
+        &format!("{}.fr", "a".repeat(64)),
+        &too_long,
+    ];
+    for domain in bad {
+        assert_rejected(&changed("/domain", json!(domain)), "`domain`");
+    }
+}
+
+/// The reference with its report URL moved onto `domain`.
+fn changed_report_url(mut r: Value, domain: &str) -> Value {
+    r["proofs"]["report"]["url"] = json!(format!("https://{domain}/rapport.json"));
+    r
+}
+
+#[test]
+fn a_reference_carries_no_unknown_key() {
+    for (path, parent) in [
+        ("", "the reference"),
+        ("/proofs", "`proofs`"),
+        ("/proofs/card", "`proofs.card`"),
+        ("/proofs/report", "`proofs.report`"),
+    ] {
+        let mut r = valid_reference();
+        r.pointer_mut(path)
+            .and_then(Value::as_object_mut)
+            .unwrap_or_else(|| panic!("no object at `{path}`"))
+            .insert("extra".into(), json!("x"));
+        assert_rejected(&r, &format!("{parent}: unknown keys [\"extra\"]"));
+    }
 }
 
 #[test]
@@ -722,6 +881,11 @@ fn a_reference_carries_no_markup() {
     );
 }
 
+const REFERENCE_KEYS: [&str; 6] = ["id", "name", "domain", "since", "request", "proofs"];
+const PROOF_KEYS: [&str; 2] = ["card", "report"];
+const CARD_KEYS: [&str; 3] = ["verify_url", "period_from", "period_to"];
+const REPORT_KEYS: [&str; 5] = ["url", "period_from", "period_to", "environments", "signed"];
+
 const REQUEST_PREFIX: &str =
     "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/";
 
@@ -729,6 +893,33 @@ const VERIFY_PREFIXES: [&str; 2] = [
     "https://perf-sentinel.dev/verifier#c=",
     "https://perf-sentinel.dev/fr/verifier#c=",
 ];
+
+/// No key beyond `allowed`, naming the unknown ones.
+fn check_keys(v: &Value, what: &str, allowed: &[&str]) -> Result<(), String> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| format!("{what} is not an object"))?;
+    check_keys_within(what, obj, allowed)
+}
+
+/// The domain rule of `scripts/check-reference-request.sh`: lowercase ASCII,
+/// 253 characters at most, two labels or more of 1 to 63 `[a-z0-9-]` with no
+/// edge hyphen, the last label not all digits.
+fn is_domain(domain: &str) -> bool {
+    let labels: Vec<&str> = domain.split('.').collect();
+    let plain = |label: &&str| {
+        (1..=63).contains(&label.len())
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    };
+    domain.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(plain)
+        && !labels[labels.len() - 1].bytes().all(|b| b.is_ascii_digit())
+}
 
 /// A non-empty string field. `prefix` is the dotted path shown in errors.
 fn text<'a>(v: &'a Value, prefix: &str, key: &str) -> Result<&'a str, String> {
@@ -778,6 +969,7 @@ fn check_period<'a>(proof: &'a Value, prefix: &str) -> Result<&'a str, String> {
 }
 
 fn check_card(card: &Value) -> Result<&str, String> {
+    check_keys(card, "`proofs.card`", &CARD_KEYS)?;
     let url = text(card, "proofs.card.", "verify_url")?;
     if !VERIFY_PREFIXES.iter().any(|p| url.starts_with(p)) {
         return Err(format!(
@@ -788,6 +980,7 @@ fn check_card(card: &Value) -> Result<&str, String> {
 }
 
 fn check_report<'a>(report: &'a Value, domain: &str) -> Result<&'a str, String> {
+    check_keys(report, "`proofs.report`", &REPORT_KEYS)?;
     let url = text(report, "proofs.report.", "url")?;
     let host = https_host(url).ok_or_else(|| {
         format!("`proofs.report.url` {url} is not an https URL with a plain host")
@@ -830,14 +1023,19 @@ fn check_no_markup(r: &Value) -> Result<(), String> {
 }
 
 fn check_reference_rules(r: &Value) -> Result<(), String> {
+    check_keys(r, "the reference", &REFERENCE_KEYS)?;
     for key in ["id", "name"] {
         text(r, "", key)?;
     }
     let (domain, since) = (text(r, "", "domain")?, text(r, "", "since")?);
+    if !is_domain(domain) {
+        return Err(format!("`domain` {domain} is not a valid domain name"));
+    }
     check_request(text(r, "", "request")?)?;
     let proofs = r["proofs"]
         .as_object()
         .ok_or("`proofs` is missing or not an object")?;
+    check_keys_within("`proofs`", proofs, &PROOF_KEYS)?;
     let (card, report) = (proofs.get("card"), proofs.get("report"));
     if card.is_none() && report.is_none() {
         return Err("`proofs` needs a `card` or a `report`".into());

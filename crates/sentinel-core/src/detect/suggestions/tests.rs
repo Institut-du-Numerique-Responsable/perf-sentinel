@@ -1,7 +1,7 @@
 use super::*;
 use crate::detect::{FindingType, Severity};
 use crate::event::CodeLocation;
-use crate::test_helpers::{make_finding, site_data_rows};
+use crate::test_helpers::{criterion, make_finding, row_id, site_data_rows};
 use serde_json::Value;
 
 fn finding_with_location(ft: FindingType, loc: Option<CodeLocation>) -> Finding {
@@ -2043,8 +2043,11 @@ const ALL_FRAMEWORKS: [Framework; 24] = [
     Framework::PhpGeneric,
 ];
 
-/// Exhaustive on purpose: a new variant stops compiling here, which points
-/// at `ALL_FRAMEWORKS`. The assertion below ties each slot to its entry.
+/// Exhaustive on purpose: a new variant stops compiling here, a reminder to
+/// extend `ALL_FRAMEWORKS`. The assertion below only checks that each listed
+/// entry sits at its own slot. It does not notice a variant missing from the
+/// list: `the_framework_list_covers_every_framework_the_tables_use` catches
+/// that for the variants the fixes table uses.
 const fn framework_slot(value: Framework) -> usize {
     match value {
         Framework::JavaJpa => 0,
@@ -2091,8 +2094,11 @@ const ALL_MESSAGING_SYSTEMS: [MessagingSystem; 6] = [
     MessagingSystem::Jms,
 ];
 
-/// Exhaustive on purpose: a new variant stops compiling here, which points
-/// at `ALL_MESSAGING_SYSTEMS`. The assertion below ties each slot to its entry.
+/// Exhaustive on purpose: a new variant stops compiling here, a reminder to
+/// extend `ALL_MESSAGING_SYSTEMS`. The assertion below only checks that each
+/// listed entry sits at its own slot. It does not notice a variant missing
+/// from the list: `the_messaging_list_covers_every_system_the_table_uses`
+/// catches that for the variants the messaging fixes table uses.
 const fn messaging_system_slot(value: MessagingSystem) -> usize {
     match value {
         MessagingSystem::Kafka => 0,
@@ -2112,6 +2118,30 @@ const _: () = {
     }
 };
 
+#[test]
+fn the_framework_list_covers_every_framework_the_tables_use() {
+    for (finding_type, framework) in FIXES.keys() {
+        for used in [*framework, framework.generic()] {
+            assert!(
+                ALL_FRAMEWORKS.contains(&used),
+                "FIXES holds {finding_type:?} for `{}`, which ALL_FRAMEWORKS does not list",
+                used.as_str()
+            );
+        }
+    }
+}
+
+#[test]
+fn the_messaging_list_covers_every_system_the_table_uses() {
+    for (finding_type, system) in MESSAGING_FIXES.keys() {
+        assert!(
+            ALL_MESSAGING_SYSTEMS.contains(system),
+            "MESSAGING_FIXES holds {finding_type:?} for `{}`, which ALL_MESSAGING_SYSTEMS does not list",
+            system.as_str()
+        );
+    }
+}
+
 const SITE_DATA: &str = "site-data/technologies.json";
 
 /// Rows of `family` that name an engine tag, which skips the unsupported ones.
@@ -2123,20 +2153,6 @@ fn rows_with_engine(family: &str) -> Vec<Value> {
 
 fn engine_of(row: &Value) -> &str {
     row["engine"].as_str().expect("row has an engine")
-}
-
-fn row_id(row: &Value) -> &str {
-    row["id"].as_str().unwrap_or("<no id>")
-}
-
-/// Criterion `index` of a row, with the row `id` in the failure message.
-fn criterion(row: &Value, index: usize) -> bool {
-    row["criteria"][index].as_bool().unwrap_or_else(|| {
-        panic!(
-            "row `{}`: criterion {index} is missing or not a boolean",
-            row_id(row)
-        )
-    })
 }
 
 fn framework_of(row: &Value) -> Framework {
