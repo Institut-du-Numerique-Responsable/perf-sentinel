@@ -295,10 +295,9 @@ Les pages technologies et références de perf-sentinel.dev sont construites dep
 node scripts/build-technologies.mjs <checkout du moteur> <checkout du lab>
 ```
 
-La commande refuse d'écrire quoi que ce soit quand une preuve du lab citée par `site-data/technologies.json` manque dans le lab. Deux suites, toutes deux dans le checkout du site :
+Le checkout du lab est un checkout de la `main` poussée du lab, par exemple `git worktree add --detach <dossier> origin/main` après un fetch. La ligne de provenance des pages cite son commit, qui doit exister sur GitHub.
 
-- Quand `teams` a changé, alignez la phrase de la page d'accueil qui dit depuis quand une équipe fait tourner Perf Sentinel en production.
-- Quand des lignes ont été ajoutées ou retirées, mettez à jour les comptes que figent les tests de pages du site.
+La commande refuse d'écrire quoi que ce soit quand une preuve du lab citée par `site-data/technologies.json` manque dans le lab. Une suite, dans le checkout du site : quand `teams` a changé, alignez la phrase de la page d'accueil qui dit depuis quand une équipe fait tourner Perf Sentinel en production.
 
 ## Ce que fait le workflow de release
 

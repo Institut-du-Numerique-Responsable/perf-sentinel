@@ -287,10 +287,9 @@ The technologies and references pages of perf-sentinel.dev are built from `site-
 node scripts/build-technologies.mjs <engine checkout> <lab checkout>
 ```
 
-It refuses to write anything when a lab proof named in `site-data/technologies.json` is missing in the lab. Two follow-ups, both in the site checkout:
+The lab checkout is a checkout of the lab's pushed `main`, for instance `git worktree add --detach <dir> origin/main` after a fetch. The provenance line of the pages names its commit, which must exist on GitHub.
 
-- When `teams` changed, align the sentence of the home page that says since when a team runs Perf Sentinel in production.
-- When rows were added or removed, update the counts that the page tests of the site pin.
+It refuses to write anything when a lab proof named in `site-data/technologies.json` is missing in the lab. One follow-up, in the site checkout: when `teams` changed, align the sentence of the home page that says since when a team runs Perf Sentinel in production.
 
 ## What the release workflow does
 
