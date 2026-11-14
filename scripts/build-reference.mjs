@@ -314,7 +314,9 @@ function buildPage(id, lang) {
   const asideSidebar = `<aside class="ps-aside ps-chrome" style="position:sticky;top:65px;align-self:start;height:calc(100vh - 65px);overflow-y:auto;border-right:1px solid var(--border);padding:26px 16px 40px 28px">${sidebar(id, lang)}</aside>`;
 
   const L = ui.ft;
-  const ftCol = (t, links) => `<div><div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:13px">${t}</div><div style="display:flex;flex-direction:column;gap:9px;font-size:14px;color:var(--text-2)">${links.map(([h, x]) => `<a href="${h}">${x}</a>`).join('')}</div></div>`;
+  // The outgoing-link arrow of site-chrome.mjs: inside the link, skipped by screen readers.
+  const EXT = '<span data-arrow="ext" aria-hidden="true"> ↗</span>';
+  const ftCol = (t, links) => `<div><div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:13px">${t}</div><div style="display:flex;flex-direction:column;gap:9px;font-size:14px;color:var(--text-2)">${links.map(([h, x]) => `<a href="${h}">${x}${h.startsWith('https://') ? EXT : ''}</a>`).join('')}</div></div>`;
   const footer =
     `<footer style="border-top:1px solid var(--border);background:var(--surface-2)"><div style="max-width:1320px;margin:0 auto;padding:48px 28px 36px">` +
     `<div data-grid="ftcols" style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:32px">` +
@@ -325,7 +327,7 @@ function buildPage(id, lang) {
     `</div>` +
     `<div style="display:flex;justify-content:space-between;gap:18px;margin-top:26px;flex-wrap:wrap;font-size:12.5px;color:var(--text-2)">` +
     `<div style="display:flex;flex-direction:column;gap:6px"><span>${L.copyright}</span><span style="display:flex;gap:14px"><a href="${lang === 'fr' ? '/mentions-legales' : '/legal-notice'}">${L.legal}</a><a href="${lang === 'fr' ? '/confidentialite' : '/privacy-policy'}">${L.privacy}</a></span></div>` +
-    `<span>${L.credit}<a href="https://www.linkedin.com/in/gwendoline-meignen-b0224873/" target="_blank" rel="noopener" id="ftCredit">Gwendoline Meignen</a></span>` +
+    `<span>${L.credit}<a href="https://www.linkedin.com/in/gwendoline-meignen-b0224873/" target="_blank" rel="noopener" id="ftCredit">Gwendoline Meignen${EXT}</a></span>` +
     `</div></div></footer>`;
 
   return head +
