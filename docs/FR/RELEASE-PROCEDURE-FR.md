@@ -287,6 +287,19 @@ changé l'un des deux tableaux de bord anglais les régénère avec
 `python3 scripts/translate-dashboards-fr.py`, et `--check` confirme
 qu'elles sont à jour. Seul l'aperçu anglais est publié chez Grafana Labs.
 
+### 9. Reconstruire les pages technologies et références
+
+Les pages technologies et références de perf-sentinel.dev sont construites depuis `site-data/` dans ce repo, et le site ne les reconstruit pas tout seul. Une fois la release publiée, lancez dans le checkout du site :
+
+```bash
+node scripts/build-technologies.mjs <checkout du moteur> <checkout du lab>
+```
+
+La commande refuse d'écrire quoi que ce soit quand une preuve du lab citée par `site-data/technologies.json` manque dans le lab. Deux suites, toutes deux dans le checkout du site :
+
+- Quand `teams` a changé, alignez la phrase de la page d'accueil qui dit depuis quand une équipe fait tourner Perf Sentinel en production.
+- Quand des lignes ont été ajoutées ou retirées, mettez à jour les comptes que figent les tests de pages du site.
+
 ## Ce que fait le workflow de release
 
 `release.yml` exécute ces jobs à chaque push de tag `v*` :

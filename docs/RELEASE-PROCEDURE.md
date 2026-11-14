@@ -279,6 +279,19 @@ English dashboard regenerates them with
 `python3 scripts/translate-dashboards-fr.py`, and `--check` confirms they
 are current. Only the English overview is published to Grafana Labs.
 
+### 9. Rebuild the technologies and references pages
+
+The technologies and references pages of perf-sentinel.dev are built from `site-data/` in this repository, and the site does not rebuild them by itself. Once the release is out, run this in the site checkout:
+
+```bash
+node scripts/build-technologies.mjs <engine checkout> <lab checkout>
+```
+
+It refuses to write anything when a lab proof named in `site-data/technologies.json` is missing in the lab. Two follow-ups, both in the site checkout:
+
+- When `teams` changed, align the sentence of the home page that says since when a team runs Perf Sentinel in production.
+- When rows were added or removed, update the counts that the page tests of the site pin.
+
 ## What the release workflow does
 
 `release.yml` runs these jobs on every `v*` tag push:
