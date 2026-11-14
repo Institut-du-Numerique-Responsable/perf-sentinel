@@ -1,0 +1,955 @@
+{
+  "teams": [
+    {"id": "t1", "since": "2026-06"}
+  ],
+  "families": [
+    {
+      "id": "frameworks",
+      "title": "Frameworks and ORMs",
+      "row_header": "Technology",
+      "extra_column": null,
+      "criteria": ["Recognized", "Dedicated advice", "Proven in the lab"],
+      "lab_criterion": 2,
+      "after": null,
+      "add": [
+        {"label": "Add a framework or an ORM", "contributing_row": "Get a new framework detected", "difficulty": "medium"},
+        {"label": "Add a language", "contributing_row": "Get a new language detected", "difficulty": "medium"}
+      ],
+      "groups": [
+        {"id": "java", "title": "Java", "logo": "java"},
+        {"id": "kotlin", "title": "Kotlin", "logo": null},
+        {"id": "csharp", "title": "C#", "logo": "csharp"},
+        {"id": "python", "title": "Python", "logo": "python"},
+        {"id": "rust", "title": "Rust", "logo": "rust"},
+        {"id": "go", "title": "Go", "logo": "go"},
+        {"id": "nodejs", "title": "Node.js", "logo": "nodejs"},
+        {"id": "ruby", "title": "Ruby", "logo": "ruby"},
+        {"id": "php", "title": "PHP", "logo": "php"},
+        {"id": "elixir", "title": "Elixir", "logo": null}
+      ],
+      "rows": [
+        {
+          "id": "spring-boot-jpa",
+          "name": "Spring Boot",
+          "detail": "JPA, Hibernate",
+          "group": "java",
+          "aliases": ["spring data", "hibernate", "jpa"],
+          "engine": "java_jpa",
+          "criteria": [true, true, true],
+          "lab": ["services/order-service", "services/payment-service", "services/notification-service"],
+          "production": ["t1"]
+        },
+        {
+          "id": "quarkus",
+          "name": "Quarkus",
+          "detail": "Panache",
+          "group": "java",
+          "aliases": ["panache"],
+          "engine": "java_quarkus",
+          "criteria": [true, true, true],
+          "lab": ["services/quarkus-svc"]
+        },
+        {
+          "id": "quarkus-reactive",
+          "name": "Quarkus reactive",
+          "detail": "Mutiny",
+          "group": "java",
+          "aliases": ["mutiny", "reactive quarkus"],
+          "engine": "java_quarkus_reactive",
+          "criteria": [true, true, true],
+          "lab": ["services/mutiny-svc"]
+        },
+        {
+          "id": "helidon-se",
+          "name": "Helidon SE",
+          "group": "java",
+          "aliases": ["helidon"],
+          "engine": "java_helidon_se",
+          "criteria": [true, true, true],
+          "lab": ["services/helidon-se-svc"]
+        },
+        {
+          "id": "helidon-mp",
+          "name": "Helidon MP",
+          "group": "java",
+          "aliases": ["helidon", "microprofile"],
+          "engine": "java_helidon_mp",
+          "criteria": [true, true, true],
+          "lab": ["services/helidon-mp-svc"]
+        },
+        {
+          "id": "spring-webflux",
+          "name": "Spring WebFlux",
+          "detail": "R2DBC",
+          "group": "java",
+          "aliases": ["webflux", "reactive spring"],
+          "engine": "java_webflux",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "The SQL advice is still the JDBC advice, and no WebFlux service runs in the lab."
+        },
+        {
+          "id": "micronaut",
+          "name": "Micronaut",
+          "group": "java",
+          "aliases": ["micronaut data"],
+          "engine": "java_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Java."
+        },
+        {
+          "id": "jooq",
+          "name": "jOOQ",
+          "group": "java",
+          "aliases": ["java object oriented querying"],
+          "engine": "java_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Java."
+        },
+        {
+          "id": "mybatis",
+          "name": "MyBatis",
+          "group": "java",
+          "aliases": ["ibatis"],
+          "engine": "java_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Java."
+        },
+        {
+          "id": "ktor",
+          "name": "Ktor",
+          "group": "kotlin",
+          "aliases": ["ktor server"],
+          "engine": "java_generic",
+          "fallback": true,
+          "criteria": [false, false, true],
+          "lab": ["services/ktor-svc"],
+          "note": "The lab proves it. Ktor receives the general advice for Java, through the OpenTelemetry Java agent."
+        },
+        {
+          "id": "exposed",
+          "name": "Exposed",
+          "group": "kotlin",
+          "aliases": ["jetbrains exposed"],
+          "engine": "java_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Java."
+        },
+        {
+          "id": "dotnet",
+          "name": ".NET",
+          "detail": "EF Core",
+          "group": "csharp",
+          "aliases": ["dotnet", "entity framework", "asp.net core", "csharp"],
+          "engine": "csharp_ef_core",
+          "criteria": [true, true, true],
+          "lab": ["services/dotnet-svc"]
+        },
+        {
+          "id": "dapper",
+          "name": "Dapper",
+          "group": "csharp",
+          "aliases": ["micro orm"],
+          "engine": "csharp_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own, and C# has no general advice for queries in a loop or redundant queries."
+        },
+        {
+          "id": "nhibernate",
+          "name": "NHibernate",
+          "group": "csharp",
+          "aliases": ["nhibernate orm"],
+          "engine": "csharp_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own, and C# has no general advice for queries in a loop or redundant queries."
+        },
+        {
+          "id": "django",
+          "name": "Django",
+          "group": "python",
+          "aliases": ["django orm"],
+          "engine": "python_django",
+          "criteria": [true, true, true],
+          "lab": ["services/django-svc"]
+        },
+        {
+          "id": "fastapi",
+          "name": "FastAPI",
+          "detail": "SQLAlchemy",
+          "group": "python",
+          "aliases": ["sqlalchemy"],
+          "engine": "python_sqlalchemy",
+          "criteria": [true, true, true],
+          "lab": ["services/fastapi-svc"]
+        },
+        {
+          "id": "psycopg",
+          "name": "psycopg",
+          "detail": "asyncpg, no ORM",
+          "group": "python",
+          "aliases": ["psycopg2", "psycopg3", "asyncpg"],
+          "engine": "python_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own, and Python has no general advice for queries in a loop or redundant queries."
+        },
+        {
+          "id": "tortoise-orm",
+          "name": "Tortoise ORM",
+          "group": "python",
+          "aliases": ["tortoise"],
+          "engine": "python_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own, and Python has no general advice for queries in a loop or redundant queries."
+        },
+        {
+          "id": "peewee",
+          "name": "Peewee",
+          "group": "python",
+          "aliases": ["peewee orm"],
+          "engine": "python_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own, and Python has no general advice for queries in a loop or redundant queries."
+        },
+        {
+          "id": "diesel",
+          "name": "Diesel",
+          "group": "rust",
+          "aliases": ["diesel rs"],
+          "engine": "rust_diesel",
+          "criteria": [true, true, true],
+          "lab": ["services/diesel-svc"]
+        },
+        {
+          "id": "seaorm",
+          "name": "SeaORM",
+          "group": "rust",
+          "aliases": ["sea orm", "sea-orm"],
+          "engine": "rust_sea_orm",
+          "criteria": [true, true, true],
+          "lab": ["services/seaorm-svc"]
+        },
+        {
+          "id": "sqlx",
+          "name": "sqlx",
+          "group": "rust",
+          "aliases": ["sqlx rust"],
+          "engine": "rust_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own, and Rust has no general advice for queries in a loop or redundant queries."
+        },
+        {
+          "id": "gorm",
+          "name": "GORM",
+          "group": "go",
+          "aliases": ["go orm"],
+          "engine": "go_gorm",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "No service of this stack runs in the simulation lab. The Go service of the lab uses pgx."
+        },
+        {
+          "id": "pgx",
+          "name": "pgx",
+          "group": "go",
+          "aliases": ["jackc pgx", "pgxpool"],
+          "engine": "go_generic",
+          "fallback": true,
+          "criteria": [false, false, true],
+          "lab": ["services/go-svc"],
+          "note": "The lab proves it, with the general advice for Go."
+        },
+        {
+          "id": "ent",
+          "name": "ent",
+          "group": "go",
+          "aliases": ["entgo"],
+          "engine": "go_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Go."
+        },
+        {
+          "id": "sqlc",
+          "name": "sqlc",
+          "group": "go",
+          "aliases": ["sqlc go"],
+          "engine": "go_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Go."
+        },
+        {
+          "id": "nestjs",
+          "name": "NestJS",
+          "detail": "Prisma",
+          "group": "nodejs",
+          "aliases": ["nest", "prisma"],
+          "engine": "node_prisma",
+          "criteria": [true, true, true],
+          "lab": ["services/nest-svc"]
+        },
+        {
+          "id": "typeorm",
+          "name": "TypeORM",
+          "group": "nodejs",
+          "aliases": ["type orm"],
+          "engine": "node_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Node.js."
+        },
+        {
+          "id": "sequelize",
+          "name": "Sequelize",
+          "group": "nodejs",
+          "aliases": ["sequelize orm"],
+          "engine": "node_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Node.js."
+        },
+        {
+          "id": "drizzle",
+          "name": "Drizzle",
+          "group": "nodejs",
+          "aliases": ["drizzle orm"],
+          "engine": "node_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Node.js."
+        },
+        {
+          "id": "rails",
+          "name": "Rails",
+          "detail": "Active Record",
+          "group": "ruby",
+          "aliases": ["ruby on rails", "activerecord"],
+          "engine": "ruby_active_record",
+          "criteria": [true, true, true],
+          "lab": ["services/rails-svc"]
+        },
+        {
+          "id": "sequel",
+          "name": "Sequel",
+          "group": "ruby",
+          "aliases": ["sequel gem"],
+          "engine": "ruby_generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "No rule of its own. It receives the general advice for Ruby."
+        },
+        {
+          "id": "laravel",
+          "name": "Laravel",
+          "detail": "Eloquent",
+          "group": "php",
+          "aliases": ["laravel eloquent"],
+          "engine": "php_laravel_eloquent",
+          "criteria": [true, true, true],
+          "lab": ["services/laravel-svc"]
+        },
+        {
+          "id": "symfony",
+          "name": "Symfony",
+          "detail": "Doctrine",
+          "group": "php",
+          "aliases": ["doctrine orm"],
+          "engine": "php_doctrine",
+          "criteria": [true, true, true],
+          "lab": ["services/symfony-svc"]
+        },
+        {
+          "id": "phoenix",
+          "name": "Phoenix",
+          "detail": "Ecto",
+          "group": "elixir",
+          "aliases": ["ecto", "elixir phoenix"],
+          "unsupported": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "The engine does not recognize Elixir. Traces are analyzed, without dedicated fix advice."
+        }
+      ]
+    },
+    {
+      "id": "databases",
+      "title": "Databases",
+      "row_header": "Technology",
+      "extra_column": null,
+      "criteria": ["Queries analyzed", "Statistics read", "Proven in the lab"],
+      "lab_criterion": 2,
+      "after": null,
+      "add": [
+        {"label": "Add a database", "contributing_row": "Add a database engine", "difficulty": "high"}
+      ],
+      "rows": [
+        {
+          "id": "postgresql",
+          "name": "PostgreSQL",
+          "aliases": ["postgres", "pg", "psql"],
+          "engine": "postgresql",
+          "criteria": [true, true, true],
+          "lab": ["scenarios/pg-stat"],
+          "production": ["t1"]
+        },
+        {
+          "id": "mysql",
+          "name": "MySQL",
+          "aliases": ["mysql server"],
+          "engine": "mysql",
+          "criteria": [true, true, true],
+          "lab": ["scenarios/mysql-stat"]
+        },
+        {
+          "id": "mariadb",
+          "name": "MariaDB",
+          "aliases": ["maria db"],
+          "engine": "mariadb",
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "Queries are analyzed like MySQL queries. Perf Sentinel does not read its statistics, and no MariaDB server runs in the lab."
+        },
+        {
+          "id": "sql-server",
+          "name": "SQL Server",
+          "aliases": ["mssql", "microsoft sql server", "sqlserver"],
+          "engine": "mssql",
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "Queries are analyzed, with one limit: a bracketed identifier made only of digits, like [123], is masked. Statistics are not read, and no server runs in the lab."
+        },
+        {
+          "id": "oracle",
+          "name": "Oracle",
+          "aliases": ["oracle database", "oracle db"],
+          "engine": "oracle",
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "Queries are analyzed. Perf Sentinel does not read its statistics, and no server runs in the lab."
+        },
+        {
+          "id": "sqlite",
+          "name": "SQLite",
+          "aliases": ["sqlite3"],
+          "engine": "sqlite",
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "Queries are analyzed. Perf Sentinel does not read its statistics, and no server runs in the lab."
+        },
+        {
+          "id": "other-sql",
+          "name": "Other SQL databases",
+          "detail": "CockroachDB, ClickHouse, DB2, Snowflake",
+          "aliases": ["cockroach", "ibm db2", "other sql"],
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "Queries are analyzed. Perf Sentinel does not read its statistics, and no server runs in the lab."
+        },
+        {
+          "id": "redis",
+          "name": "Redis",
+          "aliases": ["redis cache", "cache"],
+          "unsupported": true,
+          "dropped": "redis",
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "Calls to this database are not analyzed. Perf Sentinel handles SQL, outgoing calls and messages."
+        },
+        {
+          "id": "mongodb",
+          "name": "MongoDB",
+          "aliases": ["mongo"],
+          "unsupported": true,
+          "dropped": "mongodb",
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "Calls to this database are not analyzed. Perf Sentinel handles SQL, outgoing calls and messages."
+        },
+        {
+          "id": "elasticsearch",
+          "name": "Elasticsearch",
+          "detail": "OpenSearch",
+          "aliases": ["elastic", "opensearch"],
+          "unsupported": true,
+          "dropped": "elasticsearch",
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "Calls to this database are not analyzed. Perf Sentinel handles SQL, outgoing calls and messages."
+        },
+        {
+          "id": "cassandra",
+          "name": "Cassandra",
+          "aliases": ["apache cassandra"],
+          "unsupported": true,
+          "dropped": "cassandra",
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "Calls to this database are not analyzed. Perf Sentinel handles SQL, outgoing calls and messages."
+        },
+        {
+          "id": "dynamodb",
+          "name": "DynamoDB",
+          "aliases": ["dynamo", "aws dynamodb"],
+          "unsupported": true,
+          "dropped": "dynamodb",
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "Calls to this database are not analyzed. Perf Sentinel handles SQL, outgoing calls and messages."
+        }
+      ]
+    },
+    {
+      "id": "brokers",
+      "title": "Brokers",
+      "row_header": "Technology",
+      "extra_column": null,
+      "criteria": ["Recognized", "Dedicated advice", "Proven in the lab"],
+      "lab_criterion": 2,
+      "after": null,
+      "add": [
+        {"label": "Add a broker", "contributing_row": "Write advice for a message broker", "difficulty": "medium"}
+      ],
+      "rows": [
+        {
+          "id": "rabbitmq",
+          "name": "RabbitMQ",
+          "aliases": ["amqp", "rabbit"],
+          "engine": "rabbitmq",
+          "criteria": [true, true, true],
+          "lab": ["manifests/messaging-rabbitmq.yaml"],
+          "production": ["t1"]
+        },
+        {
+          "id": "kafka",
+          "name": "Kafka",
+          "aliases": ["apache kafka"],
+          "engine": "kafka",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "The lab checks it on prepared traces, not on a real broker."
+        },
+        {
+          "id": "pulsar",
+          "name": "Pulsar",
+          "aliases": ["apache pulsar"],
+          "engine": "pulsar",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "The lab checks it on prepared traces, not on a real broker."
+        },
+        {
+          "id": "jms",
+          "name": "JMS",
+          "detail": "ActiveMQ",
+          "aliases": ["activemq", "java message service"],
+          "engine": "jms",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "The lab checks it on prepared traces, not on a real broker."
+        },
+        {
+          "id": "amazon-sqs",
+          "name": "Amazon SQS",
+          "aliases": ["sqs", "aws sqs"],
+          "engine": "aws_sqs",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "The lab checks it on prepared traces, not on a real broker."
+        },
+        {
+          "id": "nats",
+          "name": "NATS",
+          "aliases": ["nats io"],
+          "engine": "nats",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "The lab checks it on prepared traces, not on a real broker."
+        }
+      ]
+    },
+    {
+      "id": "traces",
+      "title": "Trace sources",
+      "row_header": "Technology",
+      "extra_column": null,
+      "criteria": ["Read", "Proven in the lab"],
+      "lab_criterion": 1,
+      "after": null,
+      "add": [
+        {"label": "Add a trace source", "contributing_row": "Support a new trace format", "difficulty": "high"}
+      ],
+      "rows": [
+        {
+          "id": "otlp",
+          "name": "OTLP",
+          "detail": "gRPC and HTTP",
+          "aliases": ["opentelemetry", "otel", "otlp grpc", "otlp http"],
+          "criteria": [true, true],
+          "lab": ["scenarios/daemon-otlp-direct"],
+          "production": ["t1"]
+        },
+        {
+          "id": "otlp-json-file",
+          "name": "OTLP JSON file",
+          "aliases": ["otlp file", "opentelemetry json"],
+          "criteria": [true, true],
+          "lab": ["scenarios/batch-otlp-file"]
+        },
+        {
+          "id": "tempo",
+          "name": "Tempo",
+          "aliases": ["grafana tempo"],
+          "criteria": [true, true],
+          "lab": ["scenarios/batch-tempo-scrape"],
+          "production": ["t1"]
+        },
+        {
+          "id": "jaeger",
+          "name": "Jaeger",
+          "aliases": ["jaeger query"],
+          "criteria": [true, true],
+          "lab": ["scenarios/multiformat-input"]
+        },
+        {
+          "id": "zipkin",
+          "name": "Zipkin",
+          "aliases": ["zipkin json"],
+          "criteria": [true, true],
+          "lab": ["scenarios/multiformat-input"]
+        },
+        {
+          "id": "victoria-traces",
+          "name": "Victoria Traces",
+          "aliases": ["victoriatraces", "victoriametrics"],
+          "criteria": [true, true],
+          "lab": ["scenarios/batch-victoria-scrape"]
+        },
+        {
+          "id": "datadog",
+          "name": "Datadog",
+          "detail": "dd-trace",
+          "aliases": ["dd-trace", "dd trace", "datadog apm"],
+          "criteria": [true, false],
+          "lab": [],
+          "note": "The lab checks it on prepared traces, not on a real Datadog agent."
+        }
+      ]
+    },
+    {
+      "id": "clouds",
+      "title": "Clouds",
+      "row_header": "Technology",
+      "extra_column": null,
+      "criteria": ["Published PUE", "Regions", "Instance power"],
+      "lab_criterion": null,
+      "after": null,
+      "add": [
+        {"label": "Add a cloud provider or a region", "contributing_row": "Add a cloud provider or a region", "difficulty": "medium"}
+      ],
+      "rows": [
+        {
+          "id": "aws",
+          "name": "AWS",
+          "aliases": ["amazon web services", "amazon"],
+          "engine": "aws",
+          "criteria": [true, true, true],
+          "lab": [],
+          "production": ["t1"]
+        },
+        {
+          "id": "gcp",
+          "name": "GCP",
+          "aliases": ["google cloud", "google cloud platform"],
+          "engine": "gcp",
+          "criteria": [true, true, true],
+          "lab": []
+        },
+        {
+          "id": "azure",
+          "name": "Azure",
+          "aliases": ["microsoft azure"],
+          "engine": "azure",
+          "criteria": [true, true, true],
+          "lab": []
+        },
+        {
+          "id": "scaleway",
+          "name": "Scaleway",
+          "aliases": ["scw"],
+          "engine": "scaleway",
+          "criteria": [true, true, true],
+          "lab": []
+        },
+        {
+          "id": "ovhcloud",
+          "name": "OVHcloud",
+          "aliases": ["ovh"],
+          "engine": "ovh",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "OVHcloud does not document the processor of each range."
+        },
+        {
+          "id": "outscale",
+          "name": "OUTSCALE",
+          "aliases": ["3ds outscale"],
+          "engine": "outscale",
+          "criteria": [false, true, false],
+          "lab": [],
+          "note": "OUTSCALE publishes neither a PUE nor a power figure per instance."
+        },
+        {
+          "id": "other-provider",
+          "name": "Other provider",
+          "detail": "by country code",
+          "aliases": ["country code", "other cloud", "generic cloud"],
+          "engine": "generic",
+          "fallback": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "The calculation uses the electricity grid of the country and a generic PUE."
+        }
+      ]
+    },
+    {
+      "id": "energy",
+      "title": "Energy measurement",
+      "row_header": "Technology",
+      "extra_column": null,
+      "criteria": ["Supported", "Proven in the lab"],
+      "lab_criterion": 1,
+      "after": null,
+      "add": [
+        {"label": "Add an energy probe", "contributing_row": "Add an energy backend", "difficulty": "high"}
+      ],
+      "rows": [
+        {
+          "id": "alumet",
+          "name": "Alumet",
+          "aliases": ["rapl"],
+          "criteria": [true, true],
+          "lab": ["scenarios/alumet-conformance"]
+        },
+        {
+          "id": "kepler",
+          "name": "Kepler",
+          "aliases": ["rapl", "kubernetes efficient power level exporter"],
+          "criteria": [true, false],
+          "lab": [],
+          "note": "The lab proves it on a simulated probe, not on the real one."
+        },
+        {
+          "id": "redfish",
+          "name": "Redfish",
+          "aliases": ["bmc", "dmtf redfish"],
+          "criteria": [true, false],
+          "lab": [],
+          "note": "The lab proves it on a simulated probe, not on the real one."
+        },
+        {
+          "id": "scaphandre",
+          "name": "Scaphandre",
+          "aliases": ["rapl"],
+          "criteria": [true, false],
+          "lab": [],
+          "note": "The lab proves it on a simulated probe, not on the real one."
+        }
+      ]
+    },
+    {
+      "id": "grids",
+      "title": "Electricity grids",
+      "row_header": "Feed",
+      "extra_column": "Country or zone",
+      "criteria": ["Supported", "Real answer", "Proven in the lab"],
+      "lab_criterion": 2,
+      "after": "Any country without a live feed uses an embedded annual factor.",
+      "add": [
+        {"label": "Add a grid", "contributing_row": "Add a grid-operator feed for a country", "difficulty": "high"}
+      ],
+      "rows": [
+        {
+          "id": "rte-eco2mix",
+          "name": "RTE éCO2mix",
+          "detail": "France",
+          "aliases": ["rte", "eco2mix", "french grid"],
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "No grid feed runs in the lab. Its reading is tested on a hand-written answer, not on an answer from the operator."
+        },
+        {
+          "id": "neso",
+          "name": "NESO Carbon Intensity",
+          "detail": "Great Britain, excluding Northern Ireland",
+          "aliases": ["neso", "national grid eso", "carbon intensity"],
+          "real_answer": "2026-10-20",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "Its reading is tested on a real answer from the operator, dated 20 October 2026. No grid feed runs in the lab."
+        },
+        {
+          "id": "fingrid",
+          "name": "Fingrid",
+          "detail": "Finland",
+          "aliases": ["fingrid open data", "finnish grid"],
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "No grid feed runs in the lab. Its reading is tested on a hand-written answer, not on an answer from the operator. A free key is required."
+        },
+        {
+          "id": "energinet",
+          "name": "Energinet",
+          "detail": "Denmark, zones DK1 and DK2",
+          "aliases": ["energi data service", "dk1", "dk2"],
+          "real_answer": "2026-10-20",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "Its reading is tested on a real answer from the operator, dated 20 October 2026. No grid feed runs in the lab."
+        },
+        {
+          "id": "ree-esios",
+          "name": "REE e·sios",
+          "detail": "Mainland Spain",
+          "aliases": ["ree", "esios", "red electrica"],
+          "real_answer": "2026-10-20",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "Its reading is tested on a real answer from the operator, dated 20 October 2026. No grid feed runs in the lab. A free token is required."
+        },
+        {
+          "id": "open-electricity",
+          "name": "Open Electricity",
+          "detail": "Australia, six regions",
+          "aliases": ["openelectricity", "opennem", "nem"],
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "No grid feed runs in the lab. Its reading is tested on a hand-written answer, not on an answer from the operator."
+        },
+        {
+          "id": "mavir",
+          "name": "MAVIR",
+          "detail": "Hungary",
+          "aliases": ["hungarian grid"],
+          "real_answer": "2026-10-20",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "Its reading is tested on a real answer from the operator, dated 20 October 2026. No grid feed runs in the lab."
+        },
+        {
+          "id": "em6",
+          "name": "em6",
+          "detail": "New Zealand",
+          "aliases": ["new zealand grid"],
+          "real_answer": "2026-10-20",
+          "criteria": [true, true, false],
+          "lab": [],
+          "note": "Its reading is tested on a real answer from the operator, dated 20 October 2026. No grid feed runs in the lab."
+        },
+        {
+          "id": "electricity-maps",
+          "name": "Electricity Maps",
+          "detail": "Several countries, no single one",
+          "aliases": ["electricitymaps", "electricity map"],
+          "criteria": [true, true, true],
+          "lab": ["scripts/verify-electricity-maps.sh"],
+          "note": "The lab calls the test API that Electricity Maps provides."
+        },
+        {
+          "id": "ireland",
+          "name": "Ireland",
+          "detail": "No built-in feed",
+          "aliases": ["eirgrid", "irish grid"],
+          "unsupported": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "The calculation uses the embedded annual factor of the country."
+        },
+        {
+          "id": "germany",
+          "name": "Germany",
+          "detail": "No built-in feed",
+          "aliases": ["deutschland", "german grid"],
+          "unsupported": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "The calculation uses the embedded annual factor of the country."
+        },
+        {
+          "id": "united-states",
+          "name": "United States",
+          "detail": "No built-in feed",
+          "aliases": ["usa", "american grid"],
+          "unsupported": true,
+          "criteria": [false, false, false],
+          "lab": [],
+          "note": "The calculation uses the embedded annual factor of the country."
+        }
+      ]
+    },
+    {
+      "id": "ci",
+      "title": "Continuous integration",
+      "row_header": "Technology",
+      "extra_column": null,
+      "criteria": ["Template provided", "Proven in the lab"],
+      "lab_criterion": 1,
+      "after": null,
+      "add": [
+        {"label": "Add a CI template", "contributing_row": "Add a CI template", "difficulty": "low"}
+      ],
+      "rows": [
+        {
+          "id": "github-actions",
+          "name": "GitHub Actions",
+          "aliases": ["github", "gha", "workflow"],
+          "template": "github-actions.yml",
+          "criteria": [true, true],
+          "lab": ["scenarios/ci-e2e-github"]
+        },
+        {
+          "id": "gitlab-ci",
+          "name": "GitLab CI",
+          "aliases": ["gitlab", "gitlab pipelines"],
+          "template": "gitlab-ci.yml",
+          "criteria": [true, true],
+          "lab": ["scenarios/ci-e2e-gitlab"]
+        },
+        {
+          "id": "jenkins",
+          "name": "Jenkins",
+          "aliases": ["jenkinsfile", "jenkins pipeline"],
+          "template": "jenkinsfile.groovy",
+          "criteria": [true, true],
+          "lab": ["scenarios/ci-e2e-jenkins"],
+          "production": ["t1"]
+        }
+      ]
+    }
+  ]
+}

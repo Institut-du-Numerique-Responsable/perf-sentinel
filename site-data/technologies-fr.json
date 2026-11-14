@@ -1,0 +1,191 @@
+{
+  "families": {
+    "frameworks": {
+      "title": "Frameworks et ORM",
+      "row_header": "Technologie",
+      "criteria": ["Reconnue", "Conseils dédiés", "Éprouvée en labo"],
+      "add": ["Ajouter un framework ou un ORM", "Ajouter un langage"],
+      "groups": {
+        "java": "Java",
+        "kotlin": "Kotlin",
+        "csharp": "C#",
+        "python": "Python",
+        "rust": "Rust",
+        "go": "Go",
+        "nodejs": "Node.js",
+        "ruby": "Ruby",
+        "php": "PHP",
+        "elixir": "Elixir"
+      }
+    },
+    "databases": {
+      "title": "Bases de données",
+      "row_header": "Technologie",
+      "criteria": ["Requêtes analysées", "Statistiques lues", "Éprouvée en labo"],
+      "add": ["Ajouter une base de données"]
+    },
+    "brokers": {
+      "title": "Brokers",
+      "row_header": "Technologie",
+      "criteria": ["Reconnu", "Conseil dédié", "Éprouvé en labo"],
+      "add": ["Ajouter un broker"]
+    },
+    "traces": {
+      "title": "Sources de traces",
+      "row_header": "Technologie",
+      "criteria": ["Lue", "Éprouvée en labo"],
+      "add": ["Ajouter une source de traces"]
+    },
+    "clouds": {
+      "title": "Clouds",
+      "row_header": "Technologie",
+      "criteria": ["PUE publié", "Régions", "Puissance des instances"],
+      "add": ["Ajouter un fournisseur cloud ou une région"]
+    },
+    "energy": {
+      "title": "Mesure d’énergie",
+      "row_header": "Technologie",
+      "criteria": ["Prise en charge", "Éprouvée en labo"],
+      "add": ["Ajouter une sonde d’énergie"]
+    },
+    "grids": {
+      "title": "Réseaux électriques",
+      "row_header": "Flux",
+      "extra_column": "Pays ou zone",
+      "criteria": ["Pris en charge", "Réponse réelle", "Éprouvé en labo"],
+      "after": "Tout pays sans flux en direct utilise un facteur annuel embarqué.",
+      "add": ["Ajouter un réseau"]
+    },
+    "ci": {
+      "title": "Intégration continue",
+      "row_header": "Technologie",
+      "criteria": ["Modèle fourni", "Éprouvé en labo"],
+      "add": ["Ajouter un modèle de CI"]
+    }
+  },
+  "rows": {
+    "spring-boot-jpa": {},
+    "quarkus": {},
+    "quarkus-reactive": {"name": "Quarkus réactif"},
+    "helidon-se": {},
+    "helidon-mp": {},
+    "spring-webflux": {"note": "Les conseils SQL restent ceux de JDBC, et aucun service WebFlux ne tourne dans le labo."},
+    "micronaut": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Java."},
+    "jooq": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Java."},
+    "mybatis": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Java."},
+    "ktor": {"note": "Le labo l’éprouve. Ktor reçoit les conseils généraux de Java, par l’agent OpenTelemetry Java."},
+    "exposed": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Java."},
+    "dotnet": {},
+    "dapper": {"note": "Aucune règle propre, et C# n’a pas de conseil général pour les requêtes en boucle ou redondantes."},
+    "nhibernate": {"note": "Aucune règle propre, et C# n’a pas de conseil général pour les requêtes en boucle ou redondantes."},
+    "django": {},
+    "fastapi": {},
+    "psycopg": {
+      "detail": "asyncpg, sans ORM",
+      "note": "Aucune règle propre, et Python n’a pas de conseil général pour les requêtes en boucle ou redondantes."
+    },
+    "tortoise-orm": {"note": "Aucune règle propre, et Python n’a pas de conseil général pour les requêtes en boucle ou redondantes."},
+    "peewee": {"note": "Aucune règle propre, et Python n’a pas de conseil général pour les requêtes en boucle ou redondantes."},
+    "diesel": {},
+    "seaorm": {},
+    "sqlx": {"note": "Aucune règle propre, et Rust n’a pas de conseil général pour les requêtes en boucle ou redondantes."},
+    "gorm": {"note": "Il manque un service de cette pile dans le labo de simulation. Le service Go du labo utilise pgx."},
+    "pgx": {"note": "Le labo l’éprouve, avec les conseils généraux de Go."},
+    "ent": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Go."},
+    "sqlc": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Go."},
+    "nestjs": {},
+    "typeorm": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Node.js."},
+    "sequelize": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Node.js."},
+    "drizzle": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Node.js."},
+    "rails": {},
+    "sequel": {"note": "Aucune règle propre : elle reçoit les conseils généraux de Ruby."},
+    "laravel": {},
+    "symfony": {},
+    "phoenix": {"note": "Le moteur ne reconnaît pas Elixir. Les traces sont analysées, sans conseil de correction dédié."},
+    "postgresql": {},
+    "mysql": {},
+    "mariadb": {
+      "note": "Les requêtes sont analysées comme celles de MySQL. Perf Sentinel ne lit pas ses statistiques, et aucun serveur MariaDB ne tourne dans le labo."
+    },
+    "sql-server": {
+      "note": "Les requêtes sont analysées, avec une limite : un identifiant entre crochets tout en chiffres, comme [123], est masqué. Pas de lecture des statistiques, pas de serveur dans le labo."
+    },
+    "oracle": {"note": "Les requêtes sont analysées. Perf Sentinel ne lit pas ses statistiques, et aucun serveur ne tourne dans le labo."},
+    "sqlite": {"note": "Les requêtes sont analysées. Perf Sentinel ne lit pas ses statistiques, et aucun serveur ne tourne dans le labo."},
+    "other-sql": {
+      "name": "Autres bases SQL",
+      "note": "Les requêtes sont analysées. Perf Sentinel ne lit pas ses statistiques, et aucun serveur ne tourne dans le labo."
+    },
+    "redis": {"note": "Les appels à cette base ne sont pas analysés : Perf Sentinel traite le SQL, les appels sortants et les messages."},
+    "mongodb": {"note": "Les appels à cette base ne sont pas analysés : Perf Sentinel traite le SQL, les appels sortants et les messages."},
+    "elasticsearch": {"note": "Les appels à cette base ne sont pas analysés : Perf Sentinel traite le SQL, les appels sortants et les messages."},
+    "cassandra": {"note": "Les appels à cette base ne sont pas analysés : Perf Sentinel traite le SQL, les appels sortants et les messages."},
+    "dynamodb": {"note": "Les appels à cette base ne sont pas analysés : Perf Sentinel traite le SQL, les appels sortants et les messages."},
+    "rabbitmq": {},
+    "kafka": {"note": "Le labo le vérifie sur des traces préparées, pas sur un vrai broker."},
+    "pulsar": {"note": "Le labo le vérifie sur des traces préparées, pas sur un vrai broker."},
+    "jms": {"note": "Le labo le vérifie sur des traces préparées, pas sur un vrai broker."},
+    "amazon-sqs": {"note": "Le labo le vérifie sur des traces préparées, pas sur un vrai broker."},
+    "nats": {"note": "Le labo le vérifie sur des traces préparées, pas sur un vrai broker."},
+    "otlp": {"detail": "gRPC et HTTP"},
+    "otlp-json-file": {"name": "Fichier OTLP JSON"},
+    "tempo": {},
+    "jaeger": {},
+    "zipkin": {},
+    "victoria-traces": {},
+    "datadog": {"note": "Le labo le vérifie sur des traces préparées, pas sur un vrai agent Datadog."},
+    "aws": {},
+    "gcp": {},
+    "azure": {},
+    "scaleway": {},
+    "ovhcloud": {"note": "OVHcloud ne documente pas le processeur de chaque gamme."},
+    "outscale": {"note": "OUTSCALE ne publie ni PUE ni puissance par instance."},
+    "other-provider": {
+      "name": "Autre fournisseur",
+      "detail": "par code pays",
+      "note": "Le calcul utilise le réseau électrique du pays et un PUE générique."
+    },
+    "alumet": {},
+    "kepler": {"note": "Le labo l’éprouve sur une sonde simulée, pas sur la vraie."},
+    "redfish": {"note": "Le labo l’éprouve sur une sonde simulée, pas sur la vraie."},
+    "scaphandre": {"note": "Le labo l’éprouve sur une sonde simulée, pas sur la vraie."},
+    "rte-eco2mix": {
+      "note": "Aucun flux de réseau ne tourne dans le labo. Sa lecture est testée sur une réponse écrite à la main, pas sur une réponse de l’opérateur."
+    },
+    "neso": {
+      "detail": "Grande-Bretagne, hors Irlande du Nord",
+      "note": "Sa lecture est testée sur une réponse réelle de l’opérateur, du 20 octobre 2026. Aucun flux de réseau ne tourne dans le labo."
+    },
+    "fingrid": {
+      "detail": "Finlande",
+      "note": "Aucun flux de réseau ne tourne dans le labo. Sa lecture est testée sur une réponse écrite à la main, pas sur une réponse de l’opérateur. Une clé gratuite est demandée."
+    },
+    "energinet": {
+      "detail": "Danemark, zones DK1 et DK2",
+      "note": "Sa lecture est testée sur une réponse réelle de l’opérateur, du 20 octobre 2026. Aucun flux de réseau ne tourne dans le labo."
+    },
+    "ree-esios": {
+      "detail": "Espagne continentale",
+      "note": "Sa lecture est testée sur une réponse réelle de l’opérateur, du 20 octobre 2026. Aucun flux de réseau ne tourne dans le labo. Un jeton gratuit est demandé."
+    },
+    "open-electricity": {
+      "detail": "Australie, six régions",
+      "note": "Aucun flux de réseau ne tourne dans le labo. Sa lecture est testée sur une réponse écrite à la main, pas sur une réponse de l’opérateur."
+    },
+    "mavir": {
+      "detail": "Hongrie",
+      "note": "Sa lecture est testée sur une réponse réelle de l’opérateur, du 20 octobre 2026. Aucun flux de réseau ne tourne dans le labo."
+    },
+    "em6": {
+      "detail": "Nouvelle-Zélande",
+      "note": "Sa lecture est testée sur une réponse réelle de l’opérateur, du 20 octobre 2026. Aucun flux de réseau ne tourne dans le labo."
+    },
+    "electricity-maps": {"detail": "Plusieurs pays, sans rattachement", "note": "Le labo appelle l’API de test que fournit Electricity Maps."},
+    "ireland": {"name": "Irlande", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays."},
+    "germany": {"name": "Allemagne", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays."},
+    "united-states": {"name": "États-Unis", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays."},
+    "github-actions": {},
+    "gitlab-ci": {},
+    "jenkins": {}
+  }
+}
