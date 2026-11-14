@@ -319,6 +319,30 @@ test('a stage of the synoptic links to its technology families', async () => {
   }
 });
 
+// The synoptic copies the family titles (TECH in French, its dictionary in English): they must not drift.
+test('the synoptic names each family as the technologies page does', async () => {
+  const titles = {};
+  const titleOf = async (href) => {
+    const [path, id] = href.split('#');
+    if (!titles[path]) {
+      const { page, close } = await open(path, { wait: 'section.fam' });
+      try { titles[path] = Object.fromEntries(await page.$$eval('section.fam', (els) => els.map((s) => [s.id, s.querySelector('h2').textContent.trim()]))); }
+      finally { await close(); }
+    }
+    return titles[path][id];
+  };
+  for (const lang of ['fr', 'en']) {
+    for (const n of Object.keys(STAGE_FAMS).map(Number)) {
+      const { page, close } = await openStage(lang, n);
+      try {
+        const { links } = await techLine(page);
+        assert.ok(links.length > 0, `${lang} stage ${n}: no link`);
+        for (const { text, href } of links) assert.equal(text, await titleOf(href), `${lang} stage ${n}: ${href}`);
+      } finally { await close(); }
+    }
+  }
+});
+
 test('a stage without a family shows no technologies line', async () => {
   for (const lang of ['fr', 'en']) {
     for (const n of [2, 3, 5, 8]) {
