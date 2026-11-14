@@ -203,7 +203,9 @@ svg.scene .tiny{font-size:10px}
 .xp-fo{font:500 12px/1.3 "DM Sans";color:var(--ln)}
 .xp-txt{width:100%;font:500 12.5px "DM Mono";color:var(--ln);background:var(--deep);border:1px solid var(--rail);border-radius:8px;padding:7px 9px}
 .xp-txt:focus{outline:none;border-color:var(--flow)}
-.xp-seg{flex-wrap:wrap}.xp-seg button{min-width:0}
+.xp-seg{flex-wrap:wrap}
+@media (max-width:600px){.xp-ctrls{grid-template-columns:1fr!important}}
+.xp-vd{overflow-wrap:anywhere}.xp-vd .xp-code,.xp-chk .xp-code{display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .xp-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.xp-links{align-items:center}.xp-presets-cap{align-self:center;margin-right:2px;font:500 11.5px "DM Mono";letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}.xp-links-cap{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 10px;border-left:2px solid var(--flow);background:color-mix(in srgb,var(--flow) 7%,transparent);border-radius:0 6px 6px 0}.xp-links-cap b{font:600 11.5px "DM Mono";letter-spacing:.08em;text-transform:uppercase;color:var(--flow)}.xp-links-cap span{font:400 13.5px "DM Sans";color:var(--dim)}.xp-links button{display:inline-flex;align-items:center;gap:6px;font:600 12.5px "DM Mono";color:var(--flow);background:color-mix(in srgb,var(--flow) 12%,var(--deep));border:1px solid color-mix(in srgb,var(--flow) 60%,var(--rail));border-radius:999px;padding:6px 12px 6px 9px;cursor:zoom-in;transition:background .15s,transform .15s,border-color .15s}
 .xp-links button:hover,.xp-links button:focus-visible{border-color:var(--flow);background:color-mix(in srgb,var(--flow) 24%,var(--deep));transform:translateY(-1px)}@media (prefers-reduced-motion:reduce){.xp-links button{transition:none}.xp-links button:hover{transform:none}}
 #syn text{paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
@@ -433,7 +435,9 @@ const DETN=["N+1","Redondant","Lent","Fanout","Bavard (HTTP)","Pool saturé","S�
 // the drawn width of a text node: WebKit leaves letter-spacing out of getComputedTextLength, its box keeps it
 function textW(t){let w=0;try{w=t.getComputedTextLength()}catch(e){}try{w=Math.max(w,t.getBBox().width)}catch(e){}return w}
 // shrinks a text node until it fits its box
-function fitText(t,max){if(!t||!max)return;t.style.removeProperty("font-size");const L_=textW(t);if(L_>max){const fs=parseFloat(getComputedStyle(t).fontSize)||12;t.style.setProperty("font-size",Math.max(7,fs*max/L_)+"px","important")}}
+function fitText(t,max){if(!t||!max)return;t.style.removeProperty("font-size");if(t.style.getPropertyPriority("letter-spacing"))t.style.removeProperty("letter-spacing");const L_=textW(t);if(L_>max){const fs=parseFloat(getComputedStyle(t).fontSize)||12;t.style.setProperty("font-size",Math.max(7,fs*max/L_)+"px","important");
+ // below the 7px floor the letter-spacing gives way instead
+ if(fs*max/L_<7&&t.getNumberOfChars){const L2=textW(t);if(L2>max)t.style.setProperty("letter-spacing",Math.max(0,(parseFloat(getComputedStyle(t).letterSpacing)||0)-(L2-max)/t.getNumberOfChars())+"px","important")}}}
 
 /* ---------- the run, as the engine reported it ---------- */
 const TR=[
@@ -572,6 +576,8 @@ const outCap=tx(L.deco,1756,566,"","tiny","end"),outCap2=tx(L.deco,1756,578,"","
 function setOuts(m){OUTS[m].forEach((s,k)=>{outB[k].t.textContent=s;fitText(outB[k].t,74)});outB.forEach((o,k)=>o.g.classList.toggle("off",m==="capture"));outB[3].r.style.strokeDasharray="4 4";outB[3].t.style.fill="var(--dim)";outRails[3].setAttribute("class","alt");
   outCap.textContent=m==="daemon"?"lus par Prometheus et l'API":m==="cli"?"json, sarif, HTML : écrits par le CORE":"";outCap2.textContent=m==="daemon"?"flux NDJSON sur la sortie standard":m==="cli"?"JSON par défaut en CI":"";
   outCliG.style.display=m==="cli"?"":"none";outCap3.textContent=m==="daemon"?"corrélations entre traces, si activées":""}
+// the labels fitted before the fonts landed are measured again when they do
+const lbRefit=()=>{document.querySelectorAll(".lcd text").forEach(t=>fitText(t,t.parentNode.firstChild.getAttribute("width")-18));outB.forEach(o=>fitText(o.t,74))};document.fonts.ready.then(lbRefit);document.fonts.addEventListener("loadingdone",lbRefit);
 // daemon only: the event loop hands expired traces to the analysis worker through a bounded queue
 const qG=el("g",{style:"display:none"},L.deco);el("line",{x1:808,y1:Y-120,x2:808,y2:Y+150,style:"stroke:var(--acc);stroke-dasharray:2 4"},qG);el("rect",{x:800,y:Y-8,width:16,height:16,rx:3,class:"inst"},qG);
 tx(qG,822,494,"FILE D'ATTENTE (1 024)","tiny");tx(qG,796,508,"← réception","tiny","end");tx(qG,822,510,"analyse →","tiny");
@@ -1696,7 +1702,7 @@ XS.ing={rule:"ingest",R:SRULES,h:280,cols:4,noAv:true,q:"Ce span devient-il un �
   el("path",{d:"M24,28 V248",class:"rail",style:"stroke-width:3"},g);const bead=el("circle",{r:7,class:"xp-dot",style:"fill:var(--t1)"},g);return{rows,bead}},
  draw(c,s,r){c.rows.forEach((w,i)=>{const done=i<r.step,hit=i===r.step;w.r.style.opacity=i>r.step?.35:1;w.b.classList.toggle("sel",hit);
    w.yes.textContent=hit?"oui →":done?"non":"";w.yes.style.fill=hit?"var(--acc)":"";
-   const out=i===5&&hit?"écarté : "+REASON[r.reason][0]:ING_STEPS[i][1];w.ot.textContent=out;w.o.style.stroke=hit?(r.out==="filtered"?"var(--ko)":"var(--flow)"):"var(--rail)";w.ot.style.fill=hit?(r.out==="filtered"?"var(--ko)":"var(--flow)"):""});
+   const out=i===5&&hit?"écarté : "+REASON[r.reason][0]:ING_STEPS[i][1];w.ot.textContent=out;fitText(w.ot,194);w.o.style.stroke=hit?(r.out==="filtered"?"var(--ko)":"var(--flow)"):"var(--rail)";w.ot.style.fill=hit?(r.out==="filtered"?"var(--ko)":"var(--flow)"):""});
   c.bead.style.transform=`translate(24px,${28+r.step*44}px)`},
  verdict(s,r){const checks=r.t.slice(0,5).map((ok,i)=>[ok?true:null,ok?"oui":"non",ING_STEPS[i][0]]);
   if(r.out==="filtered"){const [a,b]=REASON[r.reason];return{checks,cls:r.reason==="not_io"?"info":"warn",t:`Écarté : ${a}`,w:`Compté dans \`filtered_${r.reason}\` : ${b}.`+(r.reason.startsWith("missing")?" Une règle optionnelle du gate, `min_usable_span_ratio`, surveille ces pertes.":"")}}
