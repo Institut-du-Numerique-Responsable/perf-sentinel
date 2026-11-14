@@ -21,6 +21,8 @@ const FT = {
 };
 const LEGAL_HREF = { fr: '/mentions-legales', en: '/legal-notice' };
 const PRIV_HREF = { fr: '/confidentialite', en: '/privacy-policy' };
+// The contact address of the legal notices, the one place it is written.
+export const CONTACT_EMAIL = 'robin.trassard@gmail.com';
 export const HOME_HREF = { fr: '/fr/', en: '/' };
 export const GUIDE_HREF = { fr: '/fr/guide', en: '/guide' };
 const HOME = { fr: 'Accueil', en: 'Home' };

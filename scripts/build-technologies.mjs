@@ -1,8 +1,9 @@
 // Generates the technologies pages, technologies.html and fr/technologies.html,
-// from the engine's site-data, after checking its lab proofs against the lab:
+// and the references pages, references.html and fr/references.html, from the
+// engine's site-data, after checking its lab proofs against the lab:
 //   node scripts/build-technologies.mjs <engineDir> <labDir> [outDir]
 // outDir defaults to the site root. Exits 1 and writes nothing when a proof is
-// missing. Every row is in the HTML: the page reads without JavaScript, with
+// missing. The references page needs no script at all. Every technologies row is in the HTML: the page reads without JavaScript, with
 // every detail open. With JavaScript, page.css folds the details under html.js
 // and assets/technologies/page.js adds the toggles, the search and the filters.
 import { execFileSync } from 'node:child_process';
@@ -10,13 +11,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { COPY } from '../assets/technologies/copy.js';
-import { escapeHtml as esc, labErrors, level, loadSiteData, localize } from './technologies-model.mjs';
-import { page } from './site-chrome.mjs';
+import { escapeHtml as esc, labErrors, level, loadSiteData, localize, teamsSummary } from './technologies-model.mjs';
+import { CONTACT_EMAIL, page } from './site-chrome.mjs';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTRIBUTING = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/CONTRIBUTING.md#what-to-contribute-by-difficulty';
 const LAB_ROOT = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab';
 const LAB = `${LAB_ROOT}/tree/main/`;
+const ISSUE_FORM = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/new?template=reference.yml';
+const EXT = '<span data-arrow="ext" aria-hidden="true"> ↗</span>';
 const fill = (text, values) => text.replace(/\{(\w+)\}/g, (_, k) => values[k]);
 
 // Drawings of the mock-up: level signs at the ink of the text, the ringed ones for production.
@@ -129,10 +132,60 @@ export function technologiesMain(data, lang, provenance) {
     `<script nomodule>document.documentElement.classList.remove('js')</script>`;
 }
 
+// A proof's period in months: « septembre 2026 », « juillet à décembre 2026 ».
+function months(from, to, t) {
+  const [fy, fm] = from.split('-');
+  const [ty, tm] = to.split('-');
+  const name = (m) => t.months[Number(m) - 1];
+  if (fy !== ty) return `${name(fm)} ${fy} ${t.ref.to} ${name(tm)} ${ty}`;
+  return fm === tm ? `${name(fm)} ${fy}` : `${name(fm)} ${t.ref.to} ${name(tm)} ${ty}`;
+}
+const and = (list, word) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} ${word} ${list.at(-1)}` : list[0]);
+
+function referenceHtml(r, t) {
+  const { card, report } = r.proofs;
+  const lines = [];
+  if (card) lines.push(`${t.ref.cardDetail(months(card.period_from, card.period_to, t), esc(r.domain))} <a href="${esc(card.verify_url)}">${t.ref.verify}</a>`);
+  if (report) {
+    const envs = and(report.environments.map(esc), t.ref.and);
+    lines.push(`${t.ref.reportDetail(months(report.period_from, report.period_to, t), envs, report.environments.length, report.signed ? t.ref.signed : t.ref.hashed)} <a href="${esc(report.url)}">${t.ref.read}${EXT}</a>`);
+  }
+  return `<tr class="row"><th scope="row"><b>${esc(r.name)}</b><small>${esc(r.domain)}</small></th><td class="d">${month(r.since, t)}</td>` +
+    `<td class="c">${mark(!!card, t)}</td><td class="c">${mark(!!report, t)}</td></tr>` +
+    `<tr class="det"><td colspan="4">${lines.map((l) => `<p>${l}</p>`).join('')}</td></tr>`;
+}
+
+/** The HTML of <main> of the references page: references is site-data/references.json's list, teams the anonymous teams of technologies.json. */
+export function referencesMain(references, teams, lang) {
+  const t = COPY[lang];
+  const r = t.ref;
+  const list = references.length
+    ? `<table><thead><tr><th scope="col">${r.org}</th><th scope="col" class="d">${r.since}</th><th scope="col" class="c">${r.card}</th><th scope="col" class="c">${r.report}</th></tr></thead>` +
+      `<tbody>${references.map((x) => referenceHtml(x, t)).join('')}</tbody></table>`
+    : `<div class="empty"><p>${r.empty}</p><p>${r.emptyText}</p><a class="btn" href="#figurer">${r.ask}</a></div>`;
+  const { count, since } = teamsSummary({ teams });
+  const anon = count
+    ? `<p class="anon">${sign('full', true)}<span>${r.anon(count, month(since, t))} <a href="${r.technologiesHref}">${r.anonLink(count)}</a></span></p>`
+    : '';
+  return `<section class="intro"><h1>${r.h1}</h1><p>${r.intro}</p></section>` +
+    `<section id="liste"><h2>${r.orgs}</h2>${list}${anon}</section>` +
+    `<section id="figurer"><h2>${r.join}</h2><ol class="steps">${r.steps.map(([b, s]) => `<li><b>${b}</b><span>${s}</span></li>`).join('')}</ol>` +
+    `<a class="btn" href="${ISSUE_FORM}">${r.ask}${EXT}</a><p class="limit">${r.anonymous(`mailto:${CONTACT_EMAIL}`)}</p></section>` +
+    `<section><h2>${r.proofs}</h2><dl class="proofs"><div><dt>${r.card}</dt><dd>${r.cardProof}</dd></div><div><dt>${r.report}</dt><dd>${r.reportProof}</dd></div></dl>` +
+    `<p class="limit">${r.limit}</p></section>`;
+}
+
 // The js class lands before the body paints, so page.css folds the details without a flash.
 const HEAD = '<link rel="stylesheet" href="/assets/technologies/page.css"><script>document.documentElement.classList.add(\'js\')</script>';
-// /technologies follows the stored choice, else the browser language; /fr/technologies never redirects.
-const REDIRECT = `<script>(function(){var l=null;try{l=localStorage.getItem('ps-lang')}catch(e){}if(l!=='fr'&&l!=='en')l=(navigator.language||'').toLowerCase().indexOf('fr')===0?'fr':'en';if(l==='fr')location.replace('/fr/technologies'+location.hash);})();</script>`;
+// The English page follows the stored choice, else the browser language; the French one never redirects.
+const redirect = (fr) => `<script>(function(){var l=null;try{l=localStorage.getItem('ps-lang')}catch(e){}if(l!=='fr'&&l!=='en')l=(navigator.language||'').toLowerCase().indexOf('fr')===0?'fr':'en';if(l==='fr')location.replace('${fr}'+location.hash);})();</script>`;
+const REF_HEAD = '<link rel="stylesheet" href="/assets/technologies/page.css">';
+
+/** The whole references page, as written by the build. */
+export function referencesPage(references, teams, lang) {
+  const [other, head] = lang === 'en' ? ['/fr/references', REF_HEAD + redirect('/fr/references')] : ['/references', REF_HEAD];
+  return page(lang, other, COPY[lang].ref.title, COPY[lang].ref.desc, referencesMain(references, teams, lang), { head, mainClass: 'rp' });
+}
 
 function main([engineDir, labDir, outDir = SITE]) {
   if (!engineDir || !labDir) {
@@ -150,8 +203,11 @@ function main([engineDir, labDir, outDir = SITE]) {
   const lab = execFileSync('git', ['-C', labDir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
   const provenance = { engine, lab, built: new Date() };
   mkdirSync(join(outDir, 'fr'), { recursive: true });
-  writeFileSync(join(outDir, 'technologies.html'), page('en', '/fr/technologies', COPY.en.title, COPY.en.desc, technologiesMain(data, 'en', provenance), { head: HEAD + REDIRECT, mainClass: 'tp' }));
+  writeFileSync(join(outDir, 'technologies.html'), page('en', '/fr/technologies', COPY.en.title, COPY.en.desc, technologiesMain(data, 'en', provenance), { head: HEAD + redirect('/fr/technologies'), mainClass: 'tp' }));
   writeFileSync(join(outDir, 'fr', 'technologies.html'), page('fr', '/technologies', COPY.fr.title, COPY.fr.desc, technologiesMain(data, 'fr', provenance), { head: HEAD, mainClass: 'tp' }));
+  for (const [lang, file] of [['en', 'references.html'], ['fr', join('fr', 'references.html')]]) {
+    writeFileSync(join(outDir, file), referencesPage(data.references.references, data.technologies.teams, lang));
+  }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));

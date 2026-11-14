@@ -7,11 +7,11 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COPY } from '../assets/verifier/copy.js';
-import { page, HOME_HREF, GUIDE_HREF } from './site-chrome.mjs';
+import { page, CONTACT_EMAIL, HOME_HREF, GUIDE_HREF } from './site-chrome.mjs';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const EMAIL = '<a href="mailto:robin.trassard@gmail.com">robin.trassard@gmail.com</a>';
+const EMAIL = `<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>`;
 
 // --- content ---
 const mentionsFR =

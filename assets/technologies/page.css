@@ -1,20 +1,22 @@
 /* The technologies page: the approved mock-up (support-v5.html, proposal 2 "one
    colour per zone") on the site's theme variables. Signs and ticks stay at the
-   ink of the text, colour only marks the zones and the difficulty. */
+   ink of the text, colour only marks the zones and the difficulty. The references
+   page (.rp, references-v1.html) shares the signs, the ticks and the base rules. */
+:is(.tp,.rp){--line-strong:color-mix(in srgb,var(--border) 72%,var(--text-2))}
 .tp{--line-strong:color-mix(in srgb,var(--border) 72%,var(--text-2));
 --c-frameworks:#0B7A55;--c-databases:#587200;--c-brokers:#BF4428;--c-traces:#1F6AA8;--c-clouds:#6548BF;--c-energy:#8A6100;--c-grids:#0C7489;--c-ci:#A8347F;--df-f:#1B530D;--df-m:#754618;--df-e:#BF2A22;
 box-sizing:border-box;width:100%;max-width:1120px;margin:0 auto;padding:0 28px 96px;display:grid;grid-template-columns:216px minmax(0,1fr);gap:0 48px;font-size:16px;line-height:1.55}
 [data-ps-root][data-theme="dark"] .tp{--c-frameworks:#26CD94;--c-databases:#C4E05A;--c-brokers:#FF8F86;--c-traces:#5CC8FF;--c-clouds:#C6A0FF;--c-energy:#F5C542;--c-grids:#4FD6E0;--c-ci:#FF9EDB;--df-f:#8FE6B8;--df-m:#F2C08A;--df-e:#FFA79E}
-.tp *{box-sizing:border-box}
+:is(.tp,.rp) *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.tp *{transition:none!important}}
-.tp [hidden]{display:none!important}
-.tp a{color:var(--accent-strong);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
-.tp .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}:is(.tp,.rp) *{transition:none!important}}
+:is(.tp,.rp) [hidden]{display:none!important}
+:is(.tp,.rp) a{color:var(--accent-strong);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+:is(.tp,.rp) .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 
 .tp .intro{grid-column:1/-1;padding:44px 0 6px;max-width:780px}
-.tp h1{font-size:clamp(30px,4.4vw,46px);line-height:1.08;letter-spacing:-.02em;font-weight:600;margin:0 0 16px;color:var(--text);text-wrap:balance}
-.tp .intro p{font-size:18px;color:var(--text-2);margin:0;max-width:62ch}
+:is(.tp,.rp) h1{font-size:clamp(30px,4.4vw,46px);line-height:1.08;letter-spacing:-.02em;font-weight:600;margin:0 0 16px;color:var(--text);text-wrap:balance}
+:is(.tp,.rp) .intro p{font-size:18px;color:var(--text-2);margin:0;max-width:62ch}
 .tp .tools{display:flex;flex-wrap:wrap;align-items:center;gap:12px 14px;margin:30px 0 0}
 html:not(.js) .tp .tools{display:none}
 .tp .search{position:relative;flex:1 1 320px;max-width:620px}
@@ -35,13 +37,13 @@ html:not(.js) .tp .tools{display:none}
 .tp .legend b{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;color:var(--text)}
 .tp .legend span{display:block;font-size:13.5px;color:var(--text-2);margin-top:4px;line-height:1.45}
 .tp .legend p span{margin:0}
-.tp .lv{width:15px;height:15px;flex:none;display:inline-block;vertical-align:-2px}
-.tp .lv circle,.tp .lv path{stroke:currentColor;stroke-width:1.6}
-.tp .lv.pr{width:18px;height:18px;margin-left:-1.5px;vertical-align:-3.5px}
-.tp .lv.pr circle,.tp .lv.pr path{stroke-width:1.25}
-.tp .mk{width:15px;height:15px;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.tp .mk.y{stroke:var(--text)}
-.tp .mk.n{stroke:var(--line-strong)}
+:is(.tp,.rp) .lv{width:15px;height:15px;flex:none;display:inline-block;vertical-align:-2px}
+:is(.tp,.rp) .lv circle,:is(.tp,.rp) .lv path{stroke:currentColor;stroke-width:1.6}
+:is(.tp,.rp) .lv.pr{width:18px;height:18px;margin-left:-1.5px;vertical-align:-3.5px}
+:is(.tp,.rp) .lv.pr circle,:is(.tp,.rp) .lv.pr path{stroke-width:1.25}
+:is(.tp,.rp) .mk{width:15px;height:15px;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
+:is(.tp,.rp) .mk.y{stroke:var(--text)}
+:is(.tp,.rp) .mk.n{stroke:var(--line-strong)}
 
 .tp-rail{position:sticky;top:84px;align-self:start;padding-top:40px;font-size:14.5px}
 .tp .tp-rail a{display:flex;align-items:center;gap:9px;padding:7px 0;color:var(--text-2);text-decoration:none;transition:color .18s}
@@ -133,4 +135,58 @@ html.js .tp tr.row.open:not([hidden])+tr.det{display:table-row}
 .tp tr.grp th{display:block}
 .tp tr.det .crit{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 10px;font-size:13.5px;color:var(--text)}
 .tp tr.det .crit span{display:inline-flex;align-items:center;gap:6px}
+}
+
+/* The references page. Without a script every detail stays open: there is nothing to fold. */
+.rp{box-sizing:border-box;width:100%;max-width:1120px;margin:0 auto;padding:0 28px 96px;font-size:16px;line-height:1.55;color:var(--text)}
+.rp .intro{padding:44px 0 0;max-width:780px}
+.rp h2{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px;color:var(--text)}
+/* main>section of the home style spaces its own sections: the same weight, loaded later. */
+main.rp>section{margin:0}
+.rp section+section{padding-top:52px}
+.rp table{width:100%;border-collapse:collapse;margin-top:12px}
+.rp thead th{font-size:12.5px;font-weight:400;color:var(--text-2);text-align:left;padding:8px 0;border-bottom:2px solid var(--accent-strong)}
+.rp th.c,.rp td.c{text-align:center;width:128px}
+.rp th.d,.rp td.d{width:170px}
+.rp tbody th,.rp td{padding:13px 0;border-bottom:1px solid var(--border);vertical-align:middle;text-align:left;font-weight:400}
+.rp tr.row :is(th,td){border-bottom-color:transparent}
+.rp tbody th b{font-weight:500;font-size:16.5px}
+.rp tbody th small{font:13px 'JetBrains Mono',ui-monospace,Consolas,monospace;color:var(--text-2);margin-left:10px;overflow-wrap:anywhere}
+.rp td.d{font-size:14.5px;color:var(--text-2)}
+.rp td.c .mk{vertical-align:-2px}
+.rp tr.det td{padding:0 0 20px;font-size:14.5px;color:var(--text-2)}
+.rp .det p{margin:0 0 6px;max-width:68ch;overflow-wrap:anywhere}
+.rp .anon{margin:16px 0 0;font-size:14.5px;color:var(--text-2);display:flex;align-items:center;gap:10px}
+.rp .anon .lv{color:var(--text);margin:0}
+.rp .empty{margin-top:14px;border-top:2px solid var(--accent-strong);border-bottom:1px solid var(--border);padding:30px 0 32px}
+.rp .empty p{margin:0 0 6px;max-width:58ch;color:var(--text-2)}
+.rp .empty p:first-child{font-size:18px;font-weight:500;color:var(--text)}
+.rp .btn{display:inline-flex;align-items:center;height:42px;padding:0 20px;border-radius:999px;border:1px solid var(--line-strong);background:var(--surface);color:var(--accent-strong);font-weight:600;font-size:15px;text-decoration:none;margin-top:18px;gap:5px}
+.rp .btn:hover{border-color:var(--accent);background:var(--accent-soft)}
+[data-ps-root] .rp a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.rp ol.steps{list-style:none;margin:18px 0 0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line-strong);counter-reset:s}
+.rp ol.steps li{padding:18px 22px 4px 0;counter-increment:s}
+.rp ol.steps li+li{padding-left:22px;border-left:1px solid var(--border)}
+.rp ol.steps li::before{content:counter(s);font:13px 'JetBrains Mono',ui-monospace,Consolas,monospace;color:var(--accent-strong);display:block;margin-bottom:8px}
+.rp ol.steps b{display:block;font-weight:600;font-size:16px;margin-bottom:4px}
+.rp ol.steps span{font-size:14.5px;color:var(--text-2);display:block;line-height:1.5}
+.rp code{font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:.86em;white-space:nowrap;background:var(--surface);border-radius:5px;padding:1px 6px}
+.rp dl.proofs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 44px;margin:18px 0 0;border-top:1px solid var(--line-strong)}
+.rp dl.proofs div{padding:18px 0 0}
+.rp dl.proofs dt{font-weight:600;font-size:16px;margin-bottom:4px}
+.rp dl.proofs dd{margin:0;font-size:14.5px;color:var(--text-2);line-height:1.5;max-width:46ch}
+.rp .limit{margin:22px 0 0;font-size:14.5px;color:var(--text-2);max-width:68ch}
+@media (max-width:720px){
+.rp{padding:0 18px 72px}
+.rp .intro{padding-top:28px}.rp .intro p{font-size:16.5px}
+.rp thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.rp table{border-top:2px solid var(--accent-strong)}
+.rp tr.row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:0 14px;align-items:center;padding:12px 0 8px}
+.rp tr.row :is(th,td){padding:0;width:auto}
+.rp tbody th small{display:block;margin:0}
+.rp td.d{grid-column:1;grid-row:2;font-size:13px}
+.rp td.c{grid-row:1/3}
+.rp tr.det td{display:block}
+.rp ol.steps,.rp dl.proofs{grid-template-columns:minmax(0,1fr)}
+.rp ol.steps li+li{padding-left:0;border-left:0;border-top:1px solid var(--border)}
 }

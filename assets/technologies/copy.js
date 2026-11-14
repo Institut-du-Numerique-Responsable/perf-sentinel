@@ -1,6 +1,9 @@
-// Words of the technologies page, English and French. The French ones are the
-// approved mock-up's (support-v5.html), word for word. Data strings (family and
+// Words of the technologies and references pages, English and French. The French
+// ones are the approved mock-ups' (support-v5.html, references-v1.html), word for word. Data strings (family and
 // row names, notes, criteria) come from the engine's site-data, never from here.
+
+// « de septembre », « d’octobre ».
+const de = (period) => (/^[aeiou]/i.test(period) ? 'd’' : 'de ') + period;
 
 export const COPY = {
   en: {
@@ -38,6 +41,43 @@ export const COPY = {
     provenance: 'Engine {engine} · lab {lab} · built on {date}',
     months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
     referencesHref: '/references#figurer',
+    // The references page. Data strings (names, domains, addresses) are escaped by the build.
+    ref: {
+      title: 'Who uses it',
+      desc: 'The organizations that use Perf Sentinel and proved it with a signed card or a published report, and how to be listed.',
+      h1: 'Who uses Perf Sentinel',
+      intro: 'The organizations listed here asked to appear and provided signed evidence. You can check each one yourself.',
+      orgs: 'Organizations',
+      org: 'Organization',
+      since: 'Proven since',
+      card: 'Signed card',
+      report: 'Published report',
+      cardDetail: (period, domain) => `Card covering ${period}, key published under ${domain}.`,
+      reportDetail: (period, envs, n, check) => `Report covering ${period}, ${envs} environment${n > 1 ? 's' : ''}, ${check}.`,
+      and: 'and',
+      to: 'to',
+      signed: 'signed',
+      hashed: 'fingerprint verified',
+      verify: 'Verify the card',
+      read: 'Read the report',
+      empty: 'No organization is listed yet.',
+      emptyText: 'Applications are open. The first organizations will appear here, with their evidence.',
+      ask: 'Ask to be listed',
+      anon: (n, since) => `${n === 1 ? 'One team has' : `${n} teams have`} also used Perf Sentinel in production since ${since}, without being named.`,
+      anonLink: (n) => (n === 1 ? 'See its stack' : 'See their stack'),
+      technologiesHref: '/technologies#production',
+      join: 'Be listed on this page',
+      steps: [
+        ['Produce a proof', 'A signed card from your Hub, or a report published with <code>perf-sentinel disclose</code>. Both if you can.'],
+        ['Open a request', 'A form on GitHub asks for the name of your organization, its domain and the link to your proofs.'],
+        ['Verification is automatic', 'Signature, key published under your domain, report fingerprint. Your organization is added after that.'],
+      ],
+      anonymous: (mail) => `Prefer not to be named? <a href="${mail}">Email us</a>: your stack will be counted on the technologies page, without your name and with no proof to provide.`,
+      proofs: 'What each proof establishes',
+      cardProof: 'Your organization, identified by its domain, measured a given period with Perf Sentinel. The signing key is published under that domain.',
+      reportProof: 'You publish a periodic report: its period, the environments measured and a fingerprint of its content. A Sigstore attestation, when attached, says who signed it.',
+      limit: 'These documents establish a use, not a result. None of them is an audit, and an organization can ask to be removed at any time.',
+    },
   },
   fr: {
     title: 'Technologies',
@@ -74,5 +114,41 @@ export const COPY = {
     provenance: 'Moteur {engine} · labo {lab} · construit le {date}',
     months: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
     referencesHref: '/fr/references#figurer',
+    ref: {
+      title: 'Qui l’utilise',
+      desc: 'Les organisations qui utilisent Perf Sentinel et l’ont prouvé par une carte signée ou un rapport publié, et comment figurer sur cette page.',
+      h1: 'Qui utilise Perf Sentinel',
+      intro: 'Les organisations listées ici ont demandé à y figurer et ont fourni une preuve signée. Vous pouvez vérifier chacune vous-même.',
+      orgs: 'Organisations',
+      org: 'Organisation',
+      since: 'Prouvé depuis',
+      card: 'Carte signée',
+      report: 'Rapport publié',
+      cardDetail: (period, domain) => `Carte sur la période ${de(period)}, clé publiée sous ${domain}.`,
+      reportDetail: (period, envs, n, check) => `Rapport ${de(period)}, environnement${n > 1 ? 's' : ''} ${envs}, ${check}.`,
+      and: 'et',
+      to: 'à',
+      signed: 'signé',
+      hashed: 'empreinte vérifiée',
+      verify: 'Vérifier la carte',
+      read: 'Lire le rapport',
+      empty: 'Aucune organisation n’est encore listée.',
+      emptyText: 'La page ouvre avec la possibilité de candidater. Les premières organisations apparaîtront ici, avec leurs preuves.',
+      ask: 'Demander à figurer',
+      anon: (n, since) => `${n === 1 ? 'Une équipe utilise' : `${n} équipes utilisent`} aussi Perf Sentinel en production depuis ${since}, sans être nommée${n > 1 ? 's' : ''}.`,
+      anonLink: (n) => (n === 1 ? 'Voir sa pile technique' : 'Voir leur pile technique'),
+      technologiesHref: '/fr/technologies#production',
+      join: 'Figurer sur cette page',
+      steps: [
+        ['Produisez une preuve', 'Une carte signée depuis votre Hub, ou un rapport publié avec <code>perf-sentinel disclose</code>. Les deux si vous le pouvez.'],
+        ['Ouvrez une demande', 'Un formulaire sur GitHub demande le nom de votre organisation, son domaine et le lien vers vos preuves.'],
+        ['La vérification est automatique', 'Signature, clé publiée sous votre domaine, empreinte du rapport. Votre organisation est ajoutée ensuite.'],
+      ],
+      anonymous: (mail) => `Vous préférez ne pas être nommé&nbsp;? <a href="${mail}">Écrivez-nous par e-mail</a>&nbsp;: votre pile technique sera comptée sur la page des technologies, sans votre nom et sans preuve à fournir.`,
+      proofs: 'Ce que chaque preuve établit',
+      cardProof: 'Votre organisation, identifiée par son domaine, a mesuré une période donnée avec Perf Sentinel. La clé de signature est publiée sous ce domaine.',
+      reportProof: 'Vous publiez un rapport périodique&nbsp;: sa période, les environnements mesurés et une empreinte de son contenu. Une attestation Sigstore, si elle est jointe, dit qui l’a signé.',
+      limit: 'Ces pièces établissent un usage, pas un résultat. Aucune ne vaut audit, et une organisation peut demander son retrait à tout moment.',
+    },
   },
 };
