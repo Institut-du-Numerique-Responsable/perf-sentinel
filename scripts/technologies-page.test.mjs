@@ -396,6 +396,24 @@ test('without JavaScript every note and add link is visible', async () => {
   }
 });
 
+test('each add link stays on the line of its difficulty while an item fits the column', async () => {
+  for (const width of [1280, 1100, 960, 768]) {
+    for (const [lang, path] of LANGS) {
+      const { page, close } = await open(path, { viewport: { width, height: 900 } });
+      try {
+        const items = await page.$$eval('.add a', (as) => as.map((a) => ({
+          text: a.textContent.trim(),
+          link: a.getBoundingClientRect().top,
+          difficulty: a.nextElementSibling.getBoundingClientRect().top,
+        })));
+        assert.equal(items.length, EXPECT.add);
+        // The two sit on one line: the difference is a font-size apart, not a line (about 22px).
+        for (const i of items) assert.ok(Math.abs(i.difficulty - i.link) <= 6, `${lang} at ${width}px: "${i.text}" is ${Math.round(i.difficulty - i.link)}px from its difficulty`);
+      } finally { await close(); }
+    }
+  }
+});
+
 test('no horizontal scroll at 390px, grid table included', async () => {
   for (const javaScriptEnabled of [true, false]) {
     for (const path of ['/technologies', '/fr/technologies']) {
@@ -407,7 +425,9 @@ test('no horizontal scroll at 390px, grid table included', async () => {
           grids: document.querySelector('#grids table').getBoundingClientRect().right,
           cells: Math.max(...[...document.querySelectorAll('#grids td, #grids th')].map((c) => c.getBoundingClientRect().right)),
           syn: Math.max(...[...document.querySelectorAll('.syn, .syn a')].map((c) => c.getBoundingClientRect().right)),
+          add: Math.max(...[...document.querySelectorAll('.add, .add *')].map((c) => c.getBoundingClientRect().right)),
         }));
+        assert.ok(widths.add <= 390, `${path} js=${javaScriptEnabled}: add line ${widths.add}`);
         assert.ok(widths.page <= 390, `${path} js=${javaScriptEnabled}: page ${widths.page}`);
         assert.ok(widths.grids <= 390, `${path} js=${javaScriptEnabled}: grids table ${widths.grids}`);
         assert.ok(widths.cells <= 390, `${path} js=${javaScriptEnabled}: grids cell ${widths.cells}`);

@@ -137,7 +137,7 @@ function familyHtml(family, teams, t) {
     : '<tbody>' + family.rows.map((r) => rowHtml(family, r, null, teams, t)).join('') + '</tbody>';
   const [hash, stage] = synopticOf(family.id);
   const syn = `<p class="syn">${t.synoptic.question} <a href="${esc(t.synopticHref + hash)}">${stage ? fill(t.synoptic.stage, { stage: t.synoptic.stages[stage] }) : t.synoptic.map}</a></p>`;
-  const add = family.add.map((a) => `<a href="${CONTRIBUTING}">${PLUS}${esc(a.label)}${EXT}</a><span>${t.difficulty} <b class="${DIFFICULTY[a.difficulty]}">${t.difficulties[a.difficulty]}</b></span>`).join('');
+  const add = family.add.map((a) => `<span class="ai"><a href="${CONTRIBUTING}">${PLUS}${esc(a.label)}${EXT}</a><span>${t.difficulty} <b class="${DIFFICULTY[a.difficulty]}">${t.difficulties[a.difficulty]}</b></span></span>`).join('');
   return `<section class="fam" id="${esc(family.id)}"><h2 id="h-${esc(family.id)}"><span class="sw" aria-hidden="true"></span>${esc(family.title)}</h2>${syn}` +
     `<table class="${family.groups ? '' : 'flat'}${family.extra_column ? ' tx' : ''}" aria-labelledby="h-${esc(family.id)}">${head}${body}</table>` +
     (family.after ? `<p class="after">${esc(family.after)}</p>` : '') +

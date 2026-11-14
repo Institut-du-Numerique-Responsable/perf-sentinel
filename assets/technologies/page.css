@@ -105,11 +105,12 @@ html.js .tp tr.row.open:not([hidden])+tr.det{display:table-row}
 @media (min-width:1120px){.tp .tx th.name{white-space:nowrap}}
 .tp thead th.x{font-size:12.5px}
 .tp .after{margin:14px 0 0;font-size:14.5px;color:var(--text-2)}
-.tp .add{margin:14px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-size:14.5px}
-.tp .add a{display:inline-flex;align-items:center;gap:7px;font-weight:500}
-.tp .add a+a,.tp .add span+a{margin-left:18px}
-.tp .add svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round}
-.tp .add span{font-size:13px;color:var(--text-2)}
+/* An item is a link and its difficulty: items wrap as wholes, and one wider than the column wraps inside itself. */
+.tp .add{margin:14px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px 28px;font-size:14.5px}
+.tp .add .ai{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px}
+.tp .add a{font-weight:500}
+.tp .add svg{width:14px;height:14px;margin-right:7px;vertical-align:-2px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round}
+.tp .add .ai>span{font-size:13px;color:var(--text-2)}
 .tp .add b{font-weight:600}
 .tp .df-f{color:var(--df-f)}.tp .df-m{color:var(--df-m)}.tp .df-e{color:var(--df-e)}
 
