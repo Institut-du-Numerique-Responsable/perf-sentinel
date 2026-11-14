@@ -75,6 +75,37 @@ test('renders one section per family, in order, in both languages', async () => 
   }
 });
 
+test('every language group with a logo in the data shows it', async () => {
+  const LANGUAGES = ['Java', 'Kotlin', 'C#', 'Python', 'Rust', 'Go', 'Node.js', 'Ruby', 'PHP', 'Elixir'];
+  for (const theme of ['light', 'dark']) {
+    for (const path of ['/technologies', '/fr/technologies']) {
+      const { page, close } = await open(path, { theme });
+      try {
+        await page.waitForLoadState('load');
+        const groups = await page.$$eval('#frameworks tr.grp th span', (spans) => spans.map((s) => ({
+          title: s.textContent.trim(),
+          images: [...s.querySelectorAll('img')].map((img) => {
+            const box = img.getBoundingClientRect();
+            return { alt: img.getAttribute('alt'), loads: img.complete && img.naturalWidth > 0, shown: box.height > 0, height: box.height };
+          }),
+        })));
+        const where = `${path} ${theme}`;
+        assert.deepEqual(groups.map((g) => g.title), LANGUAGES, where);
+        for (const { title, images } of groups) {
+          assert.ok(images.length > 0, `${where}: ${title} has no logo`);
+          for (const image of images) {
+            assert.equal(image.alt, '', `${where}: ${title}, the title follows, so the logo is decorative`);
+            assert.ok(image.loads, `${where}: ${title}, a logo does not load`);
+          }
+          const shown = images.filter((i) => i.shown);
+          assert.equal(shown.length, 1, `${where}: ${title} shows one logo`);
+          assert.equal(shown[0].height, 17, `${where}: ${title} logo is not the size of the others`);
+        }
+      } finally { await close(); }
+    }
+  }
+});
+
 test('search keeps matching rows and hides empty families', async () => {
   const { page, close } = await open('/technologies');
   try {
@@ -381,6 +412,33 @@ test('the build refuses a family without a synoptic destination', (t) => {
   const run = spawnSync(process.execPath, [join(SITE, 'scripts', 'build-technologies.mjs'), engine, lab, out], { encoding: 'utf8' });
   assert.equal(run.status, 1, run.stderr);
   assert.match(run.stderr, /newfamily/);
+  assert.deepEqual(readdirSync(out), []);
+});
+
+test('the build refuses a group logo that the site does not hold', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'technologies-build-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const engine = join(root, 'engine');
+  const lab = join(root, 'lab');
+  const out = join(root, 'out');
+  for (const d of [join(engine, 'site-data'), lab, out]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(engine, 'Cargo.toml'), '[workspace.package]\nversion = "9.9.9"\n');
+  // A family with a destination on the synoptic and no lab proof: the missing logo is the only reason to stop.
+  writeFileSync(join(engine, 'site-data', 'technologies.json'), JSON.stringify({
+    teams: [],
+    families: [{
+      id: 'frameworks', title: 'Frameworks', row_header: 'Framework', extra_column: null, criteria: ['Proven'], lab_criterion: null, after: null, add: [],
+      groups: [{ id: 'cobol', title: 'COBOL', logo: 'no-such-logo' }],
+      rows: [{ id: 'x', name: 'X', group: 'cobol', criteria: [true], lab: [] }],
+    }],
+  }));
+  writeFileSync(join(engine, 'site-data', 'technologies-fr.json'), '{}');
+  writeFileSync(join(engine, 'site-data', 'references.json'), '{"references":[]}');
+  writeFileSync(join(lab, 'Makefile'), 'verify-all-scenarios:\n\t@for s in none; do echo $$s; done\n');
+  const run = spawnSync(process.execPath, [join(SITE, 'scripts', 'build-technologies.mjs'), engine, lab, out], { encoding: 'utf8' });
+  assert.equal(run.status, 1, run.stderr);
+  assert.match(run.stderr, /cobol/, 'the group');
+  assert.match(run.stderr, /assets\/logos\/no-such-logo\.svg/, 'the missing file');
   assert.deepEqual(readdirSync(out), []);
 });
 

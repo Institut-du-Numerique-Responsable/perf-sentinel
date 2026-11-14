@@ -3,7 +3,7 @@
 // engine's site-data, after checking its lab proofs against the lab:
 //   node scripts/build-technologies.mjs <engineDir> <labDir> [outDir]
 // outDir defaults to the site root. Exits 1 and writes nothing when a proof is
-// missing or a family has no destination on the synoptic. The references page needs no script at all. Every technologies row is in the HTML: the page reads without JavaScript, with
+// missing, a family has no destination on the synoptic or a group's logo has no file. The references page needs no script at all. Every technologies row is in the HTML: the page reads without JavaScript, with
 // every detail open. With JavaScript, page.css folds the details under html.js
 // and assets/technologies/page.js adds the toggles, the search and the filters.
 import { execFileSync } from 'node:child_process';
@@ -61,6 +61,13 @@ const SYNOPTIC = {
 function synopticOf(id) {
   if (!Object.hasOwn(SYNOPTIC, id)) throw new Error(`family ${id}: no destination on the synoptic, add it to SYNOPTIC in scripts/build-technologies.mjs`);
   return SYNOPTIC[id];
+}
+
+// A group's logo names a file of assets/logos: the build stops on a name with no file behind it.
+function logoErrors(families) {
+  return families.flatMap((f) => (f.groups ?? [])
+    .filter((g) => g.logo && !existsSync(join(SITE, 'assets', 'logos', `${g.logo}.svg`)))
+    .map((g) => `family ${f.id}, group ${g.id}: logo file assets/logos/${g.logo}.svg does not exist`));
 }
 
 // A language logo, with its dark twin when assets/logos has one. Decorative: the title follows.
@@ -234,6 +241,7 @@ function main([engineDir, labDir, outDir = SITE]) {
   } catch (e) {
     errors.push(e.message);
   }
+  errors.push(...logoErrors(data.technologies.families));
   if (errors.length) {
     console.error(`build-technologies: no page written\n${errors.join('\n')}`);
     process.exit(1);
