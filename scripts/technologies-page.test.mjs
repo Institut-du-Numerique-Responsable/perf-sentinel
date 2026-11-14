@@ -5,7 +5,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -208,6 +208,26 @@ test('the details fold without a flash, and stay reachable when the script canno
     assert.equal(await page.locator('tr.det:visible').count(), EXPECT.rows);
     assert.equal(await count(page, 'tr.row button[aria-expanded]'), 0, 'no state claimed when the script never ran');
   } finally { await broken.close(); }
+});
+
+test('the details open again when page.js cannot be parsed', async () => {
+  // A parse error in a module fires no onerror on its <script>: an older browser meeting newer syntax.
+  const context = await browser.newContext({ locale: LOCALE });
+  try {
+    await context.route('**/assets/technologies/page.js', (route) => route.fulfill({ body: 'const a = ;', contentType: 'text/javascript' }));
+    const page = await context.newPage();
+    await page.goto(server.url + '/technologies');
+    await page.waitForLoadState('load');
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('js')), false);
+    assert.equal(await page.locator('tr.det:visible').count(), EXPECT.rows);
+  } finally { await context.close(); }
+});
+
+test('page.js and copy.js parse on browsers without ES2020 syntax', () => {
+  for (const file of ['page.js', 'copy.js']) {
+    const source = readFileSync(join(SITE, 'assets', 'technologies', file), 'utf8');
+    assert.doesNotMatch(source, /\?\?|\?\.(?!\d)/, `${file}: no ?? nor ?.`);
+  }
 });
 
 test('each detail links to what is missing, and only that', async () => {

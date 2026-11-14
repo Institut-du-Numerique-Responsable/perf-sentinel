@@ -155,7 +155,7 @@ export function technologiesMain(data, lang, provenance) {
     `<section class="none" id="tp-none" hidden><h2></h2><p>${t.notFoundText}</p><a href="${CONTRIBUTING}">${t.contribute}</a></section>` +
     `<p class="none-prod" id="tp-none-prod" hidden>${t.noneInProduction}</p></div>` +
     `<p class="foot">${fill(t.provenance, { engine: esc(provenance.engine), lab: esc(provenance.lab), date: `${d.getDate()} ${t.months[d.getMonth()]} ${d.getFullYear()}` })}</p>` +
-    // When the module cannot run (no module support, or it failed to load), html.js goes and every detail stays open.
+    // When the module cannot run (no module support, or it failed to load), html.js goes and every detail stays open. A parse error is caught by HEAD on load.
     `<script type="module" src="/assets/technologies/page.js" onerror="document.documentElement.classList.remove('js')"></script>` +
     `<script nomodule>document.documentElement.classList.remove('js')</script>`;
 }
@@ -221,7 +221,8 @@ export function referencesMain(references, teams, lang) {
 }
 
 // The js class lands before the body paints, so page.css folds the details without a flash.
-const HEAD = '<link rel="stylesheet" href="/assets/technologies/page.css"><script>document.documentElement.classList.add(\'js\')</script>';
+// It goes on load unless page.js set tpReady: a module that fails to parse fires no onerror.
+const HEAD = '<link rel="stylesheet" href="/assets/technologies/page.css"><script>(function(h){h.classList.add(\'js\');addEventListener(\'load\',function(){if(!h.dataset.tpReady)h.classList.remove(\'js\')})})(document.documentElement)</script>';
 // The English page follows the stored choice, else the browser language; the French one never redirects.
 const redirect = (fr) => `<script>(function(){var l=null;try{l=localStorage.getItem('ps-lang')}catch(e){}if(l!=='fr'&&l!=='en')l=(navigator.language||'').toLowerCase().indexOf('fr')===0?'fr':'en';if(l==='fr')location.replace('${fr}'+location.hash);})();</script>`;
 const REF_HEAD = '<link rel="stylesheet" href="/assets/technologies/page.css">';

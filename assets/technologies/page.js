@@ -2,7 +2,8 @@
 // An inline script in <head> sets html.js, under which page.css shows a detail only
 // when its row carries the open class. This script owns that state and the
 // button's aria-expanded, then adds the search, the production filter
-// (#production) and the scroll rail.
+// (#production) and the scroll rail. ES2018 syntax at most: a browser that runs modules
+// but cannot parse this file still gets every detail open, see HEAD in build-technologies.mjs.
 import { COPY } from './copy.js';
 
 const t = COPY[document.documentElement.lang === 'fr' ? 'fr' : 'en'];
@@ -80,7 +81,7 @@ function syncRail() {
   const line = innerHeight * 0.4;
   let cur = shown[0];
   for (const f of shown) if (f.getBoundingClientRect().top <= line) cur = f;
-  if (innerHeight + scrollY >= document.documentElement.scrollHeight - 2) cur = shown[shown.length - 1] ?? cur;
+  if (innerHeight + scrollY >= document.documentElement.scrollHeight - 2) cur = shown[shown.length - 1] || cur;
   for (const a of rail) {
     if (cur && a.getAttribute('href') === '#' + cur.id) a.setAttribute('aria-current', 'true');
     else a.removeAttribute('aria-current');
@@ -96,3 +97,5 @@ addEventListener('resize', onScroll);
 
 if (location.hash === '#production') prod.setAttribute('aria-pressed', 'true');
 filter();
+// Read by the inline script of <head> on load: without it, html.js goes and every detail opens.
+document.documentElement.dataset.tpReady = '1';
