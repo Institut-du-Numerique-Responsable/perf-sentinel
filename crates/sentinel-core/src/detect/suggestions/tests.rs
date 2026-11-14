@@ -2174,11 +2174,11 @@ fn messaging_system_of(row: &Value) -> MessagingSystem {
 /// Assert that exactly one row of `rows` has `tag` as its engine.
 fn assert_one_row(rows: &[Value], kind: &str, tag: &str) {
     let count = rows.iter().filter(|r| r["engine"] == tag).count();
-    assert!(count > 0, "{kind} tag `{tag}` has no row in {SITE_DATA}");
-    assert!(
-        count == 1,
-        "{kind} tag `{tag}` has {count} rows in {SITE_DATA}, expected one"
-    );
+    match count {
+        1 => {}
+        0 => panic!("{kind} tag `{tag}` has no row in {SITE_DATA}"),
+        n => panic!("{kind} tag `{tag}` has {n} rows in {SITE_DATA}, expected one"),
+    }
 }
 
 /// Assert that a row claims dedicated advice (criterion 1) exactly when
