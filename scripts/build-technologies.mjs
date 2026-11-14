@@ -96,7 +96,8 @@ function rowHtml(family, row, group, teams, t) {
   const prod = row.production?.length > 0;
   const cols = family.criteria.length + 3 + (family.extra_column ? 1 : 0);
   const id = `d-${family.id}-${row.id}`;
-  const haystack = [row.name, row.detail, ...(row.aliases ?? []), group?.title].filter(Boolean).join(' ').toLowerCase();
+  // The family title too: a search for « broker » or « energy » finds the family it names.
+  const haystack = [row.name, row.detail, ...(row.aliases ?? []), group?.title, family.title].filter(Boolean).join(' ').toLowerCase();
   const crit = `<div class="crit">${family.criteria.map((c, i) => `<span>${mark(row.criteria[i], t)}${esc(c)}</span>`).join('')}</div>`;
   const note = k === 'full'
     ? fill(t.allMet, { n: family.criteria.length }) + (row.note ? ' ' + esc(row.note) : '')
@@ -148,7 +149,9 @@ export function technologiesMain(data, lang, provenance) {
     `<p>${sign('full', true)}<span>${t.ringed}</span></p>`;
   return `<section class="intro"><h1>${t.h1}</h1><p>${t.intro}</p>` +
     `<div class="tools"><div class="search">${SEARCH}<input id="tp-q" type="search" placeholder="${t.placeholder}" aria-label="${t.searchLabel}" autocomplete="off"><kbd aria-hidden="true">/</kbd></div>` +
-    `<button id="tp-prod" type="button" aria-pressed="false">${sign('full', true)}${t.production}</button></div></section>` +
+    `<button id="tp-prod" type="button" aria-pressed="false">${sign('full', true)}${t.production}</button></div>` +
+    // Filled by page.js after each search or filter change: hiding rows is not announced.
+    `<p class="sr" id="tp-status" role="status" aria-live="polite"></p></section>` +
     `<section class="legend" aria-label="${t.legendLabel}">${legend}</section>` +
     `<nav class="tp-rail" aria-label="${t.railLabel}">${families.map((f) => `<a href="#${esc(f.id)}"><span class="sw"></span><b>${esc(f.title)}</b></a>`).join('')}</nav>` +
     `<div class="fams">${families.map((f) => familyHtml(f, teams, t)).join('')}` +

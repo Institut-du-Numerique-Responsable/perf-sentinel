@@ -134,6 +134,46 @@ test('search keeps matching rows and hides empty families', async () => {
   } finally { await close(); }
 });
 
+test('searching for a family title finds its rows, in both languages', async () => {
+  for (const [lang, path] of LANGS) {
+    const { page, close } = await open(path);
+    try {
+      for (const [i, id] of IDS.entries()) {
+        const title = FAMILIES[lang][i];
+        await search(page, title.toLowerCase());
+        assert.equal(await page.isVisible('#tp-none'), false, `${lang} ${title}: not "not recognized"`);
+        assert.equal(await page.locator(`#${id} tr.row:visible`).count(), await count(page, `#${id} tr.row`), `${lang} ${title}: every row of the family`);
+      }
+    } finally { await close(); }
+  }
+});
+
+test('search and filter results are announced in a live region', async () => {
+  const cases = {
+    en: { kotlin: '2 technologies shown', django: '1 technology shown', erlang: '“erlang” is not recognized yet', none: 'None of these technologies is used in production yet.' },
+    fr: { kotlin: '2 technologies affichées', django: '1 technologie affichée', erlang: '« erlang » n’est pas encore reconnue', none: 'Aucune de ces technologies n’est utilisée en production pour l’instant.' },
+  };
+  for (const [lang, path] of LANGS) {
+    const { page, close } = await open(path);
+    const status = page.locator('#tp-status');
+    try {
+      assert.equal(await status.getAttribute('role'), 'status');
+      assert.equal(await status.getAttribute('aria-live'), 'polite');
+      assert.equal(await status.getAttribute('class'), 'sr');
+      assert.equal(await status.textContent(), '', `${lang}: nothing announced on load`);
+      const c = cases[lang];
+      for (const q of ['kotlin', 'erlang', 'django']) {
+        await search(page, q);
+        assert.equal(await status.textContent(), c[q], `${lang} ${q}`);
+      }
+      await page.click('#tp-prod');
+      assert.equal(await status.textContent(), c.none, `${lang}: filter on, django outside production`);
+      await page.click('#tp-prod');
+      assert.equal(await status.textContent(), c.django, `${lang}: filter off again`);
+    } finally { await close(); }
+  }
+});
+
 test('search treats markup and pattern characters as text', async () => {
   for (const [path, word] of [['/technologies', 'is not recognized yet'], ['/fr/technologies', 'n’est pas encore reconnue']]) {
     const { page, dialogs, close } = await open(path);

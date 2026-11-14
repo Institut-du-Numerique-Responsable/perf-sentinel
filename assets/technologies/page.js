@@ -12,6 +12,7 @@ const q = document.getElementById('tp-q');
 const prod = document.getElementById('tp-prod');
 const none = document.getElementById('tp-none');
 const noneProd = document.getElementById('tp-none-prod');
+const status = document.getElementById('tp-status');
 const families = [...document.querySelectorAll('section.fam')];
 const rows = [...document.querySelectorAll('tr.row')];
 const expanded = (row) => row.querySelector('button').getAttribute('aria-expanded') === 'true';
@@ -28,7 +29,8 @@ document.querySelector('.fams').addEventListener('click', (e) => {
   if (row && !e.target.closest('a')) setOpen(row, !expanded(row));
 });
 
-function filter() {
+// say: announce the result in the live region, after a search or a filter change, not on load.
+function filter(say) {
   const s = q.value.trim().toLowerCase();
   const onlyProd = prod.getAttribute('aria-pressed') === 'true';
   let any = 0;
@@ -54,16 +56,17 @@ function filter() {
   none.hidden = found > 0;
   if (!found) none.querySelector('h2').textContent = t.notFound.replace('{q}', () => q.value.trim());
   noneProd.hidden = !(found && !any);
+  if (say) status.textContent = !found ? none.querySelector('h2').textContent : any ? t.shown(any) : t.noneInProduction;
   onScroll();
 }
 
 function setProduction(on) {
   prod.setAttribute('aria-pressed', String(on));
   history.replaceState(null, '', on ? '#production' : location.pathname + location.search);
-  filter();
+  filter(true);
 }
 
-q.addEventListener('input', filter);
+q.addEventListener('input', () => filter(true));
 prod.addEventListener('click', () => setProduction(prod.getAttribute('aria-pressed') !== 'true'));
 addEventListener('hashchange', () => { if (location.hash === '#production') setProduction(true); });
 document.addEventListener('keydown', (e) => {
