@@ -41,7 +41,7 @@ after(async () => {
   server?.close();
 });
 
-async function open(path, { viewport = { width: 1280, height: 900 }, depth } = {}) {
+async function open(path, { viewport = { width: 1280, height: 900 }, depth, wait = '#dc-root header' } = {}) {
   const context = await browser.newContext({ viewport, locale: 'en-GB' });
   // Label of a link without its arrow, for the in-page checks.
   await context.addInitScript(() => { window.__label = (a) => a.textContent.replace(/[→↗▸]/g, '').replace(/\s+/g, ' ').trim(); });
@@ -50,7 +50,7 @@ async function open(path, { viewport = { width: 1280, height: 900 }, depth } = {
   context.setDefaultTimeout(10000);
   const page = await context.newPage();
   await page.goto(server.url + path);
-  await page.waitForSelector('#dc-root header');
+  await page.waitForSelector(wait);
   return { page, close: () => context.close() };
 }
 
@@ -200,5 +200,78 @@ test('the prerendered copies carry the new links', async () => {
     for (const s of [`href="${t.tech}"`, t.qsLink, t.docsD]) {
       assert.ok(guide.includes(s), `${t.guide} prerender: ${s}`);
     }
+  }
+});
+
+// The site footer exists in four copies (home template, guide template, site-chrome.mjs
+// for the generated pages, build-reference.mjs for the reference docs): their three link
+// columns must match, with the three new links in place.
+const FT = {
+  en: { tech: 'Supported technologies', after: 'Comparison', legal: '/legal-notice', doc: '/docs/CLI', docs: '/guide' },
+  fr: { tech: 'Technologies prises en charge', after: 'Comparatif', legal: '/mentions-legales', doc: '/docs/fr/CLI', docs: '/fr/guide' },
+};
+async function footerCols(path) {
+  // Static pages have no <x-dc>; a dc-runtime page is read once hydrated, from #dc-root.
+  const { page, close } = await open(path, { wait: 'body' });
+  try {
+    await page.waitForFunction(() => !document.querySelector('x-dc'));
+    return await page.evaluate(() => [...(document.querySelector('#dc-root footer') || document.querySelector('footer')).querySelectorAll('[data-grid="ftcols"] > div')].slice(1).map((c) =>
+      [...c.querySelectorAll('a')].map((a) => ({ text: a.textContent.replace(/\s+/g, ' ').trim(), href: a.getAttribute('href') }))));
+  } finally { await close(); }
+}
+function expectNewLinks(cols, t, f, where) {
+  const [product, , project] = cols;
+  const i = product.findIndex((a) => a.text === f.after);
+  assert.ok(i >= 0, `${where}: no ${f.after} in the product column`);
+  assert.deepEqual(product[i + 1], { text: f.tech, href: t.tech }, `${where}: technologies after ${f.after}`);
+  assert.deepEqual(project.slice(-2), [{ text: t.who, href: t.refs }, { text: t.contrib, href: CONTRIB }], `${where}: project column ends with who-uses-it then contribute`);
+}
+
+test('the four footers carry the same three new links, in both languages', async () => {
+  for (const [lang, t] of LANGS) {
+    const f = FT[lang];
+    const home = await footerCols(t.home);
+    expectNewLinks(home, t, f, t.home);
+    for (const path of [t.guide, f.legal, t.tech]) {
+      assert.deepEqual(await footerCols(path), home, `${path}: footer columns match the home page`);
+    }
+  }
+});
+
+// shortcut: todo while the reference docs are not regenerated (engine main has moved), drop the todo with that commit.
+test('the reference docs footer matches the home footer', { todo: 'reference docs held back, see task-7b-report.md' }, async () => {
+  for (const [lang, t] of LANGS) {
+    assert.deepEqual(await footerCols(FT[lang].doc), await footerCols(t.home), `${FT[lang].doc}: footer columns match the home page`);
+  }
+});
+
+test('the footer links are visible to every audience', async () => {
+  for (const [, t] of LANGS) {
+    const { page, close } = await open(t.home + '?profile=exec');
+    try {
+      for (const href of [t.tech, t.refs, CONTRIB]) {
+        assert.ok(await page.locator(`#dc-root footer a[href="${href}"]`).isVisible(), `${t.home}?profile=exec: footer ${href} visible`);
+      }
+    } finally { await close(); }
+  }
+});
+
+test('the sitemap lists the four new addresses', async () => {
+  const xml = await (await fetch(server.url + '/sitemap.xml')).text();
+  for (const p of ['/technologies', '/fr/technologies', '/references', '/fr/references']) {
+    assert.ok(xml.includes(`<url><loc>https://perf-sentinel.dev${p}</loc></url>`), `sitemap: ${p}`);
+  }
+});
+
+test('the guide says its list also leads to the technologies table', async () => {
+  const intro = {
+    en: 'Every topic above is covered in full in the reference. Direct access to a page, and to the table of supported technologies:',
+    fr: 'Chaque sujet ci-dessus est couvert en intégralité dans la référence. Accès direct à une page, et au tableau des technologies prises en charge :',
+  };
+  for (const [lang, t] of LANGS) {
+    const { page, close } = await open(t.guide);
+    try {
+      assert.equal(await page.evaluate(() => document.querySelector('#dc-root #docs > p').textContent.trim()), intro[lang], `${t.guide}: #docs intro`);
+    } finally { await close(); }
   }
 });
