@@ -1,20 +1,15 @@
 // Page tests for /technologies and /fr/technologies: the committed pages on a local
-// static server and Playwright (resolved like verifier-page.test.mjs), every
-// third-party request aborted and recorded. The expected rows are those of the data.
+// static server and Playwright (page-test-helpers.mjs), every third-party request
+// aborted and recorded. The expected rows are those of the data.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './static-server.mjs';
-
-const require = createRequire(import.meta.url);
-let chromium;
-try { ({ chromium } = require('playwright')); }
-catch { ({ chromium } = require('/Users/robintrassard/RustroverProjects/perf-sentinel/crates/sentinel-cli/tests/browser/node_modules/playwright')); }
+import { chromium, LOCALE, open as openPage } from './page-test-helpers.mjs';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,23 +24,7 @@ after(async () => {
   server?.close();
 });
 
-async function open(path, { javaScriptEnabled = true, viewport = { width: 1280, height: 900 }, theme } = {}) {
-  const context = await browser.newContext({ javaScriptEnabled, viewport });
-  if (theme) await context.addInitScript((t) => { try { localStorage.setItem('ps-theme', t); } catch { /* the page then follows the system */ } }, theme);
-  const external = [];
-  await context.route('**/*', (route) => {
-    const url = new URL(route.request().url());
-    if (url.hostname === '127.0.0.1') return route.fallback();
-    external.push(url.href);
-    return route.abort();
-  });
-  context.setDefaultTimeout(10000);
-  const page = await context.newPage();
-  const dialogs = [];
-  page.on('dialog', (d) => { dialogs.push(d.message()); d.dismiss(); });
-  await page.goto(server.url + path);
-  return { page, external, dialogs, close: () => context.close() };
-}
+const open = (path, options) => openPage(browser, server.url + path, options);
 
 const FAMILIES = {
   en: ['Frameworks and ORMs', 'Databases', 'Brokers', 'Trace sources', 'Clouds', 'Energy measurement', 'Electricity grids', 'Continuous integration'],
@@ -175,7 +154,7 @@ test('the details fold without a flash, and stay reachable when the script canno
   // page.js held back: until it runs, html.js and page.css alone keep every detail folded.
   let release;
   const held = new Promise((r) => { release = r; });
-  const slow = await browser.newContext();
+  const slow = await browser.newContext({ locale: LOCALE });
   try {
     await slow.route('**/assets/technologies/page.js', async (route) => { await held; await route.fallback(); });
     const page = await slow.newPage();
@@ -188,7 +167,7 @@ test('the details fold without a flash, and stay reachable when the script canno
     assert.equal(await page.locator('tr.det:visible').count(), 0);
   } finally { release(); await slow.close(); }
   // page.js fails to load: html.js goes, every detail is open again.
-  const broken = await browser.newContext();
+  const broken = await browser.newContext({ locale: LOCALE });
   try {
     await broken.route('**/assets/technologies/page.js', (route) => route.abort());
     const page = await broken.newPage();

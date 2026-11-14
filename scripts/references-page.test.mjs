@@ -1,10 +1,9 @@
 // Page tests for /references and /fr/references: the committed pages on the local
 // static server for what does not depend on the data (language, links, no-JS
 // reading), and lists rendered in memory by referencesPage, empty or filled, served
-// on a routed path. Never written into the engine's data. Locale pinned: the English page redirects on navigator.language.
+// on a routed path. Never written into the engine's data. Locale pinned by page-test-helpers.mjs.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,11 +13,7 @@ import { startServer } from './static-server.mjs';
 import { COPY } from '../assets/technologies/copy.js';
 import { referencesPage } from './build-technologies.mjs';
 import { CONTACT_EMAIL } from './site-chrome.mjs';
-
-const require = createRequire(import.meta.url);
-let chromium;
-try { ({ chromium } = require('playwright')); }
-catch { ({ chromium } = require('/Users/robintrassard/RustroverProjects/perf-sentinel/crates/sentinel-cli/tests/browser/node_modules/playwright')); }
+import { chromium, open as openPage } from './page-test-helpers.mjs';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ISSUE_FORM = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/new?template=reference.yml';
@@ -35,24 +30,7 @@ after(async () => {
 });
 
 // html: a page served at /__mem instead of a committed file.
-async function open(path, { javaScriptEnabled = true, viewport = { width: 1280, height: 900 }, theme, html } = {}) {
-  const context = await browser.newContext({ javaScriptEnabled, viewport, locale: 'en-GB' });
-  if (theme) await context.addInitScript((t) => { try { localStorage.setItem('ps-theme', t); } catch { /* the page then follows the system */ } }, theme);
-  const external = [];
-  await context.route('**/*', (route) => {
-    const url = new URL(route.request().url());
-    if (url.hostname === '127.0.0.1') return route.fallback();
-    external.push(url.href);
-    return route.abort();
-  });
-  if (html) await context.route(`${server.url}/__mem`, (route) => route.fulfill({ body: html, contentType: 'text/html' }));
-  context.setDefaultTimeout(10000);
-  const page = await context.newPage();
-  const dialogs = [];
-  page.on('dialog', (d) => { dialogs.push(d.message()); d.dismiss(); });
-  await page.goto(server.url + (html ? '/__mem' : path));
-  return { page, external, dialogs, close: () => context.close() };
-}
+const open = (path, options = {}) => openPage(browser, server.url + (options.html ? '/__mem' : path), options);
 
 const LANGS = [['en', '/references'], ['fr', '/fr/references']];
 

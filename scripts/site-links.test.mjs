@@ -3,13 +3,8 @@
 // server, third-party requests aborted, locale pinned.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import { startServer } from './static-server.mjs';
-
-const require = createRequire(import.meta.url);
-let chromium;
-try { ({ chromium } = require('playwright')); }
-catch { ({ chromium } = require('/Users/robintrassard/RustroverProjects/perf-sentinel/crates/sentinel-cli/tests/browser/node_modules/playwright')); }
+import { chromium, open as openPage } from './page-test-helpers.mjs';
 
 const CONTRIB = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/CONTRIBUTING.md#what-to-contribute-by-difficulty';
 const L = {
@@ -41,19 +36,17 @@ after(async () => {
   server?.close();
 });
 
-async function open(path, { viewport = { width: 1280, height: 900 }, depth, wait = '#dc-root header' } = {}) {
-  const context = await browser.newContext({ viewport, locale: 'en-GB' });
-  // Label of a link without its arrow, for the in-page checks.
-  await context.addInitScript(() => { window.__label = (a) => a.textContent.replace(/[→↗▸]/g, '').replace(/\s+/g, ' ').trim(); });
-  if (depth) await context.addInitScript((d) => { try { localStorage.setItem('ps-depth', d); } catch { /* default depth then */ } }, depth);
-  // The synoptic's first-visit invitation covers part of the page.
-  await context.addInitScript(() => { try { localStorage.setItem('ps-tour-seen', '1'); } catch { /* the invitation shows then */ } });
-  await context.route('**/*', (route) => (new URL(route.request().url()).hostname === '127.0.0.1' ? route.fallback() : route.abort()));
-  context.setDefaultTimeout(10000);
-  const page = await context.newPage();
-  await page.goto(server.url + path);
-  await page.waitForSelector(wait);
-  return { page, close: () => context.close() };
+async function open(path, { viewport, depth, wait = '#dc-root header' } = {}) {
+  const init = [
+    // Label of a link without its arrow, for the in-page checks.
+    () => { window.__label = (a) => a.textContent.replace(/[→↗▸]/g, '').replace(/\s+/g, ' ').trim(); },
+    // The synoptic's first-visit invitation covers part of the page.
+    () => { try { localStorage.setItem('ps-tour-seen', '1'); } catch { /* the invitation shows then */ } },
+  ];
+  if (depth) init.push([(d) => { try { localStorage.setItem('ps-depth', d); } catch { /* default depth then */ } }, depth]);
+  const opened = await openPage(browser, server.url + path, { viewport, init });
+  await opened.page.waitForSelector(wait);
+  return opened;
 }
 
 
