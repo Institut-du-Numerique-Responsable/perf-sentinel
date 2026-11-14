@@ -1,7 +1,8 @@
 use super::*;
 use crate::detect::{FindingType, Severity};
 use crate::event::CodeLocation;
-use crate::test_helpers::make_finding;
+use crate::test_helpers::{make_finding, site_data_rows};
+use serde_json::Value;
 
 fn finding_with_location(ft: FindingType, loc: Option<CodeLocation>) -> Finding {
     let mut f = make_finding(ft, Severity::Warning);
@@ -1410,7 +1411,7 @@ fn fix_table_cardinality_is_pinned() {
     // Snapshot of the (FindingType, Framework) table size. Bump this
     // number when adding or removing an entry, so the diff shows the
     // change instead of the public `suggested_fix` surface growing
-    // silently.
+    // silently. Update the coverage table in CONTRIBUTING.md too.
     assert_eq!(FIXES.len(), 133);
     // Anchor a handful of key combinations so a swap that preserves the
     // count (drop one entry, add another) still fails the test.
@@ -2007,5 +2008,232 @@ fn fix_table_reference_urls_are_https_and_on_allowed_domains() {
              to ALLOWED_DOMAIN_SUFFIXES or the `<org>/<repo>` path to \
              ALLOWED_GITHUB_PREFIXES"
         );
+    }
+}
+
+// ── Site data against the framework and broker tables ───────
+// `site-data/technologies.json` feeds the technologies page. These tests
+// fail when a row disagrees with the tables above.
+
+const ALL_FRAMEWORKS: [Framework; 24] = [
+    Framework::JavaJpa,
+    Framework::JavaWebFlux,
+    Framework::JavaQuarkusReactive,
+    Framework::JavaQuarkus,
+    Framework::JavaHelidonMp,
+    Framework::JavaHelidonSe,
+    Framework::JavaGeneric,
+    Framework::CsharpEfCore,
+    Framework::CsharpGeneric,
+    Framework::PythonDjango,
+    Framework::PythonSqlAlchemy,
+    Framework::PythonGeneric,
+    Framework::RustDiesel,
+    Framework::RustSeaOrm,
+    Framework::RustGeneric,
+    Framework::GoGorm,
+    Framework::GoGeneric,
+    Framework::NodePrisma,
+    Framework::NodeGeneric,
+    Framework::RubyActiveRecord,
+    Framework::RubyGeneric,
+    Framework::PhpLaravelEloquent,
+    Framework::PhpDoctrine,
+    Framework::PhpGeneric,
+];
+
+/// Exhaustive on purpose: a new variant stops compiling here, which points
+/// at `ALL_FRAMEWORKS`. The assertion below ties each slot to its entry.
+const fn framework_slot(value: Framework) -> usize {
+    match value {
+        Framework::JavaJpa => 0,
+        Framework::JavaWebFlux => 1,
+        Framework::JavaQuarkusReactive => 2,
+        Framework::JavaQuarkus => 3,
+        Framework::JavaHelidonMp => 4,
+        Framework::JavaHelidonSe => 5,
+        Framework::JavaGeneric => 6,
+        Framework::CsharpEfCore => 7,
+        Framework::CsharpGeneric => 8,
+        Framework::PythonDjango => 9,
+        Framework::PythonSqlAlchemy => 10,
+        Framework::PythonGeneric => 11,
+        Framework::RustDiesel => 12,
+        Framework::RustSeaOrm => 13,
+        Framework::RustGeneric => 14,
+        Framework::GoGorm => 15,
+        Framework::GoGeneric => 16,
+        Framework::NodePrisma => 17,
+        Framework::NodeGeneric => 18,
+        Framework::RubyActiveRecord => 19,
+        Framework::RubyGeneric => 20,
+        Framework::PhpLaravelEloquent => 21,
+        Framework::PhpDoctrine => 22,
+        Framework::PhpGeneric => 23,
+    }
+}
+
+const _: () = {
+    let mut i = 0;
+    while i < ALL_FRAMEWORKS.len() {
+        assert!(framework_slot(ALL_FRAMEWORKS[i]) == i);
+        i += 1;
+    }
+};
+
+const ALL_MESSAGING_SYSTEMS: [MessagingSystem; 6] = [
+    MessagingSystem::Kafka,
+    MessagingSystem::RabbitMq,
+    MessagingSystem::AwsSqs,
+    MessagingSystem::Pulsar,
+    MessagingSystem::Nats,
+    MessagingSystem::Jms,
+];
+
+/// Exhaustive on purpose: a new variant stops compiling here, which points
+/// at `ALL_MESSAGING_SYSTEMS`. The assertion below ties each slot to its entry.
+const fn messaging_system_slot(value: MessagingSystem) -> usize {
+    match value {
+        MessagingSystem::Kafka => 0,
+        MessagingSystem::RabbitMq => 1,
+        MessagingSystem::AwsSqs => 2,
+        MessagingSystem::Pulsar => 3,
+        MessagingSystem::Nats => 4,
+        MessagingSystem::Jms => 5,
+    }
+}
+
+const _: () = {
+    let mut i = 0;
+    while i < ALL_MESSAGING_SYSTEMS.len() {
+        assert!(messaging_system_slot(ALL_MESSAGING_SYSTEMS[i]) == i);
+        i += 1;
+    }
+};
+
+const SITE_DATA: &str = "site-data/technologies.json";
+
+/// Rows of `family` that name an engine tag, which skips the unsupported ones.
+fn rows_with_engine(family: &str) -> Vec<Value> {
+    let mut rows = site_data_rows(family);
+    rows.retain(|r| r["engine"].is_string());
+    rows
+}
+
+fn engine_of(row: &Value) -> &str {
+    row["engine"].as_str().expect("row has an engine")
+}
+
+fn row_id(row: &Value) -> &str {
+    row["id"].as_str().unwrap_or("<no id>")
+}
+
+/// Criterion `index` of a row, with the row `id` in the failure message.
+fn criterion(row: &Value, index: usize) -> bool {
+    row["criteria"][index].as_bool().unwrap_or_else(|| {
+        panic!(
+            "row `{}`: criterion {index} is missing or not a boolean",
+            row_id(row)
+        )
+    })
+}
+
+fn framework_of(row: &Value) -> Framework {
+    let tag = engine_of(row);
+    ALL_FRAMEWORKS
+        .into_iter()
+        .find(|f| f.as_str() == tag)
+        .unwrap_or_else(|| panic!("row `{}`: unknown framework tag `{tag}`", row_id(row)))
+}
+
+fn messaging_system_of(row: &Value) -> MessagingSystem {
+    let tag = engine_of(row);
+    ALL_MESSAGING_SYSTEMS
+        .into_iter()
+        .find(|s| s.as_str() == tag)
+        .unwrap_or_else(|| panic!("row `{}`: unknown broker tag `{tag}`", row_id(row)))
+}
+
+/// Assert that exactly one row of `rows` has `tag` as its engine.
+fn assert_one_row(rows: &[Value], kind: &str, tag: &str) {
+    let count = rows.iter().filter(|r| r["engine"] == tag).count();
+    assert!(count > 0, "{kind} tag `{tag}` has no row in {SITE_DATA}");
+    assert_eq!(
+        count, 1,
+        "{kind} tag `{tag}` has {count} rows in {SITE_DATA}, expected one"
+    );
+}
+
+/// Assert that a row claims dedicated advice (criterion 1) exactly when
+/// `table` holds an entry for `tag`.
+fn assert_advice_claim(row: &Value, table: &str, tag: &str, has_fixes: bool) {
+    let claimed = criterion(row, 1);
+    assert_eq!(
+        claimed,
+        has_fixes,
+        "row `{}`: dedicated advice is {claimed} but {table} has {} entry for `{tag}`",
+        row_id(row),
+        if has_fixes { "an" } else { "no" },
+    );
+}
+
+#[test]
+fn every_non_generic_framework_has_exactly_one_row() {
+    let rows = rows_with_engine("frameworks");
+    for fw in ALL_FRAMEWORKS.into_iter().filter(|f| f.generic() != *f) {
+        assert_one_row(&rows, "framework", fw.as_str());
+    }
+}
+
+#[test]
+fn fallback_rows_name_a_generic_tag_and_claim_nothing() {
+    for row in rows_with_engine("frameworks") {
+        let fw = framework_of(&row);
+        let is_generic = fw.generic() == fw;
+        assert_eq!(
+            row["fallback"] == true,
+            is_generic,
+            "row `{}`: `fallback` must be true exactly when engine `{}` is a *_generic tag",
+            row_id(&row),
+            fw.as_str()
+        );
+        if is_generic {
+            assert!(
+                !criterion(&row, 0) && !criterion(&row, 1),
+                "row `{}`: a fallback row cannot claim to be recognized or to have dedicated advice",
+                row_id(&row)
+            );
+        }
+    }
+}
+
+#[test]
+fn dedicated_advice_matches_the_fixes_table() {
+    // Fallback rows are skipped: their generic tag has fixes, yet they
+    // claim none (see the test above).
+    for row in rows_with_engine("frameworks") {
+        let fw = framework_of(&row);
+        if fw.generic() == fw {
+            continue;
+        }
+        let has_fixes = FIXES.keys().any(|(_, f)| *f == fw);
+        assert_advice_claim(&row, "FIXES", fw.as_str(), has_fixes);
+    }
+}
+
+#[test]
+fn every_messaging_system_has_exactly_one_broker_row() {
+    let rows = rows_with_engine("brokers");
+    for system in ALL_MESSAGING_SYSTEMS {
+        assert_one_row(&rows, "broker", system.as_str());
+    }
+}
+
+#[test]
+fn broker_advice_matches_the_messaging_fixes_table() {
+    for row in rows_with_engine("brokers") {
+        let system = messaging_system_of(&row);
+        let has_fixes = MESSAGING_FIXES.keys().any(|(_, s)| *s == system);
+        assert_advice_claim(&row, "MESSAGING_FIXES", system.as_str(), has_fixes);
     }
 }
