@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 const FAMILY_IDS: [&str; 8] = [
     "frameworks",
@@ -463,4 +463,333 @@ fn french_file_covers_every_id_and_nothing_else() {
         assert_french_family(family, &fr_families[id_of(family)]);
     }
     assert_french_rows(&en, &fr);
+}
+
+// ---- references.json -------------------------------------------------
+
+/// A reference that passes every rule. The tests break one rule at a time.
+fn valid_reference() -> Value {
+    json!({
+        "id": "exemple-energie",
+        "name": "Exemple Énergie",
+        "domain": "exemple-energie.fr",
+        "since": "2026-07",
+        "request": "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/123",
+        "proofs": {
+            "card": {
+                "verify_url": "https://perf-sentinel.dev/verifier#c=AAAA",
+                "period_from": "2026-09-01",
+                "period_to": "2026-09-30"
+            },
+            "report": {
+                "url": "https://www.exemple-energie.fr/perf-sentinel/rapport.json",
+                "period_from": "2026-07-01",
+                "period_to": "2026-12-31",
+                "environments": ["production"],
+                "signed": true
+            }
+        }
+    })
+}
+
+/// The valid reference with the value at the JSON pointer `path` replaced.
+fn changed(path: &str, value: Value) -> Value {
+    let mut r = valid_reference();
+    *r.pointer_mut(path)
+        .unwrap_or_else(|| panic!("no value at {path}")) = value;
+    r
+}
+
+/// The check must fail, naming the reference `id` and the rule.
+fn assert_rejected(r: &Value, rule: &str) {
+    let err = check_reference(r).expect_err("the reference should be rejected");
+    assert!(err.contains(id_of(r)), "`{err}` does not name the id");
+    assert!(
+        err.contains(rule),
+        "`{err}` does not name the rule `{rule}`"
+    );
+}
+
+#[test]
+fn references_file_parses_and_may_be_empty() {
+    assert_eq!(check_reference(&valid_reference()), Ok(()));
+    let doc = load("references.json");
+    let refs = doc["references"]
+        .as_array()
+        .expect("`references` is an array");
+    let errors: Vec<String> = refs
+        .iter()
+        .filter_map(|r| check_reference(r).err())
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
+fn a_reference_needs_its_required_fields() {
+    for key in ["id", "name", "domain", "since", "request", "proofs"] {
+        let mut r = valid_reference();
+        r.as_object_mut().unwrap().remove(key);
+        assert_rejected(&r, &format!("`{key}`"));
+    }
+}
+
+#[test]
+fn a_reference_needs_at_least_one_proof() {
+    assert_rejected(&changed("/proofs", json!({})), "`proofs`");
+    // `since` follows the one proof left: the card starts in 2026-09.
+    for (kept, since) in [("card", "2026-09"), ("report", "2026-07")] {
+        let mut r = changed("/since", json!(since));
+        r["proofs"] = json!({ kept: valid_reference()["proofs"][kept].clone() });
+        assert_eq!(check_reference(&r), Ok(()), "`{kept}` alone is a proof");
+    }
+}
+
+#[test]
+fn since_is_the_month_of_the_earliest_period_from() {
+    // The proofs start on 2026-09-01 (card) and 2026-07-01 (report).
+    assert_eq!(check_reference(&valid_reference()), Ok(()));
+    assert_rejected(&changed("/since", json!("2026-09")), "`since`");
+    assert_rejected(&changed("/since", json!("2026-7")), "`since`");
+}
+
+#[test]
+fn periods_are_ordered_dates() {
+    for proof in ["card", "report"] {
+        let from = format!("/proofs/{proof}/period_from");
+        let to = format!("/proofs/{proof}/period_to");
+        assert_rejected(
+            &changed(&from, json!("2027-01-01")),
+            &from[1..].replace('/', "."),
+        );
+        assert_rejected(
+            &changed(&to, json!("01/10/2026")),
+            &to[1..].replace('/', "."),
+        );
+    }
+}
+
+#[test]
+fn verify_url_points_at_the_site_verifier() {
+    for ok in [
+        "https://perf-sentinel.dev/verifier#c=AAAA",
+        "https://perf-sentinel.dev/fr/verifier#c=AAAA",
+    ] {
+        let r = changed("/proofs/card/verify_url", json!(ok));
+        assert_eq!(check_reference(&r), Ok(()), "{ok}");
+    }
+    for bad in [
+        "https://perf-sentinel.dev/verifier",
+        "http://perf-sentinel.dev/verifier#c=AAAA",
+        "https://perf-sentinel.dev.evil.com/verifier#c=AAAA",
+        "https://exemple-energie.fr/verifier#c=AAAA",
+    ] {
+        assert_rejected(
+            &changed("/proofs/card/verify_url", json!(bad)),
+            "verify_url",
+        );
+    }
+}
+
+#[test]
+fn request_is_an_issue_of_this_repository() {
+    for bad in [
+        "https://github.com/exemple/autre-depot/issues/123",
+        "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/pull/123",
+        "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/",
+        "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/12a",
+        "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/12/",
+    ] {
+        assert_rejected(&changed("/request", json!(bad)), "`request`");
+    }
+}
+
+#[test]
+fn report_url_is_https_under_the_declared_domain() {
+    for ok in [
+        "https://exemple-energie.fr/rapport.json",
+        "https://exemple-energie.fr",
+        "https://www.exemple-energie.fr/a/b?x=1#y",
+    ] {
+        let r = changed("/proofs/report/url", json!(ok));
+        assert_eq!(check_reference(&r), Ok(()), "{ok}");
+    }
+    for bad in [
+        "http://exemple-energie.fr/rapport.json",
+        "https://evil-exemple-energie.fr/rapport.json",
+        "https://exemple-energie.fr.evil.com/rapport.json",
+        "https://exemple-energie.fr@evil.com/rapport.json",
+        "https://evil.com@exemple-energie.fr/rapport.json",
+        "https://exemple-energie.fr:8443/rapport.json",
+        "https://evil.com\\.exemple-energie.fr/rapport.json",
+        "https://evil.com/?q=exemple-energie.fr",
+        "https://evil.com#exemple-energie.fr",
+    ] {
+        assert_rejected(
+            &changed("/proofs/report/url", json!(bad)),
+            "`proofs.report.url`",
+        );
+    }
+}
+
+#[test]
+fn a_report_declares_environments_and_signature() {
+    assert_rejected(
+        &changed("/proofs/report/environments", json!("production")),
+        "environments",
+    );
+    assert_rejected(
+        &changed("/proofs/report/environments", json!([1])),
+        "environments",
+    );
+    assert_rejected(&changed("/proofs/report/signed", json!("yes")), "signed");
+    for key in ["environments", "signed"] {
+        let mut r = valid_reference();
+        r["proofs"]["report"].as_object_mut().unwrap().remove(key);
+        assert_rejected(&r, key);
+    }
+}
+
+#[test]
+fn a_reference_carries_no_markup() {
+    assert_rejected(&changed("/name", json!("Exemple <b>Énergie</b>")), "markup");
+    assert_rejected(
+        &changed("/proofs/report/environments", json!(["a>b"])),
+        "markup",
+    );
+}
+
+const REQUEST_PREFIX: &str =
+    "https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/";
+
+const VERIFY_PREFIXES: [&str; 2] = [
+    "https://perf-sentinel.dev/verifier#c=",
+    "https://perf-sentinel.dev/fr/verifier#c=",
+];
+
+/// A non-empty string field. `prefix` is the dotted path shown in errors.
+fn text<'a>(v: &'a Value, prefix: &str, key: &str) -> Result<&'a str, String> {
+    v[key]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| format!("`{prefix}{key}` is missing or not a non-empty string"))
+}
+
+/// The host of an `https://` URL, or `None` when the authority is not a plain
+/// ASCII host (no `user@`, no `:port`, no backslash a browser reads as `/`).
+fn https_host(url: &str) -> Option<&str> {
+    let host = url
+        .strip_prefix("https://")?
+        .split(['/', '?', '#'])
+        .next()?;
+    host.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+        .then_some(host)
+}
+
+fn check_request(request: &str) -> Result<(), String> {
+    let number = request.strip_prefix(REQUEST_PREFIX).unwrap_or("");
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!(
+            "`request` {request} is not an issue of this repository"
+        ));
+    }
+    Ok(())
+}
+
+/// Checks `period_from` and `period_to`, returns `period_from`.
+fn check_period<'a>(proof: &'a Value, prefix: &str) -> Result<&'a str, String> {
+    let from = text(proof, prefix, "period_from")?;
+    let to = text(proof, prefix, "period_to")?;
+    for (key, date) in [("period_from", from), ("period_to", to)] {
+        if !is_date(date) {
+            return Err(format!("`{prefix}{key}` {date} is not a YYYY-MM-DD date"));
+        }
+    }
+    if from > to {
+        return Err(format!(
+            "`{prefix}period_from` {from} is after `{prefix}period_to` {to}"
+        ));
+    }
+    Ok(from)
+}
+
+fn check_card(card: &Value) -> Result<&str, String> {
+    let url = text(card, "proofs.card.", "verify_url")?;
+    if !VERIFY_PREFIXES.iter().any(|p| url.starts_with(p)) {
+        return Err(format!(
+            "`proofs.card.verify_url` {url} is not a link to the site verifier"
+        ));
+    }
+    check_period(card, "proofs.card.")
+}
+
+fn check_report<'a>(report: &'a Value, domain: &str) -> Result<&'a str, String> {
+    let url = text(report, "proofs.report.", "url")?;
+    let host = https_host(url).ok_or_else(|| {
+        format!("`proofs.report.url` {url} is not an https URL with a plain host")
+    })?;
+    let under_domain =
+        host == domain || host.strip_suffix(domain).is_some_and(|p| p.ends_with('.'));
+    if !under_domain {
+        return Err(format!(
+            "`proofs.report.url` host {host} is not under the domain {domain}"
+        ));
+    }
+    let environments = report["environments"].as_array();
+    if !environments.is_some_and(|a| a.iter().all(Value::is_string)) {
+        return Err("`proofs.report.environments` is not an array of strings".into());
+    }
+    if !report["signed"].is_boolean() {
+        return Err("`proofs.report.signed` is not a boolean".into());
+    }
+    check_period(report, "proofs.report.")
+}
+
+/// `since` is the month of the earliest `period_from` among the proofs.
+fn check_since(since: &str, period_starts: &[&str]) -> Result<(), String> {
+    let earliest = period_starts.iter().min().map_or("", |d| &d[..7]);
+    if !is_month(since) || since != earliest {
+        return Err(format!(
+            "`since` {since} must be the YYYY-MM of the earliest period_from ({earliest})"
+        ));
+    }
+    Ok(())
+}
+
+fn check_no_markup(r: &Value) -> Result<(), String> {
+    let mut offenders = Vec::new();
+    markup_offenders(r, "reference", &mut offenders);
+    if offenders.is_empty() {
+        return Ok(());
+    }
+    Err(format!("markup in text fields: {offenders:?}"))
+}
+
+fn check_reference_rules(r: &Value) -> Result<(), String> {
+    for key in ["id", "name"] {
+        text(r, "", key)?;
+    }
+    let (domain, since) = (text(r, "", "domain")?, text(r, "", "since")?);
+    check_request(text(r, "", "request")?)?;
+    let proofs = r["proofs"]
+        .as_object()
+        .ok_or("`proofs` is missing or not an object")?;
+    let (card, report) = (proofs.get("card"), proofs.get("report"));
+    if card.is_none() && report.is_none() {
+        return Err("`proofs` needs a `card` or a `report`".into());
+    }
+    let mut period_starts = Vec::new();
+    if let Some(card) = card {
+        period_starts.push(check_card(card)?);
+    }
+    if let Some(report) = report {
+        period_starts.push(check_report(report, domain)?);
+    }
+    check_since(since, &period_starts)?;
+    check_no_markup(r)
+}
+
+/// Every rule a reference must obey. The error names the reference `id`.
+fn check_reference(r: &Value) -> Result<(), String> {
+    check_reference_rules(r).map_err(|rule| format!("reference `{}`: {rule}", id_of(r)))
 }
