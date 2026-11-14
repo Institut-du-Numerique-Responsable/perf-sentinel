@@ -116,9 +116,9 @@ Pick a row by what you want to add or change. The level reflects how many files 
 | Change the daemon, the streaming correlator or the TUI     | `daemon/`, `correlate/window.rs`, `crates/sentinel-cli/src/tui/`                           | Rust, async, memory budgets                                    | High   |
 | Change a share card or the disclosure schema               | `report/card/`, `report/periodic/`                                                         | Rust. Both are public contracts                                | High   |
 
-Paths without a crate prefix are under `crates/sentinel-core/src/`. The Low rows need no Rust beyond a copied entry. The [framework coverage](#framework-coverage) and [cloud provider coverage](#cloud-provider-coverage) tables show what is missing today.
+Paths that start with `crates/`, `docs/`, `tests/`, `scripts/`, `charts/` or `fuzz/` are relative to the repository root. The others, such as `detect/` or `score/`, are under `crates/sentinel-core/src/`. The Low rows need no Rust beyond a copied entry. The [framework coverage](#framework-coverage) and [cloud provider coverage](#cloud-provider-coverage) tables show what is missing today.
 
-The technologies page shows the same levels. They come from `site-data/technologies.json`, and a test keeps that file and this table in step.
+The technologies page will show the same levels. They already live in `site-data/technologies.json`, and a test keeps that file and this table in step.
 
 ### New to Rust
 
@@ -167,7 +167,7 @@ Reading notes:
 - The two **none** cells cover code that talks to the database without a recognized ORM, for example `sqlx`, Dapper, `psycopg` or `asyncpg`.
 - WebFlux falls back to the Java generic advice for SQL, which names JDBC helpers and not R2DBC.
 - The HTTP, fanout, chatty and serialized findings have a generic entry in every language.
-- **Lab** means the [simulation lab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab) runs a real application on that stack and checks its findings before each release. The `n_plus_one_sql_*` fixtures in `tests/fixtures/` are hand-written and do not count.
+- **Lab** means the [simulation lab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab) runs a real application on that stack and checks its findings. The `n_plus_one_sql_*` fixtures in `tests/fixtures/` are hand-written and do not count.
 
 To fill a cell, add an entry to `FIXES` in `detect/suggestions/fixes.rs` and a test in `detect/suggestions/tests.rs`, then update this table in the same change. Knowing the framework matters more than knowing Rust. A framework or a language that is not in the table needs a detection rule too: see the [extension path](docs/design/04-DETECTION.md#extension-path-for-contributors).
 
