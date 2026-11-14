@@ -86,6 +86,40 @@ cargo run -p perf-sentinel -- analyze --input tests/fixtures/n_plus_one_sql.json
 
 Then read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) followed by [docs/design/01-PIPELINE-AND-TYPES.md](docs/design/01-PIPELINE-AND-TYPES.md). That chapter explains the core decision (a pipeline of pure functions, no hexagonal architecture) that shapes every contribution. The [design doc index](docs/design/00-INDEX.md) maps each source file to the chapter explaining its rationale.
 
+### What to contribute, by difficulty
+
+Pick a row by what you want to add or change. The level reflects how many files move and what you need to know, not how useful the change is.
+
+- **Low**: one or two files, no knowledge of the pipeline. The Rust involved, if any, is copying an existing entry.
+- **Medium**: several files in one module, with pinned tests to update.
+- **High**: crosses modules, or touches a public contract or the carbon methodology. Open an issue first, so the design is agreed before you write code.
+
+| You want to                                                | Where                                                                                      | What you need to know                                          | Level  |
+|------------------------------------------------------------|--------------------------------------------------------------------------------------------|----------------------------------------------------------------|--------|
+| Report a trace from your stack that Perf Sentinel misreads | An issue with the capture attached, see [docs/INSTRUMENTATION.md](docs/INSTRUMENTATION.md) | Your stack                                                     | Low    |
+| Fix or clarify documentation                               | `docs/`, mirrored in `docs/FR/`                                                            | Markdown                                                       | Low    |
+| Write advice for a framework already detected              | `detect/suggestions/fixes.rs`                                                              | The framework                                                  | Low    |
+| Add a fixture from a real application                      | `tests/fixtures/`, `crates/sentinel-core/tests/e2e.rs`                                     | An instrumented application in that stack                      | Low    |
+| Add a CI template                                          | `docs/ci-templates/`, `docs/CI.md`                                                         | The CI system                                                  | Low    |
+| Get a new framework detected                               | `detect/suggestions/mod.rs`, `fixes.rs`                                                    | The OpenTelemetry scope or namespace its instrumentation emits | Medium |
+| Get a new language detected                                | Same files                                                                                 | The same, plus its database and HTTP clients                   | Medium |
+| Write advice for a message broker                          | Same files (`MessagingSystem`, `MESSAGING_FIXES`)                                          | The batching API of the broker client                          | Medium |
+| Add a cloud provider or a region                           | `scripts/refresh-carbon-data.py`, `score/carbon.rs`                                        | A published PUE and the datacenter locations, with sources     | Medium |
+| Change the HTML dashboard                                  | `report/html/html_template.html`, `crates/sentinel-cli/tests/browser/`                     | HTML, CSS, JavaScript, Playwright                              | Medium |
+| Change the Helm chart                                      | `charts/perf-sentinel/`                                                                    | Helm. Every change bumps the chart version                     | Medium |
+| Teach the SQL tokenizer a dialect construct                | `normalize/sql.rs`, `normalize/metamorphic.rs`                                             | Rust, the grammar of the dialect                               | High   |
+| Add a database engine                                      | `normalize/sql.rs`, `ingest/mod.rs`                                                        | Rust, the SQL dialect of the engine                            | High   |
+| Support a new trace format                                 | `ingest/`, `fuzz/`                                                                         | Rust, the specification of the format                          | High   |
+| Add a detector                                             | `detect/`, then every report sink                                                          | Rust, the pipeline. About a dozen files name each finding type | High   |
+| Add a grid-operator feed for a country                     | `score/grid_feed/`, `config/`, `report/periodic/`                                          | Rust, the API of the operator and its licence                  | High   |
+| Add an energy backend                                      | `score/`, one submodule per backend                                                        | Rust, the export format of the power source                    | High   |
+| Change the daemon, the streaming correlator or the TUI     | `daemon/`, `correlate/window.rs`, `crates/sentinel-cli/src/tui/`                           | Rust, async, memory budgets                                    | High   |
+| Change a share card or the disclosure schema               | `report/card/`, `report/periodic/`                                                         | Rust. Both are public contracts                                | High   |
+
+Paths without a crate prefix are under `crates/sentinel-core/src/`. The first four rows need no Rust beyond a copied entry. The [framework coverage](#framework-coverage) and [cloud provider coverage](#cloud-provider-coverage) tables show what is missing today.
+
+The technologies page shows the same levels. They come from `site-data/technologies.json`, and a test keeps that file and this table in step.
+
 ### New to Rust
 
 The batch pipeline is the approachable half of the codebase: plain ownership, no async, no elaborate trait bounds. A good reading path is `pipeline.rs` (short, wires the stages together), then one detector such as `detect/slow.rs` or `detect/redundant.rs`. Each detector is a small pure function from `Trace` to `Vec<Finding>` with its tests next to the code, so one file gives you a complete pipeline stage. [docs/design/04-DETECTION.md](docs/design/04-DETECTION.md) explains each algorithm.
@@ -100,12 +134,71 @@ The parts that reward expertise: the hand-written SQL tokenizer (`normalize/sql.
 
 Read the conventions below before your first PR: this project rejects speculative abstraction (three duplicated lines beat a premature helper, traits only at the pipeline borders), and the CI gates are strict (`clippy -D warnings`, `cognitive_complexity` denied, bounded Prometheus label sets, no outbound network calls). A PR that introduces an unneeded trait or an unbounded label value will be rejected regardless of code quality.
 
+### Framework coverage
+
+A finding always carries a generic `suggestion` line. It also carries a `suggested_fix` when the trace reveals the framework or at least the language. The table shows what ships today for the SQL and pool findings:
+
+- **specific**: advice written for that framework.
+- **generic**: the language-level fallback.
+- **none**: no `suggested_fix`, only the generic `suggestion` line.
+
+| Detected framework                                | N+1 SQL  | Redundant SQL | Slow SQL | Pool saturation | Lab     |
+|---------------------------------------------------|----------|---------------|----------|-----------------|---------|
+| JPA (Spring Data, Hibernate)                      | specific | specific      | specific | generic         | yes     |
+| Quarkus                                           | specific | specific      | specific | specific        | yes     |
+| Quarkus reactive (Mutiny)                         | specific | specific      | generic  | generic         | yes     |
+| WebFlux                                           | generic  | generic       | generic  | generic         | no      |
+| Helidon SE, Helidon MP                            | specific | generic       | generic  | generic         | yes     |
+| EF Core                                           | specific | specific      | specific | specific        | yes     |
+| Django                                            | specific | specific      | specific | generic         | yes     |
+| SQLAlchemy                                        | specific | specific      | specific | generic         | yes     |
+| Diesel                                            | specific | specific      | specific | generic         | yes     |
+| SeaORM                                            | specific | specific      | specific | generic         | yes     |
+| GORM                                              | specific | specific      | specific | generic         | no      |
+| Prisma                                            | specific | specific      | specific | generic         | yes     |
+| Active Record                                     | specific | specific      | specific | generic         | yes     |
+| Laravel (Eloquent)                                | specific | specific      | specific | specific        | yes     |
+| Doctrine                                          | specific | specific      | specific | generic         | yes     |
+| None detected, in Java, Go, Node.js, Ruby or PHP  | generic  | generic       | generic  | generic         | n/a     |
+| None detected, in C#, Python or Rust              | none     | none          | generic  | generic         | n/a     |
+
+Reading notes:
+
+- The two **none** cells cover code that talks to the database without a recognized ORM, for example `sqlx`, Dapper, `psycopg` or `asyncpg`.
+- WebFlux falls back to the Java generic advice for SQL, which names JDBC helpers and not R2DBC.
+- The HTTP, fanout, chatty and serialized findings have a generic entry in every language.
+- **Lab** means the [simulation lab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab) runs a real application on that stack and checks its findings before each release. The `n_plus_one_sql_*` fixtures in `tests/fixtures/` are hand-written and do not count.
+
+To fill a cell, add an entry to `FIXES` in `detect/suggestions/fixes.rs` and a test in `detect/suggestions/tests.rs`, then update this table in the same change. Knowing the framework matters more than knowing Rust. A framework or a language that is not in the table needs a detection rule too: see the [extension path](docs/design/04-DETECTION.md#extension-path-for-contributors).
+
+### Cloud provider coverage
+
+The carbon estimate reads three kinds of reference data per cloud provider. All of it ships embedded, each value with its source.
+
+| Provider           | PUE       | Regions           | Instance power                    |
+|--------------------|-----------|-------------------|-----------------------------------|
+| AWS                | published | yes               | yes, from Cloud Carbon Footprint  |
+| GCP                | published | yes               | yes, from Cloud Carbon Footprint  |
+| Azure              | published | yes               | yes, from Cloud Carbon Footprint  |
+| OVHcloud           | published | yes               | no                                |
+| Scaleway           | published | yes               | yes, derived from its catalog     |
+| OUTSCALE           | generic   | yes               | no                                |
+| Any other provider | generic   | country code only | no                                |
+
+Reading notes:
+
+- **published** is the fleet figure from the provider's sustainability report. **generic** is `GENERIC_PUE` in `score/carbon.rs`, used when the provider publishes none.
+- A provider outside the table is configured with a country code such as `fr` or `de`, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+- [docs/INSTANCE-TYPES.md](docs/INSTANCE-TYPES.md) explains why OVHcloud and OUTSCALE have no instance power rows.
+
+To add a provider or a region, every value needs a source a reader can check: a sustainability report for the PUE, a public list of datacenter locations for the regions. Regions on a national grid go through `scripts/refresh-carbon-data.py`, the others through `MANUAL_CARBON_ROWS` in `score/carbon.rs`. Update this table in the same change.
+
 ## Coding conventions
 
 ### Language
 
 - All code, comments, doc comments, error messages and CLI output must be in **English**.
-- French is used only in `README-FR.md`, the `docs/FR/` mirror, the `examples/FR/` dashboards and the translation table of `scripts/translate-dashboards-fr.py` that generates them.
+- French is used only in `README-FR.md`, `site-data/technologies-fr.json`, the `docs/FR/` mirror, the `examples/FR/` dashboards and the translation table of `scripts/translate-dashboards-fr.py` that generates them.
 
 ### Commit messages
 

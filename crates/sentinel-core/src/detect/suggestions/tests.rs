@@ -1411,7 +1411,8 @@ fn fix_table_cardinality_is_pinned() {
     // Snapshot of the (FindingType, Framework) table size. Bump this
     // number when adding or removing an entry, so the diff shows the
     // change instead of the public `suggested_fix` surface growing
-    // silently. Update the coverage table in CONTRIBUTING.md too.
+    // silently. Update the coverage table in CONTRIBUTING.md and
+    // site-data/technologies.json too.
     assert_eq!(FIXES.len(), 133);
     // Anchor a handful of key combinations so a swap that preserves the
     // count (drop one entry, add another) still fails the test.

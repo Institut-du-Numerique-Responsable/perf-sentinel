@@ -465,6 +465,70 @@ fn french_file_covers_every_id_and_nothing_else() {
     assert_french_rows(&en, &fr);
 }
 
+// ---- CONTRIBUTING.md -------------------------------------------------
+
+/// The level CONTRIBUTING.md prints for a `difficulty` of the data.
+fn contributing_level_name(difficulty: &str) -> Option<&'static str> {
+    match difficulty {
+        "low" => Some("Low"),
+        "medium" => Some("Medium"),
+        "high" => Some("High"),
+        _ => None,
+    }
+}
+
+/// The last cell of the table row whose first cell is exactly `row`.
+fn contributing_level<'a>(contributing: &'a str, row: &str) -> Option<&'a str> {
+    let prefix = format!("| {row}");
+    contributing.lines().find_map(|line| {
+        let cells = line.strip_prefix(&prefix)?;
+        // The first cell must end right after `row`, not run on into a longer title.
+        cells
+            .trim_start_matches(' ')
+            .starts_with('|')
+            .then_some(())?;
+        line.trim_end()
+            .strip_suffix('|')?
+            .rsplit('|')
+            .next()
+            .map(str::trim)
+    })
+}
+
+fn assert_add_link_level(family: &Value, link: &Value, contributing: &str) {
+    let (id, label) = (
+        id_of(family),
+        link["label"].as_str().unwrap_or("<no label>"),
+    );
+    let what = format!("family `{id}`, link `{label}`");
+    let row = link["contributing_row"]
+        .as_str()
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| panic!("{what}: no `contributing_row`"));
+    let difficulty = link["difficulty"].as_str().unwrap_or("<none>");
+    let expected = contributing_level_name(difficulty)
+        .unwrap_or_else(|| panic!("{what}: unknown difficulty `{difficulty}`"));
+    let level = contributing_level(contributing, row).unwrap_or_else(|| {
+        panic!("{what}: CONTRIBUTING.md has no table row starting with `| {row}`")
+    });
+    assert_eq!(
+        level, expected,
+        "{what}: CONTRIBUTING.md rates `{row}` {level}, the data says {expected}"
+    );
+}
+
+#[test]
+fn add_links_show_the_difficulty_contributing_gives() {
+    let doc = load("technologies.json");
+    let contributing = std::fs::read_to_string(workspace_path("CONTRIBUTING.md"))
+        .expect("failed to read CONTRIBUTING.md");
+    for family in families(&doc) {
+        for link in family["add"].as_array().into_iter().flatten() {
+            assert_add_link_level(family, link, &contributing);
+        }
+    }
+}
+
 // ---- references.json -------------------------------------------------
 
 /// A reference that passes every rule. The tests break one rule at a time.
