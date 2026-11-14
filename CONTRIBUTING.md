@@ -118,7 +118,7 @@ Pick a row by what you want to add or change. The level reflects how many files 
 
 Paths that start with `crates/`, `docs/`, `tests/`, `scripts/`, `charts/` or `fuzz/` are relative to the repository root. The others, such as `detect/` or `score/`, are under `crates/sentinel-core/src/`. The Low rows need no Rust beyond a copied entry. The [framework coverage](#framework-coverage) and [cloud provider coverage](#cloud-provider-coverage) sections show what is missing today.
 
-The technologies page will show the same levels. They already live in `site-data/technologies.json`, and a test keeps that file and this table in step.
+The technologies page shows the same levels. They already live in `site-data/technologies.json`, and a test keeps that file and this table in step.
 
 ### New to Rust
 
