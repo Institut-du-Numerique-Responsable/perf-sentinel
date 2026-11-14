@@ -54,8 +54,11 @@ export function header(lang, otherHref) {
     `</div></div></header>`;
 }
 
+// The outgoing-link arrow, as the technologies page draws it: inside the link, skipped by screen readers.
+export const EXT = '<span data-arrow="ext" aria-hidden="true"> ↗</span>';
+
 const col = (title, links) =>
-  `<div><div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:13px">${title}</div><div style="display:flex;flex-direction:column;gap:9px;font-size:14px;color:var(--text-2)">${links.map(([h, t]) => `<a href="${h}">${t}</a>`).join('')}</div></div>`;
+  `<div><div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:13px">${title}</div><div style="display:flex;flex-direction:column;gap:9px;font-size:14px;color:var(--text-2)">${links.map(([h, t]) => `<a href="${h}">${t}${h.startsWith('https://') ? EXT : ''}</a>`).join('')}</div></div>`;
 
 export function footer(lang) {
   const f = FT[lang];
@@ -68,7 +71,7 @@ export function footer(lang) {
     `</div>` +
     `<div style="display:flex;justify-content:space-between;gap:18px;margin-top:26px;flex-wrap:wrap;font-size:12.5px;color:var(--text-2)">` +
     `<div style="display:flex;flex-direction:column;gap:6px"><span>${f.copyright}</span><span style="display:flex;gap:14px"><a href="${LEGAL_HREF[lang]}">${f.legal}</a><a href="${PRIV_HREF[lang]}">${f.privacy}</a></span></div>` +
-    `<span>${f.credit}<a href="https://www.linkedin.com/in/gwendoline-meignen-b0224873/" target="_blank" rel="noopener" id="ftCredit">Gwendoline Meignen</a></span>` +
+    `<span>${f.credit}<a href="https://www.linkedin.com/in/gwendoline-meignen-b0224873/" target="_blank" rel="noopener" id="ftCredit">Gwendoline Meignen${EXT}</a></span>` +
     `</div></div></footer>`;
 }
 

@@ -307,7 +307,7 @@ function verdict(r, compact, n, resolver) {
     }
   }
   show(resolver ? 'level2' : 'level1', top, figures(card, compact), dns, details(card, compact, Boolean(resolver)),
-    el('div', { class: 'vf-ft' }, el('a', { href: T.methodHref, 'data-plain': true }, T.method), limitsButton()));
+    el('div', { class: 'vf-ft' }, el('a', { href: T.methodHref, 'data-plain': true }, T.method, el('span', { 'data-arrow': 'ext', 'aria-hidden': 'true' }, ' ↗')), limitsButton()));
 }
 
 // ---- inputs ----
