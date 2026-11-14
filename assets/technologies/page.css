@@ -62,6 +62,9 @@ html:not(.js) .tp .tools{display:none}
 #ci,.tp [href="#ci"]{--fc:var(--c-ci)}
 .tp .fam h2{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0;display:flex;align-items:center;gap:12px;color:var(--text)}
 .tp .fam h2 .sw{width:14px;height:14px;border-radius:4px}
+.tp .syn{margin:6px 0 0;font-size:14px;color:var(--text-2)}
+.tp .syn a{display:inline-block;font-weight:600}
+.tp .syn+table{margin-top:14px}
 .tp table{width:100%;border-collapse:collapse;margin-top:10px}
 .tp thead th,.tp thead td{font-size:12.5px;font-weight:400;color:var(--text-2);text-align:left;padding:8px 0;border-bottom:2px solid var(--fc)}
 .tp thead th.c,.tp td.c{text-align:center;width:112px}

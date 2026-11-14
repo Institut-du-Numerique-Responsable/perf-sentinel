@@ -41,6 +41,14 @@ export const COPY = {
     provenance: 'Engine {engine} · lab {lab} · built on {date}',
     months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
     referencesHref: '/references#figurer',
+    // The line under each family title: where the engine handles it, on the synoptic.
+    synopticHref: '/synoptique/?lang=en',
+    synoptic: {
+      question: 'What does this map to in the engine?',
+      stage: 'See the {stage} stage in the synoptic →',
+      map: 'See the deployments map in the synoptic →',
+      stages: { ingestion: 'Ingestion', detection: 'Detection', energy: 'Energy', carbon: 'Carbon' },
+    },
     // The references page. Data strings (names, domains, addresses) are escaped by the build.
     ref: {
       title: 'Who uses it',
@@ -116,6 +124,13 @@ export const COPY = {
     provenance: 'Moteur {engine} · labo {lab} · construit le {date}',
     months: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
     referencesHref: '/fr/references#figurer',
+    synopticHref: '/synoptique/?lang=fr',
+    synoptic: {
+      question: 'À quoi cela correspond dans le moteur&nbsp;?',
+      stage: 'Voir l’étage {stage} dans le synoptique →',
+      map: 'Voir la carte des déploiements dans le synoptique →',
+      stages: { ingestion: 'Ingestion', detection: 'Détection', energy: 'Énergie', carbon: 'Carbone' },
+    },
     ref: {
       title: 'Qui l’utilise',
       desc: 'Les organisations qui utilisent Perf Sentinel et l’ont prouvé par une carte signée ou un rapport publié, et comment figurer sur cette page.',

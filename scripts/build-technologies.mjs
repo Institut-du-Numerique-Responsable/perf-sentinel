@@ -3,7 +3,7 @@
 // engine's site-data, after checking its lab proofs against the lab:
 //   node scripts/build-technologies.mjs <engineDir> <labDir> [outDir]
 // outDir defaults to the site root. Exits 1 and writes nothing when a proof is
-// missing. The references page needs no script at all. Every technologies row is in the HTML: the page reads without JavaScript, with
+// missing or a family has no destination on the synoptic. The references page needs no script at all. Every technologies row is in the HTML: the page reads without JavaScript, with
 // every detail open. With JavaScript, page.css folds the details under html.js
 // and assets/technologies/page.js adds the toggles, the search and the filters.
 import { execFileSync } from 'node:child_process';
@@ -43,6 +43,25 @@ const PLUS = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 
 const CHEVRON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5l4.5 4.5L6 12.5"/></svg>';
 const SEARCH = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>';
 const DIFFICULTY = { low: 'df-f', medium: 'df-m', high: 'df-e' };
+
+// Where the engine handles each family, on the synoptic (/synoptique/): the hash of the
+// deep link and the key of COPY.<lang>.synoptic.stages, null for the deployments map.
+const SYNOPTIC = {
+  frameworks: ['#niveau=core&mode=cli&etage=4', 'detection'],
+  databases: ['#niveau=core&mode=cli&etage=1', 'ingestion'],
+  brokers: ['#niveau=core&mode=cli&etage=4', 'detection'],
+  traces: ['#niveau=core&mode=daemon&etage=1', 'ingestion'],
+  clouds: ['#niveau=core&mode=cli&etage=7', 'carbon'],
+  energy: ['#niveau=core&mode=cli&etage=6', 'energy'],
+  grids: ['#niveau=core&mode=cli&etage=7', 'carbon'],
+  ci: ['#niveau=carte&mode=cli', null],
+};
+
+// A new family in the data must get an explicit destination: the build stops without one.
+function synopticOf(id) {
+  if (!Object.hasOwn(SYNOPTIC, id)) throw new Error(`family ${id}: no destination on the synoptic, add it to SYNOPTIC in scripts/build-technologies.mjs`);
+  return SYNOPTIC[id];
+}
 
 // A language logo, with its dark twin when assets/logos has one. Decorative: the title follows.
 function logo(name) {
@@ -104,8 +123,10 @@ function familyHtml(family, teams, t) {
     ? family.groups.map((g) => `<tbody><tr class="grp"><th colspan="${cols}" scope="rowgroup"><span>${logo(g.logo)}${esc(g.title)}</span></th></tr>` +
       family.rows.filter((r) => r.group === g.id).map((r) => rowHtml(family, r, g, teams, t)).join('') + '</tbody>').join('')
     : '<tbody>' + family.rows.map((r) => rowHtml(family, r, null, teams, t)).join('') + '</tbody>';
+  const [hash, stage] = synopticOf(family.id);
+  const syn = `<p class="syn">${t.synoptic.question} <a href="${esc(t.synopticHref + hash)}">${stage ? fill(t.synoptic.stage, { stage: t.synoptic.stages[stage] }) : t.synoptic.map}</a></p>`;
   const add = family.add.map((a) => `<a href="${CONTRIBUTING}">${PLUS}${esc(a.label)}</a><span>${t.difficulty} <b class="${DIFFICULTY[a.difficulty]}">${t.difficulties[a.difficulty]}</b></span>`).join('');
-  return `<section class="fam" id="${esc(family.id)}"><h2 id="h-${esc(family.id)}"><span class="sw" aria-hidden="true"></span>${esc(family.title)}</h2>` +
+  return `<section class="fam" id="${esc(family.id)}"><h2 id="h-${esc(family.id)}"><span class="sw" aria-hidden="true"></span>${esc(family.title)}</h2>${syn}` +
     `<table class="${family.groups ? '' : 'flat'}${family.extra_column ? ' tx' : ''}" aria-labelledby="h-${esc(family.id)}">${head}${body}</table>` +
     (family.after ? `<p class="after">${esc(family.after)}</p>` : '') +
     (add ? `<p class="add">${add}</p>` : '') + '</section>';
@@ -208,6 +229,11 @@ function main([engineDir, labDir, outDir = SITE]) {
   }
   const data = loadSiteData(engineDir);
   const errors = labErrors(data.technologies, labDir);
+  try {
+    for (const { id } of data.technologies.families) synopticOf(id);
+  } catch (e) {
+    errors.push(e.message);
+  }
   if (errors.length) {
     console.error(`build-technologies: no page written\n${errors.join('\n')}`);
     process.exit(1);

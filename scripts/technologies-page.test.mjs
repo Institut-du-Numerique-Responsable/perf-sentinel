@@ -269,6 +269,8 @@ test('without JavaScript every note and add link is visible', async () => {
       assert.equal(add, 9);
       assert.equal(await page.locator('.add a:visible').count(), add);
       assert.equal(await page.locator('#grids .after:visible').count(), 1);
+      assert.equal(await page.locator('.fam .syn:visible').count(), IDS.length, 'the synoptic line of every family');
+      assert.equal(await page.locator('.fam .syn a:visible').count(), IDS.length);
     } finally { await close(); }
   }
 });
@@ -283,14 +285,103 @@ test('no horizontal scroll at 390px, grid table included', async () => {
           page: document.documentElement.scrollWidth,
           grids: document.querySelector('#grids table').getBoundingClientRect().right,
           cells: Math.max(...[...document.querySelectorAll('#grids td, #grids th')].map((c) => c.getBoundingClientRect().right)),
+          syn: Math.max(...[...document.querySelectorAll('.syn, .syn a')].map((c) => c.getBoundingClientRect().right)),
         }));
         assert.ok(widths.page <= 390, `${path} js=${javaScriptEnabled}: page ${widths.page}`);
         assert.ok(widths.grids <= 390, `${path} js=${javaScriptEnabled}: grids table ${widths.grids}`);
         assert.ok(widths.cells <= 390, `${path} js=${javaScriptEnabled}: grids cell ${widths.cells}`);
+        assert.ok(widths.syn <= 390, `${path} js=${javaScriptEnabled}: synoptic line ${widths.syn}`);
+        // The link wraps under the question, whole.
+        for (const id of IDS) {
+          const [line, link] = await page.evaluate((i) => {
+            const p = document.querySelector(`#${i} > .syn`);
+            return [p.getBoundingClientRect(), p.querySelector('a').getBoundingClientRect()];
+          }, id);
+          assert.ok(link.top >= line.top + 20, `${path} js=${javaScriptEnabled}: ${id} link on the line of the question`);
+        }
         assert.equal(await page.isVisible('#grids td.x >> nth=0'), true, 'the country column stays');
       } finally { await close(); }
     }
   }
+});
+
+// Where the engine handles each family on the synoptic: the hash, then the stage name in English and in French.
+const DETECTION = ['#niveau=core&mode=cli&etage=4', 'Detection', 'Détection'];
+const INGESTION = ['#niveau=core&mode=cli&etage=1', 'Ingestion', 'Ingestion'];
+const CARBON = ['#niveau=core&mode=cli&etage=7', 'Carbon', 'Carbone'];
+const SYNOPTIC = {
+  frameworks: DETECTION,
+  databases: INGESTION,
+  brokers: DETECTION,
+  traces: ['#niveau=core&mode=daemon&etage=1', 'Ingestion', 'Ingestion'],
+  clouds: CARBON,
+  energy: ['#niveau=core&mode=cli&etage=6', 'Energy', 'Énergie'],
+  grids: CARBON,
+  ci: ['#niveau=carte&mode=cli'],
+};
+const QUESTION = { en: 'What does this map to in the engine?', fr: 'À quoi cela correspond dans le moteur ?' };
+const synoptic = (lang, id) => {
+  const [hash, en, fr] = SYNOPTIC[id];
+  const text = hash.includes('carte')
+    ? { en: 'See the deployments map in the synoptic →', fr: 'Voir la carte des déploiements dans le synoptique →' }[lang]
+    : lang === 'en' ? `See the ${en} stage in the synoptic →` : `Voir l’étage ${fr} dans le synoptique →`;
+  return { href: `/synoptique/?lang=${lang}${hash}`, text };
+};
+
+test('each family links to its stage of the synoptic, in both languages', async () => {
+  for (const [lang, path] of [['en', '/technologies'], ['fr', '/fr/technologies']]) {
+    const raw = await (await fetch(server.url + path)).text();
+    const { page, close } = await open(path);
+    try {
+      assert.equal(await count(page, 'section.fam > h2 + p.syn + table'), IDS.length, 'the line sits between the title and the table');
+      assert.equal(await count(page, 'section.fam .syn'), IDS.length);
+      assert.equal(await count(page, 'section.fam .syn a'), IDS.length);
+      for (const id of IDS) {
+        const { href, text } = synoptic(lang, id);
+        assert.ok(raw.includes(`href="${href.replaceAll('&', '&amp;')}"`), `${id}: the & of the hash are written &amp;`);
+        const line = page.locator(`#${id} > .syn`);
+        assert.equal(await line.locator('a').getAttribute('href'), href, id);
+        assert.equal(await line.locator('a').textContent(), text, id);
+        assert.equal((await line.textContent()).trim(), `${QUESTION[lang]} ${text}`, `${id}: the question precedes the link`);
+      }
+      // 14px in the secondary text colour, the link in the accent at weight 600.
+      const line = page.locator('#frameworks > .syn');
+      assert.equal(await computed(line, 'fontSize'), '14px');
+      assert.equal(await computed(line, 'color'), await computed(page.locator('.legend span').first(), 'color'));
+      assert.equal(await computed(line.locator('a'), 'fontWeight'), '600');
+      assert.notEqual(await computed(line.locator('a'), 'color'), await computed(line, 'color'));
+      // The line goes with its family when the search or the production filter hides it.
+      await search(page, 'kotlin');
+      assert.equal(await page.locator('.syn:visible').count(), 1);
+      assert.equal(await page.locator('#frameworks > .syn').isVisible(), true);
+      await search(page, '');
+      await page.click('#tp-prod');
+      assert.equal(await page.locator('.syn:visible').count(), await visibleFamilies(page));
+      assert.equal(await page.locator('#grids > .syn').isVisible(), false, 'no ringed row in the grids');
+    } finally { await close(); }
+  }
+});
+
+test('the build refuses a family without a synoptic destination', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'technologies-build-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const engine = join(root, 'engine');
+  const lab = join(root, 'lab');
+  const out = join(root, 'out');
+  for (const d of [join(engine, 'site-data'), lab, out]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(engine, 'Cargo.toml'), '[workspace.package]\nversion = "9.9.9"\n');
+  // No lab proof is cited: the lab check passes, the missing destination is the only reason to stop.
+  writeFileSync(join(engine, 'site-data', 'technologies.json'), JSON.stringify({
+    teams: [],
+    families: [{ id: 'newfamily', title: 'New', row_header: 'Technology', extra_column: null, criteria: ['Proven'], lab_criterion: null, after: null, add: [], rows: [{ id: 'x', name: 'X', criteria: [true], lab: [] }] }],
+  }));
+  writeFileSync(join(engine, 'site-data', 'technologies-fr.json'), '{}');
+  writeFileSync(join(engine, 'site-data', 'references.json'), '{"references":[]}');
+  writeFileSync(join(lab, 'Makefile'), 'verify-all-scenarios:\n\t@for s in none; do echo $$s; done\n');
+  const run = spawnSync(process.execPath, [join(SITE, 'scripts', 'build-technologies.mjs'), engine, lab, out], { encoding: 'utf8' });
+  assert.equal(run.status, 1, run.stderr);
+  assert.match(run.stderr, /newfamily/);
+  assert.deepEqual(readdirSync(out), []);
 });
 
 test('no third-party request is made', async () => {
