@@ -80,10 +80,11 @@ html:not(.js) .tp .tools{display:none}
 .tp td.chev{width:26px;text-align:right}
 .tp td.chev svg{width:14px;height:14px;stroke:var(--text-2);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:transform .18s cubic-bezier(.2,.8,.2,1)}
 html:not(.js) .tp td.chev svg{display:none}
-.tp tr.row:has([aria-expanded="true"]) td.chev svg{transform:rotate(90deg)}
-.js .tp tr.row:has([aria-expanded="true"]) :is(td,th){border-bottom-color:transparent}
+.tp tr.row.open td.chev svg{transform:rotate(90deg)}
+.js .tp tr.row.open td,.js .tp tr.row.open th{border-bottom-color:transparent}
+/* Plain selectors only: a browser that cannot run page.js drops html.js, and every detail stays open. */
 html.js .tp tr.det{display:none}
-html.js .tp tr.row:not([hidden]):has([aria-expanded="true"])+tr.det{display:table-row}
+html.js .tp tr.row.open:not([hidden])+tr.det{display:table-row}
 .tp tr.det td{padding:2px 0 20px 38px;font-size:14.5px;color:var(--text-2)}
 .tp table.flat tr.det td{padding-left:0}
 .tp .det p{margin:0 0 8px;max-width:64ch}
@@ -110,6 +111,7 @@ html.js .tp tr.row:not([hidden]):has([aria-expanded="true"])+tr.det{display:tabl
 .tp .none{padding:44px 0;max-width:60ch}
 .tp .none h2{font-size:22px;font-weight:600;margin:0 0 8px;color:var(--text);overflow-wrap:anywhere}
 .tp .none p{color:var(--text-2);margin:0 0 14px}
+.tp .none-prod{padding:44px 0 0;margin:0;color:var(--text-2)}
 .tp .foot{grid-column:2;margin:52px 0 0;padding-top:16px;border-top:1px solid var(--line-strong);font:12px/1.5 'JetBrains Mono',ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums;color:var(--text-2)}
 
 @media (max-width:960px){

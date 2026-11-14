@@ -139,22 +139,32 @@ test('a row expands with click, Enter and Space', async () => {
   } finally { await close(); }
 });
 
-test('the details fold before the page script runs, never painted open', async () => {
-  const context = await browser.newContext();
+test('the details fold without a flash, and stay reachable when the script cannot run', async () => {
+  // page.js held back: until it runs, html.js and page.css alone keep every detail folded.
+  let release;
+  const held = new Promise((r) => { release = r; });
+  const slow = await browser.newContext();
   try {
-    // page.js never arrives: the inline html.js and page.css alone must fold every detail.
-    await context.route('**/assets/technologies/page.js', (route) => route.abort());
-    const page = await context.newPage();
-    await page.goto(server.url + '/technologies');
+    await slow.route('**/assets/technologies/page.js', async (route) => { await held; await route.fallback(); });
+    const page = await slow.newPage();
+    await page.goto(server.url + '/technologies', { waitUntil: 'commit' });
+    await page.waitForSelector('#ci tr.det', { state: 'attached' });
     assert.equal(await page.evaluate(() => document.documentElement.classList.contains('js')), true);
+    assert.equal(await page.locator('tr.det:visible').count(), 0, 'no detail painted open before the script');
+    release();
+    await page.waitForFunction((n) => document.querySelectorAll('tr.row button[aria-expanded="false"]').length === n, ROWS);
     assert.equal(await page.locator('tr.det:visible').count(), 0);
-    assert.equal(await count(page, 'tr.row button[aria-expanded]'), 0, 'no state claimed before the script owns it');
-  } finally { await context.close(); }
-  const { page, close } = await open('/technologies');
+  } finally { release(); await slow.close(); }
+  // page.js fails to load: html.js goes, every detail is open again.
+  const broken = await browser.newContext();
   try {
-    assert.equal(await count(page, 'tr.row button[aria-expanded="false"]'), ROWS);
-    assert.equal(await page.locator('tr.det:visible').count(), 0);
-  } finally { await close(); }
+    await broken.route('**/assets/technologies/page.js', (route) => route.abort());
+    const page = await broken.newPage();
+    await page.goto(server.url + '/technologies');
+    await page.waitForFunction(() => !document.documentElement.classList.contains('js'));
+    assert.equal(await page.locator('tr.det:visible').count(), ROWS);
+    assert.equal(await count(page, 'tr.row button[aria-expanded]'), 0, 'no state claimed when the script never ran');
+  } finally { await broken.close(); }
 });
 
 test('each detail links to what is missing, and only that', async () => {
@@ -200,6 +210,23 @@ test('the production filter keeps only ringed rows', async () => {
     assert.deepEqual(await names(), PRODUCTION);
     await search(page, 'postgres');
     assert.deepEqual(await names(), ['PostgreSQL']);
+    assert.equal(await page.isVisible('#tp-none-prod'), false);
+    // A technology that exists, outside production: not "not recognized".
+    await search(page, 'django');
+    assert.deepEqual(await names(), []);
+    assert.equal(await page.isVisible('#tp-none'), false);
+    assert.equal(await page.isVisible('#tp-none-prod'), true);
+    assert.equal(await page.textContent('#tp-none-prod'), 'None of these technologies is used in production yet.');
+    // A search that matches nothing at all, filter on: "not recognized", no production line.
+    await search(page, 'erlang');
+    assert.equal(await page.isVisible('#tp-none'), true);
+    assert.equal(await page.isVisible('#tp-none-prod'), false);
+    assert.match(await page.textContent('#tp-none h2'), /“erlang” is not recognized yet/);
+    // Filter off again: django is there.
+    await search(page, 'django');
+    await page.click('#tp-prod');
+    assert.deepEqual(await names(), ['Django']);
+    assert.equal(await page.isVisible('#tp-none-prod'), false);
   } finally { await close(); }
 });
 

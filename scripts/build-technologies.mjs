@@ -121,9 +121,12 @@ export function technologiesMain(data, lang, provenance) {
     `<section class="legend" aria-label="${t.legendLabel}">${legend}</section>` +
     `<nav class="tp-rail" aria-label="${t.railLabel}">${families.map((f) => `<a href="#${esc(f.id)}"><span class="sw"></span><b>${esc(f.title)}</b></a>`).join('')}</nav>` +
     `<div class="fams">${families.map((f) => familyHtml(f, teams, t)).join('')}` +
-    `<section class="none" id="tp-none" hidden><h2></h2><p>${t.notFoundText}</p><a href="${CONTRIBUTING}">${t.contribute}</a></section></div>` +
+    `<section class="none" id="tp-none" hidden><h2></h2><p>${t.notFoundText}</p><a href="${CONTRIBUTING}">${t.contribute}</a></section>` +
+    `<p class="none-prod" id="tp-none-prod" hidden>${t.noneInProduction}</p></div>` +
     `<p class="foot">${fill(t.provenance, { engine: esc(provenance.engine), lab: esc(provenance.lab), date: `${d.getDate()} ${t.months[d.getMonth()]} ${d.getFullYear()}` })}</p>` +
-    `<script type="module" src="/assets/technologies/page.js"></script>`;
+    // When the module cannot run (no module support, or it failed to load), html.js goes and every detail stays open.
+    `<script type="module" src="/assets/technologies/page.js" onerror="document.documentElement.classList.remove('js')"></script>` +
+    `<script nomodule>document.documentElement.classList.remove('js')</script>`;
 }
 
 // The js class lands before the body paints, so page.css folds the details without a flash.

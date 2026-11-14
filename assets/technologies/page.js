@@ -1,7 +1,8 @@
 // Behaviour of the technologies page. Every row and its detail ship in the HTML.
 // An inline script in <head> sets html.js, under which page.css shows a detail only
-// when its row's button says aria-expanded="true". This script owns that state,
-// then adds the search, the production filter (#production) and the scroll rail.
+// when its row carries the open class. This script owns that state and the
+// button's aria-expanded, then adds the search, the production filter
+// (#production) and the scroll rail.
 import { COPY } from './copy.js';
 
 const t = COPY[document.documentElement.lang === 'fr' ? 'fr' : 'en'];
@@ -9,11 +10,15 @@ const t = COPY[document.documentElement.lang === 'fr' ? 'fr' : 'en'];
 const q = document.getElementById('tp-q');
 const prod = document.getElementById('tp-prod');
 const none = document.getElementById('tp-none');
+const noneProd = document.getElementById('tp-none-prod');
 const families = [...document.querySelectorAll('section.fam')];
 const rows = [...document.querySelectorAll('tr.row')];
 const expanded = (row) => row.querySelector('button').getAttribute('aria-expanded') === 'true';
 
-const setOpen = (row, open) => row.querySelector('button').setAttribute('aria-expanded', String(open));
+function setOpen(row, open) {
+  row.querySelector('button').setAttribute('aria-expanded', String(open));
+  row.classList.toggle('open', open);
+}
 for (const row of rows) setOpen(row, false);
 
 // The whole row toggles; Enter and Space reach the same path through the button's click.
@@ -26,12 +31,15 @@ function filter() {
   const s = q.value.trim().toLowerCase();
   const onlyProd = prod.getAttribute('aria-pressed') === 'true';
   let any = 0;
+  let found = 0;
   for (const fam of families) {
     let n = 0;
     for (const tbody of fam.querySelectorAll('tbody')) {
       let m = 0;
       for (const row of tbody.querySelectorAll('tr.row')) {
-        row.hidden = !(row.dataset.h.includes(s) && (!onlyProd || row.hasAttribute('data-prod')));
+        const hit = row.dataset.h.includes(s);
+        found += hit;
+        row.hidden = !(hit && (!onlyProd || row.hasAttribute('data-prod')));
         m += !row.hidden;
       }
       const grp = tbody.querySelector('tr.grp');
@@ -41,8 +49,10 @@ function filter() {
     fam.hidden = !n;
     any += n;
   }
-  none.hidden = any > 0;
-  if (!any) none.querySelector('h2').textContent = t.notFound.replace('{q}', () => q.value.trim());
+  // "Not recognized" comes from the search alone: the filter only narrows what exists.
+  none.hidden = found > 0;
+  if (!found) none.querySelector('h2').textContent = t.notFound.replace('{q}', () => q.value.trim());
+  noneProd.hidden = !(found && !any);
   onScroll();
 }
 
