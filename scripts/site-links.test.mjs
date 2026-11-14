@@ -233,8 +233,7 @@ test('the four footers carry the same three new links, in both languages', async
   }
 });
 
-// shortcut: todo while the reference docs are not regenerated (engine main has moved), drop the todo with that commit.
-test('the reference docs footer matches the home footer', { todo: 'reference docs held back, see task-7b-report.md' }, async () => {
+test('the reference docs footer matches the home footer', async () => {
   for (const [lang, t] of LANGS) {
     assert.deepEqual(await footerCols(FT[lang].doc), await footerCols(t.home), `${FT[lang].doc}: footer columns match the home page`);
   }
