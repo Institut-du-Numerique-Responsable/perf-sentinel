@@ -81,6 +81,8 @@ test('an empty list shows the empty state and the request button', async () => {
       assert.equal(await page.locator('dl.proofs + .limit').count(), 1, 'the limit sentence follows the entries');
       const text = await page.textContent('main');
       assert.ok(!/sans preuve|no proof/i.test(text), 'an anonymous team sends a proof too');
+      assert.ok(!/organiz/i.test(text + await page.getAttribute('meta[name="description"]', 'content')), 'organisation, as on the rest of the site');
+      if (lang === 'en') assert.ok(text.includes('These documents show that Perf Sentinel is used, not what it achieved. None of them is an audit'), 'the limit sentence');
     } finally { await close(); }
   }
   for (const [lang] of LANGS) {
@@ -177,7 +179,8 @@ test('a listed organisation shows its proofs and verify links', async () => {
 
 test('the anonymous line counts teams and links to the production filter', async () => {
   const cases = [
-    ['en', [{ id: 'a', since: '2026-06' }, { id: 'b', since: '2025-11' }], ['2 teams', 'November 2025']],
+    ['en', [{ id: 'a', since: '2026-06' }, { id: 'b', since: '2025-11' }], ['2 unnamed teams have also been using Perf Sentinel in production since November 2025.']],
+    ['en', TEAMS, ['An unnamed team has also been using Perf Sentinel in production since June 2026.']],
     ['fr', [{ id: 'a', since: '2026-06' }, { id: 'b', since: '2025-11' }], ['2 équipes', 'novembre 2025']],
     ['fr', TEAMS, ['Une équipe', 'juin 2026']],
   ];

@@ -82,6 +82,10 @@ test('renders one section per family, in order, in both languages', async () => 
       assert.deepEqual(sections, IDS.map((id, i) => [id, FAMILIES[lang][i]]));
       assert.equal(await count(page, 'tr.row'), EXPECT.rows);
       assert.equal(await count(page, 'section.fam table'), IDS.length);
+      if (lang === 'en') {
+        const legend = await page.textContent('.legend');
+        for (const s of ['Recognized, with dedicated advice, and proven on a real application in the simulation lab.', 'This mark can appear with any level.']) assert.ok(legend.includes(s), s);
+      }
       const rail = await page.$$eval('.tp-rail a', (els) => els.map((a) => a.getAttribute('href')));
       assert.deepEqual(rail, IDS.map((id) => '#' + id));
     } finally { await close(); }
@@ -276,7 +280,7 @@ test('each detail links to what is missing, and only that', async () => {
   const LAB = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab';
   const CONTRIBUTING = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/CONTRIBUTING.md#what-to-contribute-by-difficulty';
   const links = (id) => page.$$eval(`#${id} .lk a`, (els) => els.map((a) => [a.textContent, a.getAttribute('href')]));
-  const report = ['Report a production use', '/references#figurer'];
+  const report = ['Report production use', '/references#figurer'];
   try {
     // Complete: nothing to contribute, its proof.
     assert.deepEqual(await links('d-frameworks-django'), [['See the lab', `${LAB}/tree/main/services/django-svc`], report]);
