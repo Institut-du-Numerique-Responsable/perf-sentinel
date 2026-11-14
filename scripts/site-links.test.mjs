@@ -46,6 +46,8 @@ async function open(path, { viewport = { width: 1280, height: 900 }, depth, wait
   // Label of a link without its arrow, for the in-page checks.
   await context.addInitScript(() => { window.__label = (a) => a.textContent.replace(/[→↗▸]/g, '').replace(/\s+/g, ' ').trim(); });
   if (depth) await context.addInitScript((d) => { try { localStorage.setItem('ps-depth', d); } catch { /* default depth then */ } }, depth);
+  // The synoptic's first-visit invitation covers part of the page.
+  await context.addInitScript(() => { try { localStorage.setItem('ps-tour-seen', '1'); } catch { /* the invitation shows then */ } });
   await context.route('**/*', (route) => (new URL(route.request().url()).hostname === '127.0.0.1' ? route.fallback() : route.abort()));
   context.setDefaultTimeout(10000);
   const page = await context.newPage();
@@ -273,5 +275,118 @@ test('the guide says its list also leads to the technologies table', async () =>
     try {
       assert.equal(await page.evaluate(() => document.querySelector('#dc-root #docs > p').textContent.trim()), intro[lang], `${t.guide}: #docs intro`);
     } finally { await close(); }
+  }
+});
+
+// The synoptic: a stage of the core level lists its technology families under « Dans le code ».
+const SY = {
+  fr: { label: 'Technologies prises en charge à cet étage :', base: '/fr/technologies', dialog: 'Les technologies prises en charge, et celles à ajouter', guide: 'Le guide de contribution',
+    fam: { traces: 'Sources de traces', databases: 'Bases de données', frameworks: 'Frameworks et ORM', brokers: 'Brokers', energy: 'Mesure d’énergie', clouds: 'Clouds', grids: 'Réseaux électriques' } },
+  en: { label: 'Technologies supported at this stage:', base: '/technologies', dialog: 'Supported technologies, and the ones to add', guide: 'The contribution guide',
+    fam: { traces: 'Trace sources', databases: 'Databases', frameworks: 'Frameworks and ORMs', brokers: 'Brokers', energy: 'Energy measurement', clouds: 'Clouds', grids: 'Electricity grids' } },
+};
+const STAGE_FAMS = { 1: ['traces', 'databases'], 4: ['frameworks', 'brokers'], 6: ['energy'], 7: ['clouds', 'grids'] };
+
+const waitStage = (page, n) => page.waitForFunction((n) => document.querySelector('#cn')?.textContent.includes(`0${n} /`) && document.querySelector('#csrc a'), n);
+async function openStage(lang, n, viewport) {
+  const s = await open(`/synoptique/?lang=${lang}#niveau=core&mode=cli&etage=${n}`, { viewport, wait: '#csrc a' });
+  await waitStage(s.page, n);
+  return s;
+}
+// The element right after the « Dans le code » line, null when there is none.
+const techLine = (page) => page.evaluate(() => {
+  const p = document.querySelector('#csrc').nextElementSibling;
+  if (!p) return null;
+  const a0 = p.querySelector('a');
+  return {
+    text: p.textContent.replace(/\s+/g, ' ').trim(),
+    links: [...p.querySelectorAll('a')].map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href'), target: a.getAttribute('target') })),
+    underline: a0 && getComputedStyle(a0).textDecorationLine,
+    height: p.getBoundingClientRect().height,
+  };
+});
+const expectLine = (got, lang, n, where) => {
+  const t = SY[lang], fams = STAGE_FAMS[n];
+  assert.ok(got, `${where}: no technologies line`);
+  assert.deepEqual(got.links, fams.map((f) => ({ text: t.fam[f], href: `${t.base}#${f}`, target: null })), `${where}: links`);
+  assert.equal(got.text, `${t.label} ${fams.map((f) => t.fam[f]).join(' · ')}`, `${where}: line text`);
+};
+
+test('a stage of the synoptic links to its technology families', async () => {
+  for (const lang of ['fr', 'en']) {
+    for (const n of Object.keys(STAGE_FAMS).map(Number)) {
+      const { page, close } = await openStage(lang, n);
+      try {
+        const got = await techLine(page);
+        expectLine(got, lang, n, `${lang} stage ${n}`);
+        assert.equal(got.underline, 'underline', `${lang} stage ${n}: links underlined`);
+        assert.ok(got.height < 30, `${lang} stage ${n}: one line at 1280px (${got.height}px)`);
+      } finally { await close(); }
+    }
+  }
+});
+
+test('a stage without a family shows no technologies line', async () => {
+  for (const lang of ['fr', 'en']) {
+    for (const n of [2, 3, 5, 8]) {
+      const { page, close } = await openStage(lang, n);
+      try {
+        assert.equal(await techLine(page), null, `${lang} stage ${n}`);
+      } finally { await close(); }
+    }
+  }
+});
+
+test('the line follows the stage and the language', async () => {
+  const { page, close } = await openStage('fr', 4);
+  // A port leads to the next or previous stage; the new ports arrive once the panel has faded in.
+  const go = async (side, n) => {
+    await page.click(`#cab .cport.${side}.nav`);
+    await waitStage(page, n);
+    await page.waitForFunction((n) => document.querySelector('#cab .cport.r')?.textContent.includes(`0${n + 1}`), n);
+  };
+  try {
+    expectLine(await techLine(page), 'fr', 4, 'fr stage 4');
+    await go('r', 5);
+    assert.equal(await techLine(page), null, 'fr stage 5 after stage 4: no stale line');
+    await go('r', 6);
+    expectLine(await techLine(page), 'fr', 6, 'fr stage 6 after stage 5');
+    for (const n of [5, 4, 3, 2]) await go('l', n);
+    assert.equal(await techLine(page), null, 'fr stage 2 after stage 3: no stale line');
+    await go('l', 1);
+    expectLine(await techLine(page), 'fr', 1, 'fr stage 1 after stage 2');
+    await Promise.all([page.waitForNavigation(), page.click('#langB')]);
+    await waitStage(page, 1);
+    expectLine(await techLine(page), 'en', 1, 'stage 1 after switching to English');
+  } finally { await close(); }
+});
+
+test('the contribution dialog of the synoptic links to the technologies page', async () => {
+  for (const lang of ['fr', 'en']) {
+    const { page, close } = await openStage(lang, 4);
+    try {
+      await page.click('#csrc .csrc-c');
+      await page.waitForSelector('#contrib[open]');
+      const items = await page.$$eval('#contrib li a', (as) => as.map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href'), target: a.getAttribute('target') })));
+      const i = items.findIndex((a) => a.text === SY[lang].guide);
+      assert.ok(i >= 0, `${lang}: no contribution guide in the dialog`);
+      assert.deepEqual(items[i + 1], { text: SY[lang].dialog, href: SY[lang].base, target: null }, `${lang}: technologies link after the guide`);
+      assert.ok(await page.locator(`#contrib a[href="${SY[lang].base}"]`).isVisible(), `${lang}: link visible`);
+    } finally { await close(); }
+  }
+});
+
+test('no horizontal scroll at 390px on an open stage of the synoptic', async () => {
+  for (const lang of ['fr', 'en']) {
+    for (const n of Object.keys(STAGE_FAMS).map(Number)) {
+      const { page, close } = await openStage(lang, n, { width: 390, height: 844 });
+      try {
+        assert.ok(await techLine(page), `${lang} stage ${n}: line at 390px`);
+        const [sw, cw, right] = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth,
+          Math.max(...[...document.querySelector('#csrc').nextElementSibling.querySelectorAll('*')].map((e) => e.getBoundingClientRect().right))]);
+        assert.ok(sw <= cw, `${lang} stage ${n}: ${sw} > ${cw}`);
+        assert.ok(right <= cw, `${lang} stage ${n}: line overflows (${right} > ${cw})`);
+      } finally { await close(); }
+    }
   }
 });
