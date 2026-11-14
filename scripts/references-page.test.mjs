@@ -58,6 +58,12 @@ const FILLED = [
     request: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/126',
     proofs: { report: { url: 'https://exemple-transport.fr/r.json', period_from: '2026-08-01', period_to: '2026-08-31', environments: [], signed: true } },
   },
+  {
+    // No environments key at all, not an empty list.
+    id: 'exemple-sante', name: 'Exemple Santé', domain: 'exemple-sante.fr', since: '2026-08',
+    request: 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/127',
+    proofs: { report: { url: 'https://exemple-sante.fr/r.json', period_from: '2026-08-01', period_to: '2026-08-31', signed: true } },
+  },
 ];
 const LINKS = FILLED.flatMap((r) => [r.proofs.card?.verify_url, r.proofs.report?.url].filter(Boolean));
 const TEAMS = [{ id: 't1', since: '2026-06' }];
@@ -162,6 +168,8 @@ test('a listed organisation shows its proofs and verify links', async () => {
       assert.ok(details[0].includes(lang === 'fr' ? 'septembre 2026' : 'September 2026'), details[0]);
       assert.ok(details[1].includes(lang === 'fr' ? 'd’octobre 2026' : 'October 2026'), details[1]);
       assert.ok(!/undefined|environ/.test(details[3]), `no environments, no mention: ${details[3]}`);
+      assert.ok(!/undefined|environ/.test(details[4]), `environments absent, no mention: ${details[4]}`);
+      assert.ok(details[4].includes(lang === 'fr' ? 'août 2026' : 'August 2026'), details[4]);
       assert.deepEqual(dialogs, []);
     } finally { await close(); }
   }

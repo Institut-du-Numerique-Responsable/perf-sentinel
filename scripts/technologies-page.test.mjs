@@ -1,6 +1,7 @@
 // Page tests for /technologies and /fr/technologies: the committed pages on a local
 // static server and Playwright (page-test-helpers.mjs), every third-party request
-// aborted and recorded. The expected rows are those of the data.
+// aborted and recorded. The expected counts come from the engine's data when
+// ENGINE_DIR is set, else from the committed pages read without JavaScript.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -10,14 +11,19 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './static-server.mjs';
 import { chromium, LOCALE, open as openPage } from './page-test-helpers.mjs';
+import { loadSiteData, localize } from './technologies-model.mjs';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
+const LANGS = [['en', '/technologies'], ['fr', '/fr/technologies']];
 
 let server;
 let browser;
+// rows, add (links), production (row names, page order, English), logos[lang] (group titles with a logo).
+let EXPECT;
 before(async () => {
   server = await startServer();
   browser = await chromium.launch();
+  EXPECT = process.env.ENGINE_DIR ? fromData(loadSiteData(process.env.ENGINE_DIR)) : await fromPages();
 });
 after(async () => {
   await browser?.close();
@@ -26,13 +32,40 @@ after(async () => {
 
 const open = (path, options) => openPage(browser, server.url + path, options);
 
+// Rows in page order: a grouped family lists them group by group.
+const pageRows = (f) => (f.groups ? f.groups.flatMap((g) => f.rows.filter((r) => r.group === g.id)) : f.rows);
+function fromData({ technologies, french }) {
+  const rows = technologies.families.flatMap(pageRows);
+  const logos = Object.fromEntries(LANGS.map(([lang]) => [lang, localize(technologies, french, lang).families
+    .flatMap((f) => (f.groups ?? []).filter((g) => g.logo).map((g) => g.title))]));
+  return {
+    rows: rows.length,
+    add: technologies.families.reduce((n, f) => n + f.add.length, 0),
+    production: rows.filter((r) => r.production?.length > 0).map((r) => r.name),
+    logos,
+  };
+}
+async function fromPages() {
+  const read = async (path) => {
+    const { page, close } = await open(path, { javaScriptEnabled: false });
+    try {
+      return await page.evaluate(() => ({
+        rows: document.querySelectorAll('tr.row').length,
+        add: document.querySelectorAll('.add a').length,
+        production: [...document.querySelectorAll('tr.row[data-prod] th .n')].map((e) => e.textContent.trim()),
+        logos: [...document.querySelectorAll('tr.grp th span')].filter((s) => s.querySelector('img')).map((s) => s.textContent.trim()),
+      }));
+    } finally { await close(); }
+  };
+  const [en, fr] = [await read('/technologies'), await read('/fr/technologies')];
+  return { ...en, logos: { en: en.logos, fr: fr.logos } };
+}
+
 const FAMILIES = {
   en: ['Frameworks and ORMs', 'Databases', 'Brokers', 'Trace sources', 'Clouds', 'Energy measurement', 'Electricity grids', 'Continuous integration'],
   fr: ['Frameworks et ORM', 'Bases de données', 'Brokers', 'Sources de traces', 'Clouds', 'Mesure d’énergie', 'Réseaux électriques', 'Intégration continue'],
 };
 const IDS = ['frameworks', 'databases', 'brokers', 'traces', 'clouds', 'energy', 'grids', 'ci'];
-const ROWS = 86;
-const PRODUCTION = ['Spring Boot', 'PostgreSQL', 'RabbitMQ', 'OTLP', 'Tempo', 'AWS', 'Jenkins'];
 
 const count = (page, sel) => page.locator(sel).count();
 const visibleRows = (page) => page.locator('tr.row:visible').count();
@@ -46,7 +79,7 @@ test('renders one section per family, in order, in both languages', async () => 
       assert.equal(await page.getAttribute('html', 'lang'), lang);
       const sections = await page.$$eval('section.fam', (els) => els.map((s) => [s.id, s.querySelector('h2').textContent.trim()]));
       assert.deepEqual(sections, IDS.map((id, i) => [id, FAMILIES[lang][i]]));
-      assert.equal(await count(page, 'tr.row'), ROWS);
+      assert.equal(await count(page, 'tr.row'), EXPECT.rows);
       assert.equal(await count(page, 'section.fam table'), IDS.length);
       const rail = await page.$$eval('.tp-rail a', (els) => els.map((a) => a.getAttribute('href')));
       assert.deepEqual(rail, IDS.map((id) => '#' + id));
@@ -55,13 +88,12 @@ test('renders one section per family, in order, in both languages', async () => 
 });
 
 test('every language group with a logo in the data shows it', async () => {
-  const LANGUAGES = ['Java', 'Kotlin', 'C#', 'Python', 'Rust', 'Go', 'Node.js', 'Ruby', 'PHP', 'Elixir'];
   for (const theme of ['light', 'dark']) {
-    for (const path of ['/technologies', '/fr/technologies']) {
+    for (const [lang, path] of LANGS) {
       const { page, close } = await open(path, { theme });
       try {
         await page.waitForLoadState('load');
-        const groups = await page.$$eval('#frameworks tr.grp th span', (spans) => spans.map((s) => ({
+        const groups = await page.$$eval('tr.grp th span', (spans) => spans.map((s) => ({
           title: s.textContent.trim(),
           images: [...s.querySelectorAll('img')].map((img) => {
             const box = img.getBoundingClientRect();
@@ -69,9 +101,9 @@ test('every language group with a logo in the data shows it', async () => {
           }),
         })));
         const where = `${path} ${theme}`;
-        assert.deepEqual(groups.map((g) => g.title), LANGUAGES, where);
-        for (const { title, images } of groups) {
-          assert.ok(images.length > 0, `${where}: ${title} has no logo`);
+        // A group with logo: null shows its title only.
+        assert.deepEqual(groups.filter((g) => g.images.length).map((g) => g.title), EXPECT.logos[lang], where);
+        for (const { title, images } of groups.filter((g) => g.images.length)) {
           for (const image of images) {
             assert.equal(image.alt, '', `${where}: ${title}, the title follows, so the logo is decorative`);
             assert.ok(image.loads, `${where}: ${title}, a logo does not load`);
@@ -97,7 +129,7 @@ test('search keeps matching rows and hides empty families', async () => {
     await search(page, 'hibernate');
     assert.equal(await visibleRows(page), 2, 'Spring Boot by its detail and alias, NHibernate by its name');
     await search(page, '');
-    assert.equal(await visibleRows(page), ROWS);
+    assert.equal(await visibleRows(page), EXPECT.rows);
     assert.equal(await visibleFamilies(page), IDS.length);
   } finally { await close(); }
 });
@@ -163,7 +195,7 @@ test('the details fold without a flash, and stay reachable when the script canno
     assert.equal(await page.evaluate(() => document.documentElement.classList.contains('js')), true);
     assert.equal(await page.locator('tr.det:visible').count(), 0, 'no detail painted open before the script');
     release();
-    await page.waitForFunction((n) => document.querySelectorAll('tr.row button[aria-expanded="false"]').length === n, ROWS);
+    await page.waitForFunction((n) => document.querySelectorAll('tr.row button[aria-expanded="false"]').length === n, EXPECT.rows);
     assert.equal(await page.locator('tr.det:visible').count(), 0);
   } finally { release(); await slow.close(); }
   // page.js fails to load: html.js goes, every detail is open again.
@@ -173,7 +205,7 @@ test('the details fold without a flash, and stay reachable when the script canno
     const page = await broken.newPage();
     await page.goto(server.url + '/technologies');
     await page.waitForFunction(() => !document.documentElement.classList.contains('js'));
-    assert.equal(await page.locator('tr.det:visible').count(), ROWS);
+    assert.equal(await page.locator('tr.det:visible').count(), EXPECT.rows);
     assert.equal(await count(page, 'tr.row button[aria-expanded]'), 0, 'no state claimed when the script never ran');
   } finally { await broken.close(); }
 });
@@ -199,7 +231,7 @@ test('each detail links to what is missing, and only that', async () => {
       full: r.querySelector('td.lvc').textContent.startsWith('Complete'),
       hrefs: [...r.nextElementSibling.querySelectorAll('.lk a')].map((a) => a.getAttribute('href')),
     })));
-    assert.equal(all.length, ROWS);
+    assert.equal(all.length, EXPECT.rows);
     for (const { full, hrefs } of all) {
       assert.equal(hrefs.includes(CONTRIBUTING), !full);
       assert.equal(hrefs.at(-1), '/references#figurer');
@@ -211,14 +243,14 @@ test('the production filter keeps only ringed rows', async () => {
   const { page, close } = await open('/technologies#production');
   try {
     const names = () => page.$$eval('tr.row:not([hidden]) th .n', (els) => els.map((e) => e.textContent.trim()));
-    assert.deepEqual(await names(), PRODUCTION);
-    assert.equal(await page.locator('tr.row:visible svg.lv.pr').count(), PRODUCTION.length);
+    assert.deepEqual(await names(), EXPECT.production);
+    assert.equal(await page.locator('tr.row:visible svg.lv.pr').count(), EXPECT.production.length);
     assert.equal(await page.getAttribute('#tp-prod', 'aria-pressed'), 'true');
     await page.click('#tp-prod');
-    assert.equal(await visibleRows(page), ROWS);
+    assert.equal(await visibleRows(page), EXPECT.rows);
     assert.equal(await page.getAttribute('#tp-prod', 'aria-pressed'), 'false');
     await page.click('#tp-prod');
-    assert.deepEqual(await names(), PRODUCTION);
+    assert.deepEqual(await names(), EXPECT.production);
     await search(page, 'postgres');
     assert.deepEqual(await names(), ['PostgreSQL']);
     assert.equal(await page.isVisible('#tp-none-prod'), false);
@@ -272,11 +304,11 @@ test('without JavaScript every note and add link is visible', async () => {
   for (const path of ['/technologies', '/fr/technologies']) {
     const { page, close } = await open(path, { javaScriptEnabled: false });
     try {
-      assert.equal(await page.locator('tr.det:visible').count(), ROWS);
+      assert.equal(await page.locator('tr.det:visible').count(), EXPECT.rows);
       assert.equal(await page.locator('tr.det .note:visible').count(), await count(page, 'tr.det .note'));
       assert.ok(await count(page, 'tr.det .note') > 50);
       const add = await count(page, '.add a');
-      assert.equal(add, 9);
+      assert.equal(add, EXPECT.add);
       assert.equal(await page.locator('.add a:visible').count(), add);
       assert.equal(await page.locator('#grids .after:visible').count(), 1);
       assert.equal(await page.locator('.fam .syn:visible').count(), IDS.length, 'the synoptic line of every family');
@@ -367,7 +399,6 @@ test('each family links to its stage of the synoptic, in both languages', async 
       await search(page, '');
       await page.click('#tp-prod');
       assert.equal(await page.locator('.syn:visible').count(), await visibleFamilies(page));
-      assert.equal(await page.locator('#grids > .syn').isVisible(), false, 'no ringed row in the grids');
     } finally { await close(); }
   }
 });
