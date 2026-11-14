@@ -6,7 +6,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Added
 
-- The hand-written data behind the technologies and references pages of perf-sentinel.dev now lives in `site-data/`: `technologies.json` and its French twin say what is supported and how far, `references.json` names the organisations that use Perf Sentinel. Tests check the technologies data against the engine's own tables and against the difficulty table of `CONTRIBUTING.md`, which gains that table and its framework and cloud provider coverage sections.
+- The hand-written data behind the technologies and references pages of perf-sentinel.dev now lives in `site-data/`: `technologies.json` and its French twin say what is supported and how far, `references.json` names the organisations that use Perf Sentinel. Tests check the technologies data against the engine's own tables and against the difficulty table of `CONTRIBUTING.md`. That file gains the difficulty table and a framework coverage section, and its cloud coverage now points to the technologies page.
 - A listing request for the references page. The `Reference request` issue form takes an organisation's signed share card or published disclosure report. The `reference-request` workflow checks the proof with the released `perf-sentinel` binary and answers on the issue. A maintainer then lists the organisation by hand in `site-data/references.json`.
 
 ## [0.45.0] - 2026-11-12
