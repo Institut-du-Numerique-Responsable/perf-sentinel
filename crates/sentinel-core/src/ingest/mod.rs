@@ -484,6 +484,7 @@ mod tests {
         code_frame_endpoint, consumer_entry_endpoint, http_route_endpoint, is_non_sql_db_system,
         is_sql_db_system,
     };
+    use crate::test_helpers::{row_id, site_data_rows};
 
     #[test]
     fn consumer_entry_endpoint_names_stable_destinations_only() {
@@ -834,5 +835,41 @@ mod tests {
     #[test]
     fn twin_rows_of_nothing_is_empty() {
         assert_eq!(super::twin_rows(&[]), Vec::<Vec<usize>>::new());
+    }
+
+    #[test]
+    fn database_rows_name_a_known_sql_system() {
+        // The row without an `engine` ("other SQL databases") and the
+        // unsupported rows are skipped.
+        for row in site_data_rows("databases") {
+            let Some(engine) = row["engine"].as_str() else {
+                continue;
+            };
+            assert!(
+                SQL_DB_SYSTEMS.contains(&engine),
+                "row `{}`: engine `{engine}` is not in SQL_DB_SYSTEMS",
+                row_id(&row)
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_database_rows_name_a_dropped_system() {
+        for row in site_data_rows("databases") {
+            if row["unsupported"] != true {
+                continue;
+            }
+            let dropped = row["dropped"].as_str().unwrap_or_else(|| {
+                panic!(
+                    "row `{}`: an unsupported row needs a `dropped` system",
+                    row_id(&row)
+                )
+            });
+            assert!(
+                NON_SQL_DB_SYSTEMS.contains(&dropped),
+                "row `{}`: dropped system `{dropped}` is not in NON_SQL_DB_SYSTEMS",
+                row_id(&row)
+            );
+        }
     }
 }

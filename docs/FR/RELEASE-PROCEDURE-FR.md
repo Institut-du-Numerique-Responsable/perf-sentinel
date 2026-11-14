@@ -31,9 +31,10 @@ Appliquer le travail de feature, fix ou refactor pour la release. Puis incrémen
 - `Cargo.toml` workspace `[workspace.package].version`
 - Chaque `crates/*/Cargo.toml` : soit `version.workspace = true` (résout vers la version du workspace), soit une version explicite qui doit correspondre au tag. Le pin intra-workspace `perf-sentinel-core = { version = "X.Y.Z", path = "..." }` dans `crates/sentinel-cli/Cargo.toml` est aussi vérifié ici.
 
-**Pris en charge par l'opérateur** (pas de gate CI, à auditer à la main avec `grep -RIn "<previous_version>" docs/ charts/ CHANGELOG.md`) :
+**Pris en charge par l'opérateur** (pas de gate CI, à auditer à la main avec `grep -RIn "<previous_version>" docs/ charts/ .github/ CHANGELOG.md`) :
 
 - `docs/ci-templates/*` : la constante `PERF_SENTINEL_VERSION` dans `github-actions-baseline.yml`, `github-actions-report-cleanup.yml`, `github-actions.yml`, `gitlab-ci.yml`, et `jenkinsfile.groovy`.
+- `.github/workflows/reference-request.yml` : la constante `PERF_SENTINEL_VERSION` du job `verify`, le binaire publié qui vérifie les demandes de référencement.
 - `docs/CI.md` et `docs/FR/CI-FR.md` : snippets d'exemple qui affichent `perf-sentinel@vX.Y.Z`.
 - `docs/schemas/examples/*.json` : uniquement le champ `binary_verification_url` (qui pointe toujours vers la dernière release). Les autres champs de version (`perf_sentinel_version`, `binary_version`, `binary_versions`) restent figés à la baseline historique de l'exemple.
 - `CHANGELOG.md` : déplacer le contenu de `[Unreleased]` sous un nouveau titre `[X.Y.Z]` daté du jour.

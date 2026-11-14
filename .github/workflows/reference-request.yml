@@ -1,0 +1,103 @@
+name: Reference request
+
+# Checks the proofs of a listing request (issue form reference.yml) with a
+# released perf-sentinel and posts the verdict on the issue. The workflow
+# changes no file: after a positive verdict the maintainer adds the entry to
+# site-data/references.json by hand.
+#
+# The issue body is text written by a stranger. It reaches the script through
+# `env:` only, never through an expression inside a `run:` block. The script
+# is the one on the default branch, which the `issues` event checks out.
+#
+# The script exits 0 (accepted) or 1 (refused), and both are a finished run.
+# Exit 2 means a network check could not complete, and any other code is a
+# tooling failure: the run fails so it can be re-run.
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reference-request-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify the listing request
+    if: contains(github.event.issue.labels.*.name, 'reference-request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      # Released perf-sentinel that runs the checks. Bump it with the other
+      # PERF_SENTINEL_VERSION constants, see docs/RELEASE-PROCEDURE.md.
+      PERF_SENTINEL_VERSION: "0.45.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # verify-hash runs cosign when a report is signed.
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.3
+
+      - name: Download the released binary and check its checksum
+        run: |
+          set -euo pipefail
+          base="https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/releases/download/v${PERF_SENTINEL_VERSION}"
+          dir="${RUNNER_TEMP}/perf-sentinel-download"
+          mkdir -p "${dir}" "${RUNNER_TEMP}/bin"
+          curl -sSLf -o "${dir}/perf-sentinel-linux-amd64" "${base}/perf-sentinel-linux-amd64"
+          curl -sSLf -o "${dir}/SHA256SUMS.txt" "${base}/SHA256SUMS.txt"
+          (cd "${dir}" && grep ' perf-sentinel-linux-amd64$' SHA256SUMS.txt | sha256sum -c -)
+          install -m 0755 "${dir}/perf-sentinel-linux-amd64" "${RUNNER_TEMP}/bin/perf-sentinel"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/bin/perf-sentinel" --version
+
+      - name: Check the request
+        id: verify
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        run: |
+          set +e
+          bash scripts/check-reference-request.sh > "${RUNNER_TEMP}/verdict.md"
+          echo "code=$?" >> "${GITHUB_OUTPUT}"
+
+      - name: Post the verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          CODE: ${{ steps.verify.outputs.code }}
+        run: |
+          set -euo pipefail
+          verdict="${RUNNER_TEMP}/verdict.md"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ ! -s "${verdict}" ]; then
+            printf 'The check produced no verdict. See the workflow run: %s\n' "${run_url}" > "${verdict}"
+          fi
+          # A verdict cut short by a crash has no conclusion line. Say so, so
+          # the half-written text is not read as a verdict.
+          case "${CODE}" in
+            0 | 1 | 2) ;;
+            *) printf '\n**The check stopped unexpectedly** (exit code %s). This is not a verdict on the request. Re-run the workflow: %s\n' \
+                 "${CODE}" "${run_url}" >> "${verdict}" ;;
+          esac
+          # One comment per issue, updated on each run, so an edit does not
+          # add a new one.
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+            --body-file "${verdict}" --edit-last --create-if-none
+
+      - name: Fail on a check that could not run
+        env:
+          CODE: ${{ steps.verify.outputs.code }}
+        run: |
+          case "${CODE}" in
+            0 | 1) ;;
+            *) echo "check-reference-request.sh exited with ${CODE}, re-run the workflow" >&2; exit 1 ;;
+          esac

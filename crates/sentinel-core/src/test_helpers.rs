@@ -26,6 +26,45 @@ pub fn assert_java_representative_call(
     assert_eq!(fix.framework, "java_generic");
 }
 
+/// Rows of one family of `site-data/technologies.json`, the hand-written
+/// data the technologies page renders. Panics, naming the family, when the
+/// file or the family is missing.
+pub(crate) fn site_data_rows(family: &str) -> Vec<serde_json::Value> {
+    let path = format!(
+        "{}/../../site-data/technologies.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let raw =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"));
+    let doc: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{path} is not valid JSON: {e}"));
+    let found = doc["families"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{path}: `families` is not an array"))
+        .iter()
+        .find(|f| f["id"] == family)
+        .unwrap_or_else(|| panic!("{path}: no family `{family}`"));
+    found["rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{path}: family `{family}` has no `rows` array"))
+        .clone()
+}
+
+/// The `id` of a row of `site-data/technologies.json`, for failure messages.
+pub(crate) fn row_id(row: &serde_json::Value) -> &str {
+    row["id"].as_str().unwrap_or("<no id>")
+}
+
+/// Criterion `index` of a row, with the row `id` in the failure message.
+pub(crate) fn criterion(row: &serde_json::Value, index: usize) -> bool {
+    row["criteria"][index].as_bool().unwrap_or_else(|| {
+        panic!(
+            "row `{}`: criterion {index} is missing or not a boolean",
+            row_id(row)
+        )
+    })
+}
+
 /// Build a `Report` with every field at its empty / default state.
 /// Used by tests that exercise serialization or carry-through logic
 /// without needing real findings or scoring data, so the long

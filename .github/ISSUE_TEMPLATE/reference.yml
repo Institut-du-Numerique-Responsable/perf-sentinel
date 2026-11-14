@@ -1,0 +1,66 @@
+name: Reference request
+description: Ask to be named as an organisation that uses Perf Sentinel on perf-sentinel.dev
+title: "Reference request: "
+labels: ["reference-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The reference page names an organisation only when it can prove it. This form takes signed proofs and nothing else. A workflow checks them with the released `perf-sentinel` binary and answers on this issue. A maintainer then adds the entry by hand.
+
+        Give at least one proof:
+
+        - A share card (`perf-sentinel card render`) whose domain publishes the signing key.
+        - A published disclosure report (`perf-sentinel disclose`) with the intent `official`, served from your domain.
+
+        You also agree to the listing from your own domain. Once this issue has a number, publish its address as the whole content of `https://<your domain>/.well-known/perf-sentinel-listing`, or in a TXT record of `_perf-sentinel-listing.<your domain>`. Editing this issue runs the check again.
+
+  - type: input
+    id: organisation
+    attributes:
+      label: Organisation name
+      description: The name the page shows, 120 characters at most, plain text. With a report, write it exactly as `organisation.name` in that report, the check compares the two.
+      placeholder: Exemple Énergie
+    validations:
+      required: true
+
+  - type: input
+    id: domain
+    attributes:
+      label: Domain
+      description: Your public domain name in lowercase. The card and the report must belong to it.
+      placeholder: exemple-energie.fr
+    validations:
+      required: true
+
+  - type: input
+    id: card
+    attributes:
+      label: Card verify URL
+      description: The link in the QR code of your share card. It starts with `https://perf-sentinel.dev/verifier#c=`.
+      placeholder: https://perf-sentinel.dev/verifier#c=...
+
+  - type: input
+    id: report
+    attributes:
+      label: Published report URL
+      description: The https address of your disclosure report in JSON, on your domain or one of its subdomains. A redirect is not followed.
+      placeholder: https://www.exemple-energie.fr/perf-sentinel/report.json
+
+  - type: input
+    id: identity
+    attributes:
+      label: Expected signer identity
+      description: Required when the report is signed. The identity that signed it, for example the address of a workflow.
+
+  - type: input
+    id: issuer
+    attributes:
+      label: Expected signer issuer
+      description: Required when the report is signed. The issuer of that identity, for example `https://token.actions.githubusercontent.com`.
+
+  - type: textarea
+    id: stack
+    attributes:
+      label: Stack
+      description: Optional. The languages, frameworks, databases and brokers you use with Perf Sentinel. A maintainer reads it and the check ignores it.
