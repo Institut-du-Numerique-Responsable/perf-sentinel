@@ -116,7 +116,7 @@ Pick a row by what you want to add or change. The level reflects how many files 
 | Change the daemon, the streaming correlator or the TUI     | `daemon/`, `correlate/window.rs`, `crates/sentinel-cli/src/tui/`                           | Rust, async, memory budgets                                    | High   |
 | Change a share card or the disclosure schema               | `report/card/`, `report/periodic/`                                                         | Rust. Both are public contracts                                | High   |
 
-Paths without a crate prefix are under `crates/sentinel-core/src/`. The first four rows need no Rust beyond a copied entry. The [framework coverage](#framework-coverage) and [cloud provider coverage](#cloud-provider-coverage) tables show what is missing today.
+Paths without a crate prefix are under `crates/sentinel-core/src/`. The Low rows need no Rust beyond a copied entry. The [framework coverage](#framework-coverage) and [cloud provider coverage](#cloud-provider-coverage) tables show what is missing today.
 
 The technologies page shows the same levels. They come from `site-data/technologies.json`, and a test keeps that file and this table in step.
 
