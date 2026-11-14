@@ -171,7 +171,7 @@ Reading notes:
 - The HTTP, fanout, chatty and serialized findings have a generic entry in every language.
 - **Lab** means the [simulation lab](https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab) runs a real application on that stack and checks its findings. The `n_plus_one_sql_*` fixtures in `tests/fixtures/` are hand-written and do not count.
 
-To fill a cell, add an entry to `FIXES` in `detect/suggestions/fixes.rs` and a test in `detect/suggestions/tests.rs`, then update this table in the same change. Knowing the framework matters more than knowing Rust. A framework or a language that is not in the table needs a detection rule too: see the [extension path](docs/design/04-DETECTION.md#extension-path-for-contributors).
+To fill a cell, add an entry to `FIXES` in `detect/suggestions/fixes.rs` and a test in `detect/suggestions/tests.rs`, then update this table and the row's "Dedicated advice" criterion in `site-data/technologies.json` in the same change. Knowing the framework matters more than knowing Rust. A framework or a language that is not in the table needs a detection rule too: see the [extension path](docs/design/04-DETECTION.md#extension-path-for-contributors).
 
 ### Cloud provider coverage
 
@@ -179,7 +179,7 @@ The carbon estimate reads three kinds of reference data per cloud provider. All 
 
 Reading notes:
 
-- **published** is the fleet figure from the provider's sustainability report. **generic** is `GENERIC_PUE` in `score/carbon.rs`, used when the provider publishes none.
+- The page's "Published PUE" criterion means the fleet figure from the provider's sustainability report. A provider that publishes none gets `GENERIC_PUE` from `score/carbon.rs`.
 - A provider the page does not list is configured with a country code such as `fr` or `de`, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 - [docs/INSTANCE-TYPES.md](docs/INSTANCE-TYPES.md) explains why OVHcloud and OUTSCALE have no instance power rows.
 
