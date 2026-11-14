@@ -16,8 +16,8 @@ const GH = '<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" 
 const logo = '<img data-logo="light" src="/assets/logo-h-light.svg" alt="perf sentinel" style="height:38px;width:auto"><img data-logo="dark" src="/assets/logo-h-dark.svg" alt="perf sentinel" style="height:38px;width:auto"><img data-logo="light" src="/assets/logo-h-light.svg" alt="perf sentinel" style="height:40px;width:auto;display:none">';
 
 const FT = {
-  fr: { tagline: 'Détecteur d’anti-patterns d’I/O au niveau protocole, auto-hébergeable et carbon-aware.', product: 'Produit', docs: 'Documentation', project: 'Projet', detection: 'Détection', execution: 'Déploiement', perf: 'Performance', greenops: 'GreenOps', comparison: 'Comparatif', quickstart: 'Démarrage rapide', cli: 'Référence CLI', config: 'Configuration', method: 'Méthodologie GreenOps', license: 'Licence AGPL-3.0', security: 'Sécurité', copyright: '© 2026 Robin Trassard et contributeurs · Institut du Numérique Responsable · AGPL-3.0 · Page éco-conçue, sans script de tracking', legal: 'Mentions légales', privacy: 'Confidentialité', credit: 'Logo & bannière, ' },
-  en: { tagline: 'Protocol-level I/O anti-pattern detector, self-hostable and carbon-aware.', product: 'Product', docs: 'Documentation', project: 'Project', detection: 'Detection', execution: 'Deploy', perf: 'Performance', greenops: 'GreenOps', comparison: 'Comparison', quickstart: 'Quickstart', cli: 'CLI reference', config: 'Configuration', method: 'GreenOps methodology', license: 'AGPL-3.0 license', security: 'Security', copyright: '© 2026 Robin Trassard and contributors · Institut du Numérique Responsable · AGPL-3.0 · Eco-designed page, no tracking script', legal: 'Legal notice', privacy: 'Privacy', credit: 'Logo & banner, ' },
+  fr: { tagline: 'Détecteur d’anti-patterns d’I/O au niveau protocole, auto-hébergeable et carbon-aware.', product: 'Produit', docs: 'Documentation', project: 'Projet', detection: 'Détection', execution: 'Déploiement', perf: 'Performance', greenops: 'GreenOps', comparison: 'Comparatif', tech: 'Technologies prises en charge', quickstart: 'Démarrage rapide', cli: 'Référence CLI', config: 'Configuration', method: 'Méthodologie GreenOps', license: 'Licence AGPL-3.0', security: 'Sécurité', who: 'Qui l’utilise', contrib: 'Contribuer', copyright: '© 2026 Robin Trassard et contributeurs · Institut du Numérique Responsable · AGPL-3.0 · Page éco-conçue, sans script de tracking', legal: 'Mentions légales', privacy: 'Confidentialité', credit: 'Logo & bannière, ' },
+  en: { tagline: 'Protocol-level I/O anti-pattern detector, self-hostable and carbon-aware.', product: 'Product', docs: 'Documentation', project: 'Project', detection: 'Detection', execution: 'Deploy', perf: 'Performance', greenops: 'GreenOps', comparison: 'Comparison', tech: 'Supported technologies', quickstart: 'Quickstart', cli: 'CLI reference', config: 'Configuration', method: 'GreenOps methodology', license: 'AGPL-3.0 license', security: 'Security', who: 'Who uses it', contrib: 'Contribute', copyright: '© 2026 Robin Trassard and contributors · Institut du Numérique Responsable · AGPL-3.0 · Eco-designed page, no tracking script', legal: 'Legal notice', privacy: 'Privacy', credit: 'Logo & banner, ' },
 };
 const LEGAL_HREF = { fr: '/mentions-legales', en: '/legal-notice' };
 const PRIV_HREF = { fr: '/confidentialite', en: '/privacy-policy' };
@@ -25,6 +25,9 @@ const PRIV_HREF = { fr: '/confidentialite', en: '/privacy-policy' };
 export const CONTACT_EMAIL = 'robin.trassard@gmail.com';
 export const HOME_HREF = { fr: '/fr/', en: '/' };
 export const GUIDE_HREF = { fr: '/fr/guide', en: '/guide' };
+const TECH_HREF = { fr: '/fr/technologies', en: '/technologies' };
+const WHO_HREF = { fr: '/fr/references', en: '/references' };
+const CONTRIB_HREF = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/CONTRIBUTING.md#what-to-contribute-by-difficulty';
 const HOME = { fr: 'Accueil', en: 'Home' };
 const LANGSW = { fr: 'EN', en: 'FR' };
 const OTHER = { fr: 'en', en: 'fr' };
@@ -59,9 +62,9 @@ export function footer(lang) {
   return `<footer style="border-top:1px solid var(--border);background:var(--surface-2)"><div style="max-width:1120px;margin:0 auto;padding:48px 28px 36px">` +
     `<div data-grid="ftcols" style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:32px">` +
     `<div><img data-logo="light" src="/assets/logo-h-light.svg" alt="perf sentinel" style="height:40px;width:auto"><img data-logo="dark" src="/assets/logo-h-dark.svg" alt="perf sentinel" style="height:40px;width:auto"><p style="margin:16px 0 0;font-size:13.5px;color:var(--text-2);max-width:240px;line-height:1.55">${f.tagline}</p></div>` +
-    col(f.product, [[HOME_HREF[lang] + '#detection', f.detection], [HOME_HREF[lang] + '#modes', f.execution], [HOME_HREF[lang] + '#perf', f.perf], [HOME_HREF[lang] + '#greenops', f.greenops], [HOME_HREF[lang] + '#comparatif', f.comparison]]) +
+    col(f.product, [[HOME_HREF[lang] + '#detection', f.detection], [HOME_HREF[lang] + '#modes', f.execution], [HOME_HREF[lang] + '#perf', f.perf], [HOME_HREF[lang] + '#greenops', f.greenops], [HOME_HREF[lang] + '#comparatif', f.comparison], [TECH_HREF[lang], f.tech]]) +
     col(f.docs, [[GUIDE_HREF[lang] + '#quickstart', f.quickstart], [GUIDE_HREF[lang] + '#cli', f.cli], [GUIDE_HREF[lang] + '#config', f.config], [GUIDE_HREF[lang] + '#metrics', f.method]]) +
-    col(f.project, [['https://github.com/Institut-du-Numerique-Responsable/perf-sentinel', 'GitHub'], ['https://crates.io/crates/perf-sentinel', 'crates.io'], ['https://docs.rs/perf-sentinel-core', 'docs.rs'], [HOME_HREF[lang] + '#license', f.license], [HOME_HREF[lang] + '#security', f.security]]) +
+    col(f.project, [['https://github.com/Institut-du-Numerique-Responsable/perf-sentinel', 'GitHub'], ['https://crates.io/crates/perf-sentinel', 'crates.io'], ['https://docs.rs/perf-sentinel-core', 'docs.rs'], [HOME_HREF[lang] + '#license', f.license], [HOME_HREF[lang] + '#security', f.security], [WHO_HREF[lang], f.who], [CONTRIB_HREF, f.contrib]]) +
     `</div>` +
     `<div style="display:flex;justify-content:space-between;gap:18px;margin-top:26px;flex-wrap:wrap;font-size:12.5px;color:var(--text-2)">` +
     `<div style="display:flex;flex-direction:column;gap:6px"><span>${f.copyright}</span><span style="display:flex;gap:14px"><a href="${LEGAL_HREF[lang]}">${f.legal}</a><a href="${PRIV_HREF[lang]}">${f.privacy}</a></span></div>` +
