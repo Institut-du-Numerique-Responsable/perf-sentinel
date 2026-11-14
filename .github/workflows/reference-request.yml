@@ -73,13 +73,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          CODE: ${{ steps.verify.outputs.code }}
         run: |
           set -euo pipefail
           verdict="${RUNNER_TEMP}/verdict.md"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           if [ ! -s "${verdict}" ]; then
-            printf 'The check produced no verdict. See the workflow run: %s/%s/actions/runs/%s\n' \
-              "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" > "${verdict}"
+            printf 'The check produced no verdict. See the workflow run: %s\n' "${run_url}" > "${verdict}"
           fi
+          # A verdict cut short by a crash has no conclusion line. Say so, so
+          # the half-written text is not read as a verdict.
+          case "${CODE}" in
+            0 | 1 | 2) ;;
+            *) printf '\n**The check stopped unexpectedly** (exit code %s). This is not a verdict on the request. Re-run the workflow: %s\n' \
+                 "${CODE}" "${run_url}" >> "${verdict}" ;;
+          esac
           # One comment per issue, updated on each run, so an edit does not
           # add a new one.
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \

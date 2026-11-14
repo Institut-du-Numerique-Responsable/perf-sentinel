@@ -147,7 +147,7 @@ EOF
   cp fake/hash-url.out fake/hash-report.out
   cp fake/hash-url.exit fake/hash-report.exit
   cat > fake/report.body <<EOF
-{"report_metadata":{"intent":"official"},"organisation":{"name":"Exemple","country":"FR","identifiers":{"domain":"${DOMAIN_OK}"}},"period":{"from_date":"2026-07-01","to_date":"2026-12-31"},"scope_manifest":{"environments_measured":["production"]},"integrity":{"content_hash":"sha256:abc","signature":null}}
+{"report_metadata":{"intent":"official"},"organisation":{"name":"Exemple Énergie","country":"FR","identifiers":{"domain":"${DOMAIN_OK}"}},"period":{"from_date":"2026-07-01","to_date":"2026-12-31"},"scope_manifest":{"environments_measured":["production"]},"integrity":{"content_hash":"sha256:abc","signature":null}}
 EOF
 }
 
@@ -186,6 +186,8 @@ s_report_userinfo() { with_report; F_REPORT='https://exemple-energie.fr@evil.exa
 s_report_port() { with_report; F_REPORT='https://www.exemple-energie.fr:8443/rapport.json'; with_consent_file; }
 s_report_hostile() { with_report; F_REPORT="https://www.exemple-energie.fr/r${HOSTILE}"; with_consent_file; }
 s_report_internal() { with_report; edit fake/report.body '.report_metadata.intent = "internal"'; with_consent_file; }
+s_report_other_name() { with_report; edit fake/report.body '.organisation.name = "Autre Société"'; with_consent_file; }
+s_report_name_missing() { with_report; edit fake/report.body 'del(.organisation.name)'; with_consent_file; }
 s_report_other_domain() { with_report; edit fake/report.body '.organisation.identifiers.domain = "autre.fr"'; with_consent_file; }
 s_report_redirects() { with_report; echo 301 > fake/report.code; with_consent_file; }
 s_report_hash_fails() {
@@ -205,17 +207,11 @@ s_report_not_found() { with_report; echo 404 > fake/report.code; with_consent_fi
 s_report_server_error() { with_report; echo 503 > fake/report.code; with_consent_file; }
 s_report_not_json() { with_report; echo '%PDF-1.7' > fake/report.body; with_consent_file; }
 s_report_hostile_environment() { with_report; edit fake/report.body '.scope_manifest.environments_measured = ["pr`od"]'; with_consent_file; }
+s_report_too_large() { with_report; echo 63 > fake/report.fail; with_consent_file; }
 s_report_download_fails() { with_report; echo 28 > fake/report.fail; with_consent_file; }
 s_hash_network_error() { with_report; echo 4 > fake/hash-url.exit; : > fake/hash-url.out; with_consent_file; }
 s_unsigned_report() { with_report; with_consent_file; }
-s_signed_no_fields() {
-  with_signed_report
-  F_IDENTITY=""
-  F_ISSUER=""
-  edit fake/hash-url.out '.verifications.signature = {"status":"fail","detail":"cannot verify without expected identity"} | .overall = "UNTRUSTED"'
-  echo 1 > fake/hash-url.exit
-  with_consent_file
-}
+s_signed_no_fields() { with_signed_report; F_IDENTITY=""; F_ISSUER=""; with_consent_file; }
 s_signed_one_field() { with_signed_report; F_ISSUER=""; with_consent_file; }
 s_signed_ok() { with_signed_report; with_consent_file; }
 s_signed_cosign_rejects() {
@@ -307,6 +303,11 @@ s_domain_hostile() { with_card; F_DOMAIN="${HOSTILE}"; with_consent_file; }
 s_domain_markdown() { with_card; F_DOMAIN='`@robin`.fr```'; with_consent_file; }
 s_name_hostile() { with_card; F_NAME="${HOSTILE}"; with_consent_file; }
 s_name_markup() { with_card; F_NAME='Exemple <b>Énergie</b>'; with_consent_file; }
+s_name_invisible() { with_card; F_NAME=$'Exemple \xe2\x80\xaeÉnergie'; with_consent_file; }
+s_name_zero_width() { with_card; F_NAME=$'Exemple\xe2\x80\x8bÉnergie'; with_consent_file; }
+s_name_bom() { with_card; F_NAME=$'\xef\xbb\xbfExemple Énergie'; with_consent_file; }
+s_name_joiner() { with_card; F_NAME=$'Exemple\xe2\x81\xa0Énergie'; with_consent_file; }
+s_name_accented() { with_card; F_NAME="Écoute à l’œuvre ‑ 日本語 — Ñandú"; with_consent_file; }
 s_name_missing() { with_card; F_NAME=""; with_consent_file; }
 s_name_multiline() { with_card; F_NAME=$'Exemple\nÉnergie'; with_consent_file; }
 s_repeated_heading() { with_card; F_STACK=$'### Domain\n\nother.fr'; with_consent_file; }
@@ -375,6 +376,8 @@ run_scenario() {
 
 run_scenario "accepts_a_level_2_card_with_consent" 0 s_accepts_card \
   --has '"since": "2026-09"' \
+  --has '- [ ] Organisation name: not proven by a card, check that it belongs to `exemple-energie.fr`' \
+  --lacks '- [x] Organisation name' --has 'needs a manual check' \
   --entry '.domain == "exemple-energie.fr" and .name == "Exemple Énergie" and .proofs.card.verify_url == "https://perf-sentinel.dev/verifier#c=AAAA.BBBB" and .proofs.card.period_from == "2026-09-01" and .proofs.card.period_to == "2026-09-30" and (.proofs | has("report") | not) and (.request | endswith("/issues/123"))' \
   --called 'verify-card https://perf-sentinel.dev/verifier#c=AAAA.BBBB --online' \
   --curl-all '--max-time 10' \
@@ -396,8 +399,13 @@ run_scenario "refuses_a_report_url_with_a_port" 1 s_report_port --never 'perf-se
 run_scenario "refuses_a_report_url_with_extra_characters" 1 s_report_hostile --never 'perf-sentinel verify-' --no-file pwned
 run_scenario "refuses_an_internal_report" 1 s_report_internal
 run_scenario "refuses_a_report_of_another_domain" 1 s_report_other_domain
+run_scenario "refuses_a_report_that_names_another_organisation" 1 s_report_other_name \
+  --has '`Autre Société`' --has '`Exemple Énergie`' --lacks '- [x] Organisation name' --lacks '```json'
+run_scenario "refuses_a_report_without_an_organisation_name" 1 s_report_name_missing --lacks '```json'
 run_scenario "refuses_a_report_that_redirects" 1 s_report_redirects \
   --called '--max-redirs 0' --called "--proto =https"
+run_scenario "refuses_a_report_larger_than_the_engine_cap" 1 s_report_too_large \
+  --has '10 MiB' --never 'perf-sentinel verify-'
 run_scenario "refuses_a_report_that_answers_404" 1 s_report_not_found --never 'perf-sentinel verify-'
 run_scenario "refuses_a_report_that_is_not_json" 1 s_report_not_json --never 'perf-sentinel verify-'
 run_scenario "refuses_a_report_whose_content_hash_fails" 1 s_report_hash_fails
@@ -405,7 +413,7 @@ run_scenario "refuses_a_report_that_changed_between_two_fetches" 1 s_report_swap
 run_scenario "refuses_a_report_with_another_hash_on_the_second_fetch" 1 s_report_other_hash
 run_scenario "refuses_an_environment_name_with_markup_characters" 1 s_report_hostile_environment
 run_scenario "refuses_a_signed_report_without_identity_fields" 1 s_signed_no_fields \
-  --never '--no-identity-check' --never '--expected-identity'
+  --never 'perf-sentinel verify-' --never '--no-identity-check' --never '--expected-identity'
 run_scenario "refuses_a_signed_report_with_one_identity_field" 1 s_signed_one_field --never 'perf-sentinel verify-'
 run_scenario "refuses_a_signed_report_the_signature_check_rejects" 1 s_signed_cosign_rejects
 run_scenario "refuses_a_signed_report_whose_attestation_names_other_figures" 1 s_signed_binding_fails \
@@ -428,14 +436,17 @@ run_scenario "accepts_a_signed_report_with_identity_fields" 0 s_signed_ok \
   --has '"signed": true' \
   --called "--expected-identity=${IDENTITY_OK}" --called "--expected-issuer=${ISSUER_OK}" \
   --never '--no-identity-check' \
+  --has '- [x] Organisation name: `Exemple Énergie` is the name in the report' \
   --entry '.proofs.report.signed == true and .proofs.report.environments == ["production"]'
 run_scenario "accepts_an_unsigned_report_on_its_content_hash" 0 s_unsigned_report \
   --has '"signed": false' \
   --never '--expected-identity' --never '--no-identity-check' \
-  --called '--max-redirs 0' --called '--max-filesize 16777216' --curl-all '--max-time 10' \
+  --called '--max-redirs 0' --called '--max-filesize 10485760' --curl-all '--max-time 10' \
+  --has '- [x] Organisation name: `Exemple Énergie` is the name in the report' --lacks 'manual check' \
   --entry '.since == "2026-07" and .proofs.report.url == "https://www.exemple-energie.fr/perf-sentinel/rapport.json" and .proofs.report.period_from == "2026-07-01" and .proofs.report.period_to == "2026-12-31" and (.proofs | has("card") | not)'
 run_scenario "dates_the_listing_from_the_earliest_period" 0 s_both_proofs \
-  --has '"since": "2026-07"' --entry '.proofs.card.period_from == "2026-09-01" and .proofs.report.period_from == "2026-07-01"'
+  --has '"since": "2026-07"' --has '- [x] Organisation name' --lacks 'manual check' \
+  --entry '.proofs.card.period_from == "2026-09-01" and .proofs.report.period_from == "2026-07-01"'
 
 run_scenario "refuses_without_domain_consent" 1 s_no_consent
 run_scenario "accepts_consent_published_in_a_dns_txt_record" 0 s_consent_by_dns \
@@ -452,6 +463,11 @@ run_scenario "keeps_hostile_signer_fields_as_data" 0 s_signed_hostile_fields --n
 run_scenario "wraps_a_rejected_value_so_it_cannot_inject_markdown" 1 s_domain_markdown \
   --lacks '```' --has 'Domain: `@robin.fr` is not'
 run_scenario "refuses_a_name_with_markup" 1 s_name_markup --never 'perf-sentinel verify-'
+run_scenario "refuses_a_name_with_an_invisible_direction_character" 1 s_name_invisible --never 'perf-sentinel verify-'
+run_scenario "refuses_a_name_with_a_zero_width_space" 1 s_name_zero_width --never 'perf-sentinel verify-'
+run_scenario "refuses_a_name_with_a_byte_order_mark" 1 s_name_bom --never 'perf-sentinel verify-'
+run_scenario "refuses_a_name_with_a_word_joiner" 1 s_name_joiner --never 'perf-sentinel verify-'
+run_scenario "accepts_a_name_with_accents_and_other_scripts" 0 s_name_accented
 run_scenario "refuses_a_missing_name" 1 s_name_missing --never 'perf-sentinel verify-'
 run_scenario "refuses_a_multi_line_field" 1 s_name_multiline --never 'perf-sentinel verify-'
 run_scenario "refuses_a_repeated_field_heading" 1 s_repeated_heading --never 'perf-sentinel verify-'

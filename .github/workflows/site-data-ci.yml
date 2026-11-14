@@ -1,0 +1,83 @@
+name: Site data CI
+
+# Runs what keeps the website data and the listing-request flow honest:
+#
+# - the offline harness of the request check script, with shellcheck on both
+#   scripts. Nothing else runs that harness.
+# - the Rust test that ties site-data/ to the engine tables and to the tables
+#   of CONTRIBUTING.md. ci.yml skips prose-only changes, so a change to
+#   CONTRIBUTING.md alone would never reach this test without this workflow.
+#
+# Both jobs read the repository only: no secret, no network call.
+on:
+  pull_request:
+    paths:
+      - 'scripts/check-reference-request.sh'
+      - 'scripts/test/check-reference-request-test.sh'
+      - '.github/workflows/reference-request.yml'
+      - '.github/workflows/site-data-ci.yml'
+      - 'site-data/**'
+      # site_data.rs checks that every CI row names a file here, and ci.yml
+      # skips changes under docs/.
+      - 'docs/ci-templates/**'
+      - 'CONTRIBUTING.md'
+      - 'crates/sentinel-core/tests/site_data.rs'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/check-reference-request.sh'
+      - 'scripts/test/check-reference-request-test.sh'
+      - '.github/workflows/reference-request.yml'
+      - '.github/workflows/site-data-ci.yml'
+      - 'site-data/**'
+      - 'docs/ci-templates/**'
+      - 'CONTRIBUTING.md'
+      - 'crates/sentinel-core/tests/site_data.rs'
+
+permissions:
+  contents: read
+
+# PRs get re-pushed often. Cancel the stale run, but never one on main.
+concurrency:
+  group: site-data-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  request-script:
+    name: Listing request script
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the offline harness
+        run: bash scripts/test/check-reference-request-test.sh
+
+      - name: Lint the script and its harness
+        run: shellcheck scripts/check-reference-request.sh scripts/test/check-reference-request-test.sh
+
+  site-data-tests:
+    name: Site data tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No `toolchain:` input so the action installs what `rust-toolchain.toml`
+      # declares (passing one makes it ignore the file).
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          rustflags: ""
+          build-warnings: ""
+          cache-on-failure: false
+          matcher: false
+
+      - name: Test
+        run: cargo test -p perf-sentinel-core --test site_data

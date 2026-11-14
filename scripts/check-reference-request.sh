@@ -30,13 +30,14 @@ readonly ISSUE_URL_RE='^https://github\.com/Institut-du-Numerique-Responsable/pe
 # RFC 3986 characters minus quotes, backtick, backslash, angle brackets, braces.
 readonly URL_CHARS_RE='^[A-Za-z0-9._~:/?#%&=+@,;!*()-]+$'
 readonly MAX_URL_LENGTH=4096
-readonly MAX_REPORT_BYTES=16777216
+# The cap of `perf-sentinel verify-hash --url` (10 MiB, MAX_REMOTE_BYTES in verify_hash.rs).
+readonly MAX_REPORT_BYTES=10485760
 readonly CONSENT_PATH='/.well-known/perf-sentinel-listing'
 readonly DOH_URL='https://cloudflare-dns.com/dns-query'
 
 NAME='' DOMAIN='' CARD_URL='' REPORT_URL='' IDENTITY='' ISSUER=''
 CARD_FROM='' CARD_TO='' REPORT_FROM='' REPORT_TO=''
-REPORT_ENVIRONMENTS='[]' REPORT_SIGNED=false
+REPORT_ENVIRONMENTS='[]' REPORT_SIGNED=false NAME_PROVEN=false
 TMP=''
 
 # --- Verdict ----------------------------------------------------------------
@@ -55,6 +56,9 @@ code() {
 }
 
 pass() { printf -- '- [x] %s\n' "$1"; }
+
+# An item the check could not tick: it stays open for a maintainer.
+todo() { printf -- '- [ ] %s\n' "$1"; }
 
 refuse() {
   printf -- '- [ ] %s\n\n**Refused.** Fix the point above, then edit this issue to run the check again.\n' "$1"
@@ -160,15 +164,32 @@ check_domain() {
   fi
 }
 
+# The name must be plain text. [[:cntrl:]] misses the Unicode characters that
+# hide or reorder text, so their UTF-8 bytes are listed: U+200B to U+200F,
+# U+202A to U+202E, U+2060 to U+2069 and U+FEFF.
 check_name() {
   local bad='[[:cntrl:]<>`]'
+  local invisible=$'\xe2\x80[\x8b-\x8f\xaa-\xae]|\xe2\x81[\xa0-\xa9]|\xef\xbb\xbf'
   if [ -z "$NAME" ]; then
     refuse "Organisation name: required"
   fi
   if [ "${#NAME}" -gt 120 ] || [[ $NAME =~ $bad ]]; then
     refuse "Organisation name: $(code "$NAME") is too long or holds markup characters"
   fi
-  pass "Organisation name: $(code "$NAME")"
+  if [[ $NAME =~ $invisible ]]; then
+    refuse "Organisation name: $(code "$NAME") holds an invisible or text-direction character"
+  fi
+}
+
+# Only a report proves the name: its organisation.name is covered by the
+# content hash, whereas the verdict of verify-card prints no organisation name
+# to compare with the form.
+show_name_proof() {
+  if [ "$NAME_PROVEN" = true ]; then
+    pass "Organisation name: $(code "$NAME") is the name in the report"
+  else
+    todo "Organisation name: not proven by a card, check that it belongs to $(code "$DOMAIN")"
+  fi
 }
 
 # Rule 2.
@@ -300,13 +321,13 @@ run_verify_hash() {
   fi
 }
 
-# Downloads the report to FILE, no redirect followed, 16 MiB at most.
+# Downloads the report to FILE, no redirect followed, 10 MiB at most.
 download_report() {
   local file="$1" code rc=0
   code=$(http_get "$REPORT_URL" "$file" "$MAX_REPORT_BYTES") || rc=$?
   case "$rc" in
     0) ;;
-    63) refuse "Report: it is larger than 16 MiB" ;;
+    63) refuse "Report: it is larger than 10 MiB" ;;
     *) could_not_check "Report: the download failed (curl exit code $rc)" ;;
   esac
   case "$code" in
@@ -315,11 +336,22 @@ download_report() {
     *) refuse "Report: the server answered HTTP $code (a redirect is not followed, give the final address)" ;;
   esac
   if [ "$(wc -c < "$file")" -gt "$MAX_REPORT_BYTES" ]; then
-    refuse "Report: it is larger than 16 MiB"
+    refuse "Report: it is larger than 10 MiB"
   fi
   if ! is_json_object "$file"; then
     refuse "Report: the address must serve the JSON report"
   fi
+}
+
+# The name of the form is the one the report states. The report's copy is
+# covered by the content hash checked just before.
+check_report_name() {
+  local found
+  if ! jq -e --arg n "$NAME" '.organisation.name == $n' "$TMP/report.json" > /dev/null 2>&1; then
+    found=$(jq -r '(.organisation.name // "none") | tostring' "$TMP/report.json" 2> /dev/null || true)
+    refuse "Organisation name: the report names the organisation $(code "$found"), the form says $(code "$NAME")"
+  fi
+  NAME_PROVEN=true
 }
 
 # Rule 4.
@@ -370,6 +402,7 @@ check_report() {
   if ! jq -e --arg d "$DOMAIN" '.organisation.identifiers.domain == $d' "$TMP/report.json" > /dev/null 2>&1; then
     refuse "Report: it does not name $(code "$DOMAIN") as the organisation domain"
   fi
+  check_report_name
 
   # signed: true is granted only when the signature verifies and the
   # attestation it covers names these figures.
@@ -486,7 +519,11 @@ emit_entry() {
                     environments: $environments, signed: $signed}}
         else {} end))
     }')
-  printf '\n**Accepted.** Add this entry to `site-data/references.json`, then run `cargo test -p perf-sentinel-core --test site_data`.\n\n'
+  if [ "$NAME_PROVEN" = true ]; then
+    printf '\n**Accepted.** Add this entry to `site-data/references.json`, then run `cargo test -p perf-sentinel-core --test site_data`.\n\n'
+  else
+    printf '\n**Accepted, but the organisation name needs a manual check.** A card does not prove it. Once a maintainer has checked it, add this entry to `site-data/references.json`, then run `cargo test -p perf-sentinel-core --test site_data`.\n\n'
+  fi
   printf '```json\n%s\n```\n' "$entry"
 }
 
@@ -517,6 +554,7 @@ main() {
   if [ -n "$REPORT_URL" ]; then
     check_report
   fi
+  show_name_proof
   check_consent
   emit_entry
 }
