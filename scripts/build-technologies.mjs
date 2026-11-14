@@ -19,6 +19,7 @@ const CONTRIBUTING = 'https://github.com/Institut-du-Numerique-Responsable/perf-
 const LAB_ROOT = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab';
 const LAB = `${LAB_ROOT}/tree/main/`;
 const ISSUE_FORM = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/issues/new?template=reference.yml';
+// Every link that leaves perf-sentinel.dev ends with it, as on the rest of the site.
 const EXT = '<span data-arrow="ext" aria-hidden="true"> ↗</span>';
 const fill = (text, values) => text.replace(/\{(\w+)\}/g, (_, k) => values[k]);
 
@@ -108,8 +109,8 @@ function rowHtml(family, row, group, teams, t) {
   // A complete row has nothing left to contribute. An unproven row of a family that
   // has a lab criterion points at the lab itself, where its proof would go.
   const labHref = row.lab.length ? LAB + esc(row.lab[0]) : k !== 'full' && family.lab_criterion != null ? LAB_ROOT : null;
-  const links = (k !== 'full' ? `<a href="${CONTRIBUTING}">${t.contribute}</a>` : '') +
-    (labHref ? `<a href="${labHref}">${t.lab}</a>` : '') +
+  const links = (k !== 'full' ? `<a href="${CONTRIBUTING}">${t.contribute}${EXT}</a>` : '') +
+    (labHref ? `<a href="${labHref}">${t.lab}${EXT}</a>` : '') +
     `<a href="${t.referencesHref}">${t.report}</a>`;
   const used = prod
     ? `<p class="pp">${sign(k, true)}${fill(t.usedSince, { since: month(since(row, teams), t), teams: t.teams(row.production.length) })}</p>`
@@ -136,7 +137,7 @@ function familyHtml(family, teams, t) {
     : '<tbody>' + family.rows.map((r) => rowHtml(family, r, null, teams, t)).join('') + '</tbody>';
   const [hash, stage] = synopticOf(family.id);
   const syn = `<p class="syn">${t.synoptic.question} <a href="${esc(t.synopticHref + hash)}">${stage ? fill(t.synoptic.stage, { stage: t.synoptic.stages[stage] }) : t.synoptic.map}</a></p>`;
-  const add = family.add.map((a) => `<a href="${CONTRIBUTING}">${PLUS}${esc(a.label)}</a><span>${t.difficulty} <b class="${DIFFICULTY[a.difficulty]}">${t.difficulties[a.difficulty]}</b></span>`).join('');
+  const add = family.add.map((a) => `<a href="${CONTRIBUTING}">${PLUS}${esc(a.label)}${EXT}</a><span>${t.difficulty} <b class="${DIFFICULTY[a.difficulty]}">${t.difficulties[a.difficulty]}</b></span>`).join('');
   return `<section class="fam" id="${esc(family.id)}"><h2 id="h-${esc(family.id)}"><span class="sw" aria-hidden="true"></span>${esc(family.title)}</h2>${syn}` +
     `<table class="${family.groups ? '' : 'flat'}${family.extra_column ? ' tx' : ''}" aria-labelledby="h-${esc(family.id)}">${head}${body}</table>` +
     (family.after ? `<p class="after">${esc(family.after)}</p>` : '') +
@@ -158,7 +159,7 @@ export function technologiesMain(data, lang, provenance) {
     `<section class="legend" aria-label="${t.legendLabel}">${legend}</section>` +
     `<nav class="tp-rail" aria-label="${t.railLabel}">${families.map((f) => `<a href="#${esc(f.id)}"><span class="sw"></span><b>${esc(f.title)}</b></a>`).join('')}</nav>` +
     `<div class="fams">${families.map((f) => familyHtml(f, teams, t)).join('')}` +
-    `<section class="none" id="tp-none" hidden><h2></h2><p>${t.notFoundText}</p><a href="${CONTRIBUTING}">${t.contribute}</a></section>` +
+    `<section class="none" id="tp-none" hidden><h2></h2><p>${t.notFoundText}</p><a href="${CONTRIBUTING}">${t.contribute}${EXT}</a></section>` +
     `<p class="none-prod" id="tp-none-prod" hidden>${t.noneInProduction}</p></div>` +
     `<p class="foot">${fill(t.provenance, { engine: esc(provenance.engine), lab: esc(provenance.lab), date: `${d.getDate()} ${t.months[d.getMonth()]} ${d.getFullYear()}` })}</p>` +
     // When the module cannot run (no module support, or it failed to load), html.js goes and every detail stays open. A parse error is caught by HEAD on load.

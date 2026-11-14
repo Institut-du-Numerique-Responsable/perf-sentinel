@@ -283,13 +283,13 @@ test('each detail links to what is missing, and only that', async () => {
   const report = ['Report production use', '/references#figurer'];
   try {
     // Complete: nothing to contribute, its proof.
-    assert.deepEqual(await links('d-frameworks-django'), [['See the lab', `${LAB}/tree/main/services/django-svc`], report]);
+    assert.deepEqual(await links('d-frameworks-django'), [['See the lab ↗', `${LAB}/tree/main/services/django-svc`], report]);
     // Incomplete with a proof: how to contribute, its first proof.
-    assert.deepEqual(await links('d-frameworks-ktor'), [['How to contribute', CONTRIBUTING], ['See the lab', `${LAB}/tree/main/services/ktor-svc`], report]);
+    assert.deepEqual(await links('d-frameworks-ktor'), [['How to contribute ↗', CONTRIBUTING], ['See the lab ↗', `${LAB}/tree/main/services/ktor-svc`], report]);
     // Incomplete, no proof, in a family with a lab criterion: the lab itself.
-    assert.deepEqual(await links('d-brokers-kafka'), [['How to contribute', CONTRIBUTING], ['See the lab', LAB], report]);
+    assert.deepEqual(await links('d-brokers-kafka'), [['How to contribute ↗', CONTRIBUTING], ['See the lab ↗', LAB], report]);
     // A family without a lab criterion: never a lab link, complete or not.
-    assert.deepEqual(await links('d-clouds-ovhcloud'), [['How to contribute', CONTRIBUTING], report]);
+    assert.deepEqual(await links('d-clouds-ovhcloud'), [['How to contribute ↗', CONTRIBUTING], report]);
     assert.deepEqual(await links('d-clouds-aws'), [report]);
     // The contribute and report rules hold on every row.
     const all = await page.$$eval('tr.row', (rows) => rows.map((r) => ({
@@ -302,6 +302,20 @@ test('each detail links to what is missing, and only that', async () => {
       assert.equal(hrefs.at(-1), '/references#figurer');
     }
   } finally { await close(); }
+});
+
+test('every outgoing link of the four pages carries the arrow', async () => {
+  // The page's own content: the header and footer are the site chrome, shared with the home and legal pages.
+  for (const path of ['/technologies', '/fr/technologies', '/references', '/fr/references']) {
+    const { page, close } = await open(path, { javaScriptEnabled: false });
+    try {
+      const outgoing = await page.$$eval('main a', (as) => as
+        .filter((a) => /^https?:$/.test(a.protocol) && a.hostname !== 'perf-sentinel.dev' && a.host !== location.host)
+        .map((a) => ({ href: a.href, text: a.textContent.trim(), arrow: !!a.querySelector('[data-arrow="ext"][aria-hidden="true"]') })));
+      assert.ok(outgoing.length > 0, path);
+      for (const a of outgoing) assert.ok(a.text.endsWith('↗') && a.arrow, `${path}: ${a.text} → ${a.href}`);
+    } finally { await close(); }
+  }
 });
 
 test('the production filter keeps only ringed rows', async () => {
