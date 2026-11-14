@@ -146,15 +146,15 @@
       "note": "Le calcul utilise le réseau électrique du pays et un PUE générique."
     },
     "alumet": {},
-    "kepler": {"note": "Le labo l’éprouve sur une sonde simulée, pas sur la vraie."},
-    "redfish": {"note": "Le labo l’éprouve sur une sonde simulée, pas sur la vraie."},
-    "scaphandre": {"note": "Le labo l’éprouve sur une sonde simulée, pas sur la vraie."},
+    "kepler": {"note": "Le labo le vérifie sur une sonde simulée, pas sur la vraie."},
+    "redfish": {"note": "Le labo le vérifie sur une sonde simulée, pas sur la vraie."},
+    "scaphandre": {"note": "Le labo le vérifie sur une sonde simulée, pas sur la vraie."},
     "rte-eco2mix": {
       "note": "Aucun flux de réseau ne tourne dans le labo. Sa lecture est testée sur une réponse écrite à la main, pas sur une réponse de l’opérateur."
     },
     "neso": {
       "detail": "Grande-Bretagne, hors Irlande du Nord",
-      "note": "Sa lecture est testée sur une réponse réelle de l’opérateur, du 20 octobre 2026. Aucun flux de réseau ne tourne dans le labo."
+      "note": "Aucun flux de réseau ne tourne dans le labo. Sa lecture est testée sur une réponse écrite à la main, pas sur une réponse de l’opérateur."
     },
     "fingrid": {
       "detail": "Finlande",
@@ -181,9 +181,9 @@
       "note": "Sa lecture est testée sur une réponse réelle de l’opérateur, du 20 octobre 2026. Aucun flux de réseau ne tourne dans le labo."
     },
     "electricity-maps": {"detail": "Plusieurs pays, sans rattachement", "note": "Le labo appelle l’API de test que fournit Electricity Maps."},
-    "ireland": {"name": "Irlande", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays."},
-    "germany": {"name": "Allemagne", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays."},
-    "united-states": {"name": "États-Unis", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays."},
+    "ireland": {"name": "Irlande", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays, sauf si Electricity Maps est configuré."},
+    "germany": {"name": "Allemagne", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays, sauf si Electricity Maps est configuré."},
+    "united-states": {"name": "États-Unis", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays, sauf si Electricity Maps est configuré."},
     "github-actions": {},
     "gitlab-ci": {},
     "jenkins": {}

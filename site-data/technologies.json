@@ -762,7 +762,7 @@
           "aliases": ["rapl", "kubernetes efficient power level exporter"],
           "criteria": [true, false],
           "lab": [],
-          "note": "The lab proves it on a simulated probe, not on the real one."
+          "note": "The lab checks it on a simulated probe, not on the real one."
         },
         {
           "id": "redfish",
@@ -770,7 +770,7 @@
           "aliases": ["bmc", "dmtf redfish"],
           "criteria": [true, false],
           "lab": [],
-          "note": "The lab proves it on a simulated probe, not on the real one."
+          "note": "The lab checks it on a simulated probe, not on the real one."
         },
         {
           "id": "scaphandre",
@@ -778,7 +778,7 @@
           "aliases": ["rapl"],
           "criteria": [true, false],
           "lab": [],
-          "note": "The lab proves it on a simulated probe, not on the real one."
+          "note": "The lab checks it on a simulated probe, not on the real one."
         }
       ]
     },
@@ -808,10 +808,9 @@
           "name": "NESO Carbon Intensity",
           "detail": "Great Britain, excluding Northern Ireland",
           "aliases": ["neso", "national grid eso", "carbon intensity"],
-          "real_answer": "2026-10-20",
-          "criteria": [true, true, false],
+          "criteria": [true, false, false],
           "lab": [],
-          "note": "Its reading is tested on a real answer from the operator, dated 20 October 2026. No grid feed runs in the lab."
+          "note": "No grid feed runs in the lab. Its reading is tested on a hand-written answer, not on an answer from the operator."
         },
         {
           "id": "fingrid",
@@ -888,7 +887,7 @@
           "unsupported": true,
           "criteria": [false, false, false],
           "lab": [],
-          "note": "The calculation uses the embedded annual factor of the country."
+          "note": "The calculation uses the embedded annual factor of the country, unless Electricity Maps is configured."
         },
         {
           "id": "germany",
@@ -898,7 +897,7 @@
           "unsupported": true,
           "criteria": [false, false, false],
           "lab": [],
-          "note": "The calculation uses the embedded annual factor of the country."
+          "note": "The calculation uses the embedded annual factor of the country, unless Electricity Maps is configured."
         },
         {
           "id": "united-states",
@@ -908,7 +907,7 @@
           "unsupported": true,
           "criteria": [false, false, false],
           "lab": [],
-          "note": "The calculation uses the embedded annual factor of the country."
+          "note": "The calculation uses the embedded annual factor of the country, unless Electricity Maps is configured."
         }
       ]
     },
