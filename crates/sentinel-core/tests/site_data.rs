@@ -662,11 +662,42 @@ fn references_file_parses_and_may_be_empty() {
     let refs = doc["references"]
         .as_array()
         .expect("`references` is an array");
-    let errors: Vec<String> = refs
+    let mut errors: Vec<String> = refs
         .iter()
         .filter_map(|r| check_reference(r).err())
         .collect();
+    errors.extend(repeated_references(refs));
     assert!(errors.is_empty(), "{errors:#?}");
+}
+
+/// An organisation is listed once: no `id` and no `domain` twice.
+fn repeated_references(refs: &[Value]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for key in ["id", "domain"] {
+        let mut seen = BTreeSet::new();
+        for value in refs.iter().filter_map(|r| r[key].as_str()) {
+            if !seen.insert(value) {
+                errors.push(format!("`{key}` {value} is listed twice"));
+            }
+        }
+    }
+    errors
+}
+
+#[test]
+fn an_organisation_is_listed_once() {
+    let same = [valid_reference(), valid_reference()];
+    assert_eq!(
+        repeated_references(&same),
+        [
+            "`id` exemple-energie is listed twice",
+            "`domain` exemple-energie.fr is listed twice"
+        ]
+    );
+    let mut other = valid_reference();
+    other["id"] = json!("autre");
+    other["domain"] = json!("autre.fr");
+    assert!(repeated_references(&[valid_reference(), other]).is_empty());
 }
 
 #[test]
@@ -802,6 +833,9 @@ fn verify_url_points_at_the_site_verifier() {
     }
     for bad in [
         "https://perf-sentinel.dev/verifier",
+        "https://perf-sentinel.dev/verifier#c=",
+        "https://perf-sentinel.dev/verifier#c=AA AA",
+        "https://perf-sentinel.dev/verifier#c=AA\"onclick",
         "http://perf-sentinel.dev/verifier#c=AAAA",
         "https://perf-sentinel.dev.evil.com/verifier#c=AAAA",
         "https://exemple-energie.fr/verifier#c=AAAA",
@@ -971,9 +1005,18 @@ fn check_period<'a>(proof: &'a Value, prefix: &str) -> Result<&'a str, String> {
 fn check_card(card: &Value) -> Result<&str, String> {
     check_keys(card, "`proofs.card`", &CARD_KEYS)?;
     let url = text(card, "proofs.card.", "verify_url")?;
-    if !VERIFY_PREFIXES.iter().any(|p| url.starts_with(p)) {
+    // The card token, as the request script reads it.
+    let token = VERIFY_PREFIXES
+        .iter()
+        .find_map(|p| url.strip_prefix(p))
+        .unwrap_or("");
+    if token.is_empty()
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
         return Err(format!(
-            "`proofs.card.verify_url` {url} is not a link to the site verifier"
+            "`proofs.card.verify_url` {url} is not a link to the site verifier with a card token"
         ));
     }
     check_period(card, "proofs.card.")
