@@ -1,4 +1,6 @@
 use super::*;
+use crate::test_helpers::site_data_rows;
+use serde_json::Value;
 
 // --- hourly profile tests ---
 
@@ -1167,4 +1169,121 @@ fn scoring_config_from_electricity_maps_custom_endpoint() {
     };
     let scoring = ScoringConfig::from_electricity_maps(&cfg);
     assert_eq!(scoring.api_version, ApiVersion::Custom);
+}
+
+// --- site-data/technologies.json, clouds family ---
+
+/// Each provider with the lowercase name the site data gives it as `engine`.
+const ALL_PROVIDERS: [(Provider, &str); 7] = [
+    (Provider::Aws, "aws"),
+    (Provider::Gcp, "gcp"),
+    (Provider::Azure, "azure"),
+    (Provider::Ovh, "ovh"),
+    (Provider::Scaleway, "scaleway"),
+    (Provider::Outscale, "outscale"),
+    (Provider::Generic, "generic"),
+];
+
+/// Exhaustive on purpose: a new variant stops compiling here, which points
+/// at `ALL_PROVIDERS`. The assertion below ties each slot to its entry.
+const fn provider_slot(value: Provider) -> usize {
+    match value {
+        Provider::Aws => 0,
+        Provider::Gcp => 1,
+        Provider::Azure => 2,
+        Provider::Ovh => 3,
+        Provider::Scaleway => 4,
+        Provider::Outscale => 5,
+        Provider::Generic => 6,
+    }
+}
+
+const _: () = {
+    let mut i = 0;
+    while i < ALL_PROVIDERS.len() {
+        assert!(provider_slot(ALL_PROVIDERS[i].0) == i);
+        i += 1;
+    }
+};
+
+fn row_id(row: &Value) -> &str {
+    row["id"].as_str().unwrap_or("<no id>")
+}
+
+/// Criterion `index` of a row, with the row `id` in the failure message.
+fn criterion(row: &Value, index: usize) -> bool {
+    row["criteria"][index].as_bool().unwrap_or_else(|| {
+        panic!(
+            "row `{}`: criterion {index} is missing or not a boolean",
+            row_id(row)
+        )
+    })
+}
+
+/// The provider rows of the clouds family, without the generic fallback row.
+fn provider_rows() -> Vec<Value> {
+    let mut rows = site_data_rows("clouds");
+    rows.retain(|r| r["fallback"] != true);
+    rows
+}
+
+fn provider_of(row: &Value) -> Provider {
+    let tag = row["engine"]
+        .as_str()
+        .unwrap_or_else(|| panic!("row `{}`: a provider row needs an `engine`", row_id(row)));
+    ALL_PROVIDERS
+        .into_iter()
+        .find(|&(_, name)| name == tag)
+        .unwrap_or_else(|| panic!("row `{}`: unknown provider tag `{tag}`", row_id(row)))
+        .0
+}
+
+#[test]
+fn every_provider_but_generic_has_exactly_one_cloud_row() {
+    let rows = provider_rows();
+    for (_, name) in ALL_PROVIDERS
+        .into_iter()
+        .filter(|&(p, _)| p != Provider::Generic)
+    {
+        let count = rows.iter().filter(|r| r["engine"] == name).count();
+        assert_eq!(
+            count, 1,
+            "provider `{name}` has {count} rows in the clouds family, expected one"
+        );
+    }
+}
+
+#[test]
+fn published_pue_matches_the_provider_table() {
+    for row in provider_rows() {
+        let provider = provider_of(&row);
+        let published = (provider.pue() - GENERIC_PUE).abs() > f64::EPSILON;
+        let claimed = criterion(&row, 0);
+        assert_eq!(
+            claimed,
+            published,
+            "row `{}`: the published PUE criterion is {claimed} but Provider::pue is {}",
+            row_id(&row),
+            provider.pue()
+        );
+    }
+}
+
+#[test]
+fn regions_criterion_matches_the_carbon_rows() {
+    for row in provider_rows() {
+        let provider = provider_of(&row);
+        let count = super::super::carbon_data::GENERATED_CARBON_ROWS
+            .iter()
+            .chain(MANUAL_CARBON_ROWS)
+            .filter(|&&(_, _, p)| p == provider)
+            .count();
+        let claimed = criterion(&row, 1);
+        assert_eq!(
+            claimed,
+            count > 0,
+            "row `{}`: the regions criterion is {claimed} but the carbon tables hold {count} region rows for it",
+            row_id(&row)
+        );
+    }
 }
