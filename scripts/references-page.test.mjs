@@ -91,7 +91,9 @@ test('an empty list shows the empty state and the request button', async () => {
       assert.equal(await page.getAttribute('#figurer a.btn', 'href'), ISSUE_FORM);
       assert.equal(await page.getAttribute('#figurer a[href^="mailto:"]', 'href'), `mailto:${CONTACT_EMAIL}`);
       assert.equal(await page.locator('#figurer ol.steps li').count(), 3);
-      assert.equal(await page.locator('dl.proofs dt').count(), 2);
+      const proofs = await page.$$eval('dl.proofs dt', (dts) => dts.map((d) => d.textContent));
+      assert.deepEqual(proofs.slice(2), [lang === 'fr' ? 'Équipe non nommée' : 'Unnamed team']);
+      assert.equal(await page.locator('dl.proofs + .limit').count(), 1, 'the limit sentence follows the entries');
       const text = await page.textContent('main');
       assert.ok(!/sans preuve|no proof/i.test(text), 'an anonymous team sends a proof too');
     } finally { await close(); }

@@ -171,7 +171,7 @@ main.rp>section{margin:0}
 .rp ol.steps b{display:block;font-weight:600;font-size:16px;margin-bottom:4px}
 .rp ol.steps span{font-size:14.5px;color:var(--text-2);display:block;line-height:1.5}
 .rp code{font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:.86em;white-space:nowrap;background:var(--surface);border-radius:5px;padding:1px 6px}
-.rp dl.proofs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 44px;margin:18px 0 0;border-top:1px solid var(--line-strong)}
+.rp dl.proofs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 36px;margin:18px 0 0;border-top:1px solid var(--line-strong)}
 .rp dl.proofs div{padding:18px 0 0}
 .rp dl.proofs dt{font-weight:600;font-size:16px;margin-bottom:4px}
 .rp dl.proofs dd{margin:0;font-size:14.5px;color:var(--text-2);line-height:1.5;max-width:46ch}

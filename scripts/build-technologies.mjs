@@ -185,7 +185,7 @@ export function referencesMain(references, teams, lang) {
     `<section id="liste"><h2>${r.orgs}</h2>${list}${anon}</section>` +
     `<section id="figurer"><h2>${r.join}</h2><ol class="steps">${r.steps.map(([b, s]) => `<li><b>${b}</b><span>${s}</span></li>`).join('')}</ol>` +
     `<a class="btn" href="${ISSUE_FORM}">${r.ask}${EXT}</a><p class="limit">${r.anonymous(`mailto:${CONTACT_EMAIL}`)}</p></section>` +
-    `<section><h2>${r.proofs}</h2><dl class="proofs"><div><dt>${r.card}</dt><dd>${r.cardProof}</dd></div><div><dt>${r.report}</dt><dd>${r.reportProof}</dd></div></dl>` +
+    `<section><h2>${r.proofs}</h2><dl class="proofs"><div><dt>${r.card}</dt><dd>${r.cardProof}</dd></div><div><dt>${r.report}</dt><dd>${r.reportProof}</dd></div><div><dt>${r.unnamed}</dt><dd>${r.unnamedProof}</dd></div></dl>` +
     `<p class="limit">${r.limit}</p></section>`;
 }
 
