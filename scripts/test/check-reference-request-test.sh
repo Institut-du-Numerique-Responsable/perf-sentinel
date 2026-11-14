@@ -308,6 +308,13 @@ s_name_zero_width() { with_card; F_NAME=$'Exemple\xe2\x80\x8bÉnergie'; with_con
 s_name_bom() { with_card; F_NAME=$'\xef\xbb\xbfExemple Énergie'; with_consent_file; }
 s_name_joiner() { with_card; F_NAME=$'Exemple\xe2\x81\xa0Énergie'; with_consent_file; }
 s_name_accented() { with_card; F_NAME="Écoute à l’œuvre ‑ 日本語 — Ñandú"; with_consent_file; }
+# 60 characters, 180 bytes: the limit counts characters.
+s_name_long_non_latin() { with_card; F_NAME="$(printf '日本語%.0s' $(seq 20))"; with_consent_file; }
+s_name_too_long() { with_card; F_NAME="$(printf 'a%.0s' $(seq 121))"; with_consent_file; }
+# The report is the requester's: its organisation.name is echoed in the refusal.
+s_report_name_bidi() { with_report; edit fake/report.body '.organisation.name = "Autre‮Société"'; with_consent_file; }
+# 1 + 120 bytes: a 100-byte cut stops inside the 50th "é".
+s_domain_cut_inside_a_character() { with_card; F_DOMAIN="a$(printf 'é%.0s' $(seq 60))"; with_consent_file; }
 s_name_missing() { with_card; F_NAME=""; with_consent_file; }
 s_name_multiline() { with_card; F_NAME=$'Exemple\nÉnergie'; with_consent_file; }
 s_repeated_heading() { with_card; F_STACK=$'### Domain\n\nother.fr'; with_consent_file; }
@@ -322,7 +329,8 @@ entry_of() { awk '/^```json$/{on=1; next} /^```$/{on=0} on' "$1"; }
 
 # run_scenario NAME EXPECTED_EXIT SETUP [CHECK ARG]...
 # Checks: --has/--lacks S (stdout), --called/--never S (calls.log),
-# --curl-all S (every curl call), --no-file F, --entry JQ_FILTER.
+# --curl-all S (every curl call), --no-file F, --entry JQ_FILTER,
+# --valid-utf8 WHY (stdout decodes as UTF-8).
 run_scenario() {
   local name="$1" expected_exit="$2" setup_func="$3"
   shift 3
@@ -355,6 +363,8 @@ run_scenario() {
       --no-file) [ ! -e "${tmpdir}/${arg}" ] || problems="${problems}file '${arg}' exists; " ;;
       --entry)
         entry_of "${tmpdir}/stdout.txt" | jq -e "${arg}" > /dev/null 2>&1 || problems="${problems}entry fails '${arg}'; " ;;
+      --valid-utf8)
+        iconv -f UTF-8 -t UTF-8 "${tmpdir}/stdout.txt" > /dev/null 2>&1 || problems="${problems}stdout is not valid UTF-8 (${arg}); " ;;
       *) problems="${problems}unknown check '${kind}'; " ;;
     esac
   done
@@ -463,11 +473,18 @@ run_scenario "keeps_hostile_signer_fields_as_data" 0 s_signed_hostile_fields --n
 run_scenario "wraps_a_rejected_value_so_it_cannot_inject_markdown" 1 s_domain_markdown \
   --lacks '```' --has 'Domain: `@robin.fr` is not'
 run_scenario "refuses_a_name_with_markup" 1 s_name_markup --never 'perf-sentinel verify-'
-run_scenario "refuses_a_name_with_an_invisible_direction_character" 1 s_name_invisible --never 'perf-sentinel verify-'
+run_scenario "refuses_a_name_with_an_invisible_direction_character" 1 s_name_invisible --never 'perf-sentinel verify-' \
+  --lacks $'\xe2\x80\xae' --has 'Exemple Énergie'
 run_scenario "refuses_a_name_with_a_zero_width_space" 1 s_name_zero_width --never 'perf-sentinel verify-'
 run_scenario "refuses_a_name_with_a_byte_order_mark" 1 s_name_bom --never 'perf-sentinel verify-'
 run_scenario "refuses_a_name_with_a_word_joiner" 1 s_name_joiner --never 'perf-sentinel verify-'
 run_scenario "accepts_a_name_with_accents_and_other_scripts" 0 s_name_accented
+run_scenario "counts_the_name_length_in_characters" 0 s_name_long_non_latin
+run_scenario "refuses_a_name_over_120_characters" 1 s_name_too_long --has '121 characters, 120 at most' --lacks 'markup'
+run_scenario "drops_a_text_direction_character_from_an_echoed_report_value" 1 s_report_name_bidi \
+  --lacks $'\xe2\x80\xae' --has '`AutreSociété`'
+run_scenario "cuts_an_echoed_value_on_a_character_boundary" 1 s_domain_cut_inside_a_character \
+  --valid-utf8 'refused domain echoed at 100 bytes'
 run_scenario "refuses_a_missing_name" 1 s_name_missing --never 'perf-sentinel verify-'
 run_scenario "refuses_a_multi_line_field" 1 s_name_multiline --never 'perf-sentinel verify-'
 run_scenario "refuses_a_repeated_field_heading" 1 s_repeated_heading --never 'perf-sentinel verify-'

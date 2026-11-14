@@ -34,6 +34,20 @@ readonly MAX_URL_LENGTH=4096
 readonly MAX_REPORT_BYTES=10485760
 readonly CONSENT_PATH='/.well-known/perf-sentinel-listing'
 readonly DOH_URL='https://cloudflare-dns.com/dns-query'
+# Unicode characters that hide or reorder text, as UTF-8 bytes (LC_ALL=C):
+# U+200B to U+200F, U+202A to U+202E, U+2060 to U+2069 and U+FEFF. [[:cntrl:]]
+# misses them. The regex refuses them in the name, the globs drop them from
+# every value echoed in the verdict.
+readonly INVISIBLE_RE=$'\xe2\x80[\x8b-\x8f\xaa-\xae]|\xe2\x81[\xa0-\xa9]|\xef\xbb\xbf'
+readonly INVISIBLE_GLOB_1=$'\xe2\x80[\x8b-\x8f\xaa-\xae]'
+readonly INVISIBLE_GLOB_2=$'\xe2\x81[\xa0-\xa9]'
+readonly INVISIBLE_GLOB_3=$'\xef\xbb\xbf'
+# The tail a byte cut leaves when it stops inside a UTF-8 sequence: a lead
+# byte alone, or a 3 or 4 byte lead followed by fewer continuation bytes than
+# it announces. A complete character never ends with one of these.
+readonly CUT_TAIL_1=$'[\xf0-\xf7][\x80-\xbf][\x80-\xbf]'
+readonly CUT_TAIL_2=$'[\xe0-\xf7][\x80-\xbf]'
+readonly CUT_TAIL_3=$'[\xc0-\xf7]'
 
 NAME='' DOMAIN='' CARD_URL='' REPORT_URL='' IDENTITY='' ISSUER=''
 CARD_FROM='' CARD_TO='' REPORT_FROM='' REPORT_TO=''
@@ -42,18 +56,32 @@ TMP=''
 
 # --- Verdict ----------------------------------------------------------------
 
-# A form value as inline code: backticks and control characters removed, cut
-# at 100 characters, so it cannot open a code block, a link or a mention.
+# A value as inline code: backticks, control characters and characters that
+# hide or reorder text removed, cut at 100 bytes on a character boundary, so
+# it cannot open a code block, a link or a mention, nor garble its line.
 code() {
-  local bt='`' v="$1"
+  local bt='`' v="$1" tail
   v="${v//$bt/}"
   v="${v//[[:cntrl:]]/ }"
+  v="${v//$INVISIBLE_GLOB_1/}"
+  v="${v//$INVISIBLE_GLOB_2/}"
+  v="${v//$INVISIBLE_GLOB_3/}"
+  if [ "${#v}" -gt 100 ]; then
+    v="${v:0:100}"
+    for tail in "$CUT_TAIL_1" "$CUT_TAIL_2" "$CUT_TAIL_3"; do
+      # shellcheck disable=SC2295 # $tail is a pattern on purpose.
+      v="${v%$tail}"
+    done
+  fi
   if [ -z "$v" ]; then
     printf '(empty)'
   else
-    printf '`%s`' "${v:0:100}"
+    printf '`%s`' "$v"
   fi
 }
+
+# Characters, not bytes: UTF-8 continuation bytes are not counted.
+char_count() { printf '%s' "$1" | tr -d '\200-\277' | wc -c; }
 
 pass() { printf -- '- [x] %s\n' "$1"; }
 
@@ -164,19 +192,20 @@ check_domain() {
   fi
 }
 
-# The name must be plain text. [[:cntrl:]] misses the Unicode characters that
-# hide or reorder text, so their UTF-8 bytes are listed: U+200B to U+200F,
-# U+202A to U+202E, U+2060 to U+2069 and U+FEFF.
+# The name must be plain text, 120 characters at most.
 check_name() {
-  local bad='[[:cntrl:]<>`]'
-  local invisible=$'\xe2\x80[\x8b-\x8f\xaa-\xae]|\xe2\x81[\xa0-\xa9]|\xef\xbb\xbf'
+  local bad='[[:cntrl:]<>`]' chars
   if [ -z "$NAME" ]; then
     refuse "Organisation name: required"
   fi
-  if [ "${#NAME}" -gt 120 ] || [[ $NAME =~ $bad ]]; then
-    refuse "Organisation name: $(code "$NAME") is too long or holds markup characters"
+  chars=$(char_count "$NAME")
+  if [ "$chars" -gt 120 ]; then
+    refuse "Organisation name: $((chars)) characters, 120 at most"
   fi
-  if [[ $NAME =~ $invisible ]]; then
+  if [[ $NAME =~ $bad ]]; then
+    refuse "Organisation name: $(code "$NAME") holds markup or control characters"
+  fi
+  if [[ $NAME =~ $INVISIBLE_RE ]]; then
     refuse "Organisation name: $(code "$NAME") holds an invisible or text-direction character"
   fi
 }

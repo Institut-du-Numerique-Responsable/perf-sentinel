@@ -19,7 +19,7 @@ body:
     id: organisation
     attributes:
       label: Organisation name
-      description: The name the page shows. Plain text, no markup.
+      description: The name the page shows, 120 characters at most, plain text. With a report, write it exactly as `organisation.name` in that report, the check compares the two.
       placeholder: Exemple Énergie
     validations:
       required: true
