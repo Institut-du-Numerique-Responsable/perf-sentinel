@@ -180,7 +180,7 @@
       "detail": "Nouvelle-Zélande",
       "note": "Sa lecture est testée sur une réponse réelle de l’opérateur, du 20 octobre 2026. Aucun flux de réseau ne tourne dans le labo."
     },
-    "electricity-maps": {"detail": "Plusieurs pays, sans rattachement", "note": "Le labo appelle l’API de test que fournit Electricity Maps."},
+    "electricity-maps": {"detail": "Plusieurs pays, sans rattachement", "note": "Le labo vérifie seulement que son jeton d’API est branché, pas une réponse de l’API, et aucun test du moteur ne porte une vraie réponse de sa part."},
     "ireland": {"name": "Irlande", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays, sauf si Electricity Maps est configuré."},
     "germany": {"name": "Allemagne", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays, sauf si Electricity Maps est configuré."},
     "united-states": {"name": "États-Unis", "detail": "Aucun flux intégré", "note": "Le calcul utilise le facteur annuel embarqué du pays, sauf si Electricity Maps est configuré."},

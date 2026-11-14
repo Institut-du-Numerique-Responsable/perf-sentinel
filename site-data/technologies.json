@@ -875,9 +875,9 @@
           "name": "Electricity Maps",
           "detail": "Several countries, no single one",
           "aliases": ["electricitymaps", "electricity map"],
-          "criteria": [true, true, true],
-          "lab": ["scripts/verify-electricity-maps.sh"],
-          "note": "The lab calls the test API that Electricity Maps provides."
+          "criteria": [true, false, false],
+          "lab": [],
+          "note": "The lab only checks that its API token is wired in, not an answer from the API, and no engine test holds a real answer from it."
         },
         {
           "id": "ireland",
