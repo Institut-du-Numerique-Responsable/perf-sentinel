@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { startServer } from './static-server.mjs';
 import { chromium, LOCALE, open as openPage } from './page-test-helpers.mjs';
 import { loadSiteData, localize } from './technologies-model.mjs';
+import { technologiesMain } from './build-technologies.mjs';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LANGS = [['en', '/technologies'], ['fr', '/fr/technologies']];
@@ -510,6 +511,46 @@ test('the build refuses a group logo that the site does not hold', (t) => {
   assert.match(run.stderr, /cobol/, 'the group');
   assert.match(run.stderr, /assets\/logos\/no-such-logo\.svg/, 'the missing file');
   assert.deepEqual(readdirSync(out), []);
+});
+
+test('the build refuses a group logo that is not a plain file name', (t) => {
+  // ../logos/java names a file that exists: only the name rule stops it.
+  for (const name of ['../x', '../logos/java']) {
+    const root = mkdtempSync(join(tmpdir(), 'technologies-build-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const [engine, lab, out] = ['engine', 'lab', 'out'].map((d) => join(root, d));
+    for (const d of [join(engine, 'site-data'), lab, out]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(engine, 'Cargo.toml'), '[workspace.package]\nversion = "9.9.9"\n');
+    writeFileSync(join(engine, 'site-data', 'technologies.json'), JSON.stringify({
+      teams: [],
+      families: [{
+        id: 'frameworks', title: 'Frameworks', row_header: 'Framework', extra_column: null, criteria: ['Proven'], lab_criterion: null, after: null, add: [],
+        groups: [{ id: 'cobol', title: 'COBOL', logo: name }],
+        rows: [{ id: 'x', name: 'X', group: 'cobol', criteria: [true], lab: [] }],
+      }],
+    }));
+    writeFileSync(join(engine, 'site-data', 'technologies-fr.json'), '{}');
+    writeFileSync(join(engine, 'site-data', 'references.json'), '{"references":[]}');
+    writeFileSync(join(lab, 'Makefile'), 'verify-all-scenarios:\n');
+    const run = spawnSync(process.execPath, [join(SITE, 'scripts', 'build-technologies.mjs'), engine, lab, out], { encoding: 'utf8' });
+    assert.equal(run.status, 1, `${name}: ${run.stderr}`);
+    assert.match(run.stderr, /family frameworks, group cobol: logo .* is not a file name of assets\/logos/, name);
+    assert.deepEqual(readdirSync(out), [], name);
+  }
+});
+
+test('a row id reaches id and aria-controls escaped', () => {
+  const data = {
+    technologies: {
+      teams: [],
+      families: [{ id: 'ci', title: 'CI', row_header: 'Technology', extra_column: null, criteria: ['Proven'], lab_criterion: null, after: null, add: [], rows: [{ id: 'x"onclick="alert(1)', name: 'X', criteria: [true], lab: [] }] }],
+    },
+    french: {},
+  };
+  const html = technologiesMain(data, 'en', { engine: '9.9.9', lab: 'abc', built: new Date(2026, 10, 14) });
+  assert.ok(!html.includes('onclick="alert(1)"'), 'no attribute breaks out');
+  assert.ok(html.includes('aria-controls="d-ci-x&quot;onclick=&quot;alert(1)"'), 'aria-controls');
+  assert.ok(html.includes('id="d-ci-x&quot;onclick=&quot;alert(1)"'), 'id');
 });
 
 test('no third-party request is made', async () => {

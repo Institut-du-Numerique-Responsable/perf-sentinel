@@ -235,6 +235,14 @@ test('a proof link that is not https stops the build, no page written', (t) => {
       assert.throws(() => referencesPage([bad(field, href)], TEAMS, lang), (e) => e.message.includes('exemple-energie') && e.message.includes(field), `${field} ${lang}`);
     }
   }
+  // A proof present without its link would render href="undefined".
+  for (const [proof, field] of [['card', 'verify_url'], ['report', 'url']]) {
+    const r = structuredClone(FILLED[0]);
+    delete r.proofs[proof][field];
+    for (const [lang] of LANGS) {
+      assert.throws(() => referencesPage([r], TEAMS, lang), (e) => e.message.includes('exemple-energie') && e.message.includes(`proofs.${proof}.${field}`), `missing ${field} ${lang}`);
+    }
+  }
   const root = mkdtempSync(join(tmpdir(), 'references-build-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const [engine, lab, out] = ['engine', 'lab', 'out'].map((d) => join(root, d));

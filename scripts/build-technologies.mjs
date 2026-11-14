@@ -63,11 +63,14 @@ function synopticOf(id) {
   return SYNOPTIC[id];
 }
 
-// A group's logo names a file of assets/logos: the build stops on a name with no file behind it.
+// A group's logo names a file of assets/logos: the build stops on a name that is not a
+// plain file name, or with no file behind it.
 function logoErrors(families) {
-  return families.flatMap((f) => (f.groups ?? [])
-    .filter((g) => g.logo && !existsSync(join(SITE, 'assets', 'logos', `${g.logo}.svg`)))
-    .map((g) => `family ${f.id}, group ${g.id}: logo file assets/logos/${g.logo}.svg does not exist`));
+  return families.flatMap((f) => (f.groups ?? []).filter((g) => g.logo).flatMap((g) => {
+    if (!/^[a-z0-9-]+$/.test(g.logo)) return [`family ${f.id}, group ${g.id}: logo ${g.logo} is not a file name of assets/logos (a-z, 0-9, -)`];
+    if (!existsSync(join(SITE, 'assets', 'logos', `${g.logo}.svg`))) return [`family ${f.id}, group ${g.id}: logo file assets/logos/${g.logo}.svg does not exist`];
+    return [];
+  }));
 }
 
 // A language logo, with its dark twin when assets/logos has one. Decorative: the title follows.
@@ -95,7 +98,7 @@ function rowHtml(family, row, group, teams, t) {
   const k = level(row);
   const prod = row.production?.length > 0;
   const cols = family.criteria.length + 3 + (family.extra_column ? 1 : 0);
-  const id = `d-${family.id}-${row.id}`;
+  const id = esc(`d-${family.id}-${row.id}`);
   // The family title too: a search for « broker » or « energy » finds the family it names.
   const haystack = [row.name, row.detail, ...(row.aliases ?? []), group?.title, family.title].filter(Boolean).join(' ').toLowerCase();
   const crit = `<div class="crit">${family.criteria.map((c, i) => `<span>${mark(row.criteria[i], t)}${esc(c)}</span>`).join('')}</div>`;
@@ -191,12 +194,14 @@ function referenceHtml(r, t) {
 const mailto = (r) => esc(`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(r.mailSubject)}&body=${encodeURIComponent(r.mailBody.replaceAll('\n', '\r\n'))}`);
 
 // Proof links become hrefs: only https://, whatever the engine's own data tests let through.
+// A proof present without its link would render href="undefined": refused too.
 function checkProofLinks(references) {
   for (const r of references) {
     for (const [proof, field] of [['card', 'verify_url'], ['report', 'url']]) {
-      const href = r.proofs?.[proof]?.[field];
-      if (href !== undefined && !String(href).startsWith('https://')) {
-        throw new Error(`reference ${r.id}: proofs.${proof}.${field} is not an https:// address`);
+      if (!r.proofs?.[proof]) continue;
+      const href = r.proofs[proof][field];
+      if (!String(href ?? '').startsWith('https://')) {
+        throw new Error(`reference ${r.id}: proofs.${proof}.${field} is ${href == null ? 'missing' : 'not an https:// address'}`);
       }
     }
   }
@@ -265,11 +270,15 @@ function main([engineDir, labDir, outDir = SITE]) {
   if (!engine) throw new Error(`no [workspace.package].version in ${join(engineDir, 'Cargo.toml')}`);
   const lab = execFileSync('git', ['-C', labDir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
   const provenance = { engine, lab, built: new Date() };
+  // All four pages exist before the first write: a page that throws leaves nothing written.
+  const pages = {
+    'technologies.html': page('en', '/fr/technologies', COPY.en.title, COPY.en.desc, technologiesMain(data, 'en', provenance), { head: HEAD + redirect('/fr/technologies'), mainClass: 'tp' }),
+    'fr/technologies.html': page('fr', '/technologies', COPY.fr.title, COPY.fr.desc, technologiesMain(data, 'fr', provenance), { head: HEAD, mainClass: 'tp' }),
+    'references.html': references[0],
+    'fr/references.html': references[1],
+  };
   mkdirSync(join(outDir, 'fr'), { recursive: true });
-  writeFileSync(join(outDir, 'technologies.html'), page('en', '/fr/technologies', COPY.en.title, COPY.en.desc, technologiesMain(data, 'en', provenance), { head: HEAD + redirect('/fr/technologies'), mainClass: 'tp' }));
-  writeFileSync(join(outDir, 'fr', 'technologies.html'), page('fr', '/technologies', COPY.fr.title, COPY.fr.desc, technologiesMain(data, 'fr', provenance), { head: HEAD, mainClass: 'tp' }));
-  writeFileSync(join(outDir, 'references.html'), references[0]);
-  writeFileSync(join(outDir, 'fr', 'references.html'), references[1]);
+  for (const [path, html] of Object.entries(pages)) writeFileSync(join(outDir, path), html);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));
