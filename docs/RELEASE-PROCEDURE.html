@@ -150,9 +150,10 @@
 <li><code class="ps-ic">Cargo.toml</code> workspace <code class="ps-ic">[workspace.package].version</code></li>
 <li>Each <code class="ps-ic">crates/*/Cargo.toml</code>: either <code class="ps-ic">version.workspace = true</code> (resolves to the workspace version), or an explicit version that must match the tag. The intra-workspace pin <code class="ps-ic">perf-sentinel-core = { version = "X.Y.Z", path = "..." }</code> in <code class="ps-ic">crates/sentinel-cli/Cargo.toml</code> is checked here too.</li>
 </ul>
-<p class="ps-p"><strong>Operator-driven</strong> (no CI gate, audit manually with <code class="ps-ic">grep -RIn "&lt;previous_version&gt;" docs/ charts/ CHANGELOG.md</code>):</p>
+<p class="ps-p"><strong>Operator-driven</strong> (no CI gate, audit manually with <code class="ps-ic">grep -RIn "&lt;previous_version&gt;" docs/ charts/ .github/ CHANGELOG.md</code>):</p>
 <ul>
 <li><code class="ps-ic">docs/ci-templates/*</code>: the <code class="ps-ic">PERF_SENTINEL_VERSION</code> constant in <code class="ps-ic">github-actions-baseline.yml</code>, <code class="ps-ic">github-actions-report-cleanup.yml</code>, <code class="ps-ic">github-actions.yml</code>, <code class="ps-ic">gitlab-ci.yml</code>, and <code class="ps-ic">jenkinsfile.groovy</code>.</li>
+<li><code class="ps-ic">.github/workflows/reference-request.yml</code>: the <code class="ps-ic">PERF_SENTINEL_VERSION</code> constant of the <code class="ps-ic">verify</code> job, the released binary that checks listing requests.</li>
 <li><a href="/docs/CI">CI</a> and <a href="/docs/CI">CI</a>: snippet examples that show <code class="ps-ic">perf-sentinel@vX.Y.Z</code>.</li>
 <li><code class="ps-ic">docs/schemas/examples/*.json</code>: only the <code class="ps-ic">binary_verification_url</code> field (which always points to the latest release). The other version fields (<code class="ps-ic">perf_sentinel_version</code>, <code class="ps-ic">binary_version</code>, <code class="ps-ic">binary_versions</code>) stay frozen at the example's historical baseline.</li>
 <li><code class="ps-ic">CHANGELOG.md</code>: move the <code class="ps-ic">[Unreleased]</code> content under a new <code class="ps-ic">[X.Y.Z]</code> heading dated today.</li>

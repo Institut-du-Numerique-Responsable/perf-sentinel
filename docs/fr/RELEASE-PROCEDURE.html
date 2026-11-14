@@ -150,9 +150,10 @@
 <li><code class="ps-ic">Cargo.toml</code> workspace <code class="ps-ic">[workspace.package].version</code></li>
 <li>Chaque <code class="ps-ic">crates/*/Cargo.toml</code> : soit <code class="ps-ic">version.workspace = true</code> (résout vers la version du workspace), soit une version explicite qui doit correspondre au tag. Le pin intra-workspace <code class="ps-ic">perf-sentinel-core = { version = "X.Y.Z", path = "..." }</code> dans <code class="ps-ic">crates/sentinel-cli/Cargo.toml</code> est aussi vérifié ici.</li>
 </ul>
-<p class="ps-p"><strong>Pris en charge par l'opérateur</strong> (pas de gate CI, à auditer à la main avec <code class="ps-ic">grep -RIn "&lt;previous_version&gt;" docs/ charts/ CHANGELOG.md</code>) :</p>
+<p class="ps-p"><strong>Pris en charge par l'opérateur</strong> (pas de gate CI, à auditer à la main avec <code class="ps-ic">grep -RIn "&lt;previous_version&gt;" docs/ charts/ .github/ CHANGELOG.md</code>) :</p>
 <ul>
 <li><code class="ps-ic">docs/ci-templates/*</code> : la constante <code class="ps-ic">PERF_SENTINEL_VERSION</code> dans <code class="ps-ic">github-actions-baseline.yml</code>, <code class="ps-ic">github-actions-report-cleanup.yml</code>, <code class="ps-ic">github-actions.yml</code>, <code class="ps-ic">gitlab-ci.yml</code>, et <code class="ps-ic">jenkinsfile.groovy</code>.</li>
+<li><code class="ps-ic">.github/workflows/reference-request.yml</code> : la constante <code class="ps-ic">PERF_SENTINEL_VERSION</code> du job <code class="ps-ic">verify</code>, le binaire publié qui vérifie les demandes de référencement.</li>
 <li><a href="/docs/fr/CI">CI</a> et <a href="/docs/fr/CI">CI</a> : snippets d'exemple qui affichent <code class="ps-ic">perf-sentinel@vX.Y.Z</code>.</li>
 <li><code class="ps-ic">docs/schemas/examples/*.json</code> : uniquement le champ <code class="ps-ic">binary_verification_url</code> (qui pointe toujours vers la dernière release). Les autres champs de version (<code class="ps-ic">perf_sentinel_version</code>, <code class="ps-ic">binary_version</code>, <code class="ps-ic">binary_versions</code>) restent figés à la baseline historique de l'exemple.</li>
 <li><code class="ps-ic">CHANGELOG.md</code> : déplacer le contenu de <code class="ps-ic">[Unreleased]</code> sous un nouveau titre <code class="ps-ic">[X.Y.Z]</code> daté du jour.</li>
