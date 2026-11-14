@@ -1,10 +1,10 @@
-// Behaviour of the technologies page. Every row and its detail ship in the HTML,
-// visible: this script folds the details, then adds the search, the production
-// filter (#production) and the rail that follows the scroll.
+// Behaviour of the technologies page. Every row and its detail ship in the HTML.
+// An inline script in <head> sets html.js, under which page.css shows a detail only
+// when its row's button says aria-expanded="true". This script owns that state,
+// then adds the search, the production filter (#production) and the scroll rail.
 import { COPY } from './copy.js';
 
 const t = COPY[document.documentElement.lang === 'fr' ? 'fr' : 'en'];
-document.documentElement.classList.add('js');
 
 const q = document.getElementById('tp-q');
 const prod = document.getElementById('tp-prod');
@@ -13,10 +13,7 @@ const families = [...document.querySelectorAll('section.fam')];
 const rows = [...document.querySelectorAll('tr.row')];
 const expanded = (row) => row.querySelector('button').getAttribute('aria-expanded') === 'true';
 
-function setOpen(row, open) {
-  row.querySelector('button').setAttribute('aria-expanded', String(open));
-  row.nextElementSibling.hidden = row.hidden || !open;
-}
+const setOpen = (row, open) => row.querySelector('button').setAttribute('aria-expanded', String(open));
 for (const row of rows) setOpen(row, false);
 
 // The whole row toggles; Enter and Space reach the same path through the button's click.
@@ -35,7 +32,6 @@ function filter() {
       let m = 0;
       for (const row of tbody.querySelectorAll('tr.row')) {
         row.hidden = !(row.dataset.h.includes(s) && (!onlyProd || row.hasAttribute('data-prod')));
-        row.nextElementSibling.hidden = row.hidden || !expanded(row);
         m += !row.hidden;
       }
       const grp = tbody.querySelector('tr.grp');

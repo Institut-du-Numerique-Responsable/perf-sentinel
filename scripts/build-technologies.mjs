@@ -2,8 +2,9 @@
 // from the engine's site-data, after checking its lab proofs against the lab:
 //   node scripts/build-technologies.mjs <engineDir> <labDir> [outDir]
 // outDir defaults to the site root. Exits 1 and writes nothing when a proof is
-// missing. Every row is in the HTML: the page reads without JavaScript, and
-// assets/technologies/page.js adds the search, the folding and the filters.
+// missing. Every row is in the HTML: the page reads without JavaScript, with
+// every detail open. With JavaScript, page.css folds the details under html.js
+// and assets/technologies/page.js adds the toggles, the search and the filters.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -14,7 +15,8 @@ import { page } from './site-chrome.mjs';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTRIBUTING = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/CONTRIBUTING.md#what-to-contribute-by-difficulty';
-const LAB = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/tree/main/';
+const LAB_ROOT = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab';
+const LAB = `${LAB_ROOT}/tree/main/`;
 const fill = (text, values) => text.replace(/\{(\w+)\}/g, (_, k) => values[k]);
 
 // Drawings of the mock-up: level signs at the ink of the text, the ringed ones for production.
@@ -70,14 +72,17 @@ function rowHtml(family, row, group, teams, t) {
   const note = k === 'full'
     ? fill(t.allMet, { n: family.criteria.length }) + (row.note ? ' ' + esc(row.note) : '')
     : esc(row.note ?? '');
-  const links = `<a href="${CONTRIBUTING}">${t.contribute}</a>` +
-    (row.lab.length ? `<a href="${LAB}${esc(row.lab[0])}">${t.lab}</a>` : '') +
+  // A complete row has nothing left to contribute. An unproven row of a family that
+  // has a lab criterion points at the lab itself, where its proof would go.
+  const labHref = row.lab.length ? LAB + esc(row.lab[0]) : k !== 'full' && family.lab_criterion != null ? LAB_ROOT : null;
+  const links = (k !== 'full' ? `<a href="${CONTRIBUTING}">${t.contribute}</a>` : '') +
+    (labHref ? `<a href="${labHref}">${t.lab}</a>` : '') +
     `<a href="${t.referencesHref}">${t.report}</a>`;
   const used = prod
     ? `<p class="pp">${sign(k, true)}${fill(t.usedSince, { since: month(since(row, teams), t), teams: t.teams(row.production.length) })}</p>`
     : '';
   return `<tr class="row" data-h="${esc(haystack)}"${prod ? ' data-prod' : ''}>` +
-    `<th scope="row" class="name"><button type="button" aria-expanded="true" aria-controls="${id}"><span class="n">${esc(row.name)}</span>${row.detail && !family.extra_column ? `<small>${esc(row.detail)}</small>` : ''}</button></th>` +
+    `<th scope="row" class="name"><button type="button" aria-controls="${id}"><span class="n">${esc(row.name)}</span>${row.detail && !family.extra_column ? `<small>${esc(row.detail)}</small>` : ''}</button></th>` +
     (family.extra_column ? `<td class="x">${esc(row.detail ?? '')}</td>` : '') +
     `<td class="lvc">${sign(k, prod)}${t.levels[k][0]}${prod ? `<span class="sr">${t.inProduction}</span>` : ''}</td>` +
     row.criteria.map((v) => `<td class="c">${mark(v, t)}</td>`).join('') +
@@ -121,7 +126,8 @@ export function technologiesMain(data, lang, provenance) {
     `<script type="module" src="/assets/technologies/page.js"></script>`;
 }
 
-const HEAD = '<link rel="stylesheet" href="/assets/technologies/page.css">';
+// The js class lands before the body paints, so page.css folds the details without a flash.
+const HEAD = '<link rel="stylesheet" href="/assets/technologies/page.css"><script>document.documentElement.classList.add(\'js\')</script>';
 // /technologies follows the stored choice, else the browser language; /fr/technologies never redirects.
 const REDIRECT = `<script>(function(){var l=null;try{l=localStorage.getItem('ps-lang')}catch(e){}if(l!=='fr'&&l!=='en')l=(navigator.language||'').toLowerCase().indexOf('fr')===0?'fr':'en';if(l==='fr')location.replace('/fr/technologies'+location.hash);})();</script>`;
 

@@ -82,6 +82,8 @@ html:not(.js) .tp .tools{display:none}
 html:not(.js) .tp td.chev svg{display:none}
 .tp tr.row:has([aria-expanded="true"]) td.chev svg{transform:rotate(90deg)}
 .js .tp tr.row:has([aria-expanded="true"]) :is(td,th){border-bottom-color:transparent}
+html.js .tp tr.det{display:none}
+html.js .tp tr.row:not([hidden]):has([aria-expanded="true"])+tr.det{display:table-row}
 .tp tr.det td{padding:2px 0 20px 38px;font-size:14.5px;color:var(--text-2)}
 .tp table.flat tr.det td{padding-left:0}
 .tp .det p{margin:0 0 8px;max-width:64ch}
@@ -89,10 +91,12 @@ html:not(.js) .tp td.chev svg{display:none}
 .tp .pp{display:flex;align-items:center;gap:9px;color:var(--text)}
 .tp .pp .lv{margin:0;flex:none}
 .tp .crit{display:none}
-.tp .x{font-size:14.5px;color:var(--text-2);width:215px;padding-right:14px}
-.tp .tx th.c,.tp .tx td.c{width:100px}
-.tp .tx th.lvh,.tp .tx td.lvc{width:156px}
+.tp .x{font-size:14.5px;color:var(--text-2);padding-right:14px}
+.tp .tx th.c,.tp .tx td.c{width:92px}
+.tp .tx th.lvh,.tp .tx td.lvc{width:140px}
 .tp .tx th.name{padding-right:14px}
+/* From 1120px the content column is at its full 800px: the feed names fit on one line. */
+@media (min-width:1120px){.tp .tx th.name{white-space:nowrap}}
 .tp thead th.x{font-size:12.5px}
 .tp .after{margin:14px 0 0;font-size:14.5px;color:var(--text-2)}
 .tp .add{margin:14px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-size:14.5px}

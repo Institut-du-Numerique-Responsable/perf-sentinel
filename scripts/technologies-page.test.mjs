@@ -128,9 +128,61 @@ test('a row expands with click, Enter and Space', async () => {
     await page.keyboard.press('Enter');
     assert.equal(await button.getAttribute('aria-expanded'), 'true');
     assert.equal(await detail.isVisible(), true);
+    await search(page, 'kotlin');
+    assert.equal(await detail.isVisible(), false, 'a row hidden by the search hides its open detail');
+    await search(page, '');
+    assert.equal(await detail.isVisible(), true);
+    await button.focus();
     await page.keyboard.press('Space');
     assert.equal(await button.getAttribute('aria-expanded'), 'false');
     assert.equal(await detail.isVisible(), false);
+  } finally { await close(); }
+});
+
+test('the details fold before the page script runs, never painted open', async () => {
+  const context = await browser.newContext();
+  try {
+    // page.js never arrives: the inline html.js and page.css alone must fold every detail.
+    await context.route('**/assets/technologies/page.js', (route) => route.abort());
+    const page = await context.newPage();
+    await page.goto(server.url + '/technologies');
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('js')), true);
+    assert.equal(await page.locator('tr.det:visible').count(), 0);
+    assert.equal(await count(page, 'tr.row button[aria-expanded]'), 0, 'no state claimed before the script owns it');
+  } finally { await context.close(); }
+  const { page, close } = await open('/technologies');
+  try {
+    assert.equal(await count(page, 'tr.row button[aria-expanded="false"]'), ROWS);
+    assert.equal(await page.locator('tr.det:visible').count(), 0);
+  } finally { await close(); }
+});
+
+test('each detail links to what is missing, and only that', async () => {
+  const { page, close } = await open('/technologies', { javaScriptEnabled: false });
+  const LAB = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab';
+  const CONTRIBUTING = 'https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/CONTRIBUTING.md#what-to-contribute-by-difficulty';
+  const links = (id) => page.$$eval(`#${id} .lk a`, (els) => els.map((a) => [a.textContent, a.getAttribute('href')]));
+  const report = ['Report a production use', '/references#figurer'];
+  try {
+    // Complete: nothing to contribute, its proof.
+    assert.deepEqual(await links('d-frameworks-django'), [['See the lab', `${LAB}/tree/main/services/django-svc`], report]);
+    // Incomplete with a proof: how to contribute, its first proof.
+    assert.deepEqual(await links('d-frameworks-ktor'), [['How to contribute', CONTRIBUTING], ['See the lab', `${LAB}/tree/main/services/ktor-svc`], report]);
+    // Incomplete, no proof, in a family with a lab criterion: the lab itself.
+    assert.deepEqual(await links('d-brokers-kafka'), [['How to contribute', CONTRIBUTING], ['See the lab', LAB], report]);
+    // A family without a lab criterion: never a lab link, complete or not.
+    assert.deepEqual(await links('d-clouds-ovhcloud'), [['How to contribute', CONTRIBUTING], report]);
+    assert.deepEqual(await links('d-clouds-aws'), [report]);
+    // The contribute and report rules hold on every row.
+    const all = await page.$$eval('tr.row', (rows) => rows.map((r) => ({
+      full: r.querySelector('td.lvc').textContent.startsWith('Complete'),
+      hrefs: [...r.nextElementSibling.querySelectorAll('.lk a')].map((a) => a.getAttribute('href')),
+    })));
+    assert.equal(all.length, ROWS);
+    for (const { full, hrefs } of all) {
+      assert.equal(hrefs.includes(CONTRIBUTING), !full);
+      assert.equal(hrefs.at(-1), '/references#figurer');
+    }
   } finally { await close(); }
 });
 
@@ -245,4 +297,16 @@ test('the build refuses to write when a lab proof is missing', (t) => {
   assert.equal(run.status, 1, run.stderr);
   assert.match(run.stderr, /scenarios\/ci-missing/);
   assert.deepEqual(readdirSync(out), []);
+});
+
+test('grid feed names stay on one line at 1280px', async () => {
+  const { page, close } = await open('/fr/technologies', { viewport: { width: 1280, height: 900 } });
+  try {
+    const lines = await page.$$eval('#grids tr.row th .n', (els) => els.map((e) => {
+      const r = e.getClientRects();
+      return [e.textContent, r.length];
+    }));
+    for (const [name, n] of lines) assert.equal(n, 1, `${name} wraps on ${n} lines`);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 1280);
+  } finally { await close(); }
 });
