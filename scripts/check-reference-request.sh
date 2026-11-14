@@ -211,6 +211,9 @@ check_card() {
     reason=$(jq -r '.reason // "unknown"' "$TMP/card.json" 2> /dev/null || true)
     refuse "Card: the card is not valid, reason $(code "$reason")"
   fi
+  if ! jq -e '.integrity == "ok" and (.content == "intact" or .content == "not_checked")' "$TMP/card.json" > /dev/null 2>&1; then
+    refuse "Card: its signature check did not pass"
+  fi
   if ! jq -e '.level == 2' "$TMP/card.json" > /dev/null 2>&1; then
     found=$(jq -r '.level // "none"' "$TMP/card.json" 2> /dev/null || true)
     refuse "Card: level $(code "$found") found, level 2 is needed (the domain must publish the signing key)"
@@ -255,6 +258,27 @@ check_report_url() {
 hash_status() { jq -r ".verifications.$2.status // \"\"" "$1" 2> /dev/null || true; }
 hash_detail() { jq -r ".verifications.$2.detail // \"\"" "$1" 2> /dev/null || true; }
 
+# The engine's own verdict, on every run: a check that did not pass, or an
+# overall UNTRUSTED, refuses the report whatever else passed. ok, skip and
+# not_provided are the statuses that are not failures. Reading only the checks
+# we need would miss the others: a signature that cosign verifies says nothing
+# when attestation_binding failed, because the signature covers the attestation
+# and not the report.
+refuse_on_failed_check() {
+  local file="$1" failed
+  if ! failed=$(jq -r '[.verifications | to_entries[]
+      | select((.value | type) != "object" or ((.value.status // "") | IN("ok", "skip", "not_provided") | not))
+      | .key] | join(", ")' "$file" 2> /dev/null); then
+    refuse "Report: the check printed no readable verifications"
+  fi
+  if [ -n "$failed" ]; then
+    refuse "Report: the check $(code "$failed") did not pass"
+  fi
+  if [ "$(jq -r '.overall // ""' "$file" 2> /dev/null || true)" = UNTRUSTED ]; then
+    refuse "Report: the check rates the report UNTRUSTED"
+  fi
+}
+
 # Runs verify-hash with the given arguments, output in FILE, and sorts its
 # exit codes: 0, 1 and 2 print a verdict, 3 means the report is unreadable,
 # the others (4 network, 5 newer schema, a crash) are not a verdict on it.
@@ -269,6 +293,10 @@ run_verify_hash() {
   esac
   if ! is_json_object "$out"; then
     could_not_check "Report: the check printed no verdict"
+  fi
+  refuse_on_failed_check "$out"
+  if [ "$rc" -eq 1 ]; then
+    refuse "Report: the check ended with exit code 1, which means UNTRUSTED"
   fi
 }
 
@@ -296,19 +324,20 @@ download_report() {
 
 # Rule 4.
 check_report() {
-  local intent
+  local intent signed=false check
   check_report_url
   if [ -n "$IDENTITY$ISSUER" ] && { [ -z "$IDENTITY" ] || [ -z "$ISSUER" ]; }; then
     refuse "Report: fill both signer fields, or neither"
   fi
-  local args=(--url "$REPORT_URL") signer
+  local file_args=(--report "$TMP/report.json") url_args=(--url "$REPORT_URL") signer
   if [ -n "$IDENTITY" ]; then
     for signer in "$IDENTITY" "$ISSUER"; do
       case "$signer" in
         -* | *[[:cntrl:]]*) refuse "Report: a signer field must not start with a dash or hold control characters" ;;
       esac
     done
-    args+=("--expected-identity=$IDENTITY" "--expected-issuer=$ISSUER")
+    file_args+=("--expected-identity=$IDENTITY" "--expected-issuer=$ISSUER")
+    url_args+=("--expected-identity=$IDENTITY" "--expected-issuer=$ISSUER")
   fi
 
   # Download first: a 404 or a redirect is a plain refusal, whereas the engine
@@ -316,12 +345,20 @@ check_report() {
   # bytes read below, and check that the engine, which fetches the report
   # itself, saw the same content.
   download_report "$TMP/report.json"
-  run_verify_hash "$TMP/hash-file.json" --report "$TMP/report.json"
+  if jq -e '.integrity.signature != null' "$TMP/report.json" > /dev/null 2>&1; then
+    signed=true
+    if [ -z "$IDENTITY" ]; then
+      refuse "Report: it is signed, so both signer fields (identity and issuer) are required"
+    fi
+  fi
+  run_verify_hash "$TMP/hash-file.json" "${file_args[@]}"
   if [ "$(hash_status "$TMP/hash-file.json" content_hash)" != ok ]; then
     refuse "Report: its content hash does not match the report"
   fi
-  run_verify_hash "$TMP/hash-url.json" "${args[@]}"
+  run_verify_hash "$TMP/hash-url.json" "${url_args[@]}"
+  # The detail embeds the claimed hash: equal and non-empty details mean one content.
   if [ "$(hash_status "$TMP/hash-url.json" content_hash)" != ok ] ||
+    [ -z "$(hash_detail "$TMP/hash-file.json" content_hash)" ] ||
     [ "$(hash_detail "$TMP/hash-url.json" content_hash)" != "$(hash_detail "$TMP/hash-file.json" content_hash)" ]; then
     refuse "Report: the file changed between two downloads, or its content hash does not match"
   fi
@@ -334,13 +371,14 @@ check_report() {
     refuse "Report: it does not name $(code "$DOMAIN") as the organisation domain"
   fi
 
-  if jq -e '.integrity.signature != null' "$TMP/report.json" > /dev/null 2>&1; then
-    if [ -z "$IDENTITY" ] || [ -z "$ISSUER" ]; then
-      refuse "Report: it is signed, so both signer fields (identity and issuer) are required"
-    fi
-    if [ "$(hash_status "$TMP/hash-url.json" signature)" != ok ]; then
-      refuse "Report: the signature check gave $(code "$(hash_status "$TMP/hash-url.json" signature)"), $(code "$(hash_detail "$TMP/hash-url.json" signature)")"
-    fi
+  # signed: true is granted only when the signature verifies and the
+  # attestation it covers names these figures.
+  if [ "$signed" = true ]; then
+    for check in signature attestation_binding; do
+      if [ "$(hash_status "$TMP/hash-url.json" "$check")" != ok ]; then
+        refuse "Report: it is signed, but the check $(code "$check") gave $(code "$(hash_status "$TMP/hash-url.json" "$check")"), $(code "$(hash_detail "$TMP/hash-url.json" "$check")")"
+      fi
+    done
     REPORT_SIGNED=true
   fi
 

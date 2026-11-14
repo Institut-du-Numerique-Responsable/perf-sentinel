@@ -134,11 +134,14 @@ EOF
 }
 
 # An unsigned official report for the domain, July to December 2026. The
-# engine answers PARTIAL (exit 2) on an unsigned report, as the real one does.
+# verifications object has every key the real `verify-hash --format json`
+# prints (content_hash, core_patterns, attestation_binding, signature,
+# binary_attestation), with the statuses a real run gives an unsigned report:
+# nothing to bind, nothing signed, so PARTIAL (exit 2).
 with_report() {
   F_REPORT="${REPORT_OK}"
   cat > fake/hash-url.out <<'EOF'
-{"report_path":"x","report_metadata":{"intent":"official","integrity_level":"hash-only","report_uuid":"u"},"period":{"from_date":"2026-07-01","to_date":"2026-12-31"},"verifications":{"content_hash":{"status":"ok","detail":"matches integrity.content_hash (sha256:abc)"},"signature":{"status":"not_provided"}},"overall":"PARTIAL"}
+{"report_path":"x","report_metadata":{"intent":"official","integrity_level":"hash-only","perf_sentinel_version":"0.45.0","report_uuid":"u"},"period":{"from_date":"2026-07-01","to_date":"2026-12-31"},"verifications":{"content_hash":{"status":"ok","detail":"matches integrity.content_hash (sha256:abc)"},"core_patterns":{"status":"ok","detail":"matches canonical core set for local perf-sentinel (4 patterns)"},"attestation_binding":{"status":"not_provided"},"signature":{"status":"not_provided"},"binary_attestation":{"status":"not_provided"}},"overall":"PARTIAL"}
 EOF
   echo 2 > fake/hash-url.exit
   cp fake/hash-url.out fake/hash-report.out
@@ -148,14 +151,18 @@ EOF
 EOF
 }
 
-# The same report, signed, with the signer fields filled and cosign content.
+# The same report, signed, with the signer fields filled. The run on the
+# published URL finds the sidecar attestation and bundle: signature and
+# attestation_binding are ok, TRUSTED (exit 0). The run on the downloaded file
+# has no sidecar: the signature is skipped, PARTIAL (exit 2).
 with_signed_report() {
   with_report
   F_IDENTITY="${IDENTITY_OK}"
   F_ISSUER="${ISSUER_OK}"
   edit fake/report.body '.integrity.signature = {"format":"sigstore-cosign-intoto-v1","signer_identity":"x","signer_issuer":"y"}'
-  edit fake/hash-url.out '.verifications.signature = {"status":"ok","detail":"valid"} | .overall = "TRUSTED"'
+  edit fake/hash-url.out '.verifications.attestation_binding = {"status":"ok","detail":"the attestation names this content hash"} | .verifications.signature = {"status":"ok","detail":"valid (signed by x via y)"} | .overall = "TRUSTED"'
   echo 0 > fake/hash-url.exit
+  edit fake/hash-report.out '.verifications.signature = {"status":"skip","detail":"signature metadata present, pass --attestation <path> to verify"}'
 }
 
 with_consent_file() { printf '%s\n' "${ISSUE_OK}" > fake/consent.body; }
@@ -215,6 +222,61 @@ s_signed_cosign_rejects() {
   with_signed_report
   edit fake/hash-url.out '.verifications.signature = {"status":"fail","detail":"cosign rejected"} | .overall = "UNTRUSTED"'
   echo 1 > fake/hash-url.exit
+  with_consent_file
+}
+# A third party's attestation and bundle beside the report: cosign verifies
+# them, but they name other figures.
+s_signed_binding_fails() {
+  with_signed_report
+  edit fake/hash-url.out '.verifications.attestation_binding = {"status":"fail","detail":"the attestation names another content hash"} | .overall = "UNTRUSTED"'
+  echo 1 > fake/hash-url.exit
+  with_consent_file
+}
+s_signed_binding_skipped() {
+  with_signed_report
+  edit fake/hash-url.out '.verifications.attestation_binding = {"status":"skip","detail":"nothing ties it to these figures"} | .overall = "PARTIAL"'
+  echo 2 > fake/hash-url.exit
+  with_consent_file
+}
+s_signed_signature_skipped() {
+  with_signed_report
+  edit fake/hash-url.out '.verifications.signature = {"status":"skip","detail":"cosign not found in PATH"} | .overall = "PARTIAL"'
+  echo 2 > fake/hash-url.exit
+  with_consent_file
+}
+s_untrusted_first_run() {
+  with_report
+  edit fake/hash-report.out '.overall = "UNTRUSTED"'
+  echo 1 > fake/hash-report.exit
+  with_consent_file
+}
+s_untrusted_second_run() {
+  with_report
+  edit fake/hash-url.out '.overall = "UNTRUSTED"'
+  echo 1 > fake/hash-url.exit
+  with_consent_file
+}
+s_core_patterns_fail_first_run() {
+  with_report
+  edit fake/hash-report.out '.verifications.core_patterns = {"status":"fail","detail":"core_patterns_required diverges"}'
+  echo 1 > fake/hash-report.exit
+  with_consent_file
+}
+s_core_patterns_fail_second_run() {
+  with_report
+  edit fake/hash-url.out '.verifications.core_patterns = {"status":"fail","detail":"core_patterns_required diverges"}'
+  echo 1 > fake/hash-url.exit
+  with_consent_file
+}
+# The exit code and the JSON must agree: either one saying "not trusted" refuses.
+s_card_integrity_not_ok() { with_card; edit fake/card.out '.integrity = "tampered"'; with_consent_file; }
+s_exit_1_first_run() { with_report; echo 1 > fake/hash-report.exit; with_consent_file; }
+s_exit_1_second_run() { with_report; echo 1 > fake/hash-url.exit; with_consent_file; }
+# Equal details prove the two runs saw one content, so empty ones prove nothing.
+s_hash_detail_missing() {
+  with_report
+  edit fake/hash-url.out 'del(.verifications.content_hash.detail)'
+  edit fake/hash-report.out 'del(.verifications.content_hash.detail)'
   with_consent_file
 }
 s_signed_hostile_fields() { with_signed_report; F_IDENTITY="${HOSTILE}"; F_ISSUER="https://x${HOSTILE}"; with_consent_file; }
@@ -346,6 +408,22 @@ run_scenario "refuses_a_signed_report_without_identity_fields" 1 s_signed_no_fie
   --never '--no-identity-check' --never '--expected-identity'
 run_scenario "refuses_a_signed_report_with_one_identity_field" 1 s_signed_one_field --never 'perf-sentinel verify-'
 run_scenario "refuses_a_signed_report_the_signature_check_rejects" 1 s_signed_cosign_rejects
+run_scenario "refuses_a_signed_report_whose_attestation_names_other_figures" 1 s_signed_binding_fails \
+  --lacks '"signed": true' --lacks '```json' --has 'attestation_binding'
+run_scenario "refuses_a_signed_report_whose_attestation_binding_is_skipped" 1 s_signed_binding_skipped \
+  --lacks '"signed": true' --lacks '```json'
+run_scenario "refuses_a_signed_report_whose_signature_was_skipped" 1 s_signed_signature_skipped \
+  --lacks '"signed": true' --lacks '```json'
+run_scenario "refuses_a_report_the_engine_rates_untrusted_on_the_first_run" 1 s_untrusted_first_run --lacks '```json'
+run_scenario "refuses_a_report_the_engine_rates_untrusted_on_the_second_run" 1 s_untrusted_second_run --lacks '```json'
+run_scenario "refuses_a_failed_secondary_check_on_the_first_run" 1 s_core_patterns_fail_first_run \
+  --has 'core_patterns' --lacks '```json'
+run_scenario "refuses_a_failed_secondary_check_on_the_second_run" 1 s_core_patterns_fail_second_run \
+  --has 'core_patterns' --lacks '```json'
+run_scenario "refuses_a_card_whose_signature_check_did_not_pass" 1 s_card_integrity_not_ok --lacks '```json'
+run_scenario "refuses_a_report_when_the_first_run_exits_untrusted" 1 s_exit_1_first_run --lacks '```json'
+run_scenario "refuses_a_report_when_the_second_run_exits_untrusted" 1 s_exit_1_second_run --lacks '```json'
+run_scenario "refuses_a_report_without_a_content_hash_detail_to_compare" 1 s_hash_detail_missing --lacks '```json'
 run_scenario "accepts_a_signed_report_with_identity_fields" 0 s_signed_ok \
   --has '"signed": true' \
   --called "--expected-identity=${IDENTITY_OK}" --called "--expected-issuer=${ISSUER_OK}" \
