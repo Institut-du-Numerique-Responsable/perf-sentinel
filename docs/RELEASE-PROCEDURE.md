@@ -34,6 +34,7 @@ Apply the feature, fix or refactor work for the release. Then bump every version
 **Operator-driven** (no CI gate, audit manually with `grep -RIn "<previous_version>" docs/ charts/ CHANGELOG.md`):
 
 - `docs/ci-templates/*`: the `PERF_SENTINEL_VERSION` constant in `github-actions-baseline.yml`, `github-actions-report-cleanup.yml`, `github-actions.yml`, `gitlab-ci.yml`, and `jenkinsfile.groovy`.
+- `.github/workflows/reference-request.yml`: the `PERF_SENTINEL_VERSION` constant of the `verify` job, the released binary that checks listing requests.
 - `docs/CI.md` and `docs/FR/CI-FR.md`: snippet examples that show `perf-sentinel@vX.Y.Z`.
 - `docs/schemas/examples/*.json`: only the `binary_verification_url` field (which always points to the latest release). The other version fields (`perf_sentinel_version`, `binary_version`, `binary_versions`) stay frozen at the example's historical baseline.
 - `CHANGELOG.md`: move the `[Unreleased]` content under a new `[X.Y.Z]` heading dated today.
