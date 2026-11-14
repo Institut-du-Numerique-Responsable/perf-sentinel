@@ -219,7 +219,7 @@ function expectNewLinks(cols, t, f, where) {
   const i = product.findIndex((a) => a.text === f.after);
   assert.ok(i >= 0, `${where}: no ${f.after} in the product column`);
   assert.deepEqual(product[i + 1], { text: f.tech, href: t.tech }, `${where}: technologies after ${f.after}`);
-  assert.deepEqual(project.slice(-2), [{ text: t.who, href: t.refs }, { text: t.contrib, href: CONTRIB }], `${where}: project column ends with who-uses-it then contribute`);
+  assert.deepEqual(project.slice(-2), [{ text: t.who, href: t.refs }, { text: `${t.contrib} ↗`, href: CONTRIB }], `${where}: project column ends with who-uses-it then contribute`);
 }
 
 test('the four footers carry the same three new links, in both languages', async () => {
@@ -236,6 +236,66 @@ test('the four footers carry the same three new links, in both languages', async
 test('the reference docs footer matches the home footer', async () => {
   for (const [lang, t] of LANGS) {
     assert.deepEqual(await footerCols(FT[lang].doc), await footerCols(t.home), `${FT[lang].doc}: footer columns match the home page`);
+  }
+});
+
+// The arrow convention: a link that leaves perf-sentinel.dev ends with « ↗ », an internal one never does.
+// Text links only: a logo, an image or the header's GitHub badge (logo and star count) carries no arrow.
+const linksOf = (page, scope) => page.evaluate((scope) => {
+  const root = document.querySelector('#dc-root') || document;
+  return [...root.querySelectorAll(scope)].filter((a) => a.hasAttribute('href') && !a.querySelector('img,svg,[role="img"]')).map((a) => ({
+    href: a.href, text: a.textContent.replace(/\s+/g, ' ').trim(),
+    outgoing: /^https?:$/.test(a.protocol) && a.hostname !== 'perf-sentinel.dev' && a.host !== location.host,
+    arrow: !!a.querySelector('[data-arrow="ext"][aria-hidden="true"]'),
+  }));
+}, scope);
+// element: the arrow is the aria-hidden span. some: the scope has at least one outgoing link.
+// internal: no internal link carries « ↗ » (the bodies keep it on the demos that open in a new tab).
+// The bodies: the text is what counts, the home's earlier arrows are spans screen readers still read.
+function expectArrows(links, where, { element = true, some = true, internal = true } = {}) {
+  if (some) assert.ok(links.some((a) => a.outgoing), `${where}: no outgoing link`);
+  for (const a of links) {
+    if (a.outgoing) assert.ok(a.text.endsWith('↗') && (a.arrow || !element), `${where}: ${a.text} → ${a.href}`);
+    else if (internal) assert.ok(!a.text.includes('↗'), `${where}: internal ${a.text} → ${a.href}`);
+  }
+}
+const CHROME_PATHS = ['/', '/fr/', '/guide', '/fr/guide', '/legal-notice', '/mentions-legales', '/verifier', '/fr/verifier', '/docs/CLI', '/docs/fr/CLI', '/technologies', '/references'];
+
+test('every outgoing text link of the header and footer ends with the arrow, and no internal one does', async () => {
+  for (const path of CHROME_PATHS) {
+    const { page, close } = await open(path, { wait: 'body' });
+    try {
+      await page.waitForFunction(() => !document.querySelector('x-dc'));
+      // The home's menus write their arrow as a plain span: the text is what counts there.
+      expectArrows(await linksOf(page, 'header a'), `${path} header`, { element: false, some: false });
+      expectArrows(await linksOf(page, 'footer a'), `${path} footer`);
+    } finally { await close(); }
+  }
+});
+
+// The bodies of the hand-written pages. Left out on purpose: the badges of the home page, its
+// license pill and its two release versions (pills, like the star buttons), and the mailto links.
+const BODY_EXEMPT = (a) => a.href.startsWith('mailto:') || a.href.includes('/releases/tag/') || (a.href === 'https://www.gnu.org/licenses/agpl-3.0.html' && a.text === 'open source');
+test('every outgoing text link in the bodies carries the arrow', async () => {
+  for (const path of ['/', '/fr/', '/guide', '/fr/guide', '/legal-notice', '/mentions-legales', '/privacy-policy', '/confidentialite', '/verifier', '/fr/verifier']) {
+    const { page, close } = await open(path, { wait: 'body' });
+    try {
+      await page.waitForFunction(() => !document.querySelector('x-dc'));
+      expectArrows((await linksOf(page, 'main a')).filter((a) => !BODY_EXEMPT(a)), `${path} body`, { internal: false, element: false });
+    } finally { await close(); }
+  }
+});
+
+test('the outgoing links of the synoptic contribution dialog carry the arrow', async () => {
+  for (const lang of ['fr', 'en']) {
+    const { page, close } = await openStage(lang, 4);
+    try {
+      await page.click('#csrc .csrc-c');
+      await page.waitForSelector('#contrib[open]');
+      const links = await linksOf(page, '#contrib a');
+      expectArrows(links, `${lang} synoptic dialog`);
+      assert.equal(links.filter((a) => a.outgoing).length, 5, `${lang}: five outgoing links`);
+    } finally { await close(); }
   }
 });
 
@@ -383,7 +443,7 @@ test('the contribution dialog of the synoptic links to the technologies page', a
     try {
       await page.click('#csrc .csrc-c');
       await page.waitForSelector('#contrib[open]');
-      const items = await page.$$eval('#contrib li a', (as) => as.map((a) => ({ text: a.textContent.trim(), href: a.getAttribute('href'), target: a.getAttribute('target') })));
+      const items = await page.$$eval('#contrib li a', (as) => as.map((a) => ({ text: a.textContent.replace(/↗$/, '').trim(), href: a.getAttribute('href'), target: a.getAttribute('target') })));
       const i = items.findIndex((a) => a.text === SY[lang].guide);
       assert.ok(i >= 0, `${lang}: no contribution guide in the dialog`);
       assert.deepEqual(items[i + 1], { text: SY[lang].dialog, href: SY[lang].base, target: null }, `${lang}: technologies link after the guide`);

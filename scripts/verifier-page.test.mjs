@@ -191,6 +191,8 @@ test('a valid link shows the neutral level 1 state', async () => {
   assert.equal(await visible(page, '#verifier-compact-note'), true);
   assert.ok((await text(page, '#verifier-compact-note')).includes('environment'));
   assert.equal(await visible(page, '#verifier-dns'), true);
+  // The method link leaves the site: it carries the outgoing arrow.
+  assert.deepEqual(await page.$eval('#verifier-result .vf-ft a', (a) => [a.textContent.trim().endsWith('↗'), !!a.querySelector('[data-arrow="ext"][aria-hidden="true"]')]), [true, true]);
   await assertNoAccent(page);
   assert.deepEqual(external, []);
   await close();

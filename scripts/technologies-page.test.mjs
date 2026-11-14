@@ -305,12 +305,12 @@ test('each detail links to what is missing, and only that', async () => {
 });
 
 test('every outgoing link of the four pages carries the arrow', async () => {
-  // The page's own content: the header and footer are the site chrome, shared with the home and legal pages.
+  // The whole page, header and footer included; the header's GitHub badge (logo and name) is not a text link.
   for (const path of ['/technologies', '/fr/technologies', '/references', '/fr/references']) {
     const { page, close } = await open(path, { javaScriptEnabled: false });
     try {
-      const outgoing = await page.$$eval('main a', (as) => as
-        .filter((a) => /^https?:$/.test(a.protocol) && a.hostname !== 'perf-sentinel.dev' && a.host !== location.host)
+      const outgoing = await page.$$eval('a', (as) => as
+        .filter((a) => /^https?:$/.test(a.protocol) && a.hostname !== 'perf-sentinel.dev' && a.host !== location.host && !a.querySelector('svg,img'))
         .map((a) => ({ href: a.href, text: a.textContent.trim(), arrow: !!a.querySelector('[data-arrow="ext"][aria-hidden="true"]') })));
       assert.ok(outgoing.length > 0, path);
       for (const a of outgoing) assert.ok(a.text.endsWith('↗') && a.arrow, `${path}: ${a.text} → ${a.href}`);
