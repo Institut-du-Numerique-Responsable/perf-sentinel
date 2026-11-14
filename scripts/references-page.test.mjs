@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './static-server.mjs';
+import { COPY } from '../assets/technologies/copy.js';
 import { referencesPage } from './build-technologies.mjs';
 import { CONTACT_EMAIL } from './site-chrome.mjs';
 
@@ -89,7 +90,7 @@ test('an empty list shows the empty state and the request button', async () => {
     try {
       assert.equal(await page.getAttribute('html', 'lang'), lang);
       assert.equal(await page.getAttribute('#figurer a.btn', 'href'), ISSUE_FORM);
-      assert.equal(await page.getAttribute('#figurer a[href^="mailto:"]', 'href'), `mailto:${CONTACT_EMAIL}`);
+      assert.equal(await page.locator('#figurer a[href^="mailto:"]').count(), 1);
       assert.equal(await page.locator('#figurer ol.steps li').count(), 3);
       const proofs = await page.$$eval('dl.proofs dt', (dts) => dts.map((d) => d.textContent));
       assert.deepEqual(proofs.slice(2), [lang === 'fr' ? 'Équipe non nommée' : 'Unnamed team']);
@@ -104,6 +105,58 @@ test('an empty list shows the empty state and the request button', async () => {
       assert.equal(await page.locator('#liste table').count(), 0, 'no table without a row');
       assert.equal(await page.isVisible('#liste .empty'), true);
       assert.equal(await page.getAttribute('#liste .empty a', 'href'), '#figurer');
+    } finally { await close(); }
+  }
+});
+
+// What the owner approved, typed out here so that a slip in copy.js cannot pass for its own reference.
+const MAIL = {
+  fr: {
+    subject: 'Perf Sentinel, équipe en production sans être nommée',
+    body: [
+      'Bonjour,',
+      '',
+      'Notre équipe utilise Perf Sentinel en production et souhaite être comptée sans être nommée.',
+      '',
+      'En production depuis : (mois et année)',
+      'Notre pile : (langages et frameworks, bases de données, brokers, source de traces, cloud, intégration continue)',
+      'Notre preuve : (lien de vérification d’une carte signée, ou adresse d’un rapport publié)',
+    ],
+  },
+  en: {
+    subject: 'Perf Sentinel, team in production without being named',
+    body: [
+      'Hello,',
+      '',
+      'Our team runs Perf Sentinel in production and would like to be counted without being named.',
+      '',
+      'In production since: (month and year)',
+      'Our stack: (languages and frameworks, databases, brokers, trace source, cloud, continuous integration)',
+      'Our proof: (verify link of a signed card, or address of a published report)',
+    ],
+  },
+};
+
+test('the anonymous route opens a prefilled message', async () => {
+  for (const [lang, path] of LANGS) {
+    const raw = await (await fetch(server.url + path)).text();
+    const { page, close } = await open(path);
+    try {
+      const href = await page.getAttribute('#figurer a[href^="mailto:"]', 'href');
+      const mail = new URL(href);
+      assert.equal(mail.protocol, 'mailto:');
+      assert.equal(mail.pathname, CONTACT_EMAIL, `${lang}: the address is the exported constant`);
+      assert.deepEqual([...mail.searchParams.keys()], ['subject', 'body'], lang);
+      const subject = mail.searchParams.get('subject');
+      const body = mail.searchParams.get('body');
+      assert.equal(subject, COPY[lang].ref.mailSubject, lang);
+      assert.equal(body.replaceAll('\r\n', '\n'), COPY[lang].ref.mailBody, lang);
+      assert.equal(subject, MAIL[lang].subject, lang);
+      assert.equal(body, MAIL[lang].body.join('\r\n'), `${lang}: line breaks are CRLF`);
+      assert.ok(href.includes('%0D%0A') && !/%0A/.test(href.replaceAll('%0D%0A', '')), `${lang}: line breaks are %0D%0A`);
+      assert.ok(raw.includes('?subject=') && raw.includes('&amp;body='), `${lang}: the & between subject and body is written &amp; in the HTML`);
+      // The sentence around the link does not change.
+      assert.equal(await page.textContent('#figurer a[href^="mailto:"]'), lang === 'fr' ? 'Écrivez-nous par e-mail' : 'Write to us by e-mail');
     } finally { await close(); }
   }
 });

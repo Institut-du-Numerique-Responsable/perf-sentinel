@@ -184,6 +184,9 @@ function referenceHtml(r, t) {
     `<tr class="det"><td colspan="4">${lines.map((l) => `<p>${l}</p>`).join('')}</td></tr>`;
 }
 
+// The address is written once, in site-chrome.mjs. The message is the one to complete, CRLF line breaks as mail clients expect.
+const mailto = (r) => esc(`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(r.mailSubject)}&body=${encodeURIComponent(r.mailBody.replaceAll('\n', '\r\n'))}`);
+
 // Proof links become hrefs: only https://, whatever the engine's own data tests let through.
 function checkProofLinks(references) {
   for (const r of references) {
@@ -212,7 +215,7 @@ export function referencesMain(references, teams, lang) {
   return `<section class="intro"><h1>${r.h1}</h1><p>${r.intro}</p></section>` +
     `<section id="liste"><h2>${r.orgs}</h2>${list}${anon}</section>` +
     `<section id="figurer"><h2>${r.join}</h2><ol class="steps">${r.steps.map(([b, s]) => `<li><b>${b}</b><span>${s}</span></li>`).join('')}</ol>` +
-    `<a class="btn" href="${ISSUE_FORM}">${r.ask}${EXT}</a><p class="limit">${r.anonymous(`mailto:${CONTACT_EMAIL}`)}</p></section>` +
+    `<a class="btn" href="${ISSUE_FORM}">${r.ask}${EXT}</a><p class="limit">${r.anonymous(mailto(r))}</p></section>` +
     `<section><h2>${r.proofs}</h2><dl class="proofs"><div><dt>${r.card}</dt><dd>${r.cardProof}</dd></div><div><dt>${r.report}</dt><dd>${r.reportProof}</dd></div><div><dt>${r.unnamed}</dt><dd>${r.unnamedProof}</dd></div></dl>` +
     `<p class="limit">${r.limit}</p></section>`;
 }
