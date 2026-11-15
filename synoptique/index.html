@@ -2039,6 +2039,8 @@ async function ovPlay(m){const id=++ovRun;ovShow(m);ovG.dots.textContent="";ovLi
     if(!n)await ovSleep(700,id);await gate(()=>id===ovRun,"ov")}
    stepL.querySelectorAll("li").forEach(li=>li.classList.remove("on"));stepT.forEach(g=>g.classList.remove("on"));await ovSleep(1600,id)}}catch(e){if(e!=="stop")console.error(e)}}
 /* zoom: the block's own content fades out to reveal the next level already running inside its frame, then that level grows to fill the page */
+// layers a zoom is running on: a chained zoom (CORE, then the map) must not get its transitions back from the previous one
+const MORPHING=new Set();
 function ovMorph(blk,tgt,dir,SRC=OV){const R=SRC.getBoundingClientRect(),fr=blk.querySelector("rect"),m=fr.getScreenCTM(),b=fr.getBBox();
  const at=(x,y)=>{const q=SRC.createSVGPoint();q.x=x;q.y=y;const r=q.matrixTransform(m);return[r.x-R.left,r.y-R.top]};
  const [x0,y0]=at(b.x+14,b.y+14),[x1,y1]=at(b.x+b.width-14,b.y+b.height-14);
@@ -2047,14 +2049,14 @@ function ovMorph(blk,tgt,dir,SRC=OV){const R=SRC.getBoundingClientRect(),fr=blk.
  const mini=`translate(${sx-s*cx}px,${sy-s*cy}px) scale(${s})`,big=`translate(${cx-k*sx}px,${cy-k*sy}px) scale(${k})`,none="translate(0px,0px) scale(1)";
  // a child faded on purpose (the stage row in capture) fades from and back to its own opacity, not to full
  const inner=[...blk.children].filter(e=>e!==fr),o0=inner.map(e=>getComputedStyle(e).opacity),ease="cubic-bezier(.65,0,.35,1)";
- [SRC,tgt].forEach(e=>{e.style.transition="none";e.style.transformOrigin="0 0";e.classList.remove("gone")});tgt.style.zIndex=2;
+ [SRC,tgt].forEach(e=>{MORPHING.add(e);e.style.transition="none";e.style.transformOrigin="0 0";e.classList.remove("gone")});tgt.style.zIndex=2;
  // cancel by reference: getAnimations() can miss a finished fill-forwards animation whose transform still applies
  const made=[],an=(e,k,o)=>{const a=mo(e.animate(k,o));made.push(a);return a};
  const fade=(els,out,ms)=>els.map((e,i)=>an(e,out?[{opacity:o0[i]},{opacity:0}]:[{opacity:0},{opacity:o0[i]}],{duration:reduce?1:ms,fill:"forwards"}).finished);
  const done=()=>{made.forEach(a=>a.cancel());[SRC,tgt].forEach(e=>{e.getAnimations().forEach(a=>a.cancel());e.style.transform=""});inner.forEach(e=>{e.getAnimations().forEach(a=>a.cancel());e.style.opacity=""});tgt.style.zIndex="";
   (dir==="in"?SRC:tgt).classList.add("gone");
   // settle the hidden state while transitions are still off, or the restored opacity transition replays the fade
-  [SRC,tgt].forEach(e=>getComputedStyle(e).opacity);requestAnimationFrame(()=>[SRC,tgt].forEach(e=>e.style.transition=""))};
+  [SRC,tgt].forEach(e=>{MORPHING.delete(e);getComputedStyle(e).opacity});requestAnimationFrame(()=>[SRC,tgt].forEach(e=>{if(!MORPHING.has(e))e.style.transition=""}))};
  const grow=(rev)=>{const o=[{transform:none,opacity:1},{transform:big,opacity:1,offset:.55},{transform:big,opacity:0}],t=[{transform:mini},{transform:none}];
   const op={duration:reduce?1:800,easing:ease,fill:"forwards",direction:rev?"reverse":"normal"};return Promise.all([an(SRC,o,op).finished,an(tgt,t,op).finished])};
  if(dir==="in")return Promise.all([...fade(inner,true,380),an(tgt,[{transform:mini,opacity:0},{transform:mini,opacity:1}],{duration:reduce?1:420,fill:"forwards"}).finished]).then(()=>grow(false)).then(done);
