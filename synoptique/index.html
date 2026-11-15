@@ -558,8 +558,8 @@ mod(7,"Rapport","Signer chaque finding, appliquer les acquittements, évaluer le
   el("line",{x1:1531,y1:Y-5,x2:1531,y2:Y-48,class:"instl"},g);m.ack=el("rect",{x:1517,y:Y-74,width:28,height:26,rx:5,class:"inst"},g);tx(g,1531,Y-57,"✓","tiny","middle");
   m.ackT=tx(g,1531,Y-99,"","tiny","middle");m.ackT2=tx(g,1531,Y-84,"","tiny","middle");
   m.gate=el("g",{},g);el("line",{x1:1528,y1:Y+5,x2:1528,y2:Y+26,class:"instl"},m.gate);m.valve=el("rect",{x:1508,y:Y+26,width:40,height:26,rx:5,class:"inst"},m.gate);tx(m.gate,1528,Y+43,"GATE","tiny","middle");
-  m.sigLead=el("path",{d:`M1548,${Y+39} H1580 V${Y-128} H1576`,class:"instl"},m.gate);
-  m.sig=el("g",{},g);el("rect",{x:1556,y:Y-150,width:20,height:44,rx:10,class:"sym"},m.sig);
+  m.sigLead=el("path",{d:`M1548,${Y+39} H1580 V${Y-138} H1576`,class:"instl"},m.gate);
+  m.sig=el("g",{transform:"translate(0,-10)"},g);el("rect",{x:1556,y:Y-150,width:20,height:44,rx:10,class:"sym"},m.sig);
   m.red=el("circle",{cx:1566,cy:Y-138,r:5,style:"fill:var(--track)"},m.sig);m.green=el("circle",{cx:1566,cy:Y-118,r:5,style:"fill:var(--track)"},m.sig);m.leg=el("g",{},g);[["var(--ko)","rouge : échoue"],["var(--flow)","vert : passe"],["var(--track)","éteint : pas évalué"]].forEach(([c,s],k)=>{el("circle",{cx:1592,cy:Y-198+k*16,r:4,style:`fill:${c}`},m.leg);tx(m.leg,1601,Y-194+k*16,s,"tiny")});m.dnote=el("g",{style:"display:none"},g);["le daemon n'évalue","pas le gate par lot,","seulement à l'export :"].forEach((s,k)=>tx(m.dnote,1588,Y-206+k*16,s,"tiny"));xpCode(m.dnote,1588,Y-156,"/api/export/report");
   m.gnote=tx(g,1528,Y+66,"","tiny","middle");m.gnote2=tx(g,1528,Y+78,"","tiny","middle");
   m.f=lcd(g,1482,420,100,"SIGNATURES","—");m.gv=lcd(g,1482,466,100,"GATE","—");m.out=lcd(g,1482,512,100,"CODE DE SORTIE","—");});
