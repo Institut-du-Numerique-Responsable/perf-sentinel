@@ -551,7 +551,7 @@ mod(6,"Carbone","Convertir l'énergie en gCO₂e : intensité du réseau, PUE, f
   m.mul=el("rect",{x:1342,y:Y-14,width:28,height:28,rx:5,class:"sym"},g);tx(g,1356,Y+5,"×","lab","middle");
   el("path",{d:`M1356,${Y-17} V178`,class:"pipe2"},g);m.grid=tx(g,1356,146,"","tiny","middle");m.grid2=tx(g,1356,162,"","tiny","middle");
   m.pue=el("rect",{x:1384,y:Y-16,width:40,height:32,rx:6,class:"sym"},g);tx(g,1404,Y-24,"DATACENTER","tiny","middle");tx(g,1404,Y-2,"PUE","tiny","middle").style.setProperty("font-size","9px","important");tx(g,1404,Y+11,"1"+L_DEC+"15","tiny","middle").style.setProperty("font-size","9px","important");
-  m.add=el("rect",{x:1434,y:Y-10,width:20,height:20,rx:4,class:"sym"},g);tx(g,1444,Y+4,"+","lab","middle");el("path",{d:`M1444,${Y+13} V381`,class:"pipe2"},g);tx(g,1437,366,"FABRICATION","tiny","end");
+  m.add=el("rect",{x:1434,y:Y-10,width:20,height:20,rx:4,class:"sym"},g);tx(g,1444,Y+4,"+","lab","middle");el("path",{d:`M1444,${Y+13} V381`,class:"pipe2"},g);tx(g,1451,394,"FABRICATION","tiny","end");
   lead(g,`M1340,${Y-8} H1326 V420`);m.i=lcd(g,1322,420,132,"RÉSEAU (g/kWh)","—");m.op=lcd(g,1322,466,132,"EXPLOITATION (g)","—");m.tot=lcd(g,1322,512,132,"TOTAL (g), ÷2 À ×2","—");});
 // 08 rapport: signatures, acknowledgments, the gate tapping the report
 mod(7,"Rapport","Signer chaque finding, appliquer les acquittements, évaluer le quality gate, publier.",1476,1586,(g,m)=>{
