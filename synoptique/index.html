@@ -2052,7 +2052,9 @@ function ovMorph(blk,tgt,dir,SRC=OV){const R=SRC.getBoundingClientRect(),fr=blk.
  const made=[],an=(e,k,o)=>{const a=mo(e.animate(k,o));made.push(a);return a};
  const fade=(els,out,ms)=>els.map((e,i)=>an(e,out?[{opacity:o0[i]},{opacity:0}]:[{opacity:0},{opacity:o0[i]}],{duration:reduce?1:ms,fill:"forwards"}).finished);
  const done=()=>{made.forEach(a=>a.cancel());[SRC,tgt].forEach(e=>{e.getAnimations().forEach(a=>a.cancel());e.style.transform=""});inner.forEach(e=>{e.getAnimations().forEach(a=>a.cancel());e.style.opacity=""});tgt.style.zIndex="";
-  (dir==="in"?SRC:tgt).classList.add("gone");requestAnimationFrame(()=>[SRC,tgt].forEach(e=>e.style.transition=""))};
+  (dir==="in"?SRC:tgt).classList.add("gone");
+  // settle the hidden state while transitions are still off, or the restored opacity transition replays the fade
+  [SRC,tgt].forEach(e=>getComputedStyle(e).opacity);requestAnimationFrame(()=>[SRC,tgt].forEach(e=>e.style.transition=""))};
  const grow=(rev)=>{const o=[{transform:none,opacity:1},{transform:big,opacity:1,offset:.55},{transform:big,opacity:0}],t=[{transform:mini},{transform:none}];
   const op={duration:reduce?1:800,easing:ease,fill:"forwards",direction:rev?"reverse":"normal"};return Promise.all([an(SRC,o,op).finished,an(tgt,t,op).finished])};
  if(dir==="in")return Promise.all([...fade(inner,true,380),an(tgt,[{transform:mini,opacity:0},{transform:mini,opacity:1}],{duration:reduce?1:420,fill:"forwards"}).finished]).then(()=>grow(false)).then(done);
