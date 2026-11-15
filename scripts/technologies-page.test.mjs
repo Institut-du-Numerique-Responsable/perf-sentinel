@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './static-server.mjs';
-import { chromium, LOCALE, open as openPage } from './page-test-helpers.mjs';
+import { chromium, webkit, LOCALE, open as openPage } from './page-test-helpers.mjs';
 import { loadSiteData, localize } from './technologies-model.mjs';
 import { technologiesMain } from './build-technologies.mjs';
 
@@ -225,6 +225,23 @@ test('a row expands with click, Enter and Space', async () => {
     assert.equal(await button.getAttribute('aria-expanded'), 'false');
     assert.equal(await detail.isVisible(), false);
   } finally { await close(); }
+});
+
+// Safari on iPhone only: Chromium never split the rows, WebKit did once a detail folded back.
+test('rows keep the full width on a phone after a detail folds, in WebKit', async () => {
+  const wk = await webkit.launch();
+  try {
+    const { page, close } = await openPage(wk, server.url + '/fr/technologies', { viewport: { width: 390, height: 844 } });
+    try {
+      const widths = () => page.evaluate(() => [...document.querySelectorAll('#frameworks tr.row')].slice(0, 4).map((r) => Math.round(r.getBoundingClientRect().width)));
+      const before = await widths();
+      const row = page.locator('#frameworks tr.row').first();
+      await row.click();
+      await row.click();
+      assert.deepEqual(await widths(), before);
+      assert.equal(new Set(before).size, 1, `rows of unequal width: ${before}`);
+    } finally { await close(); }
+  } finally { await wk.close(); }
 });
 
 test('the details fold without a flash, and stay reachable when the script cannot run', async () => {

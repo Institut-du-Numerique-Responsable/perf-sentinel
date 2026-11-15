@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 let playwright;
 try { playwright = require('playwright'); }
 catch { playwright = require('/Users/robintrassard/RustroverProjects/perf-sentinel/crates/sentinel-cli/tests/browser/node_modules/playwright'); }
-export const { chromium } = playwright;
+export const { chromium, webkit } = playwright;
 
 // The English pages redirect on navigator.language: every context gets this one.
 export const LOCALE = 'en-GB';
