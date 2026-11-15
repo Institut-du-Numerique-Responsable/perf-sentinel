@@ -71,7 +71,8 @@ html:not(.js) .tp .tools{display:none}
 .tp th.lvh,.tp td.lvc{width:168px}
 .tp td,.tp th.name{padding:11px 0;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text)}
 .tp tr.row{cursor:pointer}
-.tp tr.row:hover :is(td,th){background:color-mix(in srgb,var(--fc) 7%,transparent)}
+/* Touch screens keep :hover after a tap: the highlight then sticks to the row. */
+@media (hover:hover){.tp tr.row:hover :is(td,th){background:color-mix(in srgb,var(--fc) 7%,transparent)}}
 .tp th.name{text-align:left;font-weight:500;padding-left:38px}
 .tp th.name button{all:unset;cursor:pointer;border-radius:4px}
 [data-ps-root] .tp th.name button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
@@ -129,6 +130,10 @@ html.js .tp tr.row.open:not([hidden])+tr.det{display:table-row}
 }
 @media (max-width:640px){
 .tp thead{display:none}
+/* No table layout on phones: WebKit wraps a grid row in an anonymous cell and, once a detail folds back, splits the rows into two columns. */
+.tp table,.tp tbody,.tp tr.grp,.tp tr.det{display:block}
+html.js .tp tr.det{display:none}
+html.js .tp tr.row.open:not([hidden])+tr.det{display:block}
 .tp tr.row{display:grid;grid-template-columns:minmax(0,1fr) auto 22px;align-items:center;column-gap:10px;border-bottom:1px solid var(--border);padding:11px 0}
 .tp tr.row :is(td,th){border:0;padding:0}
 .tp th.name{padding-left:0!important}.tp th.name small{display:block;margin:0}
