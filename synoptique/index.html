@@ -1133,7 +1133,8 @@ const xpEsc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;
 const xpFmt=t=>xpEsc(tr_(t)).replace(/`([^`]+)`/g,'<code class="xp-code">$1</code>');
 // a code chip inside an SVG plot: the text sits on a tinted rounded box
 // h caps the chip height, centred on the text, for chips stacked in tight rows
-function xpChipFit(g){const t=g.querySelector("text"),r=g.querySelector("rect");if(!t||!r)return;const b=t.getBBox(),h=+g.dataset.h||0,ch=h?Math.min(b.height+4,h):b.height+4;r.setAttribute("x",b.x-4);r.setAttribute("y",b.y+b.height/2-ch/2);r.setAttribute("width",b.width+8);r.setAttribute("height",ch)}
+// the font box keeps more room above the letters than below: the chip centres a little under its middle
+function xpChipFit(g){const t=g.querySelector("text"),r=g.querySelector("rect");if(!t||!r)return;const b=t.getBBox(),h=+g.dataset.h||0,ch=h?Math.min(b.height+4,h):b.height+4;r.setAttribute("x",b.x-4);r.setAttribute("y",b.y+b.height*.58-ch/2);r.setAttribute("width",b.width+8);r.setAttribute("height",ch)}
 function xpCode(p,x,y,s,an,max,h){const g=el("g",{class:"xp-svgcode"},p);el("rect",{rx:4},g);const t=tx(g,x,y,s,"tiny",an||"start");if(max)fitText(t,max);if(h)g.dataset.h=h;xpChipFit(g);return g}
 function xpMount(def){clearT();db.innerHTML="";db.classList.add("xp-on");if(!def.state)def.state=xpCopy(def.presets[0]);
   const R=document.createElement("div");R.className="xp";
