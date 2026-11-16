@@ -143,10 +143,24 @@ const FRAME_STYLE = grab('00-INDEX.html', /<style>[\s\S]*?<\/style>/)
 // The frame style is lifted from an already-built page, so inject only once.
 const LOGO_380 = '@media(max-width:380px){.ps-chrome img[data-logo]{height:30px!important}}';
 const RAW_STYLE = FRAME_STYLE.includes(LOGO_380) ? FRAME_STYLE : FRAME_STYLE.replace(/<\/style>$/, LOGO_380 + '</style>');
-const STYLE = RAW_STYLE.includes('.ps-lang-btn{') ? RAW_STYLE : RAW_STYLE.replace('</style>', LANG_CSS + '</style>');
+const LANG_STYLE = RAW_STYLE.includes('.ps-lang-btn{') ? RAW_STYLE : RAW_STYLE.replace('</style>', LANG_CSS + '</style>');
+// Search hits: the query words are wrapped in <mark> in titles and snippets.
+const MARK_CSS = '.psr mark{background:color-mix(in srgb,var(--accent) 28%,transparent);color:var(--text);border-radius:3px;padding:0 1px}';
+const STYLE = LANG_STYLE.includes('.psr mark{') ? LANG_STYLE : LANG_STYLE.replace('</style>', MARK_CSS + '</style>');
+// Inject hl() next to esc() and route the result title and snippet through it.
+// Idempotent, since the frame script is lifted from an already-built page.
+function highlightSearch(script) {
+  if (script.includes('function hl(')) return script;
+  const HL = String.raw`function hl(s,tk){var re=new RegExp('('+tk.map(function(t){return t.replace(/[.*+?^\${}()|[\]\\]/g,'\\$&')}).join('|')+')','gi');return s.split(re).map(function(p,i){return i%2?'<mark>'+esc(p)+'</mark>':esc(p)}).join('')}`;
+  const OLD_ROW = `<div class="psr-t">'+esc(d.t)+'</div><div class="psr-x">…'+esc(sn)+'…</div>`;
+  const NEW_ROW = `<div class="psr-t">'+hl(d.t,tk)+'</div><div class="psr-x">…'+hl(sn,tk)+'…</div>`;
+  if (!script.includes(OLD_ROW) || !script.includes('function load(')) throw new Error('search script changed, update highlightSearch()');
+  // Function replacers: HL holds "$&", which a string replacement would expand.
+  return script.replace('function load(', () => HL + 'function load(').replace(OLD_ROW, () => NEW_ROW);
+}
 // The EN and FR inline scripts differ only in the search "No results" string,
 // so derive FR from EN (avoids reading our own output for the FR frame).
-const SCRIPT_EN = grab('00-INDEX.html', /<script>[\s\S]*?<\/script>/);
+const SCRIPT_EN = highlightSearch(grab('00-INDEX.html', /<script>[\s\S]*?<\/script>/));
 const SCRIPT = { en: SCRIPT_EN, fr: SCRIPT_EN.replace('No results', 'Aucun résultat') };
 
 // Static default for the theme pill: system mode (the inline script re-syncs at load).
