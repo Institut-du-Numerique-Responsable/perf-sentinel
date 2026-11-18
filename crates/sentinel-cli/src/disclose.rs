@@ -861,14 +861,12 @@ fn build_anti_pattern_details(
         let last = last_seen.get(&key).copied().unwrap_or(now);
         let waste_kwh = (accum.avoidable_io_ops as f64) * per_op_kwh;
         let waste_kgco2eq = waste_kwh * service_carbon_kwh_ratio;
-        let rgesn_criteria = FindingType::from_kind_str(pattern)
-            .map(|t| {
-                t.rgesn_criteria()
-                    .iter()
-                    .map(|c| (*c).to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let rgesn_criteria = FindingType::from_kind_str(pattern).map_or_default(|t| {
+            t.rgesn_criteria()
+                .iter()
+                .map(|c| (*c).to_string())
+                .collect()
+        });
         out.push(AntiPatternDetail {
             kind: pattern.clone(),
             occurrences: accum.occurrences,

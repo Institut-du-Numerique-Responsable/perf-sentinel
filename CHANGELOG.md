@@ -12,6 +12,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 ### Changed
 
 - The findings dashboard's `Findings history` table shows each problem's volume and impact over the time range, as the live `Findings` table does. It reads the `detections`, `avoidable_io_ops` and `detections_gaps` that PerfSentinelHub 0.8.6 and later serve on a `GET /api/findings` read with `from` and `to`, from the daemons' detection ledgers, into three new columns after `Endpoint`: `Detections`, `Extra I/O ops` and `Count gaps`. The table now ranks by `Extra I/O ops`. Until now it only had `Severity` to rank by, since the Hub kept no counts when the row shipped. A count with gaps is a lower bound, and both counts stay blank for a Hub older than 0.8.6, a daemon older than 0.37.0 and the days before its upgrade. Dashboard `version` 17. `docs/HELM-DEPLOYMENT.md`, `docs/LIMITATIONS.md` and their French mirrors describe it, and the French variant is regenerated.
+- The pinned toolchain moves from Rust 1.99.1 to 1.100.0 (`rust-toolchain.toml`, `rust-version`, the CI comments that name it, CONTRIBUTING.md). None of the release's compatibility notes applies to the workspace. Clippy 1.100 extends `map_unwrap_or` to `map(f).unwrap_or_default()`, so 13 call sites move to `map_or_default(f)`. Cargo 1.100 flags `package.homepage` as redundant with `package.repository`, which held the same URL, so `homepage` is dropped from the manifests.
 
 ## [0.45.0] - 2026-11-12
 

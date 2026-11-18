@@ -1493,8 +1493,7 @@ mod cors_tests {
         let allow_methods = response
             .headers()
             .get(header::ACCESS_CONTROL_ALLOW_METHODS)
-            .map(|v| v.to_str().unwrap_or("").to_ascii_uppercase())
-            .unwrap_or_default();
+            .map_or_default(|v| v.to_str().unwrap_or("").to_ascii_uppercase());
         assert!(
             !allow_methods.split(',').any(|m| m.trim() == "PUT"),
             "PUT must not be advertised, got: {allow_methods}"

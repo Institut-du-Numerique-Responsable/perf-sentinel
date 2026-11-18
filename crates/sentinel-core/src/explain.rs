@@ -151,8 +151,7 @@ fn make_node(
 ) -> SpanNode {
     let inline_findings = findings_by_template
         .get(span.template.as_ref())
-        .map(|fs| fs.iter().map(|f| InlineFinding::from_finding(f)).collect())
-        .unwrap_or_default();
+        .map_or_default(|fs| fs.iter().map(|f| InlineFinding::from_finding(f)).collect());
 
     SpanNode {
         span_id: span.event.span_id.clone(),

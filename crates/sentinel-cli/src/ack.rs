@@ -751,8 +751,7 @@ fn format_ack_table(entries: &[AckListEntry], colored: bool) -> String {
             reason: e
                 .reason
                 .as_deref()
-                .map(|r| sanitize_for_terminal(r).into_owned())
-                .unwrap_or_default(),
+                .map_or_default(|r| sanitize_for_terminal(r).into_owned()),
         })
         .collect();
 

@@ -1279,25 +1279,15 @@ fn build_tick_ctx<'s>(
     } = *sources;
 
     // Cloud entries first (lowest precedence).
-    let cloud_snap = cloud_state
-        .map(|s| s.snapshot(now, cloud_staleness_ms))
-        .unwrap_or_default();
+    let cloud_snap = cloud_state.map_or_default(|s| s.snapshot(now, cloud_staleness_ms));
     // Redfish entries override cloud for the same service.
-    let redfish_snap = redfish_state
-        .map(|s| s.snapshot(now, redfish_staleness_ms))
-        .unwrap_or_default();
+    let redfish_snap = redfish_state.map_or_default(|s| s.snapshot(now, redfish_staleness_ms));
     // Kepler entries override Redfish and cloud for the same service.
-    let kepler_snap = kepler_state
-        .map(|s| s.snapshot(now, kepler_staleness_ms))
-        .unwrap_or_default();
+    let kepler_snap = kepler_state.map_or_default(|s| s.snapshot(now, kepler_staleness_ms));
     // Scaphandre entries override Kepler and every lower-tier source.
-    let scaph_snap = scaphandre_state
-        .map(|s| s.snapshot(now, scaphandre_staleness_ms))
-        .unwrap_or_default();
+    let scaph_snap = scaphandre_state.map_or_default(|s| s.snapshot(now, scaphandre_staleness_ms));
     // Alumet entries override every other measured source.
-    let alumet_snap = alumet_state
-        .map(|s| s.snapshot(now, alumet_staleness_ms))
-        .unwrap_or_default();
+    let alumet_snap = alumet_state.map_or_default(|s| s.snapshot(now, alumet_staleness_ms));
     let realtime_snap = realtime_snapshot(sources, now);
     // Host energy accumulated since the previous scored batch.
     // Consuming here (once per built batch) keeps shed batches from

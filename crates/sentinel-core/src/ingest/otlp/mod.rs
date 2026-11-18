@@ -1865,8 +1865,7 @@ pub(crate) fn join_resource_block(
         let key = block
             .resource
             .as_ref()
-            .map(prost::Message::encode_to_vec)
-            .unwrap_or_default();
+            .map_or_default(prost::Message::encode_to_vec);
         match joined.entry(key) {
             Entry::Occupied(mut slot) if slot.get().1 + spans <= MAX_SPANS_PER_SERVICE => {
                 let (first, count) = slot.get_mut();
@@ -2265,7 +2264,7 @@ pub(crate) fn restitch_records(
     let span = |span_id: &str, parent: Option<&str>, start_ns: u64, end_ns: u64| Span {
         trace_id: trace_id.as_bytes().to_vec(),
         span_id: span_id.as_bytes().to_vec(),
-        parent_span_id: parent.map(|p| p.as_bytes().to_vec()).unwrap_or_default(),
+        parent_span_id: parent.map_or_default(|p| p.as_bytes().to_vec()),
         start_time_unix_nano: start_ns,
         end_time_unix_nano: end_ns,
         ..Default::default()

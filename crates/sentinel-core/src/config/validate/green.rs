@@ -759,8 +759,7 @@ impl Config {
         let queries = |subsystem| -> Vec<String> {
             self.green
                 .static_hosts(subsystem)
-                .map(StaticHostsConfig::groups)
-                .unwrap_or_default()
+                .map_or_default(StaticHostsConfig::groups)
                 .into_iter()
                 .filter_map(|group| group.cpu_query.map(|q| q.trim().to_string()))
                 .collect()

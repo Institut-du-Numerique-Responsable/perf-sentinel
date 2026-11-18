@@ -1018,8 +1018,7 @@ mod tests {
             lines
                 .iter()
                 .find(|l| l.text.contains(label))
-                .map(|l| l.text.clone())
-                .unwrap_or_default()
+                .map_or_default(|l| l.text.clone())
         };
         assert_eq!(
             text("Database:"),

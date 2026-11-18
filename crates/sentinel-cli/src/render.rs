@@ -964,8 +964,7 @@ impl<'a> WasteLine<'a> {
 fn format_waste_line(w: &WasteLine<'_>) -> String {
     let gco2 = w
         .waste_gco2
-        .map(|g| format!(", {} gCO\u{2082}", fmt_tiny(g)))
-        .unwrap_or_default();
+        .map_or_default(|g| format!(", {} gCO\u{2082}", fmt_tiny(g)));
     let region = w.region.map_or_else(String::new, |r| {
         format!(", region {}", sanitize_for_terminal(r))
     });
