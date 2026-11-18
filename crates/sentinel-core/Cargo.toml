@@ -52,7 +52,7 @@ tiny-skia = { version = "0.12.0", optional = true, default-features = false, fea
 png = { version = "0.18.1", optional = true }
 # Writes the card's JPEG XL codestream; the engine writes the container.
 # Pure Rust, default features off so it takes the scalar path.
-jixel = { version = "=0.5.7", optional = true, default-features = false }
+jixel = { version = "=0.5.10", optional = true, default-features = false }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_path_to_error = "0.1.20"
 # `float_roundtrip`: the disclosure `content_hash` is computed over the
@@ -65,7 +65,7 @@ serde_json = { version = "1.0.154", features = ["float_roundtrip", "raw_value"] 
 tracing = "0.1.44"
 thiserror = "2.0.21"
 toml = "1.2.1"
-regex = "1.13.1"
+regex = "1.13.2"
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "sync", "time", "net", "signal", "macros", "io-util", "fs"] }
 # tonic/axum/tower are unconditional because report/metrics.rs (Prometheus
 # /metrics router) uses axum+tower, and ingest/otlp/ uses tonic directly
@@ -77,7 +77,7 @@ tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "sync", "time
 # feature. zstd is left out because it would pull zstd-sys (C bindings) into a
 # static musl binary.
 tonic = "0.14.9"
-prost = "0.14.5"
+prost = "0.14.6"
 # with-serde (already on via the default `full` feature) is pinned explicitly:
 # the batch `analyze --input` OTLP/JSON arm needs the serde impls (camelCase +
 # hex ids) and must keep working if `default-features = false` is set later.
@@ -99,12 +99,12 @@ sha2 = "0.11.1"
 jiff = { version = "1.0.1", default-features = false, features = ["std", "serde"] }
 # UUID v4 for the `report_uuid` field of periodic disclosure reports.
 # Serde feature lets the wire schema embed the value as a JSON string.
-uuid = { version = "1.29.2", features = ["v4", "serde"] }
+uuid = { version = "1.29.3", features = ["v4", "serde"] }
 # Daemon-only deps (behind the `daemon` feature flag).
 hyper = { version = "1.12.0", features = ["client", "http1", "server"], optional = true }
 hyper-util = { version = "0.1.21", features = ["client", "client-legacy", "client-proxy", "http1", "http2", "tokio", "server-auto"], optional = true }
 http-body-util = { version = "0.1.5", optional = true }
-bytes = { version = "1.12.1", optional = true }
+bytes = { version = "1.12.2", optional = true }
 arc-swap = { version = "1.9.5", optional = true }
 hyper-rustls = { version = "0.27.10", default-features = false, features = ["http1", "webpki-tokio", "ring", "tls12"], optional = true }
 # The outbound client builds its own rustls config: the Mozilla roots plus
