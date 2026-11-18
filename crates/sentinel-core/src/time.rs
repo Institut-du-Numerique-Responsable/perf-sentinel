@@ -473,7 +473,7 @@ mod tests {
         struct Stamp {
             #[serde(with = "rfc3339_serde")]
             at: jiff::Timestamp,
-            #[serde(with = "rfc3339_serde::option")]
+            #[serde(default, with = "rfc3339_serde::option")]
             maybe: Option<jiff::Timestamp>,
         }
         for json in [
