@@ -10,6 +10,16 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.46.0]
+
+### Changed
+
+- **`appVersion` moves to `0.46.0`.** The daemon handles dates with `jiff`
+  instead of `chrono`, which RustSec flagged unmaintained, and keeps the
+  timestamp form of its ack store, archives, daily rollups and API answers, so
+  a daemon upgraded on an existing volume reads its files unchanged. The image
+  is built with Rust 1.100.0. No chart value or template changes.
+
 ## [0.45.0]
 
 ### Fixed
