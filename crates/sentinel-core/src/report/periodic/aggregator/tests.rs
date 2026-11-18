@@ -111,7 +111,7 @@ fn make_report(
     }
 }
 
-fn write_archive(lines: &[(jiff::Timestamp, Report)]) -> (TempDir, PathBuf) {
+fn write_archive(lines: &[(Timestamp, Report)]) -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("archive.ndjson");
     let mut file = File::create(&path).unwrap();
@@ -124,7 +124,7 @@ fn write_archive(lines: &[(jiff::Timestamp, Report)]) -> (TempDir, PathBuf) {
 
 /// Same shape the daemon writer produces, built with the shared chain
 /// primitives rather than a second implementation of them.
-fn write_chained_archive(lines: &[(jiff::Timestamp, Report)]) -> (TempDir, PathBuf) {
+fn write_chained_archive(lines: &[(Timestamp, Report)]) -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("archive.ndjson");
     let mut file = File::create(&path).unwrap();
@@ -145,15 +145,13 @@ fn write_chained_archive(lines: &[(jiff::Timestamp, Report)]) -> (TempDir, PathB
 
 /// Chained archive whose lines carry the cumulative `drops` counter,
 /// the shape the daemon writes since v1.7.
-fn write_chained_archive_with_drops(
-    lines: &[(jiff::Timestamp, Report, u64)],
-) -> (TempDir, PathBuf) {
+fn write_chained_archive_with_drops(lines: &[(Timestamp, Report, u64)]) -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
     let path = write_drops_file(dir.path(), "archive.ndjson", lines);
     (dir, path)
 }
 
-fn write_drops_file(dir: &Path, name: &str, lines: &[(jiff::Timestamp, Report, u64)]) -> PathBuf {
+fn write_drops_file(dir: &Path, name: &str, lines: &[(Timestamp, Report, u64)]) -> PathBuf {
     let path = dir.join(name);
     let mut file = File::create(&path).unwrap();
     let mut prev = super::super::hasher::ARCHIVE_CHAIN_SEED.to_string();
@@ -1081,7 +1079,7 @@ fn in_total_window(app_kwh: f64, db: bool, msg: bool) -> Report {
     r
 }
 
-fn aggregate_windows(lines: &[(jiff::Timestamp, Report)]) -> AggregateInputs {
+fn aggregate_windows(lines: &[(Timestamp, Report)]) -> AggregateInputs {
     let (_dir, path) = write_archive(lines);
     aggregate_from_paths(&[path], &q1_2026(), false).unwrap()
 }
@@ -1212,7 +1210,7 @@ fn beside_db_window(energy: f64, model: &str) -> Report {
 
 /// Legacy measured, dedicated declared, shared modeled, a broker and an
 /// estimated window, in that order.
-fn mixed_host_period() -> Vec<(jiff::Timestamp, Report)> {
+fn mixed_host_period() -> Vec<(Timestamp, Report)> {
     let mut broker = in_total_window(1.0, false, true);
     if let Some(block) = broker
         .disclosure_waste
@@ -2229,7 +2227,7 @@ fn a_window_on_the_first_day_reaches_the_period_start() {
     assert!(!archive_reaches_period_start(None, &period));
 }
 
-fn folded(lines: &[(jiff::Timestamp, Report)]) -> PeriodState {
+fn folded(lines: &[(Timestamp, Report)]) -> PeriodState {
     let mut state = PeriodState::default();
     for (ts, report) in lines {
         state.process_window(report, *ts, false).unwrap();
@@ -2237,7 +2235,7 @@ fn folded(lines: &[(jiff::Timestamp, Report)]) -> PeriodState {
     state
 }
 
-fn day(d: i8, h: i8) -> jiff::Timestamp {
+fn day(d: i8, h: i8) -> Timestamp {
     crate::time::utc(2026, 1, d, h, 0, 0)
 }
 
@@ -2319,7 +2317,7 @@ use proptest::prelude::*;
 
 /// The daemon's shape: one chained rollup line per closed day, in monthly
 /// files, the chain carried across files.
-fn write_rollups(dir: &Path, stem: &str, lines: &[(jiff::Timestamp, Report)]) -> Vec<PathBuf> {
+fn write_rollups(dir: &Path, stem: &str, lines: &[(Timestamp, Report)]) -> Vec<PathBuf> {
     let mut acc = DayAccumulator::default();
     let mut days = Vec::new();
     for (ts, report) in lines {
@@ -2453,7 +2451,7 @@ proptest! {
     ) {
         let pool = window_pool();
         let base = crate::time::utc(2026, 1, 30, 0, 0, 0);
-        let mut lines: Vec<(jiff::Timestamp, Report)> = picks
+        let mut lines: Vec<(Timestamp, Report)> = picks
             .iter()
             .map(|(i, s)| (base + jiff::SignedDuration::from_secs(*s), pool[*i].clone()))
             .collect();

@@ -530,7 +530,7 @@ fn disclosure_archive_status(metrics: &MetricsState) -> Option<DisclosureArchive
         .ok()
         .filter(|d| *d > 0)?;
     let day = |seconds: i64| {
-        jiff::Timestamp::from_second(seconds)
+        Timestamp::from_second(seconds)
             .ok()
             .map(crate::time::utc_date)
     };

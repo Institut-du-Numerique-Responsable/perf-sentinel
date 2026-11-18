@@ -72,7 +72,7 @@ fn ack(signature: &str, expires_at: Option<&str>) -> Acknowledgment {
     }
 }
 
-fn now_2026_05_02() -> jiff::Timestamp {
+fn now_2026_05_02() -> Timestamp {
     crate::time::utc(2026, 5, 2, 12, 0, 0)
 }
 

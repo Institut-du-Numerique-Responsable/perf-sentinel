@@ -342,7 +342,7 @@ fn value_ts(value: &Value) -> Option<Timestamp> {
     value
         .get("ts")?
         .as_str()
-        .and_then(|ts| ts.parse::<jiff::Timestamp>().ok())
+        .and_then(|ts| ts.parse::<Timestamp>().ok())
 }
 
 fn last_day_of_month(year: i32, month: u32) -> Option<Date> {

@@ -405,7 +405,7 @@ pub(crate) fn utc(y: i16, mo: i8, d: i8, h: i8, mi: i8, s: i8) -> jiff::Timestam
         .expect("valid test instant")
 }
 
-/// Serde adapter writing a [`jiff::Timestamp`] in the [`rfc3339`] form.
+/// Serde adapter writing a [`Timestamp`] in the [`rfc3339`] form.
 /// Reading accepts any RFC 3339 offset, as chrono did.
 pub(crate) mod rfc3339_serde {
     use jiff::Timestamp;

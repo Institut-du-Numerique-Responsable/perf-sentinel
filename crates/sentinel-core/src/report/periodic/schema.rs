@@ -956,7 +956,7 @@ mod tests {
             intent: ReportIntent::Internal,
             confidentiality_level: Confidentiality::Internal,
             integrity_level: IntegrityLevel::HashOnly,
-            generated_at: "2026-04-01T00:00:00Z".parse::<jiff::Timestamp>().unwrap(),
+            generated_at: "2026-04-01T00:00:00Z".parse::<Timestamp>().unwrap(),
             generated_by: "cli-batch".to_string(),
             perf_sentinel_version: "0.6.2".to_string(),
             report_uuid: Uuid::nil(),
@@ -1096,8 +1096,8 @@ mod tests {
                 occurrences: 12,
                 estimated_waste_kwh: 0.05,
                 estimated_waste_kgco2eq: 0.006,
-                first_seen: "2026-01-04T10:00:00Z".parse::<jiff::Timestamp>().unwrap(),
-                last_seen: "2026-03-29T18:00:00Z".parse::<jiff::Timestamp>().unwrap(),
+                first_seen: "2026-01-04T10:00:00Z".parse::<Timestamp>().unwrap(),
+                last_seen: "2026-03-29T18:00:00Z".parse::<Timestamp>().unwrap(),
                 rgesn_criteria: Vec::new(),
             }],
         }
@@ -1469,8 +1469,8 @@ mod tests {
             occurrences: 1,
             estimated_waste_kwh: 0.0,
             estimated_waste_kgco2eq: 0.0,
-            first_seen: "2026-01-01T00:00:00Z".parse::<jiff::Timestamp>().unwrap(),
-            last_seen: "2026-01-01T00:00:00Z".parse::<jiff::Timestamp>().unwrap(),
+            first_seen: "2026-01-01T00:00:00Z".parse::<Timestamp>().unwrap(),
+            last_seen: "2026-01-01T00:00:00Z".parse::<Timestamp>().unwrap(),
             rgesn_criteria: Vec::new(),
         };
         let json = serde_json::to_value(&detail).unwrap();

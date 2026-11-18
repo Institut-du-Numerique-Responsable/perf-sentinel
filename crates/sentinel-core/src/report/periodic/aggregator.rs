@@ -1716,15 +1716,11 @@ impl Builder {
         let Some(spans) = self.rollup_spans.get(family) else {
             return false;
         };
-        value
-            .and_then(|v| v.get("ts"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(|ts| ts.parse::<jiff::Timestamp>().ok())
-            .is_some_and(|ts| {
-                spans
-                    .iter()
-                    .any(|(first, last)| *first <= ts && ts <= *last)
-            })
+        line_ts(value).is_some_and(|ts| {
+            spans
+                .iter()
+                .any(|(first, last)| *first <= ts && ts <= *last)
+        })
     }
 }
 
@@ -2074,11 +2070,12 @@ fn verify_chain_value(
 /// A line the reader cannot parse counts as in-period: it was read from a
 /// file the operator pointed at, and dropping it would hide a break.
 fn line_in_period(value: Option<&serde_json::Value>, period: &Period) -> bool {
-    value
-        .and_then(|v| v.get("ts"))
-        .and_then(serde_json::Value::as_str)
-        .and_then(|ts| ts.parse::<jiff::Timestamp>().ok())
-        .is_none_or(|ts| in_period(ts, period))
+    line_ts(value).is_none_or(|ts| in_period(ts, period))
+}
+
+/// The `ts` of an archive line, `None` when absent or unparsable.
+fn line_ts(value: Option<&serde_json::Value>) -> Option<Timestamp> {
+    value?.get("ts")?.as_str()?.parse().ok()
 }
 
 fn service_io_distribution(

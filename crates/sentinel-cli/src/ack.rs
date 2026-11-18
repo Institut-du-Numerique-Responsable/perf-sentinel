@@ -1305,10 +1305,9 @@ mod tests {
         assert!(out.contains("alice"));
         assert!(out.contains("bob"));
         assert!(out.contains("never"));
-        let expires =
-            crate::render::to_local("2026-05-12T13:30:00Z".parse::<jiff::Timestamp>().unwrap())
-                .strftime("%Y-%m-%d %H:%M")
-                .to_string();
+        let expires = crate::render::to_local("2026-05-12T13:30:00Z".parse::<Timestamp>().unwrap())
+            .strftime("%Y-%m-%d %H:%M")
+            .to_string();
         assert!(out.contains(&expires), "{out}");
         assert!(out.contains("2 daemon acknowledgments active (showing up to 1000)"));
     }
