@@ -825,3 +825,8 @@ v0.45.0	5d3961b	2026-11-12	PASS
 # traffic Job, and chart-disclose-persistence needed the unpublished 0.46.0
 # image loaded under its GHCR name. Not run: verify-all-scenarios.
 v0.46.0	493ef99	2026-11-18	PASS
+# v0.46.0 rerun after the Qodana cleanup (092f5333, the archive line stamp read
+# shared by the disclosure aggregator): disclose (10/10), disclose-temporal
+# (5/5), disclose-archive-family-baseline, archive-integrity-chain (6 cases),
+# chart-disclose-persistence, on perf-sentinel:0.46.0-092f5333. All PASS.
+v0.46.0	493ef99	2026-11-18	PASS
