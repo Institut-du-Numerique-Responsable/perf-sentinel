@@ -1309,10 +1309,13 @@ it saw the finding in, and a Hub that predates that filter ignores it.
 `Findings history` lists one
 row per problem the Hub saw in that environment on a day inside the
 range, on the Hub's clock in UTC, with `First seen`, `Last seen` and
-`Status` computed for that environment alone. It has no occurrence
-columns: the daemon's counts are relative to its ring and do not add up
-over months, and `perf_sentinel_findings_total` keeps the volumes in
-Prometheus. The per-day history starts the day the Hub was upgraded to
+`Status` computed for that environment alone. `Detections` and
+`Extra I/O ops` give each problem's volume and impact over the range's
+UTC days, from the detection ledgers the Hub reads (PerfSentinelHub 0.8.6
+and daemons 0.37.0 and later, blank otherwise), and the table ranks by
+`Extra I/O ops`. `Count gaps` lists why a count falls short (a restart,
+sampling, the current day still open, and so on), and a count with gaps
+is a lower bound. The per-day history starts the day the Hub was upgraded to
 0.3.0, and the Hub keeps it for `Hub:Retention`, 180 days by default.
 
 The row needs three things, none of which the rest of the dashboard

@@ -2589,7 +2589,7 @@
           "type": "table",
           "id": 101,
           "title": "Findings history",
-          "description": "One row per problem the Hub saw in the chosen environment inside the dashboard's time range, read from the Hub rather than from the daemon's ring. A day counts when the Hub observed the finding that day, on the Hub's clock in UTC.\n\n'First seen', 'Last seen' and 'Status' describe the chosen environment alone, the whole fleet on All. There are no occurrence columns: the daemon's counts are relative to its ring and do not add up over months. 'Code' is the call site as the Findings table above shows it, at the last observation.\n\n'Acked on' and 'Acked by' come from the Hub's mirror of each daemon's acks, 'Acked via' is the daemon's own annotation at the last observation. The Ack link opens the Hub's ack page for that signature, once Hub URL is set.\n\nGrouping matches every grouping the Hub saw the finding in, since its signature does not carry one.\n\nNeeds PerfSentinelHub 0.3.0: an older Hub ignores the range and the environment and answers its latest state, and a Hub without the grouping filter ignores Grouping.",
+          "description": "One row per problem the Hub saw in the chosen environment inside the dashboard's time range, read from the Hub rather than from the daemon's ring. A day counts when the Hub observed the finding that day, on the Hub's clock in UTC.\n\n'First seen', 'Last seen' and 'Status' describe the chosen environment alone, the whole fleet on All. 'Detections' counts how many times the daemons detected the problem on the range's UTC days, from their detection ledgers, and 'Extra I/O ops' sums the avoidable I/O of those detections, the impact to rank by, 0 for the types that waste none and blank when green scoring is off. Both stay blank for a daemon older than 0.37.0 and for the days before its upgrade. 'Count gaps' lists why a count falls short, empty when it is complete: uncovered_days, open_day (the current day included), restart, sampling, shed, ingest_rejected, overflow, multi_instance. A count with gaps is a lower bound. 'Code' is the call site as the Findings table above shows it, at the last observation.\n\n'Acked on' and 'Acked by' come from the Hub's mirror of each daemon's acks, 'Acked via' is the daemon's own annotation at the last observation. The Ack link opens the Hub's ack page for that signature, once Hub URL is set.\n\nGrouping matches every grouping the Hub saw the finding in, since its signature does not carry one.\n\nNeeds PerfSentinelHub 0.3.0: an older Hub ignores the range and the environment and answers its latest state, and a Hub without the grouping filter ignores Grouping. Detections, Extra I/O ops and Count gaps need PerfSentinelHub 0.8.6, an older Hub leaves them blank.",
           "datasource": {
             "type": "yesoreyeram-infinity-datasource",
             "uid": "${DS_HUB}"
@@ -2615,7 +2615,7 @@
               "url_options": {
                 "method": "GET"
               },
-              "root_selector": "$count($) > 0 ? $map($, function($i) {{\"finding\": $i.finding, \"first_seen\": $i.first_seen, \"last_seen\": $i.last_seen, \"status\": $i.status, \"max_confidence\": $i.max_confidence, \"sources\": $join([$i.sources.name], \", \"), \"acked_on\": $join([$i.acks.source_id], \", \"), \"acked_by\": $join([$i.acks.by], \", \"), \"acknowledged_by\": $i.acknowledged_by, \"code\": ($l := $i.finding.code_location; $n := $l.function ? ($l.namespace ? ($substring($l.function, 0, $length($l.namespace)) = $l.namespace and $substring($l.function, $length($l.namespace), 1) in [\".\", \"\\\\\", \":\", \"#\"] ? $l.function : $l.namespace & ($contains($l.namespace, \"\\\\\") or $contains($l.namespace, \"::\") ? \"::\" : \".\") & $l.function) : $l.function) : $l.namespace; $f := $l.filepath ? $l.filepath & ($exists($l.lineno) ? \":\" & $string($l.lineno) : \"\") : undefined; $n and $f ? $n & \" (\" & $f & \")\" : ($n ? $n : $f)), \"ack\": \"Ack\", \"fix\": $i.finding.suggested_fix.recommendation ? $i.finding.suggested_fix.recommendation : $i.finding.suggestion, \"fix_for\": $replace($replace($i.finding.suggested_fix.framework, \"_generic\", \"\"), \"_\", \" \")}}) : []",
+              "root_selector": "$count($) > 0 ? $map($, function($i) {{\"finding\": $i.finding, \"first_seen\": $i.first_seen, \"last_seen\": $i.last_seen, \"status\": $i.status, \"detections\": $i.detections, \"extra_io_ops\": $i.avoidable_io_ops, \"count_gaps\": $join([$i.detections_gaps], \", \"), \"max_confidence\": $i.max_confidence, \"sources\": $join([$i.sources.name], \", \"), \"acked_on\": $join([$i.acks.source_id], \", \"), \"acked_by\": $join([$i.acks.by], \", \"), \"acknowledged_by\": $i.acknowledged_by, \"code\": ($l := $i.finding.code_location; $n := $l.function ? ($l.namespace ? ($substring($l.function, 0, $length($l.namespace)) = $l.namespace and $substring($l.function, $length($l.namespace), 1) in [\".\", \"\\\\\", \":\", \"#\"] ? $l.function : $l.namespace & ($contains($l.namespace, \"\\\\\") or $contains($l.namespace, \"::\") ? \"::\" : \".\") & $l.function) : $l.function) : $l.namespace; $f := $l.filepath ? $l.filepath & ($exists($l.lineno) ? \":\" & $string($l.lineno) : \"\") : undefined; $n and $f ? $n & \" (\" & $f & \")\" : ($n ? $n : $f)), \"ack\": \"Ack\", \"fix\": $i.finding.suggested_fix.recommendation ? $i.finding.suggested_fix.recommendation : $i.finding.suggestion, \"fix_for\": $replace($replace($i.finding.suggested_fix.framework, \"_generic\", \"\"), \"_\", \" \")}}) : []",
               "columns": [
                 {
                   "selector": "ack",
@@ -2645,6 +2645,21 @@
                 {
                   "selector": "finding.source_endpoint",
                   "text": "Endpoint",
+                  "type": "string"
+                },
+                {
+                  "selector": "detections",
+                  "text": "Detections",
+                  "type": "number"
+                },
+                {
+                  "selector": "extra_io_ops",
+                  "text": "Extra I/O ops",
+                  "type": "number"
+                },
+                {
+                  "selector": "count_gaps",
+                  "text": "Count gaps",
                   "type": "string"
                 },
                 {
@@ -2932,6 +2947,42 @@
               {
                 "matcher": {
                   "id": "byName",
+                  "options": "Detections"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Extra I/O ops"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Count gaps"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
                   "options": "Ack"
                 },
                 "properties": [
@@ -2957,7 +3008,7 @@
             "showHeader": true,
             "sortBy": [
               {
-                "displayName": "Last seen",
+                "displayName": "Extra I/O ops",
                 "desc": true
               }
             ]
@@ -2974,20 +3025,23 @@
                   "Service": 3,
                   "Grouping": 4,
                   "Endpoint": 5,
-                  "Status": 6,
-                  "First seen": 7,
-                  "Last seen": 8,
-                  "Sources": 9,
-                  "Acked on": 10,
-                  "Acked by": 11,
-                  "Acked via": 12,
-                  "Operation": 13,
-                  "Code": 14,
-                  "Suggestion": 15,
-                  "Fix for": 16,
-                  "Confidence": 17,
-                  "Trace": 18,
-                  "Signature": 19
+                  "Detections": 6,
+                  "Extra I/O ops": 7,
+                  "Count gaps": 8,
+                  "Status": 9,
+                  "First seen": 10,
+                  "Last seen": 11,
+                  "Sources": 12,
+                  "Acked on": 13,
+                  "Acked by": 14,
+                  "Acked via": 15,
+                  "Operation": 16,
+                  "Code": 17,
+                  "Suggestion": 18,
+                  "Fix for": 19,
+                  "Confidence": 20,
+                  "Trace": 21,
+                  "Signature": 22
                 },
                 "renameByName": {}
               }
@@ -3313,7 +3367,7 @@
     }
   ],
   "timezone": "browser",
-  "version": 16,
+  "version": 17,
   "annotations": {
     "list": [
       {

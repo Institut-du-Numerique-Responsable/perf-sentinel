@@ -1044,10 +1044,14 @@ chaque regroupement où il a vu le finding, et un Hub antérieur à ce
 filtre l'ignore. `Findings history`
 liste une ligne par problème que le Hub a vu dans cet environnement un
 jour de la plage, à l'horloge du Hub en UTC, avec `First seen`,
-`Last seen` et `Status` calculés pour ce seul environnement. Elle n'a
-pas de colonnes d'occurrences : les comptes du daemon sont relatifs à
-son ring et ne s'additionnent pas sur des mois, et
-`perf_sentinel_findings_total` garde les volumes dans Prometheus.
+`Last seen` et `Status` calculés pour ce seul environnement.
+`Detections` et `Extra I/O ops` donnent le volume et l'impact de chaque
+problème sur les jours UTC de la plage, d'après les registres de
+détections que lit le Hub (PerfSentinelHub 0.8.6 et daemons 0.37.0 et
+suivants, vides sinon), et la table trie sur `Extra I/O ops`.
+`Count gaps` liste pourquoi un compte est incomplet (un redémarrage,
+l'échantillonnage, le jour en cours encore ouvert, etc.), et un compte
+incomplet est une borne basse.
 L'historique par jour commence le jour où le Hub est passé en 0.3.0, et
 le Hub le garde pendant `Hub:Retention`, 180 jours par défaut.
 

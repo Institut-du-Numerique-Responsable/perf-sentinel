@@ -9,6 +9,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 - The hand-written data behind the technologies and references pages of perf-sentinel.dev now lives in `site-data/`: `technologies.json` and its French twin say what is supported and how far, `references.json` names the organisations that use Perf Sentinel. Tests check the technologies data against the engine's own tables and against the difficulty table of `CONTRIBUTING.md`. That file gains the difficulty table, a framework coverage section, a cloud coverage section that points to the technologies page, and the rules for listing an organisation or an unnamed team.
 - A listing request for the references page. The `Reference request` issue form takes an organisation's signed share card or published disclosure report. The `reference-request` workflow checks the proof with the released `perf-sentinel` binary and answers on the issue. A maintainer then lists the organisation by hand in `site-data/references.json`.
 
+### Changed
+
+- The findings dashboard's `Findings history` table shows each problem's volume and impact over the time range, as the live `Findings` table does. It reads the `detections`, `avoidable_io_ops` and `detections_gaps` that PerfSentinelHub 0.8.6 and later serve on a `GET /api/findings` read with `from` and `to`, from the daemons' detection ledgers, into three new columns after `Endpoint`: `Detections`, `Extra I/O ops` and `Count gaps`. The table now ranks by `Extra I/O ops`. Until now it only had `Severity` to rank by, since the Hub kept no counts when the row shipped. A count with gaps is a lower bound, and both counts stay blank for a Hub older than 0.8.6, a daemon older than 0.37.0 and the days before its upgrade. Dashboard `version` 17. `docs/HELM-DEPLOYMENT.md`, `docs/LIMITATIONS.md` and their French mirrors describe it, and the French variant is regenerated.
+
 ## [0.45.0] - 2026-11-12
 
 ### Changed
