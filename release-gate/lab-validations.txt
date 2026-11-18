@@ -812,3 +812,21 @@ v0.44.0	469a396	2026-11-11	PASS
 v0.44.1	afa0437	2026-11-11	PASS
 v0.45.0	53bddc4	2026-11-12	PASS
 v0.45.0	5d3961b	2026-11-12	PASS
+# v0.46.0 (chrono, chrono-tz and humantime replaced with jiff, Rust 1.100.0):
+# targeted pass on a fresh cluster with perf-sentinel:0.46.0-08e7d060, built
+# from the release commit. validate-findings (12/12), daemon-ack-workflow,
+# ack-lifecycle-warning, ack-store-fsgroup-root, failure-mode-daemon-restart,
+# archive-integrity-chain (6 cases), archive-window-drops, disclose (10/10),
+# disclose-temporal (5/5), disclose-archive-family-baseline,
+# chart-disclose-persistence (chart 0.46.0 local), verify-hash-roundtrip (7/7),
+# verify-hash-fail-closed, intent-validator (4/4), card-cli (png, pdf, svg and
+# jxl byte for byte), query-monitor-api. All PASS. Two reruns, both lab-side:
+# failure-mode-daemon-restart saw no pre-restart events on the cold start of its
+# traffic Job, and chart-disclose-persistence needed the unpublished 0.46.0
+# image loaded under its GHCR name. Not run: verify-all-scenarios.
+v0.46.0	493ef99	2026-11-18	PASS
+# v0.46.0 rerun after the Qodana cleanup (092f5333, the archive line stamp read
+# shared by the disclosure aggregator): disclose (10/10), disclose-temporal
+# (5/5), disclose-archive-family-baseline, archive-integrity-chain (6 cases),
+# chart-disclose-persistence, on perf-sentinel:0.46.0-092f5333. All PASS.
+v0.46.0	493ef99	2026-11-18	PASS

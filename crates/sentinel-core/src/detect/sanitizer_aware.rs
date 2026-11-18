@@ -864,7 +864,7 @@ mod tests {
                     &format!("2025-07-10T14:32:01.{:03}Z", i * 30),
                     *d,
                 );
-                e.instrumentation_scopes = scope.map(|s| vec![Arc::from(s)]).unwrap_or_default();
+                e.instrumentation_scopes = scope.map_or_default(|s| vec![Arc::from(s)]);
                 e
             })
             .collect();

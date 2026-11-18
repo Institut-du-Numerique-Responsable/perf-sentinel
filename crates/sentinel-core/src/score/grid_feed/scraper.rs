@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use jiff::Timestamp;
 
 use super::config::{GridFeedConfig, GridFeedKind};
 use super::state::GridFeedState;
@@ -26,7 +26,7 @@ const USER_AGENT: &str =
 /// Consecutive failed ticks before the one-shot fallback warning.
 const FAILURE_THRESHOLD: u32 = 3;
 /// A record dated further ahead than clock skew explains is not a measurement.
-const MAX_CLOCK_SKEW: chrono::TimeDelta = chrono::TimeDelta::minutes(15);
+const MAX_CLOCK_SKEW: jiff::SignedDuration = jiff::SignedDuration::from_mins(15);
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FeedError {
@@ -50,14 +50,16 @@ pub(crate) enum FeedError {
 /// lag: RTE up to an hour or so, Open Electricity up to 100 minutes for
 /// rooftop solar on the WEM, NESO and em6 per half hour, MAVIR per quarter
 /// hour, Fingrid, Energinet and e·sios every few minutes.
-const fn max_reading_age(kind: GridFeedKind) -> chrono::TimeDelta {
+const fn max_reading_age(kind: GridFeedKind) -> jiff::SignedDuration {
     match kind {
-        GridFeedKind::RteEco2mix | GridFeedKind::OpenElectricity => chrono::TimeDelta::hours(3),
-        GridFeedKind::Neso | GridFeedKind::Em6 => chrono::TimeDelta::hours(2),
+        GridFeedKind::RteEco2mix | GridFeedKind::OpenElectricity => {
+            jiff::SignedDuration::from_hours(3)
+        }
+        GridFeedKind::Neso | GridFeedKind::Em6 => jiff::SignedDuration::from_hours(2),
         GridFeedKind::Fingrid(_)
         | GridFeedKind::Energinet
         | GridFeedKind::ReeEsios
-        | GridFeedKind::Mavir => chrono::TimeDelta::hours(1),
+        | GridFeedKind::Mavir => jiff::SignedDuration::from_hours(1),
     }
 }
 
@@ -70,9 +72,8 @@ pub(super) fn check_value(value: Option<f64>) -> Result<f64, FeedError> {
     }
 }
 
-pub(super) fn parse_rfc3339(raw: &str, field: &str) -> Result<DateTime<Utc>, FeedError> {
-    DateTime::parse_from_rfc3339(raw)
-        .map(|at| at.with_timezone(&Utc))
+pub(super) fn parse_rfc3339(raw: &str, field: &str) -> Result<Timestamp, FeedError> {
+    raw.parse::<Timestamp>()
         .map_err(|e| FeedError::Parse(format!("{field}: {e}")))
 }
 
@@ -81,9 +82,9 @@ pub(super) fn parse_naive_utc(
     raw: &str,
     format: &str,
     field: &str,
-) -> Result<DateTime<Utc>, FeedError> {
-    NaiveDateTime::parse_from_str(raw, format)
-        .map(|at| at.and_utc())
+) -> Result<Timestamp, FeedError> {
+    jiff::civil::DateTime::strptime(format, raw)
+        .and_then(|at| jiff::tz::Offset::UTC.to_timestamp(at))
         .map_err(|e| FeedError::Parse(format!("{field}: {e}")))
 }
 
@@ -92,7 +93,7 @@ pub(super) fn parse_naive_utc(
 fn requests<'a>(
     cfg: &GridFeedConfig,
     wanted: &[&'a str],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Vec<(hyper::Uri, Vec<&'a str>)>, FeedError> {
     let single = |url: String| vec![(url, wanted.to_vec())];
     let calls = match cfg.kind {
@@ -146,8 +147,8 @@ type ZoneSplit = (Vec<(String, f64)>, Vec<(String, FeedError)>);
 fn fresh_zones(
     kind: GridFeedKind,
     wanted: &[&str],
-    parsed: Vec<(String, f64, DateTime<Utc>)>,
-    now: DateTime<Utc>,
+    parsed: Vec<(String, f64, Timestamp)>,
+    now: Timestamp,
 ) -> ZoneSplit {
     let mut fresh = Vec::new();
     let mut failed: Vec<(String, FeedError)> = Vec::new();
@@ -155,11 +156,11 @@ fn fresh_zones(
         if !wanted.contains(&zone.as_str()) {
             continue;
         }
-        let age = now.signed_duration_since(at);
+        let age = now.duration_since(at);
         if age > max_reading_age(kind) {
-            failed.push((zone, FeedError::Stale(age.num_minutes())));
+            failed.push((zone, FeedError::Stale(age.as_mins())));
         } else if age < -MAX_CLOCK_SKEW {
-            failed.push((zone, FeedError::Future(-age.num_minutes())));
+            failed.push((zone, FeedError::Future(-age.as_mins())));
         } else {
             fresh.push((zone, value));
         }
@@ -179,7 +180,7 @@ async fn fetch(
     headers: &[AuthHeader],
     uri: &hyper::Uri,
     wanted: &[&str],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<ZoneSplit, FeedError> {
     let max_bytes = if cfg.kind == GridFeedKind::OpenElectricity {
         MAX_OPEN_ELECTRICITY_BODY_BYTES
@@ -269,7 +270,7 @@ pub fn spawn_grid_feed_scraper(
         wanted.sort_unstable();
         wanted.dedup();
         let headers = match request_headers(&config)
-            .and_then(|headers| requests(&config, &wanted, Utc::now()).map(|_| headers))
+            .and_then(|headers| requests(&config, &wanted, Timestamp::now()).map(|_| headers))
         {
             Ok(headers) => headers,
             Err(e) => {
@@ -284,7 +285,7 @@ pub fn spawn_grid_feed_scraper(
         let mut failures: BTreeMap<String, u32> = BTreeMap::new();
         loop {
             ticker.tick().await;
-            let now = Utc::now();
+            let now = Timestamp::now();
             match requests(&config, &wanted, now) {
                 Ok(calls) => {
                     for (uri, zones) in &calls {
@@ -304,8 +305,8 @@ mod tests {
     use crate::test_helpers::{http_200_text, http_status, spawn_one_shot_server};
     use std::collections::BTreeMap;
 
-    fn at(s: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    fn at(s: &str) -> Timestamp {
+        s.parse::<Timestamp>().unwrap()
     }
 
     fn rte_config(endpoint: String) -> GridFeedConfig {

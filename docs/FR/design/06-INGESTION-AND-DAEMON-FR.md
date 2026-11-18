@@ -64,7 +64,7 @@ La conversion de nanosecondes Unix vers `YYYY-MM-DDTHH:MM:SS.mmmZ` utilise l'alg
 3. Calculer l'ère (cycle de 400 ans) et le jour de l'ère
 4. Dériver l'année de l'ère, le jour de l'année, le mois et le jour en utilisant une formule sans table de recherche
 
-Cela évite le crate [chrono](https://docs.rs/chrono/) (~150 Ko de surcoût binaire) et son surcoût de parsing de ~200ns. L'algorithme artisanal gère correctement les années bissextiles (vérifié par un test avec `2024-02-29`).
+Cela tient [jiff](https://docs.rs/jiff/), que le crate utilise pour ses autres dates, hors du chemin chaud des spans. L'algorithme artisanal gère correctement les années bissextiles (vérifié par un test avec `2024-02-29`).
 
 ### Priorité du type d'événement
 

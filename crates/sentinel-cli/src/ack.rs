@@ -20,7 +20,7 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::QueryOutputFormat;
@@ -91,7 +91,7 @@ struct AckRequestBody {
     by: Option<String>,
     reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<Timestamp>,
 }
 
 /// Mirror of the daemon's `AckEntry` for the subset of fields the CLI
@@ -103,9 +103,9 @@ struct AckListEntry {
     by: String,
     #[serde(default)]
     reason: Option<String>,
-    at: DateTime<Utc>,
+    at: Timestamp,
     #[serde(default)]
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<Timestamp>,
 }
 
 /// Entry point dispatched from `main.rs`. Returns an exit code rather
@@ -220,7 +220,7 @@ fn finish_create(
     signature: &str,
     by: &str,
     reason: &str,
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<Timestamp>,
     daemon_url: &str,
 ) -> i32 {
     if status.as_u16() == 201 {
@@ -603,25 +603,27 @@ fn prompt_api_key() -> Option<String> {
 }
 
 /// Parse an `--expires` argument: ISO8601 datetime first, fall back to
-/// a relative duration parsed by humantime ("7d", "24h", "30m").
-pub(crate) fn parse_expires(s: &str) -> Result<DateTime<Utc>, String> {
+/// a relative duration ("7d", "24h", "30m", "1w", "1h30m"). A day is 24
+/// hours. Months and years have no fixed length, so they are refused.
+pub(crate) fn parse_expires(s: &str) -> Result<Timestamp, String> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
         return Err("empty value".to_string());
     }
-    if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
-        return Ok(dt.with_timezone(&Utc));
+    if let Ok(dt) = trimmed.parse::<Timestamp>() {
+        return Ok(dt);
     }
-    let dur = humantime::parse_duration(trimmed).map_err(|e| {
-        format!(
-            "expected ISO8601 datetime (e.g. 2026-05-11T00:00:00Z) or relative duration (e.g. 7d, 24h, 30m); got `{trimmed}` ({e})"
-        )
-    })?;
-    let chrono_dur =
-        chrono::Duration::from_std(dur).map_err(|_| "duration overflow".to_string())?;
-    Utc::now()
-        .checked_add_signed(chrono_dur)
-        .ok_or_else(|| "duration overflows DateTime range".to_string())
+    let dur = trimmed
+        .parse::<jiff::Span>()
+        .and_then(|span| span.to_duration(jiff::SpanRelativeTo::days_are_24_hours()))
+        .map_err(|e| {
+            format!(
+                "expected ISO8601 datetime (e.g. 2026-05-11T00:00:00Z) or relative duration (e.g. 7d, 24h, 30m); got `{trimmed}` ({e})"
+            )
+        })?;
+    Timestamp::now()
+        .checked_add(dur)
+        .map_err(|_| "duration overflows the date range".to_string())
 }
 
 fn resolve_by(arg: Option<String>) -> String {
@@ -631,12 +633,7 @@ fn resolve_by(arg: Option<String>) -> String {
         .unwrap_or_else(|| "anonymous".to_string())
 }
 
-fn print_create_summary(
-    signature: &str,
-    by: &str,
-    reason: &str,
-    expires_at: Option<DateTime<Utc>>,
-) {
+fn print_create_summary(signature: &str, by: &str, reason: &str, expires_at: Option<Timestamp>) {
     let colors = if std::io::stdout().is_terminal() {
         ansi_colors(false)
     } else {
@@ -659,11 +656,11 @@ fn print_create_summary(
     println!("  {dim}Reason:{reset}    {}", sanitize_for_terminal(reason));
     match expires_at {
         Some(dt) => {
-            let delta = dt - Utc::now();
+            let delta = dt.duration_since(Timestamp::now());
             let pretty = format_relative(delta);
             println!(
                 "  {dim}Expires:{reset}   {} ({})",
-                crate::render::to_local(&dt).format(LOCAL_TIME_FORMAT),
+                crate::render::to_local(dt).strftime(LOCAL_TIME_FORMAT),
                 pretty
             );
         }
@@ -739,20 +736,19 @@ fn format_ack_table(entries: &[AckListEntry], colored: bool) -> String {
         .map(|e| Row {
             signature: sanitize_for_terminal(&e.signature).into_owned(),
             by: sanitize_for_terminal(&e.by).into_owned(),
-            at: crate::render::to_local(&e.at)
-                .format("%Y-%m-%d %H:%M")
+            at: crate::render::to_local(e.at)
+                .strftime("%Y-%m-%d %H:%M")
                 .to_string(),
             expires: match e.expires_at {
-                Some(dt) => crate::render::to_local(&dt)
-                    .format("%Y-%m-%d %H:%M")
+                Some(dt) => crate::render::to_local(dt)
+                    .strftime("%Y-%m-%d %H:%M")
                     .to_string(),
                 None => "never".to_string(),
             },
             reason: e
                 .reason
                 .as_deref()
-                .map(|r| sanitize_for_terminal(r).into_owned())
-                .unwrap_or_default(),
+                .map_or_default(|r| sanitize_for_terminal(r).into_owned()),
         })
         .collect();
 
@@ -856,10 +852,10 @@ fn eprint_network_error(daemon_url: &str, err: &sentinel_core::http_client::Fetc
     eprintln!("hint: is `perf-sentinel watch` running?");
 }
 
-/// Format a `chrono::Duration` as a coarse "in N days/hours/minutes"
+/// Format a duration as a coarse "in N days/hours/minutes"
 /// or "expired N days ago" hint for the create summary.
-fn format_relative(delta: chrono::Duration) -> String {
-    let total = delta.num_seconds();
+fn format_relative(delta: jiff::SignedDuration) -> String {
+    let total = delta.as_secs();
     if total <= 0 {
         return "expired".to_string();
     }
@@ -945,7 +941,7 @@ pub(crate) async fn post_ack_via_daemon(
     signature: &str,
     by: &str,
     reason: &str,
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<Timestamp>,
     api_key: Option<&str>,
 ) -> Result<(), AckSubmitError> {
     let body = AckRequestBody {
@@ -1112,7 +1108,7 @@ mod tests {
     fn parse_expires_iso8601_returns_absolute() {
         let dt = parse_expires("2026-05-11T00:00:00Z").expect("valid");
         assert_eq!(
-            dt.format("%Y-%m-%dT%H:%MZ").to_string(),
+            dt.strftime("%Y-%m-%dT%H:%MZ").to_string(),
             "2026-05-11T00:00Z"
         );
     }
@@ -1120,7 +1116,7 @@ mod tests {
     #[test]
     fn parse_expires_7d_returns_now_plus_seven_days() {
         let dt = parse_expires("7d").expect("valid");
-        let delta = (dt - Utc::now()).num_seconds();
+        let delta = (dt - Timestamp::now()).as_secs();
         let seven_days = 7 * 86_400_i64;
         assert!(
             (seven_days - 5..=seven_days + 5).contains(&delta),
@@ -1131,14 +1127,22 @@ mod tests {
     #[test]
     fn parse_expires_24h_relative() {
         let dt = parse_expires("24h").expect("valid");
-        let delta = (dt - Utc::now()).num_seconds();
+        let delta = (dt - Timestamp::now()).as_secs();
         assert!((86_395..=86_405).contains(&delta));
+    }
+
+    #[test]
+    fn parse_expires_takes_weeks_and_refuses_months() {
+        let delta = (parse_expires("1w").expect("valid") - Timestamp::now()).as_secs();
+        assert!((604_795..=604_805).contains(&delta));
+        // A month has no fixed length, so it cannot be added to an instant.
+        assert!(parse_expires("1mo").is_err());
     }
 
     #[test]
     fn parse_expires_30m_relative() {
         let dt = parse_expires("30m").expect("valid");
-        let delta = (dt - Utc::now()).num_seconds();
+        let delta = (dt - Timestamp::now()).as_secs();
         assert!((1795..=1805).contains(&delta));
     }
 
@@ -1281,22 +1285,14 @@ mod tests {
                 signature: "n_plus_one_sql:svc:_api:0123456789abcdef0123456789abcdef".to_string(),
                 by: "alice".to_string(),
                 reason: Some("deferred".to_string()),
-                at: DateTime::parse_from_rfc3339("2026-05-05T12:00:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
-                expires_at: Some(
-                    DateTime::parse_from_rfc3339("2026-05-12T13:30:00Z")
-                        .unwrap()
-                        .with_timezone(&Utc),
-                ),
+                at: "2026-05-05T12:00:00Z".parse::<Timestamp>().unwrap(),
+                expires_at: Some("2026-05-12T13:30:00Z".parse::<Timestamp>().unwrap()),
             },
             AckListEntry {
                 signature: "slow_http:other:_api:fedcba9876543210fedcba9876543210".to_string(),
                 by: "bob".to_string(),
                 reason: None,
-                at: DateTime::parse_from_rfc3339("2026-05-04T09:15:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
+                at: "2026-05-04T09:15:00Z".parse::<Timestamp>().unwrap(),
                 expires_at: None,
             },
         ];
@@ -1309,10 +1305,9 @@ mod tests {
         assert!(out.contains("alice"));
         assert!(out.contains("bob"));
         assert!(out.contains("never"));
-        let expires =
-            crate::render::to_local(&DateTime::parse_from_rfc3339("2026-05-12T13:30:00Z").unwrap())
-                .format("%Y-%m-%d %H:%M")
-                .to_string();
+        let expires = crate::render::to_local("2026-05-12T13:30:00Z".parse::<Timestamp>().unwrap())
+            .strftime("%Y-%m-%d %H:%M")
+            .to_string();
         assert!(out.contains(&expires), "{out}");
         assert!(out.contains("2 daemon acknowledgments active (showing up to 1000)"));
     }
@@ -1372,27 +1367,45 @@ mod tests {
 
     #[test]
     fn format_relative_handles_days_hours_minutes() {
-        assert_eq!(format_relative(chrono::Duration::days(7)), "in 7 days");
-        assert_eq!(format_relative(chrono::Duration::days(1)), "in 1 day");
-        assert_eq!(format_relative(chrono::Duration::hours(3)), "in 3h");
-        assert_eq!(format_relative(chrono::Duration::minutes(15)), "in 15min");
-        assert_eq!(format_relative(chrono::Duration::seconds(-1)), "expired");
+        assert_eq!(
+            format_relative(jiff::SignedDuration::from_hours(24 * 7)),
+            "in 7 days"
+        );
+        assert_eq!(
+            format_relative(jiff::SignedDuration::from_hours(24)),
+            "in 1 day"
+        );
+        assert_eq!(
+            format_relative(jiff::SignedDuration::from_hours(3)),
+            "in 3h"
+        );
+        assert_eq!(
+            format_relative(jiff::SignedDuration::from_mins(15)),
+            "in 15min"
+        );
+        assert_eq!(
+            format_relative(jiff::SignedDuration::from_secs(-1)),
+            "expired"
+        );
     }
 
     #[test]
     fn format_relative_rounds_up_a_delta_taken_just_after_the_expiry() {
-        let short = |d: chrono::Duration| d - chrono::Duration::seconds(3);
+        let short = |d: jiff::SignedDuration| d - jiff::SignedDuration::from_secs(3);
         assert_eq!(
-            format_relative(short(chrono::Duration::days(7))),
+            format_relative(short(jiff::SignedDuration::from_hours(24 * 7))),
             "in 7 days"
         );
         assert_eq!(
-            format_relative(short(chrono::Duration::days(1))),
+            format_relative(short(jiff::SignedDuration::from_hours(24))),
             "in 1 day"
         );
-        assert_eq!(format_relative(short(chrono::Duration::hours(3))), "in 3h");
         assert_eq!(
-            format_relative(chrono::Duration::seconds(30)),
+            format_relative(short(jiff::SignedDuration::from_hours(3))),
+            "in 3h"
+        );
+        assert_eq!(
+            format_relative(jiff::SignedDuration::from_secs(30)),
             "in less than a minute"
         );
     }

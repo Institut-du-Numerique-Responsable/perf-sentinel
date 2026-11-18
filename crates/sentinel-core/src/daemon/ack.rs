@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
@@ -57,9 +57,14 @@ pub struct AckEntry {
     pub by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    pub at: DateTime<Utc>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(with = "crate::time::rfc3339_serde")]
+    pub at: Timestamp,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::time::rfc3339_serde::option"
+    )]
+    pub expires_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -155,7 +160,7 @@ impl AckStore {
         }
 
         let active = if storage_path.exists() {
-            replay_and_compact(&storage_path, Utc::now()).await?
+            replay_and_compact(&storage_path, Timestamp::now()).await?
         } else {
             HashMap::new()
         };
@@ -235,7 +240,7 @@ impl AckStore {
             signature: signature.to_string(),
             by,
             reason: None,
-            at: Utc::now(),
+            at: Timestamp::now(),
             expires_at: None,
         };
         append_line(&mut file, &entry).await?;
@@ -264,7 +269,7 @@ impl AckStore {
     /// at compaction time, but a daemon that has been running past an
     /// entry's `expires_at` would still surface them otherwise).
     pub async fn list_active(&self) -> Vec<AckEntry> {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let active = self.active.read().await;
         let mut entries: Vec<AckEntry> = active
             .values()
@@ -334,7 +339,7 @@ fn sanitize_entry(entry: &mut AckEntry) {
     }
 }
 
-pub(crate) fn is_expired(entry: &AckEntry, now: DateTime<Utc>) -> bool {
+pub(crate) fn is_expired(entry: &AckEntry, now: Timestamp) -> bool {
     entry.expires_at.is_some_and(|exp| exp < now)
 }
 
@@ -394,7 +399,7 @@ async fn append_line(file: &mut File, entry: &AckEntry) -> Result<(), AckError> 
 
 async fn replay_and_compact(
     path: &Path,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<HashMap<String, AckEntry>, AckError> {
     let metadata = tokio::fs::metadata(path).await?;
     let file_size = metadata.len();
@@ -472,7 +477,7 @@ async fn replay_and_compact(
 /// expired, unack of unknown signature).
 fn apply_replay_entry(
     entry: AckEntry,
-    now: DateTime<Utc>,
+    now: Timestamp,
     active: &mut HashMap<String, AckEntry>,
 ) -> bool {
     match entry.action {
@@ -648,7 +653,6 @@ async fn rewrite_compacted(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration;
     use core::assert_matches;
     use tempfile::TempDir;
 
@@ -658,7 +662,7 @@ mod tests {
             signature: sig.to_string(),
             by: "alice@example.com".to_string(),
             reason: Some("test".to_string()),
-            at: Utc::now(),
+            at: Timestamp::now(),
             expires_at: None,
         }
     }
@@ -756,13 +760,13 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("acks.jsonl");
         let prefixes = ["f", "b", "d", "a", "e", "c"];
-        let t0 = Utc::now() - Duration::hours(1);
+        let t0 = Timestamp::now() - jiff::SignedDuration::from_hours(1);
         {
             let store = AckStore::new(path.clone()).await.unwrap();
             for (i, prefix) in prefixes.iter().enumerate() {
                 let mut entry =
                     sample_entry(&valid_sig(&format!("{prefix}:svc:_e")), AckAction::Ack);
-                entry.at = t0 + Duration::seconds(i64::try_from(i).unwrap());
+                entry.at = t0 + jiff::SignedDuration::from_secs(i64::try_from(i).unwrap());
                 store.ack(entry).await.unwrap();
             }
         }
@@ -809,11 +813,11 @@ mod tests {
         {
             let store = AckStore::new(path.clone()).await.unwrap();
             let live = AckEntry {
-                expires_at: Some(Utc::now() + Duration::days(7)),
+                expires_at: Some(Timestamp::now() + jiff::SignedDuration::from_hours(24 * 7)),
                 ..sample_entry(&sig_live, AckAction::Ack)
             };
             let dead = AckEntry {
-                expires_at: Some(Utc::now() - Duration::days(1)),
+                expires_at: Some(Timestamp::now() - jiff::SignedDuration::from_hours(24)),
                 ..sample_entry(&sig_dead, AckAction::Ack)
             };
             store.ack(live).await.unwrap();
@@ -836,11 +840,11 @@ mod tests {
         let sig_live = valid_sig("foo:svc:_alive");
         let sig_dead = valid_sig("foo:svc:_dead");
         let live = AckEntry {
-            expires_at: Some(Utc::now() + Duration::days(7)),
+            expires_at: Some(Timestamp::now() + jiff::SignedDuration::from_hours(24 * 7)),
             ..sample_entry(&sig_live, AckAction::Ack)
         };
         let dead = AckEntry {
-            expires_at: Some(Utc::now() - Duration::seconds(1)),
+            expires_at: Some(Timestamp::now() - jiff::SignedDuration::from_secs(1)),
             ..sample_entry(&sig_dead, AckAction::Ack)
         };
         store.ack(live).await.unwrap();
@@ -954,7 +958,7 @@ mod tests {
         let store = AckStore::new(path).await.unwrap();
         let sig = valid_sig("foo:svc:_endpoint");
         let entry = AckEntry {
-            expires_at: Some(Utc::now() - Duration::seconds(1)),
+            expires_at: Some(Timestamp::now() - jiff::SignedDuration::from_secs(1)),
             ..sample_entry(&sig, AckAction::Ack)
         };
         // Bypass `ack` because it would not insert an already-expired entry.

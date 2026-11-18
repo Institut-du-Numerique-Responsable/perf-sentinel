@@ -7,7 +7,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+use jiff::Timestamp;
+
+use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
 use crate::detect::Finding;
@@ -72,8 +74,8 @@ pub struct AggregateInputs {
     /// disclosure. Their waste fed the operational tier only, so the
     /// canonical tier omits those windows.
     pub legacy_waste_windows: u64,
-    pub first_seen: BTreeMap<(String, String), DateTime<Utc>>,
-    pub last_seen: BTreeMap<(String, String), DateTime<Utc>>,
+    pub first_seen: BTreeMap<(String, String), Timestamp>,
+    pub last_seen: BTreeMap<(String, String), Timestamp>,
     /// Distinct `energy_model` tags (without `+cal` suffix) observed
     /// across the folded windows. Empty when every window predates
     /// per-service carbon attribution.
@@ -116,7 +118,7 @@ pub struct AggregateInputs {
     /// Oldest window found in the archive files, in or out of the period.
     /// Later than the period's first day means the archive does not reach
     /// back to it, see [`archive_reaches_period_start`].
-    pub earliest_archived_window: Option<DateTime<Utc>>,
+    pub earliest_archived_window: Option<Timestamp>,
     /// Three of the five terms of the published total, in gCO2eq. The
     /// in-total database and broker host terms are in `carbon_breakdown`.
     /// Only `operational` carries an avoidable share: embodied hardware
@@ -149,7 +151,7 @@ pub struct AntiPatternAccumulator {
 
 #[derive(Debug, Deserialize)]
 struct ArchivedReport {
-    ts: DateTime<Utc>,
+    ts: Timestamp,
     report: Report,
 }
 
@@ -197,7 +199,7 @@ pub fn aggregate_from_paths(
 }
 
 /// Inclusive `(earliest, latest)` window timestamp covered by an archive.
-pub type ArchiveTimeRange = (DateTime<Utc>, DateTime<Utc>);
+pub type ArchiveTimeRange = (Timestamp, Timestamp);
 
 /// Scan the archive `paths` for the earliest and latest window timestamp,
 /// without folding the (heavy) report bodies. Each NDJSON line is parsed
@@ -212,7 +214,7 @@ pub type ArchiveTimeRange = (DateTime<Utc>, DateTime<Utc>);
 pub fn archive_time_range(paths: &[PathBuf]) -> Result<Option<ArchiveTimeRange>, AggregationError> {
     #[derive(Deserialize)]
     struct TsOnly {
-        ts: DateTime<Utc>,
+        ts: Timestamp,
     }
     let mut range: Option<ArchiveTimeRange> = None;
     for path in &resolve_files(paths)? {
@@ -418,9 +420,9 @@ pub(crate) struct PeriodState {
     malformed_lines_skipped: u64,
     legacy_waste_windows: u64,
     #[serde(with = "pair_key_map")]
-    first_seen: BTreeMap<(String, String), DateTime<Utc>>,
+    first_seen: BTreeMap<(String, String), Timestamp>,
     #[serde(with = "pair_key_map")]
-    last_seen: BTreeMap<(String, String), DateTime<Utc>>,
+    last_seen: BTreeMap<(String, String), Timestamp>,
     total_requests: u64,
     total_io_ops: u64,
     total_carbon_kgco2eq: f64,
@@ -477,11 +479,11 @@ pub(crate) struct PeriodState {
     /// Distinct UTC calendar days that carried >= 1 folded window. Bounded
     /// by the period length (<= 366 for a calendar year), no cap needed.
     /// Drives the v1.2 temporal-coverage continuity signal.
-    observed_days: BTreeSet<NaiveDate>,
+    observed_days: BTreeSet<Date>,
     /// Earliest window folded into the unattributed bucket. A rollup is
     /// folded without `--strict-attribution`, so the reader needs this to
     /// refuse it later when the flag is set.
-    first_unattributed: Option<DateTime<Utc>>,
+    first_unattributed: Option<Timestamp>,
 }
 
 #[derive(Default)]
@@ -506,7 +508,7 @@ struct Builder {
     /// counter against another's would invent resets.
     last_drops: BTreeMap<String, u64>,
     /// Oldest well-formed window across every input line, period or not.
-    earliest_archived: Option<DateTime<Utc>>,
+    earliest_archived: Option<Timestamp>,
     /// Windows the rollup lines already folded, as `[first, last]` window
     /// timestamps per archive family (the window archive a rollup file
     /// sits beside). A window line inside one is read for its chain and
@@ -520,14 +522,14 @@ struct Builder {
     /// Oldest well-formed window whose chain verified. When any line is
     /// chained, the reach check reads this one: a line without a hash put
     /// in front of a chained archive must not stand in for pruned windows.
-    earliest_chained: Option<DateTime<Utc>>,
+    earliest_chained: Option<Timestamp>,
 }
 
 /// The chain anchor: the previous line's hash and its sequence number.
 type ChainAnchor = Option<(String, u64)>;
 
 /// First and last window timestamps a rollup line folded.
-type WindowSpan = (DateTime<Utc>, DateTime<Utc>);
+type WindowSpan = (Timestamp, Timestamp);
 
 /// One archive line handed to [`Builder::fold_window`]. Grouped like
 /// [`ChainStep`]: the mutable `warned_fallback` has to travel with the
@@ -807,7 +809,7 @@ impl PeriodState {
     pub(crate) fn process_window(
         &mut self,
         report: &Report,
-        ts: DateTime<Utc>,
+        ts: Timestamp,
         strict: bool,
     ) -> Result<bool, AggregationError> {
         let Some(m) = self.compute_window_metrics(report, ts) else {
@@ -818,7 +820,7 @@ impl PeriodState {
         // Count the day only once the window is committed (after the
         // non-finite-carbon guard), keeping observed_days aligned with
         // windows_aggregated.
-        self.observed_days.insert(ts.date_naive());
+        self.observed_days.insert(crate::time::utc_date(ts));
         self.fold_disclosure_waste(report, &m);
         self.fold_binary_version(&report.binary_version);
         self.fold_window_energy_model(
@@ -838,7 +840,7 @@ impl PeriodState {
         let unattributed = per_service_io.is_empty() && !m.runtime_attribution;
         if unattributed && strict {
             return Err(AggregationError::UnattributedWindow {
-                ts: ts.to_rfc3339(),
+                ts: crate::time::rfc3339(ts),
             });
         }
         if unattributed {
@@ -855,11 +857,7 @@ impl PeriodState {
     /// `process_window` needs. Returns `None` (and bumps the malformed
     /// counter) when the carbon fields are non-finite, signalling the
     /// caller to skip the window.
-    fn compute_window_metrics(
-        &mut self,
-        report: &Report,
-        ts: DateTime<Utc>,
-    ) -> Option<WindowMetrics> {
+    fn compute_window_metrics(&mut self, report: &Report, ts: Timestamp) -> Option<WindowMetrics> {
         let carbon_kg = report
             .green_summary
             .co2
@@ -1191,7 +1189,7 @@ impl PeriodState {
         collect_endpoints_seen(&mut self.per_service, &report.per_endpoint_io_ops);
     }
 
-    fn route_findings(&mut self, findings: &[Finding], ts: DateTime<Utc>, unattributed: bool) {
+    fn route_findings(&mut self, findings: &[Finding], ts: Timestamp, unattributed: bool) {
         // Route findings to the unattributed bucket when the window had
         // no per-service offenders or runtime maps, so a service never
         // publishes efficiency=100 alongside non-zero
@@ -1223,7 +1221,7 @@ impl PeriodState {
         &mut self,
         service: &str,
         pattern: &str,
-        ts: DateTime<Utc>,
+        ts: Timestamp,
         occurrences: u64,
         avoidable: u64,
     ) -> bool {
@@ -1237,7 +1235,7 @@ impl PeriodState {
         true
     }
 
-    fn update_seen_timestamps(&mut self, service_key: &str, pattern: &str, ts: DateTime<Utc>) {
+    fn update_seen_timestamps(&mut self, service_key: &str, pattern: &str, ts: Timestamp) {
         let key = (service_key.to_string(), pattern.to_string());
         self.first_seen
             .entry(key.clone())
@@ -1270,7 +1268,7 @@ impl PeriodState {
 }
 
 impl PeriodState {
-    pub(crate) fn first_unattributed(&self) -> Option<DateTime<Utc>> {
+    pub(crate) fn first_unattributed(&self) -> Option<Timestamp> {
         self.first_unattributed
     }
 
@@ -1280,7 +1278,7 @@ impl PeriodState {
 
     /// Restrict the observed days to `day`, the only one a rollup line may
     /// answer for. An empty state keeps no day.
-    pub(crate) fn keep_only_day(&mut self, day: NaiveDate) {
+    pub(crate) fn keep_only_day(&mut self, day: Date) {
         self.observed_days.clear();
         if self.windows_aggregated > 0 {
             self.observed_days.insert(day);
@@ -1288,7 +1286,7 @@ impl PeriodState {
     }
 
     #[cfg(test)]
-    pub(crate) fn insert_observed_day_for_test(&mut self, day: NaiveDate) {
+    pub(crate) fn insert_observed_day_for_test(&mut self, day: Date) {
         self.observed_days.insert(day);
     }
 
@@ -1395,8 +1393,8 @@ impl PeriodState {
     /// pairing `credit` keeps on the window path.
     fn merge_seen(
         &mut self,
-        first: BTreeMap<(String, String), DateTime<Utc>>,
-        last: BTreeMap<(String, String), DateTime<Utc>>,
+        first: BTreeMap<(String, String), Timestamp>,
+        last: BTreeMap<(String, String), Timestamp>,
     ) {
         for (key, ts) in first {
             if self.admits(&key) {
@@ -1550,10 +1548,10 @@ fn merge_waste_block(acc: &mut DbWasteAccumulator, other: DbWasteAccumulator) {
 mod pair_key_map {
     use std::collections::BTreeMap;
 
-    use chrono::{DateTime, Utc};
+    use jiff::Timestamp;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    type Map = BTreeMap<(String, String), DateTime<Utc>>;
+    type Map = BTreeMap<(String, String), Timestamp>;
 
     pub(super) fn serialize<S: Serializer>(map: &Map, s: S) -> Result<S::Ok, S::Error> {
         s.collect_seq(
@@ -1563,7 +1561,7 @@ mod pair_key_map {
     }
 
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Map, D::Error> {
-        let rows = Vec::<(String, String, DateTime<Utc>)>::deserialize(d)?;
+        let rows = Vec::<(String, String, Timestamp)>::deserialize(d)?;
         Ok(rows
             .into_iter()
             .map(|(service, pattern, ts)| ((service, pattern), ts))
@@ -1699,7 +1697,7 @@ impl Builder {
         let mut state = line.state;
         if strict && let Some(ts) = state.first_unattributed() {
             return Err(AggregationError::UnattributedWindow {
-                ts: ts.to_rfc3339(),
+                ts: crate::time::rfc3339(ts),
             });
         }
         // A rollup answers for its own day only.
@@ -1718,16 +1716,11 @@ impl Builder {
         let Some(spans) = self.rollup_spans.get(family) else {
             return false;
         };
-        value
-            .and_then(|v| v.get("ts"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
-            .map(|ts| ts.with_timezone(&Utc))
-            .is_some_and(|ts| {
-                spans
-                    .iter()
-                    .any(|(first, last)| *first <= ts && ts <= *last)
-            })
+        line_ts(value).is_some_and(|ts| {
+            spans
+                .iter()
+                .any(|(first, last)| *first <= ts && ts <= *last)
+        })
     }
 }
 
@@ -1748,7 +1741,7 @@ struct RollupStep<'a> {
     warned_break: &'a mut bool,
 }
 
-fn period_has_day(period: &Period, day: NaiveDate) -> bool {
+fn period_has_day(period: &Period, day: Date) -> bool {
     period.from_date <= day && day <= period.to_date
 }
 
@@ -1889,8 +1882,8 @@ impl Builder {
 /// A quiet start does not trip it, since older lines still precede the
 /// period.
 #[must_use]
-pub fn archive_reaches_period_start(earliest: Option<DateTime<Utc>>, period: &Period) -> bool {
-    earliest.is_some_and(|ts| ts.date_naive() <= period.from_date)
+pub fn archive_reaches_period_start(earliest: Option<Timestamp>, period: &Period) -> bool {
+    earliest.is_some_and(|ts| crate::time::utc_date(ts) <= period.from_date)
 }
 
 /// One waste block, database or broker, emitted only once a window
@@ -2077,11 +2070,12 @@ fn verify_chain_value(
 /// A line the reader cannot parse counts as in-period: it was read from a
 /// file the operator pointed at, and dropping it would hide a break.
 fn line_in_period(value: Option<&serde_json::Value>, period: &Period) -> bool {
-    value
-        .and_then(|v| v.get("ts"))
-        .and_then(serde_json::Value::as_str)
-        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
-        .is_none_or(|ts| in_period(ts.with_timezone(&Utc), period))
+    line_ts(value).is_none_or(|ts| in_period(ts, period))
+}
+
+/// The `ts` of an archive line, `None` when absent or unparsable.
+fn line_ts(value: Option<&serde_json::Value>) -> Option<Timestamp> {
+    value?.get("ts")?.as_str()?.parse().ok()
 }
 
 fn service_io_distribution(
@@ -2191,19 +2185,13 @@ fn scale_u64(value: u64, factor: f64) -> u64 {
     }
 }
 
-fn in_period(ts: DateTime<Utc>, period: &Period) -> bool {
+fn in_period(ts: Timestamp, period: &Period) -> bool {
     // Half-open [from, to+1d) so that envelopes at any sub-second offset
     // inside `to_date` (e.g. `2026-03-31T23:59:59.500Z`) are included.
-    let from = naive_to_utc_start(period.from_date);
-    let to_exclusive = period
-        .to_date
-        .succ_opt()
-        .map_or_else(|| naive_to_utc_start(period.to_date), naive_to_utc_start);
+    let from = crate::time::utc_midnight(period.from_date);
+    let to_exclusive =
+        crate::time::utc_midnight(period.to_date.tomorrow().unwrap_or(period.to_date));
     ts >= from && ts < to_exclusive
-}
-
-fn naive_to_utc_start(d: NaiveDate) -> DateTime<Utc> {
-    Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).expect("00:00:00 is valid"))
 }
 
 /// Build the v1.2 temporal-continuity signal from the set of distinct
@@ -2214,7 +2202,7 @@ fn naive_to_utc_start(d: NaiveDate) -> DateTime<Utc> {
 /// This measures days with OBSERVED TRAFFIC, not daemon uptime: archiving is
 /// traffic-gated, so legitimately quiet days lower it. See
 /// [`TemporalCoverage`].
-fn compute_temporal_coverage(observed: &BTreeSet<NaiveDate>, period: &Period) -> TemporalCoverage {
+fn compute_temporal_coverage(observed: &BTreeSet<Date>, period: &Period) -> TemporalCoverage {
     let days_in_period = period.days_covered;
     let observed_days = u32::try_from(observed.len()).unwrap_or(u32::MAX);
     let temporal_coverage = if days_in_period == 0 {
@@ -2236,11 +2224,10 @@ fn compute_temporal_coverage(observed: &BTreeSet<NaiveDate>, period: &Period) ->
 /// the declared span, so the cost is bounded by archive content, not by an
 /// operator-chosen `from`/`to` range. `observed` holds only in-period days, so
 /// the leading/trailing edges and the between-day gaps cover the whole period.
-fn largest_gap_days(observed: &BTreeSet<NaiveDate>, period: &Period) -> u32 {
+fn largest_gap_days(observed: &BTreeSet<Date>, period: &Period) -> u32 {
     // Inclusive day-count between two dates as a saturating u32 (>= 0).
-    let span = |a: NaiveDate, b: NaiveDate| -> u32 {
-        u32::try_from((b - a).num_days().max(0)).unwrap_or(u32::MAX)
-    };
+    let span =
+        |a: Date, b: Date| -> u32 { u32::try_from((b - a).get_days().max(0)).unwrap_or(u32::MAX) };
     let Some(&first) = observed.iter().next() else {
         // No observed day: the whole period is one gap.
         return if period.to_date >= period.from_date {

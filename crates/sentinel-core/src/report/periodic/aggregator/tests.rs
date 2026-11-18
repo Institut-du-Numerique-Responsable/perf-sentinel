@@ -4,7 +4,6 @@ use crate::report::interpret::InterpretationLevel;
 use crate::report::{Analysis, GreenSummary, PerEndpointIoOps, QualityGate, Report};
 use crate::score::carbon::{CarbonEstimate, CarbonReport};
 use crate::score::host_static::HostPlacement;
-use chrono::TimeZone;
 use core::assert_matches;
 use std::io::Write;
 use tempfile::TempDir;
@@ -112,7 +111,7 @@ fn make_report(
     }
 }
 
-fn write_archive(lines: &[(DateTime<Utc>, Report)]) -> (TempDir, PathBuf) {
+fn write_archive(lines: &[(Timestamp, Report)]) -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("archive.ndjson");
     let mut file = File::create(&path).unwrap();
@@ -125,7 +124,7 @@ fn write_archive(lines: &[(DateTime<Utc>, Report)]) -> (TempDir, PathBuf) {
 
 /// Same shape the daemon writer produces, built with the shared chain
 /// primitives rather than a second implementation of them.
-fn write_chained_archive(lines: &[(DateTime<Utc>, Report)]) -> (TempDir, PathBuf) {
+fn write_chained_archive(lines: &[(Timestamp, Report)]) -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("archive.ndjson");
     let mut file = File::create(&path).unwrap();
@@ -146,13 +145,13 @@ fn write_chained_archive(lines: &[(DateTime<Utc>, Report)]) -> (TempDir, PathBuf
 
 /// Chained archive whose lines carry the cumulative `drops` counter,
 /// the shape the daemon writes since v1.7.
-fn write_chained_archive_with_drops(lines: &[(DateTime<Utc>, Report, u64)]) -> (TempDir, PathBuf) {
+fn write_chained_archive_with_drops(lines: &[(Timestamp, Report, u64)]) -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
     let path = write_drops_file(dir.path(), "archive.ndjson", lines);
     (dir, path)
 }
 
-fn write_drops_file(dir: &Path, name: &str, lines: &[(DateTime<Utc>, Report, u64)]) -> PathBuf {
+fn write_drops_file(dir: &Path, name: &str, lines: &[(Timestamp, Report, u64)]) -> PathBuf {
     let path = dir.join(name);
     let mut file = File::create(&path).unwrap();
     let mut prev = super::super::hasher::ARCHIVE_CHAIN_SEED.to_string();
@@ -173,8 +172,8 @@ fn write_drops_file(dir: &Path, name: &str, lines: &[(DateTime<Utc>, Report, u64
 
 fn q1_2026() -> Period {
     Period {
-        from_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-        to_date: NaiveDate::from_ymd_opt(2026, 3, 31).unwrap(),
+        from_date: jiff::civil::date(2026, 1, 1),
+        to_date: jiff::civil::date(2026, 3, 31),
         period_type: crate::report::periodic::schema::PeriodType::CalendarQuarter,
         days_covered: 90,
     }
@@ -191,7 +190,7 @@ fn plain_window() -> Report {
 /// the delta restarts from the new value.
 #[test]
 fn drop_counter_deltas_become_windows_dropped() {
-    let ts = |m, d| Utc.with_ymd_and_hms(2026, m, d, 0, 0, 0).unwrap();
+    let ts = |m, d| crate::time::utc(2026, m, d, 0, 0, 0);
     let windows = [
         (ts(1, 10), plain_window(), 2),
         (ts(1, 20), plain_window(), 5),
@@ -260,7 +259,7 @@ fn rotation_stamps_are_told_apart_from_ordinary_suffixes() {
 /// active one, so the delta across a rotation boundary must be kept.
 #[test]
 fn drop_deltas_survive_a_rotation_boundary() {
-    let ts = |m, d| Utc.with_ymd_and_hms(2026, m, d, 0, 0, 0).unwrap();
+    let ts = |m, d| crate::time::utc(2026, m, d, 0, 0, 0);
     let dir = TempDir::new().unwrap();
     // Rotation naming: the stamped file sorts before the active one.
     let rotated = write_drops_file(
@@ -285,7 +284,7 @@ fn drop_deltas_survive_a_rotation_boundary() {
 /// reset of the first.
 #[test]
 fn drop_counters_do_not_leak_between_archive_families() {
-    let ts = |m, d| Utc.with_ymd_and_hms(2026, m, d, 0, 0, 0).unwrap();
+    let ts = |m, d| crate::time::utc(2026, m, d, 0, 0, 0);
     let dir = TempDir::new().unwrap();
     let host_a = write_drops_file(
         dir.path(),
@@ -314,8 +313,8 @@ fn drop_counters_do_not_leak_between_archive_families() {
 /// "measured zero" for a period whose own windows carry no counter.
 #[test]
 fn out_of_period_counter_lines_do_not_claim_zero_drops() {
-    let outside = Utc.with_ymd_and_hms(2025, 6, 15, 0, 0, 0).unwrap();
-    let inside = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+    let outside = crate::time::utc(2025, 6, 15, 0, 0, 0);
+    let inside = crate::time::utc(2026, 1, 15, 0, 0, 0);
     let dir = TempDir::new().unwrap();
     // The period's own window predates the counter. Only an
     // out-of-period line carries one.
@@ -340,7 +339,7 @@ fn out_of_period_counter_lines_do_not_claim_zero_drops() {
 /// distinguishable from "zero drops".
 #[test]
 fn archives_without_the_counter_yield_no_drop_figures() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
     let (_dir, path) = write_archive(&[(ts1, plain_window())]);
     let inputs = aggregate_from_paths(std::slice::from_ref(&path), &q1_2026(), false).unwrap();
     assert_eq!(inputs.windows_dropped, None);
@@ -349,9 +348,9 @@ fn archives_without_the_counter_yield_no_drop_figures() {
 
 #[test]
 fn an_intact_chain_verifies_and_an_edited_window_breaks_it() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
+    let ts3 = crate::time::utc(2026, 3, 15, 0, 0, 0);
     let windows = [
         (ts1, plain_window()),
         (ts2, plain_window()),
@@ -382,8 +381,8 @@ fn an_intact_chain_verifies_and_an_edited_window_breaks_it() {
 
 #[test]
 fn a_crash_truncated_fragment_is_not_a_break() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
     let (_dir, path) = write_chained_archive(&[(ts1, plain_window()), (ts2, plain_window())]);
     let text = std::fs::read_to_string(&path).unwrap();
     let lines: Vec<&str> = text.lines().collect();
@@ -401,9 +400,9 @@ fn a_crash_truncated_fragment_is_not_a_break() {
 
 #[test]
 fn a_removed_window_breaks_the_chain_and_pre_chain_archives_do_not() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
+    let ts3 = crate::time::utc(2026, 3, 15, 0, 0, 0);
     let (_dir, path) = write_chained_archive(&[
         (ts1, plain_window()),
         (ts2, plain_window()),
@@ -426,9 +425,9 @@ fn a_removed_window_breaks_the_chain_and_pre_chain_archives_do_not() {
 
 #[test]
 fn a_break_revealed_just_after_the_period_still_affects_the_period() {
-    let in_period = Utc.with_ymd_and_hms(2026, 3, 30, 0, 0, 0).unwrap();
-    let removed = Utc.with_ymd_and_hms(2026, 3, 31, 0, 0, 0).unwrap();
-    let after = Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap();
+    let in_period = crate::time::utc(2026, 3, 30, 0, 0, 0);
+    let removed = crate::time::utc(2026, 3, 31, 0, 0, 0);
+    let after = crate::time::utc(2026, 4, 1, 0, 0, 0);
     let (_dir, path) = write_chained_archive(&[
         (in_period, plain_window()),
         (removed, plain_window()),
@@ -447,8 +446,8 @@ fn a_break_revealed_just_after_the_period_still_affects_the_period() {
 fn carbon_methodology_and_embodied_are_folded_from_the_windows() {
     // Methodology and embodied values are read from archived windows,
     // not from the config of whoever runs `disclose`.
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
     let mut with_transport = plain_window();
     if let Some(co2) = with_transport.green_summary.co2.as_mut() {
         co2.total.methodology = "sci_v1_numerator+transport".to_string();
@@ -501,8 +500,8 @@ fn stripping_the_hash_field_is_a_break_not_a_pre_chain_line() {
     // After a chained line, a deleted `hash` must not read as
     // "written before chaining existed" (the benign bucket), or an
     // editor could rewrite a window and publish breaks: 0.
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
     let (_dir, path) = write_chained_archive(&[(ts1, plain_window()), (ts2, plain_window())]);
     let text = std::fs::read_to_string(&path).unwrap();
     let mut lines: Vec<serde_json::Value> = text
@@ -523,9 +522,9 @@ fn stripping_the_hash_field_is_a_break_not_a_pre_chain_line() {
 fn a_removed_run_that_ends_inside_the_file_is_a_break() {
     // `prev` alone cannot see a removed run: the line after it points
     // at a hash that is no longer there, and `seq` jumps too.
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
+    let ts3 = crate::time::utc(2026, 3, 15, 0, 0, 0);
     let (_dir, path) = write_chained_archive(&[
         (ts1, plain_window()),
         (ts2, plain_window()),
@@ -545,9 +544,9 @@ fn truncating_the_tail_is_invisible_to_the_chain_alone() {
     // after a clean tail cut is a shorter self-consistent chain, and
     // no field inside the file can contradict it. Only an anchor kept
     // outside it can, which `integrity.cross_period_log` reserves.
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
+    let ts3 = crate::time::utc(2026, 3, 15, 0, 0, 0);
     let (_dir, path) = write_chained_archive(&[
         (ts1, plain_window()),
         (ts2, plain_window()),
@@ -567,9 +566,9 @@ fn one_stripped_hash_costs_one_break_not_two() {
     // The line after a damaged one chains onto a hash the walk never
     // saw. Counting that as a second break would report two edits for
     // one, and a reader cannot tell an inflated count from a real one.
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
+    let ts3 = crate::time::utc(2026, 3, 15, 0, 0, 0);
     let (_dir, path) = write_chained_archive(&[
         (ts1, plain_window()),
         (ts2, plain_window()),
@@ -594,9 +593,9 @@ fn a_break_outside_the_period_is_counted_apart() {
     // One rolling archive can cover years. A window edited in 2025
     // must not be published as a break in the 2026 Q1 disclosure, and
     // the verified count must match what the period folded.
-    let old_ts = Utc.with_ymd_and_hms(2025, 6, 15, 0, 0, 0).unwrap();
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+    let old_ts = crate::time::utc(2025, 6, 15, 0, 0, 0);
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
     let (_dir, path) = write_chained_archive(&[
         (old_ts, plain_window()),
         (ts1, plain_window()),
@@ -622,8 +621,8 @@ fn the_applied_coefficients_are_published_and_a_change_shows_both() {
     // They scale every published figure and appear nowhere else, so a
     // period scored under two different coefficients must say so
     // rather than average them into one number.
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
     let mut first = plain_window();
     first.green_summary.scoring_config = Some(crate::score::carbon::ScoringConfig {
         embodied_per_request_gco2: Some(0.001),
@@ -655,7 +654,7 @@ fn transport_is_omitted_rather_than_zeroed_when_nothing_counted_it() {
     // With `include_network_transport` off, and with it on but no
     // cross-region traffic, the windows are identical. Publishing 0.0
     // would assert a measurement neither case made.
-    let ts = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 1, 15, 0, 0, 0);
     let (_dir, path) = write_archive(&[(ts, plain_window())]);
     let out = aggregate_from_paths(&[path], &q1_2026(), false).unwrap();
     let bd = out.aggregate.carbon_breakdown.expect("breakdown present");
@@ -763,9 +762,9 @@ fn standalone_subsystem_carbon_emits_a_breakdown() {
 
 #[test]
 fn temporal_coverage_counts_distinct_days() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
+    let ts3 = crate::time::utc(2026, 3, 15, 0, 0, 0);
     let (_dir, path) = write_archive(&[
         (ts1, plain_window()),
         (ts2, plain_window()),
@@ -784,8 +783,8 @@ fn temporal_coverage_counts_distinct_days() {
 
 #[test]
 fn temporal_coverage_dedups_same_day_windows() {
-    let morning = Utc.with_ymd_and_hms(2026, 1, 10, 1, 0, 0).unwrap();
-    let evening = Utc.with_ymd_and_hms(2026, 1, 10, 23, 0, 0).unwrap();
+    let morning = crate::time::utc(2026, 1, 10, 1, 0, 0);
+    let evening = crate::time::utc(2026, 1, 10, 23, 0, 0);
     let (_dir, path) = write_archive(&[(morning, plain_window()), (evening, plain_window())]);
     let tc = aggregate_from_paths(&[path], &q1_2026(), false)
         .unwrap()
@@ -797,10 +796,8 @@ fn temporal_coverage_dedups_same_day_windows() {
 #[test]
 fn temporal_coverage_buckets_subsecond_near_midnight_by_utc_day() {
     // 23:59:59.500 on Jan 31 and 00:00:00.200 on Feb 1 are distinct days.
-    let jan31 = Utc.with_ymd_and_hms(2026, 1, 31, 23, 59, 59).unwrap()
-        + chrono::Duration::milliseconds(500);
-    let feb1 =
-        Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap() + chrono::Duration::milliseconds(200);
+    let jan31 = crate::time::utc(2026, 1, 31, 23, 59, 59) + jiff::SignedDuration::from_millis(500);
+    let feb1 = crate::time::utc(2026, 2, 1, 0, 0, 0) + jiff::SignedDuration::from_millis(200);
     let (_dir, path) = write_archive(&[(jan31, plain_window()), (feb1, plain_window())]);
     let tc = aggregate_from_paths(&[path], &q1_2026(), false)
         .unwrap()
@@ -811,7 +808,7 @@ fn temporal_coverage_buckets_subsecond_near_midnight_by_utc_day() {
 
 #[test]
 fn aggregator_surfaces_both_waste_tiers() {
-    let ts = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 1, 15, 0, 0, 0);
     // green_summary avoidable (50) differs from the canonical tier (200),
     // so the assertions prove the disclosure_waste tiers drive the output,
     // not the operational green_summary.
@@ -858,7 +855,7 @@ fn aggregator_surfaces_both_waste_tiers() {
 
 #[test]
 fn a_declared_database_window_lands_in_the_declared_bucket() {
-    let ts = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 1, 15, 0, 0, 0);
     let tier = crate::report::AvoidableTier {
         n_plus_one_threshold: 2,
         avoidable_io_ops: 10,
@@ -886,8 +883,8 @@ fn a_declared_database_window_lands_in_the_declared_bucket() {
 
 #[test]
 fn aggregator_sums_messaging_waste_and_splits_provenance() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
     let tier = crate::report::AvoidableTier {
         n_plus_one_threshold: 2,
         avoidable_io_ops: 10,
@@ -949,8 +946,8 @@ fn aggregator_sums_messaging_waste_and_splits_provenance() {
 
 #[test]
 fn aggregator_sums_database_waste_across_windows() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
     let tier = crate::report::AvoidableTier {
         n_plus_one_threshold: 2,
         avoidable_io_ops: 10,
@@ -973,7 +970,7 @@ fn aggregator_sums_database_waste_across_windows() {
     });
     // Out-of-spec provenance tag: the whole block is dropped, none
     // of its figures reach the sums.
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+    let ts3 = crate::time::utc(2026, 3, 15, 0, 0, 0);
     let mut r3 = make_report(100, 1_000, 50, &[("svc-a", "/api", 1_000)], vec![]);
     r3.disclosure_waste = Some(crate::report::DisclosureWaste {
         canonical: tier.clone(),
@@ -1082,7 +1079,7 @@ fn in_total_window(app_kwh: f64, db: bool, msg: bool) -> Report {
     r
 }
 
-fn aggregate_windows(lines: &[(DateTime<Utc>, Report)]) -> AggregateInputs {
+fn aggregate_windows(lines: &[(Timestamp, Report)]) -> AggregateInputs {
     let (_dir, path) = write_archive(lines);
     aggregate_from_paths(&[path], &q1_2026(), false).unwrap()
 }
@@ -1213,7 +1210,7 @@ fn beside_db_window(energy: f64, model: &str) -> Report {
 
 /// Legacy measured, dedicated declared, shared modeled, a broker and an
 /// estimated window, in that order.
-fn mixed_host_period() -> Vec<(DateTime<Utc>, Report)> {
+fn mixed_host_period() -> Vec<(Timestamp, Report)> {
     let mut broker = in_total_window(1.0, false, true);
     if let Some(block) = broker
         .disclosure_waste
@@ -1325,9 +1322,9 @@ fn a_rollup_state_without_the_waste_block_scope_reads_and_merges_it() {
 
 #[test]
 fn aggregator_folds_three_windows() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
+    let ts3 = crate::time::utc(2026, 3, 15, 0, 0, 0);
 
     let r1 = make_report(
         100,
@@ -1388,7 +1385,7 @@ fn aggregator_folds_three_windows() {
 
 #[test]
 fn aggregate_request_total_does_not_sum_rounded_service_shares() {
-    let ts = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 1, 15, 0, 0, 0);
     let report = make_report(
         1,
         2,
@@ -1405,9 +1402,9 @@ fn aggregate_request_total_does_not_sum_rounded_service_shares() {
 
 #[test]
 fn archive_time_range_reports_min_and_max() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 3, 20, 12, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 2, 10, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 3, 20, 12, 0, 0);
+    let ts3 = crate::time::utc(2026, 2, 10, 0, 0, 0);
     let r = make_report(10, 100, 5, &[("svc", "/", 100)], vec![]);
     let (_dir, path) = write_archive(&[(ts1, r.clone()), (ts2, r.clone()), (ts3, r)]);
 
@@ -1428,7 +1425,7 @@ fn archive_time_range_skips_malformed_lines() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("archive.ndjson");
     let mut file = File::create(&path).unwrap();
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_report(10, 100, 0, &[("svc", "/", 100)], vec![]);
     let envelope = serde_json::json!({ "ts": ts, "report": r });
     writeln!(file, "{{ not json").unwrap();
@@ -1444,9 +1441,9 @@ fn archive_time_range_skips_malformed_lines() {
 
 #[test]
 fn aggregator_filters_outside_period() {
-    let in_p = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
-    let before = Utc.with_ymd_and_hms(2025, 12, 31, 0, 0, 0).unwrap();
-    let after = Utc.with_ymd_and_hms(2026, 4, 1, 12, 0, 0).unwrap();
+    let in_p = crate::time::utc(2026, 2, 1, 0, 0, 0);
+    let before = crate::time::utc(2025, 12, 31, 0, 0, 0);
+    let after = crate::time::utc(2026, 4, 1, 12, 0, 0);
 
     let r = make_report(50, 100, 5, &[("svc", "/", 100)], vec![]);
     let (_dir, path) = write_archive(&[(before, r.clone()), (in_p, r.clone()), (after, r)]);
@@ -1462,7 +1459,7 @@ fn aggregator_skips_malformed_lines() {
     let mut file = File::create(&path).unwrap();
     let r = make_report(10, 100, 0, &[("svc", "/", 100)], vec![]);
     let envelope = serde_json::json!({
-        "ts": Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap(),
+        "ts": crate::time::utc(2026, 2, 1, 0, 0, 0),
         "report": r,
     });
     writeln!(file, "{}", serde_json::to_string(&envelope).unwrap()).unwrap();
@@ -1477,7 +1474,7 @@ fn aggregator_skips_malformed_lines() {
 
 #[test]
 fn aggregator_errors_when_no_windows_in_period() {
-    let outside = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+    let outside = crate::time::utc(2025, 1, 1, 0, 0, 0);
     let r = make_report(10, 100, 0, &[("svc", "/", 100)], vec![]);
     let (_dir, path) = write_archive(&[(outside, r)]);
 
@@ -1487,7 +1484,7 @@ fn aggregator_errors_when_no_windows_in_period() {
 
 #[test]
 fn aggregator_strict_attribution_errors_on_empty_io() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_report(10, 100, 0, &[], vec![]);
     let (_dir, path) = write_archive(&[(ts, r)]);
 
@@ -1497,7 +1494,7 @@ fn aggregator_strict_attribution_errors_on_empty_io() {
 
 #[test]
 fn aggregator_falls_back_to_unattributed_when_lax() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     // A split finding folds whole into the bucket, no per-service row.
     let mut finding = make_finding("svc-a", FindingType::NPlusOneSql, "SELECT *");
     finding.pattern.occurrences_by_service =
@@ -1517,7 +1514,7 @@ fn aggregator_falls_back_to_unattributed_when_lax() {
 /// count is unchanged.
 #[test]
 fn route_findings_splits_avoidable_across_services() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut finding = make_finding("svc-a", FindingType::NPlusOneSql, "SELECT *");
     assert_eq!(finding.pattern.occurrences, 5);
     finding.pattern.occurrences_by_service =
@@ -1548,7 +1545,7 @@ fn aggregator_resolves_directory_of_ndjson() {
     let dir = TempDir::new().unwrap();
     let p1 = dir.path().join("a.ndjson");
     let p2 = dir.path().join("b.ndjson");
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_report(10, 100, 0, &[("svc", "/", 100)], vec![]);
     for p in [&p1, &p2] {
         let mut f = File::create(p).unwrap();
@@ -1563,8 +1560,8 @@ fn aggregator_resolves_directory_of_ndjson() {
 
 #[test]
 fn aggregator_tracks_first_and_last_seen() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 3, 25, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 5, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 3, 25, 0, 0, 0);
     let r1 = make_report(
         10,
         100,
@@ -1609,7 +1606,7 @@ fn make_runtime_report(
 
 #[test]
 fn aggregator_uses_runtime_attribution_when_present() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_runtime_report(
         &[("svc-low", "/api", 100), ("svc-high", "/api", 100)],
         &[("svc-low", 0.005), ("svc-high", 0.500)],
@@ -1641,7 +1638,7 @@ fn aggregator_uses_runtime_attribution_when_present() {
 fn aggregator_falls_back_to_proxy_for_legacy_archives() {
     // make_report leaves the per-service maps empty and energy_kwh
     // at zero, mirroring an archive without runtime energy attribution.
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_report(10, 100, 5, &[("svc", "/", 100)], vec![]);
     let (_dir, path) = write_archive(&[(ts, r)]);
 
@@ -1658,8 +1655,8 @@ fn aggregator_falls_back_to_proxy_for_legacy_archives() {
 
 #[test]
 fn aggregator_mixed_archive_per_window_strategy() {
-    let ts_legacy = Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap();
-    let ts_runtime = Utc.with_ymd_and_hms(2026, 2, 10, 0, 0, 0).unwrap();
+    let ts_legacy = crate::time::utc(2026, 1, 10, 0, 0, 0);
+    let ts_runtime = crate::time::utc(2026, 2, 10, 0, 0, 0);
     let legacy = make_report(10, 100, 5, &[("svc-a", "/", 100)], vec![]);
     let runtime = make_runtime_report(
         &[("svc-b", "/", 50)],
@@ -1695,7 +1692,7 @@ fn aggregator_clamps_negative_energy_and_carbon_from_tampered_archive() {
     // JSON allows negative numbers. A tampered archive could carry
     // them to skew the period downward. Without the clamp, per-service
     // sums would go negative and propagate to `total_energy_kwh`.
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_runtime_report(
         &[("svc-a", "/", 100)],
         &[("svc-a", -1.0e10), ("svc-b", -0.5)],
@@ -1724,7 +1721,7 @@ fn aggregator_caps_per_service_cardinality() {
     // A tampered archive carrying MAX_SERVICES + N distinct service
     // strings must not balloon `per_service`. Overflow services are
     // silently dropped, existing services keep accumulating.
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let overflow = 32_usize;
     let services_raw: Vec<(String, f64, f64, String)> = (0..(MAX_SERVICES + overflow))
         .map(|i| {
@@ -1769,7 +1766,7 @@ fn aggregator_caps_per_service_cardinality() {
 
 #[test]
 fn aggregator_rejects_oversize_energy_model_strings() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let oversize = "x".repeat(1024);
     let r = make_runtime_report(
         &[("svc", "/", 10)],
@@ -1790,7 +1787,7 @@ fn aggregator_rejects_oversize_energy_model_strings() {
 
 #[test]
 fn aggregator_caps_distinct_energy_models() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut reports = Vec::new();
     for i in 0..(MAX_ENERGY_MODELS + 20) {
         let model = format!("model_{i:04}");
@@ -1803,7 +1800,7 @@ fn aggregator_caps_distinct_energy_models() {
             &model,
         );
         let offset = i64::try_from(i).expect("test bound");
-        reports.push((ts + chrono::Duration::seconds(offset), r));
+        reports.push((ts + jiff::SignedDuration::from_secs(offset), r));
     }
     let (_dir, path) = write_archive(&reports);
 
@@ -1814,7 +1811,7 @@ fn aggregator_caps_distinct_energy_models() {
 
 #[test]
 fn aggregator_collects_single_binary_version() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut r = make_report(10, 100, 5, &[("svc", "/", 100)], vec![]);
     r.binary_version = "0.6.2".to_string();
     let (_dir, path) = write_archive(&[(ts, r)]);
@@ -1826,8 +1823,8 @@ fn aggregator_collects_single_binary_version() {
 
 #[test]
 fn aggregator_collects_distinct_binary_versions_in_mixed_archive() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 10, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 10, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 10, 0, 0, 0);
     let mut r1 = make_report(10, 100, 5, &[("svc-a", "/", 100)], vec![]);
     r1.binary_version = "0.6.2".to_string();
     let mut r2 = make_report(10, 100, 5, &[("svc-b", "/", 50)], vec![]);
@@ -1842,7 +1839,7 @@ fn aggregator_collects_distinct_binary_versions_in_mixed_archive() {
 
 #[test]
 fn aggregator_skips_empty_binary_version_from_legacy_archive() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_report(10, 100, 5, &[("svc", "/", 100)], vec![]);
     // make_report leaves binary_version as String::new()
     let (_dir, path) = write_archive(&[(ts, r)]);
@@ -1853,7 +1850,7 @@ fn aggregator_skips_empty_binary_version_from_legacy_archive() {
 
 #[test]
 fn aggregator_rejects_oversize_binary_version_strings() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut r = make_report(10, 100, 5, &[("svc", "/", 100)], vec![]);
     r.binary_version = "x".repeat(MAX_BINARY_VERSION_LEN + 1);
     let (_dir, path) = write_archive(&[(ts, r)]);
@@ -1864,7 +1861,7 @@ fn aggregator_rejects_oversize_binary_version_strings() {
 
 #[test]
 fn aggregator_detects_calibration_when_cal_suffix_present() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_runtime_report(
         &[("svc", "/", 10)],
         &[("svc", 0.001)],
@@ -1885,7 +1882,7 @@ fn aggregator_detects_calibration_when_cal_suffix_present() {
 fn aggregator_sets_calibration_from_the_flag_behind_a_measured_tag() {
     // A real-time or measured window tag drops `+cal`, so only
     // `energy_calibrated` says the modeled services were calibrated.
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     for window_tag in ["electricity_maps_api", "scaphandre_rapl"] {
         let mut r = make_runtime_report(
             &[("svc", "/", 10)],
@@ -1905,7 +1902,7 @@ fn aggregator_sets_calibration_from_the_flag_behind_a_measured_tag() {
 
 #[test]
 fn aggregator_does_not_set_calibration_when_no_cal_suffix() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let r = make_runtime_report(
         &[("svc", "/", 10)],
         &[("svc", 0.001)],
@@ -1922,7 +1919,7 @@ fn aggregator_does_not_set_calibration_when_no_cal_suffix() {
 
 #[test]
 fn aggregator_collects_per_service_energy_models_single_window() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut r = make_runtime_report(
         &[("svc-a", "/", 10), ("svc-b", "/", 10)],
         &[("svc-a", 0.001), ("svc-b", 0.001)],
@@ -1948,8 +1945,8 @@ fn aggregator_collects_per_service_energy_models_single_window() {
 
 #[test]
 fn aggregator_merges_per_service_energy_models_across_windows() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 10, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 10, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 10, 0, 0, 0);
     let mut r1 = make_runtime_report(
         &[("svc", "/", 10)],
         &[("svc", 0.001)],
@@ -1983,7 +1980,7 @@ fn aggregator_merges_per_service_energy_models_across_windows() {
 
 #[test]
 fn aggregator_strips_cal_suffix_from_per_service_energy_models() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut r = make_runtime_report(
         &[("svc", "/", 10)],
         &[("svc", 0.001)],
@@ -2007,9 +2004,9 @@ fn aggregator_strips_cal_suffix_from_per_service_energy_models() {
 fn aggregator_per_service_measured_ratio_means_across_windows() {
     // Three windows with the same service at ratios 0.5, 0.8, 0.3.
     // Period-level mean: (0.5 + 0.8 + 0.3) / 3 = 0.533...
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 10, 0, 0, 0).unwrap();
-    let ts3 = Utc.with_ymd_and_hms(2026, 3, 10, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 10, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 10, 0, 0, 0);
+    let ts3 = crate::time::utc(2026, 3, 10, 0, 0, 0);
     let make = |ratio: f64| {
         let mut r = make_runtime_report(
             &[("svc", "/", 10)],
@@ -2042,7 +2039,7 @@ fn aggregator_per_service_measured_ratio_means_across_windows() {
 
 #[test]
 fn aggregator_per_service_measured_ratio_clamps_out_of_range_symmetrically() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut r = make_runtime_report(
         &[("svc", "/", 10)],
         &[("svc", 0.001)],
@@ -2074,7 +2071,7 @@ fn aggregator_per_service_measured_ratio_clamps_out_of_range_symmetrically() {
 
 #[test]
 fn aggregator_per_service_energy_models_empty_for_legacy_archive() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     // make_report leaves the per-service map empty.
     let r = make_report(10, 100, 5, &[("svc", "/", 100)], vec![]);
     let (_dir, path) = write_archive(&[(ts, r)]);
@@ -2085,8 +2082,8 @@ fn aggregator_per_service_energy_models_empty_for_legacy_archive() {
 
 #[test]
 fn aggregator_calibration_sticky_when_only_one_window_has_cal() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 10, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 10, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 10, 0, 0, 0);
     let r1 = make_runtime_report(
         &[("svc", "/", 10)],
         &[("svc", 0.001)],
@@ -2111,7 +2108,7 @@ fn aggregator_calibration_sticky_when_only_one_window_has_cal() {
 
 #[test]
 fn aggregator_rejects_invalid_binary_version_pattern() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut r = make_report(10, 100, 5, &[("svc", "/", 100)], vec![]);
     // Control char + arbitrary UTF-8: must be rejected by the
     // boundary check, no entry in the period-level set.
@@ -2127,8 +2124,8 @@ fn aggregator_rejects_invalid_binary_version_pattern() {
 /// tier under-reports by the legacy windows' share.
 #[test]
 fn legacy_windows_are_counted_not_silently_folded() {
-    let ts1 = Utc.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap();
-    let ts2 = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+    let ts1 = crate::time::utc(2026, 1, 15, 0, 0, 0);
+    let ts2 = crate::time::utc(2026, 2, 15, 0, 0, 0);
     let tier = crate::report::AvoidableTier {
         n_plus_one_threshold: crate::detect::n_plus_one::DISCLOSURE_N_PLUS_ONE_THRESHOLD,
         avoidable_io_ops: 10,
@@ -2157,13 +2154,13 @@ fn legacy_windows_are_counted_not_silently_folded() {
 
 #[test]
 fn aggregator_caps_distinct_binary_versions() {
-    let ts = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+    let ts = crate::time::utc(2026, 2, 1, 0, 0, 0);
     let mut reports = Vec::new();
     for i in 0..(MAX_BINARY_VERSIONS + 5) {
         let mut r = make_report(10, 100, 5, &[("svc", "/", 100)], vec![]);
         r.binary_version = format!("0.6.{i}");
         let offset = i64::try_from(i).expect("test bound");
-        reports.push((ts + chrono::Duration::seconds(offset), r));
+        reports.push((ts + jiff::SignedDuration::from_secs(offset), r));
     }
     let (_dir, path) = write_archive(&reports);
 
@@ -2190,20 +2187,14 @@ fn an_archive_starting_before_the_period_reaches_its_start() {
     // A quiet first week: no window inside the period before mid-January,
     // but the archive holds December lines, so nothing was pruned.
     let (_dir, path) = write_archive(&[
-        (
-            Utc.with_ymd_and_hms(2025, 12, 20, 9, 0, 0).unwrap(),
-            plain_window(),
-        ),
-        (
-            Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap(),
-            plain_window(),
-        ),
+        (crate::time::utc(2025, 12, 20, 9, 0, 0), plain_window()),
+        (crate::time::utc(2026, 1, 15, 9, 0, 0), plain_window()),
     ]);
     let period = q1_2026();
     let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
     assert_eq!(
         inputs.earliest_archived_window,
-        Some(Utc.with_ymd_and_hms(2025, 12, 20, 9, 0, 0).unwrap())
+        Some(crate::time::utc(2025, 12, 20, 9, 0, 0))
     );
     assert!(archive_reaches_period_start(
         inputs.earliest_archived_window,
@@ -2215,14 +2206,8 @@ fn an_archive_starting_before_the_period_reaches_its_start() {
 fn a_pruned_archive_does_not_reach_the_period_start() {
     // What rotation leaves after pruning a busy quarter: only its last weeks.
     let (_dir, path) = write_archive(&[
-        (
-            Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap(),
-            plain_window(),
-        ),
-        (
-            Utc.with_ymd_and_hms(2026, 3, 30, 9, 0, 0).unwrap(),
-            plain_window(),
-        ),
+        (crate::time::utc(2026, 3, 10, 9, 0, 0), plain_window()),
+        (crate::time::utc(2026, 3, 30, 9, 0, 0), plain_window()),
     ]);
     let period = q1_2026();
     let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
@@ -2235,14 +2220,14 @@ fn a_pruned_archive_does_not_reach_the_period_start() {
 #[test]
 fn a_window_on_the_first_day_reaches_the_period_start() {
     let period = q1_2026();
-    let first_day = Utc.with_ymd_and_hms(2026, 1, 1, 23, 59, 0).unwrap();
+    let first_day = crate::time::utc(2026, 1, 1, 23, 59, 0);
     assert!(archive_reaches_period_start(Some(first_day), &period));
-    let second_day = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
+    let second_day = crate::time::utc(2026, 1, 2, 0, 0, 0);
     assert!(!archive_reaches_period_start(Some(second_day), &period));
     assert!(!archive_reaches_period_start(None, &period));
 }
 
-fn folded(lines: &[(DateTime<Utc>, Report)]) -> PeriodState {
+fn folded(lines: &[(Timestamp, Report)]) -> PeriodState {
     let mut state = PeriodState::default();
     for (ts, report) in lines {
         state.process_window(report, *ts, false).unwrap();
@@ -2250,8 +2235,8 @@ fn folded(lines: &[(DateTime<Utc>, Report)]) -> PeriodState {
     state
 }
 
-fn day(d: u32, h: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 1, d, h, 0, 0).unwrap()
+fn day(d: i8, h: i8) -> Timestamp {
+    crate::time::utc(2026, 1, d, h, 0, 0)
 }
 
 #[test]
@@ -2332,7 +2317,7 @@ use proptest::prelude::*;
 
 /// The daemon's shape: one chained rollup line per closed day, in monthly
 /// files, the chain carried across files.
-fn write_rollups(dir: &Path, stem: &str, lines: &[(DateTime<Utc>, Report)]) -> Vec<PathBuf> {
+fn write_rollups(dir: &Path, stem: &str, lines: &[(Timestamp, Report)]) -> Vec<PathBuf> {
     let mut acc = DayAccumulator::default();
     let mut days = Vec::new();
     for (ts, report) in lines {
@@ -2465,10 +2450,10 @@ proptest! {
         picks in prop::collection::vec((0usize..5, 0i64..(3 * 86_400)), 1..40)
     ) {
         let pool = window_pool();
-        let base = Utc.with_ymd_and_hms(2026, 1, 30, 0, 0, 0).unwrap();
-        let mut lines: Vec<(DateTime<Utc>, Report)> = picks
+        let base = crate::time::utc(2026, 1, 30, 0, 0, 0);
+        let mut lines: Vec<(Timestamp, Report)> = picks
             .iter()
-            .map(|(i, s)| (base + chrono::Duration::seconds(*s), pool[*i].clone()))
+            .map(|(i, s)| (base + jiff::SignedDuration::from_secs(*s), pool[*i].clone()))
             .collect();
         lines.sort_by_key(|(ts, _)| *ts);
         let (_wdir, window_path) = write_chained_archive(&lines);
@@ -2546,10 +2531,7 @@ fn the_rollup_chain_runs_across_monthly_files() {
     let lines = vec![
         (day(30, 9), pool[0].clone()),
         (day(31, 9), pool[0].clone()),
-        (
-            Utc.with_ymd_and_hms(2026, 2, 1, 9, 0, 0).unwrap(),
-            pool[0].clone(),
-        ),
+        (crate::time::utc(2026, 2, 1, 9, 0, 0), pool[0].clone()),
     ];
     let paths = write_rollups(dir.path(), "archive", &lines);
     assert_eq!(paths.len(), 2);
@@ -2577,7 +2559,7 @@ fn a_rollup_cannot_claim_days_other_than_its_own() {
     let mut closed = acc.take().unwrap();
     closed
         .state
-        .insert_observed_day_for_test(day(20, 0).date_naive());
+        .insert_observed_day_for_test(crate::time::utc_date(day(20, 0)));
     let line = rollup::serialize_rollup(&closed, "seed", 0, 0).unwrap();
     let path = dir.path().join("archive-daily-2026-01.ndjson");
     std::fs::write(&path, line + "\n").unwrap();
@@ -2653,8 +2635,8 @@ fn removing_the_periods_last_rollup_day_is_an_in_period_break() {
         .collect();
     std::fs::write(&paths[0], kept.join("\n") + "\n").unwrap();
     let period = Period {
-        from_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-        to_date: NaiveDate::from_ymd_opt(2026, 1, 12).unwrap(),
+        from_date: jiff::civil::date(2026, 1, 1),
+        to_date: jiff::civil::date(2026, 1, 12),
         period_type: crate::report::periodic::schema::PeriodType::Custom,
         days_covered: 12,
     };
@@ -2704,13 +2686,11 @@ fn a_hashless_line_ahead_of_a_chained_archive_does_not_reach_back_for_it() {
     // One line without a hash, dated before the period, put in front of a
     // chained archive that only starts in March: it must not stand in for
     // the pruned windows, nor vanish from the integrity counters' view.
-    let (_dir, path) = write_chained_archive(&[(
-        Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap(),
-        plain_window(),
-    )]);
+    let (_dir, path) =
+        write_chained_archive(&[(crate::time::utc(2026, 3, 10, 9, 0, 0), plain_window())]);
     let chained = std::fs::read_to_string(&path).unwrap();
     let forged = serde_json::json!({
-        "ts": Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap(),
+        "ts": crate::time::utc(2025, 12, 1, 0, 0, 0),
         "report": plain_window(),
     });
     std::fs::write(&path, format!("{forged}\n{chained}")).unwrap();
@@ -2718,7 +2698,7 @@ fn a_hashless_line_ahead_of_a_chained_archive_does_not_reach_back_for_it() {
     let inputs = aggregate_from_paths(&[path], &period, false).unwrap();
     assert_eq!(
         inputs.earliest_archived_window,
-        Some(Utc.with_ymd_and_hms(2026, 3, 10, 9, 0, 0).unwrap())
+        Some(crate::time::utc(2026, 3, 10, 9, 0, 0))
     );
     assert!(!archive_reaches_period_start(
         inputs.earliest_archived_window,
@@ -2732,10 +2712,7 @@ fn a_hashless_rollup_line_ahead_of_the_chain_does_not_reach_back_for_it() {
     let dir = TempDir::new().unwrap();
     let paths = write_rollups(dir.path(), "archive", &[(day(20, 9), pool[0].clone())]);
     let mut acc = DayAccumulator::default();
-    acc.observe(
-        Utc.with_ymd_and_hms(2025, 12, 1, 9, 0, 0).unwrap(),
-        &pool[0],
-    );
+    acc.observe(crate::time::utc(2025, 12, 1, 9, 0, 0), &pool[0]);
     let mut forged: serde_json::Value =
         serde_json::from_str(&rollup::serialize_rollup(&acc.take().unwrap(), "x", 0, 0).unwrap())
             .unwrap();

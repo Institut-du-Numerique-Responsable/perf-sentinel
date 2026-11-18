@@ -1,7 +1,7 @@
 //! em6 (New Zealand): carbon intensity of grid-connected generation per
 //! 30-minute trading period, on a free endpoint without key.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 
 use super::scraper::{FeedError, check_value, parse_rfc3339};
@@ -23,10 +23,10 @@ pub(super) fn url(endpoint: &str) -> String {
 
 /// The newest of the last three trading periods, dated by the start of its
 /// period: em6 publishes a period a few minutes after it ends.
-pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, FeedError> {
+pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, Timestamp)>, FeedError> {
     let response: Response =
         serde_json::from_slice(body).map_err(|e| FeedError::Parse(e.to_string()))?;
-    let mut latest: Option<(f64, DateTime<Utc>)> = None;
+    let mut latest: Option<(f64, Timestamp)> = None;
     for item in response.items {
         let Ok(value) = check_value(item.nz_carbon_gkwh) else {
             continue;
@@ -65,7 +65,7 @@ mod tests {
         let zones = parse(BODY.as_bytes()).unwrap();
         assert_eq!(zones[0].0, "NZ");
         assert!((zones[0].1 - 31.74).abs() < f64::EPSILON);
-        assert_eq!(zones[0].2.to_rfc3339(), "2026-10-20T12:30:00+00:00");
+        assert_eq!(zones[0].2.to_string(), "2026-10-20T12:30:00Z");
     }
 
     #[test]

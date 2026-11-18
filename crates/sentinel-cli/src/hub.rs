@@ -231,7 +231,7 @@ fn exit_code(result: Result<(), String>) -> i32 {
 }
 
 fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    jiff::Timestamp::now().as_millisecond()
 }
 
 fn local_time(ms: i64) -> String {
@@ -876,10 +876,10 @@ fn parse_hub_time(s: &str) -> Result<u64, String> {
     if let Ok(ms) = s.parse::<u64>() {
         return Ok(ms);
     }
-    chrono::DateTime::parse_from_rfc3339(s)
+    s.parse::<jiff::Timestamp>()
         .map_err(|e| format!("`{s}` is neither RFC 3339 UTC nor epoch milliseconds ({e})"))
         .and_then(|t| {
-            u64::try_from(t.timestamp_millis()).map_err(|_| format!("`{s}` is before 1970"))
+            u64::try_from(t.as_millisecond()).map_err(|_| format!("`{s}` is before 1970"))
         })
 }
 
@@ -944,7 +944,7 @@ async fn ack(
     if let Some(expires) = expires {
         let at = crate::ack::parse_expires(expires)
             .map_err(|e| format!("Invalid --expires value, {e}"))?;
-        body["expires_at"] = at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true).into();
+        body["expires_at"] = at.strftime("%Y-%m-%dT%H:%M:%SZ").to_string().into();
     }
     let path = format!(
         "/api/sources/{}/acks{}",

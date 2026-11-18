@@ -1187,32 +1187,31 @@ fn duration_format_covers_all_branches() {
 }
 
 #[test]
-fn embedded_zone_only_stands_in_for_a_name_the_system_lacks() {
-    let none = |_: &str| false;
-    let tokyo = embedded_zone(Some("Asia/Tokyo"), none).expect("embedded Asia/Tokyo");
-    let t = chrono::DateTime::parse_from_rfc3339("2025-07-10T14:32:01Z").unwrap();
+fn the_embedded_zone_database_resolves_iana_names() {
+    // The `FROM scratch` image has no system database, so a `TZ` name
+    // resolves from the copy compiled into the binary.
+    let tokyo = jiff::tz::TimeZoneDatabase::bundled()
+        .get("Asia/Tokyo")
+        .expect("embedded Asia/Tokyo");
+    let t = "2025-07-10T14:32:01Z".parse::<jiff::Timestamp>().unwrap();
     assert_eq!(
-        t.with_timezone(&tokyo)
-            .format(LOCAL_TIME_FORMAT)
+        t.to_zoned_datetime(tokyo)
+            .strftime(LOCAL_TIME_FORMAT)
             .to_string(),
         "2025-07-10 23:32:01"
     );
-    assert!(embedded_zone(Some(":Europe/Paris"), none).is_some());
-    // Left to chrono::Local: unset, the system's own copy, a path, a POSIX rule.
-    assert!(embedded_zone(None, none).is_none());
-    assert!(embedded_zone(Some("Asia/Tokyo"), |_| true).is_none());
-    assert!(embedded_zone(Some("/etc/localtime"), none).is_none());
-    assert!(embedded_zone(Some("JST-9"), none).is_none());
-    assert!(embedded_zone(Some(""), none).is_none());
 }
 
 #[test]
 fn local_iso_converts_to_local_time_and_falls_back_to_the_input() {
     // The zone is the machine's, so the expectation goes through to_local too.
-    let expected =
-        to_local(&chrono::DateTime::parse_from_rfc3339("2026-04-20T23:30:01.000Z").unwrap())
-            .format(LOCAL_TIME_FORMAT)
-            .to_string();
+    let expected = to_local(
+        "2026-04-20T23:30:01.000Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap(),
+    )
+    .strftime(LOCAL_TIME_FORMAT)
+    .to_string();
     assert_eq!(
         fmt_local_iso("2026-04-20T23:30:01.000Z", LOCAL_TIME_FORMAT),
         expected

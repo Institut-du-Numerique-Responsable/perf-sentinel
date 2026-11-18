@@ -976,7 +976,7 @@ pub(crate) enum Commands {
             not(feature = "tui"),
             arg(long, value_name = "YYYY-MM-DD", required = true)
         )]
-        from: Option<chrono::NaiveDate>,
+        from: Option<jiff::civil::Date>,
         /// Inclusive period end (UTC), YYYY-MM-DD. Optional under `--tui`.
         #[cfg_attr(
             feature = "tui",
@@ -986,7 +986,7 @@ pub(crate) enum Commands {
             not(feature = "tui"),
             arg(long, value_name = "YYYY-MM-DD", required = true)
         )]
-        to: Option<chrono::NaiveDate>,
+        to: Option<jiff::civil::Date>,
         /// One or more archive paths. Each may be a single `.ndjson`
         /// file or a directory whose `*.ndjson` files are unioned.
         #[arg(long, value_name = "PATH", num_args = 1.., required = true)]

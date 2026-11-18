@@ -889,14 +889,11 @@ impl App {
     /// Inspect view (the sole resizable layout) and never behind the ack
     /// modal, which captures keys but not the mouse.
     fn accepts_panel_drag(&self) -> bool {
-        if self.view != View::Inspect {
-            return false;
-        }
         #[cfg(feature = "daemon")]
         if self.ack_modal.is_visible() {
             return false;
         }
-        true
+        self.view == View::Inspect
     }
 
     /// Border (if any) under the cursor, using the last drawn Inspect area.

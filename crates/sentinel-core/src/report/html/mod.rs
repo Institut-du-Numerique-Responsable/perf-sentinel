@@ -759,15 +759,13 @@ fn build_payload_with_label<'a>(
     // One detection pass over the candidate set, reused for the size
     // budget below and for the payload, rather than one per stage.
     let index = CulpritIndex::build(report);
-    let mut culprits_by_trace: HashMap<&str, BTreeMap<String, Vec<&'a str>>> = index
-        .as_ref()
-        .map(|idx| {
+    let mut culprits_by_trace: HashMap<&str, BTreeMap<String, Vec<&'a str>>> =
+        index.as_ref().map_or_default(|idx| {
             ordered
                 .iter()
                 .map(|t| (t.trace_id.as_str(), idx.for_trace(t)))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     let (kept_refs, trimmed) = if let Some(cap) = options.max_traces_embedded {
         let take = cap.min(total);

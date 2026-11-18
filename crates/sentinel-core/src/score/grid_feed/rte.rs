@@ -1,7 +1,7 @@
 //! RTE `éCO2mix`: `taux_co2` of the `eco2mix-national-tr` dataset on the
 //! ODRÉ portal, an estimate of the direct emissions of French production.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 
 use super::scraper::{FeedError, check_value, parse_rfc3339};
@@ -28,7 +28,7 @@ pub(super) fn url(endpoint: &str) -> String {
     format!("{endpoint}/{RECORDS_QUERY}")
 }
 
-pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, FeedError> {
+pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, Timestamp)>, FeedError> {
     let response: RecordsResponse =
         serde_json::from_slice(body).map_err(|e| FeedError::Parse(e.to_string()))?;
     let record = response
@@ -73,7 +73,7 @@ pub(super) mod tests {
         let body = r#"{"total_count": 1, "results": [{"taux_co2": 34, "date_heure": "2026-10-20T10:15:00+02:00"}]}"#;
         let zones = parse(body.as_bytes()).unwrap();
         assert!((zones[0].1 - 34.0).abs() < f64::EPSILON);
-        assert_eq!(zones[0].2.to_rfc3339(), "2026-10-20T08:15:00+00:00");
+        assert_eq!(zones[0].2.to_string(), "2026-10-20T08:15:00Z");
     }
 
     #[test]

@@ -845,20 +845,7 @@ fn run_gh_attestation_verify(binary: &Path, expected_commit: Option<&str>) -> St
 
 fn command_exists(name: &str) -> bool {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path).any(|d| {
-        if d.join(name).is_file() {
-            return true;
-        }
-        #[cfg(windows)]
-        {
-            for ext in ["exe", "cmd", "bat", "com"] {
-                if d.join(format!("{name}.{ext}")).is_file() {
-                    return true;
-                }
-            }
-        }
-        false
-    })
+    std::env::split_paths(&path).any(|d| d.join(name).is_file())
 }
 
 /// Reject values that would let an adversarial report pivot cosign's

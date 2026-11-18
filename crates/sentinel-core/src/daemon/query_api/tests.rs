@@ -845,9 +845,9 @@ async fn the_settle_pass_merges_the_traces_live_at_the_incident() {
     let state = make_state();
     // Delivered promptly, so `startsAt` is now and the settle has to wait.
     let now = crate::daemon::event_loop::current_time_ms();
-    let starts_at = DateTime::from_timestamp_millis(i64::try_from(now).unwrap())
+    let starts_at = Timestamp::from_millisecond(i64::try_from(now).unwrap())
         .unwrap()
-        .to_rfc3339();
+        .to_string();
     push_finding(
         &state,
         "cart-svc",
@@ -3195,10 +3195,10 @@ async fn list_acks_with_include_toml_lists_both_sources() {
 #[tokio::test]
 async fn list_acks_with_include_toml_skips_an_expired_toml_ack() {
     let mut expired = toml_baseline_fixture(TOML_SIG);
-    expired.expires_at_dt = Some(Utc::now() - chrono::Duration::days(1));
+    expired.expires_at_dt = Some(Timestamp::now() - jiff::SignedDuration::from_hours(24));
     let mut live =
         toml_baseline_fixture("slow_sql:billing-svc:GET__live:00112233445566778899aabbccddeeff");
-    live.expires_at_dt = Some(Utc::now() + chrono::Duration::days(1));
+    live.expires_at_dt = Some(Timestamp::now() + jiff::SignedDuration::from_hours(24));
     let toml = HashMap::from([
         (TOML_SIG.to_string(), expired),
         (live.inner.signature.clone(), live),
@@ -3285,7 +3285,7 @@ fn finding_response_does_not_collide_with_stored_finding_fields() {
         },
         acknowledged_by: Some(AckSource::Daemon {
             by: "alice".to_string(),
-            at: Utc::now(),
+            at: Timestamp::now(),
             reason: None,
             expires_at: None,
         }),

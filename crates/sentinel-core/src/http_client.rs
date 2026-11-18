@@ -165,8 +165,7 @@ fn load_pem_roots(path: &Path) -> Vec<CertificateDer<'static>> {
 static EXTRA_ROOTS: LazyLock<Vec<CertificateDer<'static>>> = LazyLock::new(|| {
     std::env::var_os("SSL_CERT_FILE")
         .filter(|v| !v.is_empty())
-        .map(|v| load_pem_roots(Path::new(&v)))
-        .unwrap_or_default()
+        .map_or_default(|v| load_pem_roots(Path::new(&v)))
 });
 
 /// Build a hyper-util client over the given request body type. Private

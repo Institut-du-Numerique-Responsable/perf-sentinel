@@ -162,7 +162,7 @@ fn validate_period(period: &Period, errors: &mut Vec<ValidationError>) {
         // `days_covered` is derived from the dates by `disclose`, so a
         // disclose-produced report always satisfies this. A mismatch means a
         // hand-edited or forged report.
-        let expected = (period.to_date - period.from_date).num_days() + 1;
+        let expected = i64::from((period.to_date - period.from_date).get_days()) + 1;
         if i64::from(period.days_covered) != expected {
             errors.push(ValidationError::Period(format!(
                 "days_covered {} does not equal (to_date - from_date) + 1 = {expected}",

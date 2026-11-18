@@ -1,7 +1,7 @@
 //! NESO Carbon Intensity API (Great Britain): national intensity per half
 //! hour, direct CO2 of generation plus imports per kWh consumed.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 
 use super::scraper::{FeedError, check_value, parse_naive_utc};
@@ -9,7 +9,7 @@ use super::scraper::{FeedError, check_value, parse_naive_utc};
 /// Minutes only, no seconds: "2026-10-20T12:00Z".
 const TIME_FORMAT: &str = "%Y-%m-%dT%H:%MZ";
 /// Windows read per poll: enough to see an estimate stop moving.
-const LOOKBACK: chrono::TimeDelta = chrono::TimeDelta::hours(3);
+const LOOKBACK: jiff::SignedDuration = jiff::SignedDuration::from_hours(3);
 /// The same estimate on this many consecutive windows while the forecast
 /// moved means NESO stopped updating it and copies it forward.
 const FROZEN_WINDOWS: usize = 4;
@@ -32,9 +32,9 @@ struct Intensity {
 }
 
 /// The last three hours of half-hour windows, up to now.
-pub(super) fn url(endpoint: &str, now: DateTime<Utc>) -> String {
-    let from = (now - LOOKBACK).format(TIME_FORMAT);
-    let to = now.format(TIME_FORMAT);
+pub(super) fn url(endpoint: &str, now: Timestamp) -> String {
+    let from = (now - LOOKBACK).strftime(TIME_FORMAT);
+    let to = now.strftime(TIME_FORMAT);
     format!("{endpoint}/intensity/{from}/{to}")
 }
 
@@ -43,7 +43,7 @@ pub(super) fn url(endpoint: &str, now: DateTime<Utc>) -> String {
 /// estimate, dated by its own window start. When it has stopped moving
 /// while the forecast moves, or when no window has one, take the newest
 /// window's forecast instead.
-pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, FeedError> {
+pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, Timestamp)>, FeedError> {
     let response: Response =
         serde_json::from_slice(body).map_err(|e| FeedError::Parse(e.to_string()))?;
     let mut windows = Vec::with_capacity(response.data.len());
@@ -52,7 +52,7 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
         windows.push((at, period.intensity));
     }
     windows.sort_by_key(|(at, _)| *at);
-    let estimated: Vec<&(DateTime<Utc>, Intensity)> =
+    let estimated: Vec<&(Timestamp, Intensity)> =
         windows.iter().filter(|(_, i)| i.actual.is_some()).collect();
     let frozen = estimated.len() >= FROZEN_WINDOWS && {
         let tail = &estimated[estimated.len() - FROZEN_WINDOWS..];
@@ -73,8 +73,8 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
 mod tests {
     use super::*;
 
-    fn at(s: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    fn at(s: &str) -> Timestamp {
+        s.parse::<Timestamp>().unwrap()
     }
 
     fn body(windows: &[(&str, Option<f64>, Option<f64>)]) -> String {

@@ -9,7 +9,9 @@ use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Datelike, Days, NaiveDate, Utc};
+use jiff::Timestamp;
+
+use jiff::civil::Date;
 use serde_json::Value;
 
 use crate::report::Report;
@@ -67,7 +69,7 @@ impl RollupWriter {
 
     pub(super) fn observe(
         &mut self,
-        ts: DateTime<Utc>,
+        ts: Timestamp,
         report: &Report,
         drops: u64,
         metrics: &MetricsState,
@@ -161,7 +163,7 @@ impl RollupWriter {
     /// Continue the chain from the last line on disk, whichever month holds
     /// it, and return the first window of every line written, so a snapshot
     /// already appended is never appended again.
-    fn resume(&mut self) -> BTreeSet<DateTime<Utc>> {
+    fn resume(&mut self) -> BTreeSet<Timestamp> {
         let mut written = BTreeSet::new();
         for (_, _, path) in self.files() {
             for value in rollup_values(&path) {
@@ -179,7 +181,7 @@ impl RollupWriter {
     /// A snapshot some line already holds (same first window) is stale. Any
     /// other is the only copy of its windows: appended, or kept to retry when
     /// the directory refuses it.
-    fn recover_snapshot(&mut self, written: &BTreeSet<DateTime<Utc>>, drops: u64) {
+    fn recover_snapshot(&mut self, written: &BTreeSet<Timestamp>, drops: u64) {
         let path = self.partial_path();
         if super::archive::is_symlink(&path) {
             tracing::warn!(path = %path.display(), "daily rollup snapshot is a symlink, refusing to follow it");
@@ -224,13 +226,13 @@ impl RollupWriter {
     /// The month file for `day`, never behind the newest month on disk: a
     /// line filed into an older month after a clock step back would sit
     /// ahead of earlier lines in the reader's name order and break the chain.
-    fn target_path(&self, day: NaiveDate) -> PathBuf {
-        let month = (day.year(), day.month());
+    fn target_path(&self, day: Date) -> PathBuf {
+        let month = (i32::from(day.year()), u32::from(day.month().unsigned_abs()));
         let (year, m) = self
             .files()
             .last()
             .map_or(month, |(y, m, _)| month.max((*y, *m)));
-        let first = NaiveDate::from_ymd_opt(year, m, 1).unwrap_or(day);
+        let first = month_start(year, m).unwrap_or(day);
         self.dir.join(rollup::rollup_file_name(&self.stem, first))
     }
 
@@ -262,9 +264,12 @@ impl RollupWriter {
     /// Delete each month whose last day is more than `retention_days`
     /// before the day just closed, or before today when that day lies in
     /// the future: one future-stamped window must not age out the history.
-    fn prune(&self, closed: NaiveDate) {
-        let reference = closed.min(Utc::now().date_naive());
-        let Some(cutoff) = reference.checked_sub_days(Days::new(u64::from(self.retention_days)))
+    fn prune(&self, closed: Date) {
+        let reference = closed.min(crate::time::utc_date(Timestamp::now()));
+        let Some(cutoff) = jiff::Span::new()
+            .try_days(i64::from(self.retention_days))
+            .ok()
+            .and_then(|span| reference.checked_sub(span).ok())
         else {
             return;
         };
@@ -278,16 +283,13 @@ impl RollupWriter {
     }
 
     fn refresh_horizon(&self, metrics: &MetricsState) {
-        let days: BTreeSet<NaiveDate> = self
+        let days: BTreeSet<Date> = self
             .files()
             .iter()
             .flat_map(|(_, _, path)| rollup_values(path))
-            .filter_map(|v| v.get("day")?.as_str()?.parse::<NaiveDate>().ok())
+            .filter_map(|v| v.get("day")?.as_str()?.parse::<Date>().ok())
             .collect();
-        let seconds = |day: &NaiveDate| {
-            day.and_hms_opt(0, 0, 0)
-                .map_or(0, |t| t.and_utc().timestamp())
-        };
+        let seconds = |day: &Date| crate::time::utc_midnight(*day).as_second();
         metrics
             .archive_rollup_days
             .set(i64::try_from(days.len()).unwrap_or(i64::MAX));
@@ -336,31 +338,34 @@ fn rollup_values(path: &Path) -> Vec<Value> {
         .collect()
 }
 
-fn value_ts(value: &Value) -> Option<DateTime<Utc>> {
+fn value_ts(value: &Value) -> Option<Timestamp> {
     value
         .get("ts")?
         .as_str()
-        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
-        .map(|ts| ts.with_timezone(&Utc))
+        .and_then(|ts| ts.parse::<Timestamp>().ok())
 }
 
-fn last_day_of_month(year: i32, month: u32) -> Option<NaiveDate> {
+fn last_day_of_month(year: i32, month: u32) -> Option<Date> {
     let (next_year, next_month) = if month == 12 {
         (year + 1, 1)
     } else {
         (year, month + 1)
     };
-    NaiveDate::from_ymd_opt(next_year, next_month, 1)?.pred_opt()
+    month_start(next_year, next_month)?.yesterday().ok()
+}
+
+/// The first day of `year`-`month`, as `rollup::parse_rollup_file_name` reads them.
+fn month_start(year: i32, month: u32) -> Option<Date> {
+    Date::new(i16::try_from(year).ok()?, i8::try_from(month).ok()?, 1).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Duration, TimeZone};
     use tempfile::TempDir;
 
-    fn at(m: u32, d: u32, h: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, m, d, h, 0, 0).unwrap()
+    fn at(m: i8, d: i8, h: i8) -> Timestamp {
+        crate::time::utc(2026, m, d, h, 0, 0)
     }
 
     fn window() -> Report {
@@ -536,16 +541,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let metrics = MetricsState::new();
         let archive = dir.path().join("archive.ndjson");
-        let today = Utc::now();
-        let past = today - Duration::days(30);
-        let far = today + Duration::days(5 * 366);
+        let today = Timestamp::now();
+        let past = today - jiff::SignedDuration::from_hours(24 * 30);
+        let far = today + jiff::SignedDuration::from_hours(24 * (5 * 366));
         let mut w = RollupWriter::open(&archive, 400, 0, &metrics);
         w.observe(past, &window(), 0, &metrics);
         w.observe(far, &window(), 0, &metrics);
-        w.observe(past + Duration::days(1), &window(), 0, &metrics);
-        let past_file = dir
-            .path()
-            .join(rollup::rollup_file_name("archive", past.date_naive()));
+        w.observe(
+            past + jiff::SignedDuration::from_hours(24),
+            &window(),
+            0,
+            &metrics,
+        );
+        let past_file = dir.path().join(rollup::rollup_file_name(
+            "archive",
+            crate::time::utc_date(past),
+        ));
         assert!(
             past_file.exists(),
             "one future-stamped window pruned the history"
@@ -630,8 +641,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let metrics = MetricsState::new();
         let archive = dir.path().join("archive.ndjson");
-        let oct = |h: u32, m: u32| Utc.with_ymd_and_hms(2026, 10, 1, h, m, 0).unwrap();
-        let sep = Utc.with_ymd_and_hms(2026, 9, 30, 23, 50, 0).unwrap();
+        let oct = |h: i8, m: i8| crate::time::utc(2026, 10, 1, h, m, 0);
+        let sep = crate::time::utc(2026, 9, 30, 23, 50, 0);
         let mut w = RollupWriter::open(&archive, 400, 0, &metrics);
         w.observe(oct(0, 10), &window(), 0, &metrics);
         w.observe(sep, &window(), 0, &metrics);
@@ -639,8 +650,8 @@ mod tests {
         w.shutdown(0, &metrics);
         assert!(!dir.path().join("archive-daily-2026-09.ndjson").exists());
         let period = crate::report::periodic::schema::Period {
-            from_date: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
-            to_date: NaiveDate::from_ymd_opt(2026, 10, 31).unwrap(),
+            from_date: jiff::civil::date(2026, 9, 1),
+            to_date: jiff::civil::date(2026, 10, 31),
             period_type: crate::report::periodic::schema::PeriodType::Custom,
             days_covered: 61,
         };
@@ -671,7 +682,7 @@ mod tests {
         assert_eq!(metrics.archive_rollup_days.get(), 2);
         assert_eq!(
             metrics.archive_oldest_day_seconds.get(),
-            at(2, 20, 0).timestamp()
+            at(2, 20, 0).as_second()
         );
     }
 }

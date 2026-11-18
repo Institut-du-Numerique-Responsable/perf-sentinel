@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Datelike, Days, Months, NaiveDate, Utc};
+use jiff::Timestamp;
+
+use jiff::civil::Date;
 use sentinel_core::report::periodic::AggregationError;
 use sentinel_core::report::periodic::aggregator::aggregate_from_paths;
 use sentinel_core::report::periodic::org_config::OrgConfig;
@@ -57,10 +59,10 @@ impl Granularity {
 /// bounds. `Custom` returns the caller-supplied dates verbatim.
 pub(crate) fn resolve_period(
     granularity: Granularity,
-    anchor: NaiveDate,
-    custom_from: NaiveDate,
-    custom_to: NaiveDate,
-) -> (NaiveDate, NaiveDate) {
+    anchor: Date,
+    custom_from: Date,
+    custom_to: Date,
+) -> (Date, Date) {
     match granularity {
         Granularity::Month => month_bounds(anchor),
         Granularity::Quarter => quarter_bounds(anchor),
@@ -71,47 +73,42 @@ pub(crate) fn resolve_period(
 
 /// Step the anchor one granularity-unit forward (`forward`) or backward.
 /// `Custom` leaves the anchor unchanged (its bounds are edited directly).
-pub(crate) fn step_anchor(granularity: Granularity, anchor: NaiveDate, forward: bool) -> NaiveDate {
+pub(crate) fn step_anchor(granularity: Granularity, anchor: Date, forward: bool) -> Date {
     let months = match granularity {
         Granularity::Month => 1,
         Granularity::Quarter => 3,
         Granularity::Year => 12,
         Granularity::Custom => return anchor,
     };
-    let shifted = if forward {
-        anchor.checked_add_months(Months::new(months))
-    } else {
-        anchor.checked_sub_months(Months::new(months))
-    };
-    shifted.unwrap_or(anchor)
+    let step = jiff::Span::new().months(if forward { months } else { -months });
+    anchor.checked_add(step).unwrap_or(anchor)
 }
 
-fn month_bounds(anchor: NaiveDate) -> (NaiveDate, NaiveDate) {
-    let first = first_of_month(anchor.year(), anchor.month());
+fn month_bounds(anchor: Date) -> (Date, Date) {
+    let first = anchor.first_of_month();
     (first, last_day_of_span(first, 1))
 }
 
-fn quarter_bounds(anchor: NaiveDate) -> (NaiveDate, NaiveDate) {
-    let first_month = (anchor.month0() / 3) * 3 + 1;
+fn quarter_bounds(anchor: Date) -> (Date, Date) {
+    let first_month = ((anchor.month() - 1) / 3) * 3 + 1;
     let first = first_of_month(anchor.year(), first_month);
     (first, last_day_of_span(first, 3))
 }
 
-fn year_bounds(anchor: NaiveDate) -> (NaiveDate, NaiveDate) {
+fn year_bounds(anchor: Date) -> (Date, Date) {
     let first = first_of_month(anchor.year(), 1);
     (first, last_day_of_span(first, 12))
 }
 
-fn first_of_month(year: i32, month: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(year, month, 1)
-        .unwrap_or_else(|| NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch date is valid"))
+fn first_of_month(year: i16, month: i8) -> Date {
+    Date::new(year, month, 1).unwrap_or_else(|_| jiff::civil::date(1970, 1, 1))
 }
 
 /// Last calendar day of a span of `months` starting at `first` (a first-of-month date).
-fn last_day_of_span(first: NaiveDate, months: u32) -> NaiveDate {
+fn last_day_of_span(first: Date, months: i32) -> Date {
     first
-        .checked_add_months(Months::new(months))
-        .and_then(|next| next.pred_opt())
+        .checked_add(jiff::Span::new().months(months))
+        .and_then(Date::yesterday)
         .unwrap_or(first)
 }
 
@@ -161,8 +158,8 @@ pub(crate) fn equivalent_command(
     intent: ReportIntent,
     confidentiality: Confidentiality,
     period_type: PeriodType,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     input: &[PathBuf],
     org_config_path: &Path,
 ) -> String {
@@ -357,11 +354,11 @@ pub(crate) struct DiscloseState {
     total_requests_cli: Option<u64>,
     /// Earliest and latest window timestamp in the archive, for default
     /// anchoring and the range hint. `None` for an empty archive.
-    archive_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    archive_range: Option<(Timestamp, Timestamp)>,
     granularity: Granularity,
-    anchor: NaiveDate,
-    custom_from: NaiveDate,
-    custom_to: NaiveDate,
+    anchor: Date,
+    custom_from: Date,
+    custom_to: Date,
     custom_field: CustomField,
     intent: ReportIntent,
     confidentiality: Confidentiality,
@@ -378,12 +375,12 @@ impl DiscloseState {
         org: OrgConfig,
         org_config_path: PathBuf,
         strict_attribution: bool,
-        archive_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
-        fallback_anchor: NaiveDate,
+        archive_range: Option<(Timestamp, Timestamp)>,
+        fallback_anchor: Date,
     ) -> Self {
-        let anchor = archive_range.map_or(fallback_anchor, |(_, max)| max.date_naive());
+        let anchor = archive_range.map_or(fallback_anchor, |(_, max)| crate::render::utc_date(max));
         let (custom_from, custom_to) = archive_range.map_or((anchor, anchor), |(min, max)| {
-            (min.date_naive(), max.date_naive())
+            (crate::render::utc_date(min), crate::render::utc_date(max))
         });
         let mut state = Self {
             input,
@@ -431,7 +428,7 @@ impl DiscloseState {
         self.custom_field
     }
 
-    pub(crate) fn archive_range(&self) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
+    pub(crate) fn archive_range(&self) -> Option<(Timestamp, Timestamp)> {
         self.archive_range
     }
 
@@ -439,7 +436,7 @@ impl DiscloseState {
         self.scroll_offset
     }
 
-    pub(crate) fn resolved_dates(&self) -> (NaiveDate, NaiveDate) {
+    pub(crate) fn resolved_dates(&self) -> (Date, Date) {
         resolve_period(
             self.granularity,
             self.anchor,
@@ -450,7 +447,7 @@ impl DiscloseState {
 
     fn period(&self) -> Period {
         let (from, to) = self.resolved_dates();
-        let days_covered = match (to - from).num_days() {
+        let days_covered = match (to - from).get_days() {
             n if n < 0 => 0,
             n => u32::try_from(n).map_or(u32::MAX, |d| d.saturating_add(1)),
         };
@@ -511,13 +508,16 @@ impl DiscloseState {
             CustomField::From => &mut self.custom_from,
             CustomField::To => &mut self.custom_to,
         };
-        let next = match (by, forward) {
-            (AdjustBy::Day, true) => target.checked_add_days(Days::new(1)),
-            (AdjustBy::Day, false) => target.checked_sub_days(Days::new(1)),
-            (AdjustBy::Month, true) => target.checked_add_months(Months::new(1)),
-            (AdjustBy::Month, false) => target.checked_sub_months(Months::new(1)),
+        let step = match by {
+            AdjustBy::Day => jiff::Span::new().days(1),
+            AdjustBy::Month => jiff::Span::new().months(1),
         };
-        if let Some(next) = next {
+        let next = if forward {
+            target.checked_add(step)
+        } else {
+            target.checked_sub(step)
+        };
+        if let Ok(next) = next {
             *target = next;
         }
         // Keep the range ordered: the just-moved edge wins.
@@ -703,8 +703,8 @@ impl DiscloseState {
 mod tests {
     use super::*;
 
-    fn d(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).expect("valid date")
+    fn d(year: i16, month: i8, day: i8) -> Date {
+        Date::new(year, month, day).expect("valid date")
     }
 
     fn sample_org() -> OrgConfig {
@@ -716,7 +716,7 @@ mod tests {
 
     /// State over an empty archive (`Preview::Empty`). The stepper and
     /// toggle transitions under test don't depend on archived data.
-    fn empty_state(anchor: NaiveDate) -> DiscloseState {
+    fn empty_state(anchor: Date) -> DiscloseState {
         DiscloseState::new(
             Vec::new(),
             sample_org(),
@@ -830,8 +830,8 @@ mod tests {
 
     #[test]
     fn default_anchors_on_archive_max() {
-        let min = "2026-01-05T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let max = "2026-03-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let min = "2026-01-05T00:00:00Z".parse::<Timestamp>().unwrap();
+        let max = "2026-03-20T00:00:00Z".parse::<Timestamp>().unwrap();
         let state = DiscloseState::new(
             Vec::new(),
             sample_org(),
@@ -901,8 +901,8 @@ mod tests {
 
     #[test]
     fn custom_day_step_keeps_range_ordered() {
-        let min = "2026-03-10T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let max = "2026-03-12T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let min = "2026-03-10T00:00:00Z".parse::<Timestamp>().unwrap();
+        let max = "2026-03-12T00:00:00Z".parse::<Timestamp>().unwrap();
         let mut state = DiscloseState::new(
             Vec::new(),
             sample_org(),
@@ -1018,8 +1018,7 @@ mod tests {
             lines
                 .iter()
                 .find(|l| l.text.contains(label))
-                .map(|l| l.text.clone())
-                .unwrap_or_default()
+                .map_or_default(|l| l.text.clone())
         };
         assert_eq!(
             text("Database:"),
@@ -1072,8 +1071,8 @@ mod tests {
 
     #[test]
     fn step_month_moves_custom_edge_then_noops_elsewhere() {
-        let min = "2026-03-10T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let max = "2026-03-20T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let min = "2026-03-10T00:00:00Z".parse::<Timestamp>().unwrap();
+        let max = "2026-03-20T00:00:00Z".parse::<Timestamp>().unwrap();
         let mut state = DiscloseState::new(
             Vec::new(),
             sample_org(),

@@ -5,7 +5,7 @@
 
 use std::io::Read;
 
-use chrono::{DateTime, TimeDelta, Utc};
+use jiff::Timestamp;
 
 use super::scraper::{FeedError, check_value};
 
@@ -31,8 +31,8 @@ const MAX_WORKSHEET_BYTES: u64 = 1024 * 1024;
 /// The last hour on the quarter grid, or every label shifts. Cells are
 /// filled up to the label `toTime`, so a quarter ahead takes in the one in
 /// progress.
-pub(super) fn url(endpoint: &str, now: DateTime<Utc>) -> String {
-    let quarter = now.timestamp().div_euclid(QUARTER_SECS) * QUARTER_SECS;
+pub(super) fn url(endpoint: &str, now: Timestamp) -> String {
+    let quarter = now.as_second().div_euclid(QUARTER_SECS) * QUARTER_SECS;
     let from = (quarter - 3600) * 1000;
     let to = (quarter + QUARTER_SECS) * 1000;
     format!(
@@ -44,7 +44,7 @@ pub(super) fn url(endpoint: &str, now: DateTime<Utc>) -> String {
 /// The newest quarter with a measured ratio, dated by its start: labels
 /// mark the end. The quarter in progress is included and revised by a few
 /// g/kWh once it closes. tCO2/MWh times 1000 gives gCO2/kWh.
-pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, FeedError> {
+pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, Timestamp)>, FeedError> {
     let xml = worksheet(body).ok_or_else(|| {
         FeedError::Parse("not an XLSX export with a readable worksheet".to_string())
     })?;
@@ -61,7 +61,7 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
         }
     };
     let (time, actual) = (column(&[TIME])?, column(&ACTUAL)?);
-    let mut latest: Option<(f64, DateTime<Utc>)> = None;
+    let mut latest: Option<(f64, Timestamp)> = None;
     for row in rows.iter().skip(1) {
         let cell = |wanted: &str| {
             row.iter()
@@ -71,11 +71,11 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
         let (Some(label), Some(raw)) = (cell(time), cell(actual)) else {
             continue;
         };
-        let end = DateTime::parse_from_str(label, "%Y.%m.%d %H:%M:%S %z")
+        let end = Timestamp::strptime("%Y.%m.%d %H:%M:%S %z", label)
             .map_err(|e| FeedError::Parse(format!("{TIME}: {e}")))?;
         let at = end
-            .with_timezone(&Utc)
-            .checked_sub_signed(TimeDelta::seconds(QUARTER_SECS))
+            .checked_sub(jiff::SignedDuration::from_secs(QUARTER_SECS))
+            .ok()
             .ok_or_else(|| FeedError::Parse(format!("{TIME}: {label:?} out of range")))?;
         let ratio: f64 = raw
             .parse()
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn url_stays_on_the_quarter_grid() {
         // 2026-10-20 13:29:37 UTC.
-        let now = DateTime::from_timestamp(1_792_502_977, 0).unwrap();
+        let now = Timestamp::from_second(1_792_502_977).unwrap();
         let url = url("https://rtdwweb.mavir.hu/rtdwweb/webuser", now);
         assert_eq!(
             url,
@@ -266,7 +266,7 @@ mod tests {
         let zones = parse(&xlsx(&sheet(&header()))).unwrap();
         assert_eq!(zones[0].0, "HU");
         assert!((zones[0].1 - 78.0).abs() < 1e-9);
-        assert_eq!(zones[0].2.to_rfc3339(), "2026-10-20T13:15:00+00:00");
+        assert_eq!(zones[0].2.to_string(), "2026-10-20T13:15:00Z");
     }
 
     #[test]
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn a_label_at_the_minimum_date_is_a_parse_error_not_a_panic() {
         let oldest =
-            sheet(&header()).replace("2026.10.20 15:30:00 +0200", "-262143.01.01 00:00:00 +0000");
+            sheet(&header()).replace("2026.10.20 15:30:00 +0200", "-9999.01.02 01:59:59 +0000");
         let err = parse(&xlsx(&oldest)).unwrap_err();
         assert!(
             matches!(err, FeedError::Parse(ref m) if m.contains("out of range")),

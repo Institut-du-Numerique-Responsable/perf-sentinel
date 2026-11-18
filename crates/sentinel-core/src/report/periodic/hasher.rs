@@ -461,7 +461,6 @@ mod tests {
         // organisation, the aggregate totals, the methodology
         // header, or the period bounds must invalidate the
         // signature).
-        use chrono::Datelike as _;
         let r = sample_report();
         let baseline = compute_content_hash(&r).unwrap();
 
@@ -501,7 +500,9 @@ mod tests {
         m.period.from_date = m
             .period
             .from_date
-            .with_day(m.period.from_date.day().wrapping_add(1).min(28))
+            .with()
+            .day(m.period.from_date.day().wrapping_add(1).min(28))
+            .build()
             .unwrap();
         assert_ne!(
             compute_content_hash(&m).unwrap(),

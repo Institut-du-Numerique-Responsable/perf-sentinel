@@ -51,7 +51,7 @@ pub(crate) fn render_carousel_pdf(
 ) -> Result<Vec<u8>, CardError> {
     let at = i64::try_from(payload.generated_at_ms)
         .ok()
-        .and_then(chrono::DateTime::from_timestamp_millis)
+        .and_then(|ms| jiff::Timestamp::from_millisecond(ms).ok())
         .ok_or_else(|| export_failed("generated_at_ms is out of range"))?;
     let date = pdf_date(at);
     let language = match payload.lang {

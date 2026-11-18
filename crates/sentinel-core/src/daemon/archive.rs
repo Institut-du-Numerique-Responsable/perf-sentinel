@@ -7,7 +7,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender, error::TrySendError};
 use tokio::task::JoinHandle;
@@ -37,7 +37,7 @@ pub enum ArchiveError {
 
 /// Owned snapshot of one scoring window, serialised by the writer task.
 pub struct OwnedArchive {
-    pub ts: DateTime<Utc>,
+    pub ts: Timestamp,
     pub report: Report,
 }
 
@@ -411,7 +411,7 @@ fn serialize_envelope(
     drops: u64,
 ) -> Result<String, serde_json::Error> {
     let body = serde_json::json!({
-        "ts": archive.ts,
+        "ts": crate::time::rfc3339(archive.ts),
         "report": &archive.report,
         "prev": prev,
         "seq": seq,
@@ -475,7 +475,7 @@ pub(super) fn write_line(file: &mut File, line: &str) -> std::io::Result<()> {
 
 fn rotate(active: &Path, file: &mut File, max_files: u32) -> std::io::Result<()> {
     file.flush()?;
-    let stamp = Utc::now().format("%Y%m%dT%H%M%S%fZ").to_string();
+    let stamp = Timestamp::now().strftime("%Y%m%dT%H%M%S%NZ").to_string();
     let rotated_name = match active.file_stem().and_then(OsStr::to_str) {
         Some(stem) => format!("{stem}-{stamp}.ndjson"),
         None => format!("archive-{stamp}.ndjson"),
@@ -627,7 +627,7 @@ mod tests {
 
     fn sample_archive() -> OwnedArchive {
         OwnedArchive {
-            ts: Utc::now(),
+            ts: Timestamp::now(),
             report: empty_report(),
         }
     }

@@ -3,7 +3,8 @@
 
 #![cfg(test)]
 
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::Timestamp;
+
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
@@ -14,10 +15,8 @@ use super::schema::{
     core_patterns_required,
 };
 
-pub(super) fn parse_rfc3339(s: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(s)
-        .expect("test fixture timestamp")
-        .with_timezone(&Utc)
+pub(super) fn parse_rfc3339(s: &str) -> Timestamp {
+    s.parse::<Timestamp>().expect("test fixture timestamp")
 }
 
 pub(super) fn sample_metadata(
@@ -69,8 +68,8 @@ pub(super) fn sample_organisation() -> Organisation {
 
 pub(super) fn sample_q1_period() -> Period {
     Period {
-        from_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-        to_date: NaiveDate::from_ymd_opt(2026, 3, 31).unwrap(),
+        from_date: jiff::civil::date(2026, 1, 1),
+        to_date: jiff::civil::date(2026, 3, 31),
         period_type: PeriodType::CalendarQuarter,
         days_covered: 90,
     }

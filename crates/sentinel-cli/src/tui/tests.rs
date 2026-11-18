@@ -6,9 +6,9 @@ use super::ack_modal::{
 };
 use super::draw::draw_detail_panel;
 use super::*;
-#[cfg(feature = "daemon")]
-use chrono::Utc;
 use core::assert_matches;
+#[cfg(feature = "daemon")]
+use jiff::Timestamp;
 use sentinel_core::detect::{Confidence, GreenImpact, Pattern};
 use sentinel_core::event::GroupingAttribute;
 
@@ -1614,7 +1614,7 @@ fn app_with_daemon_handle_populates_acks_by_signature() {
         "sig-1".to_string(),
         AckSource::Daemon {
             by: "alice".to_string(),
-            at: Utc::now(),
+            at: Timestamp::now(),
             reason: Some("investigating".to_string()),
             expires_at: None,
         },
@@ -1642,7 +1642,7 @@ fn findings_panel_renders_acked_indicator_when_signature_in_map() {
         "sig-acked".to_string(),
         AckSource::Daemon {
             by: "alice".to_string(),
-            at: Utc::now(),
+            at: Timestamp::now(),
             reason: Some("test".to_string()),
             expires_at: None,
         },
@@ -1732,7 +1732,7 @@ fn apply_ack_outcome_success_closes_modal_and_updates_map() {
         "sig".to_string(),
         AckSource::Daemon {
             by: "alice".to_string(),
-            at: Utc::now(),
+            at: Timestamp::now(),
             reason: Some("test".to_string()),
             expires_at: None,
         },
@@ -1741,7 +1741,7 @@ fn apply_ack_outcome_success_closes_modal_and_updates_map() {
         "sig2".to_string(),
         AckSource::Daemon {
             by: "bob".to_string(),
-            at: Utc::now(),
+            at: Timestamp::now(),
             reason: None,
             expires_at: None,
         },
@@ -1768,7 +1768,7 @@ fn apply_ack_outcome_success_with_none_keeps_existing_map() {
         "sig-prior".to_string(),
         AckSource::Daemon {
             by: "alice".to_string(),
-            at: Utc::now(),
+            at: Timestamp::now(),
             reason: None,
             expires_at: None,
         },
@@ -1800,7 +1800,7 @@ fn apply_ack_outcome_success_with_some_empty_clears_map() {
         "sig-prior".to_string(),
         AckSource::Daemon {
             by: "alice".to_string(),
-            at: Utc::now(),
+            at: Timestamp::now(),
             reason: None,
             expires_at: None,
         },

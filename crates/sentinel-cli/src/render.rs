@@ -964,8 +964,7 @@ impl<'a> WasteLine<'a> {
 fn format_waste_line(w: &WasteLine<'_>) -> String {
     let gco2 = w
         .waste_gco2
-        .map(|g| format!(", {} gCO\u{2082}", fmt_tiny(g)))
-        .unwrap_or_default();
+        .map_or_default(|g| format!(", {} gCO\u{2082}", fmt_tiny(g)));
     let region = w.region.map_or_else(String::new, |r| {
         format!(", region {}", sanitize_for_terminal(r))
     });
@@ -1682,42 +1681,23 @@ pub(crate) const LOCAL_TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
 /// A UTC ISO 8601 timestamp in local time, or the sanitized input when it does not parse.
 pub(crate) fn fmt_local_iso(iso: &str, format: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(iso).map_or_else(
+    iso.parse::<jiff::Timestamp>().map_or_else(
         |_| sanitize_for_terminal(iso).into_owned(),
-        |t| to_local(&t).format(format).to_string(),
+        |t| to_local(t).strftime(format).to_string(),
     )
 }
 
-/// `t` in the local time zone. Every human-facing time goes through here.
-pub(crate) fn to_local<Z: chrono::TimeZone>(
-    t: &chrono::DateTime<Z>,
-) -> chrono::DateTime<chrono::FixedOffset> {
-    static EMBEDDED: std::sync::OnceLock<Option<chrono_tz::Tz>> = std::sync::OnceLock::new();
-    let embedded = EMBEDDED.get_or_init(|| {
-        embedded_zone(std::env::var("TZ").ok().as_deref(), |name| {
-            std::path::Path::new("/usr/share/zoneinfo")
-                .join(name)
-                .is_file()
-        })
-    });
-    match embedded {
-        Some(tz) => t.with_timezone(tz).fixed_offset(),
-        None => t.with_timezone(&chrono::Local).fixed_offset(),
-    }
+/// The UTC calendar day of `t`.
+pub(crate) fn utc_date(t: jiff::Timestamp) -> jiff::civil::Date {
+    jiff::tz::Offset::UTC.to_datetime(t).date()
 }
 
-/// The embedded IANA zone to use when `TZ` names one the system database
-/// lacks, as in the `FROM scratch` image, where `chrono::Local` would
-/// silently fall back to UTC. `None` leaves the zone to `chrono::Local`:
-/// `TZ` unset, a path, a POSIX rule such as `JST-9`, or a name the system
-/// database has, which is preferred for being the one the host keeps current.
-fn embedded_zone(tz: Option<&str>, system_has: impl Fn(&str) -> bool) -> Option<chrono_tz::Tz> {
-    let tz = tz?;
-    let name = tz.strip_prefix(':').unwrap_or(tz);
-    if name.is_empty() || name.starts_with('/') || system_has(name) {
-        return None;
-    }
-    name.parse().ok()
+/// `t` in the local time zone. Every human-facing time goes through here.
+/// The zone follows `TZ` (an IANA name, a path or a POSIX rule) and then
+/// `/etc/localtime`. Names resolve against the system database, or the
+/// embedded copy when the system has none, as in the `FROM scratch` image.
+pub(crate) fn to_local(t: jiff::Timestamp) -> jiff::ZonedDateTime {
+    t.to_zoned_datetime(jiff::tz::TimeZone::system())
 }
 
 /// Format a window duration in milliseconds as a compact human-readable
