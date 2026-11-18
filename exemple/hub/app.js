@@ -331,6 +331,8 @@
         recapShowAll: false,
         // The What moved groups shown whole, by their key; the others stop at RECAP_MOVES_FIRST.
         recapMovesOpen: {},
+        // The snapshot on screen was read with moves=all: its lists are all the Hub keeps.
+        recapMovesWhole: false,
         // The group whose whole list is being read with moves=all, and the group whose read failed.
         recapMovesLoading: null,
         recapMovesFailed: null,
@@ -1169,7 +1171,9 @@
         if (state.recap.view === 'pilotage') return {status: 'ready', steps: PSL.recapPilotageSteps(state.recap)};
         return {
             status: 'ready',
-            steps: PSL.recapTechSteps(state.recap, {showAll: state.recapShowAll, movesOpen: state.recapMovesOpen})
+            steps: PSL.recapTechSteps(state.recap, {
+                showAll: state.recapShowAll, movesOpen: state.recapMovesOpen, movesWhole: state.recapMovesWhole
+            })
         };
     }
 
@@ -7663,7 +7667,7 @@
         // Every move when the screen already held them all or a group is being opened whole: a write
         // that lands meanwhile takes over that read instead of racing it, so the click is kept.
         const opening = keep ? state.recapMovesLoading : null;
-        const all = Boolean(opening) || (keep && state.recap && !state.recap.movements.counts);
+        const all = Boolean(opening) || (keep && state.recapMovesWhole);
         const previous = state.recapJob;
         clearTimeout(state.recapPollTimer);
         // A job this screen stops following for other filters is let go, so the Hub stops it once nobody
@@ -7688,8 +7692,10 @@
             state.recapNameDraft = null;
             state.recapAssigning = null;
             state.recapAssignDraft = null;
+            state.recapBusy = {};
             state.recapShowAll = false;
             state.recapMovesOpen = {};
+            state.recapMovesWhole = false;
             state.recapMovesFailed = null;
             state.recapReports = null;
             state.recapGenerateError = null;
@@ -7699,7 +7705,7 @@
         }
         state.recapRestarts = 0;
         if (state.recapDirect) {
-            landRecap(sequence, getJson(PSL.recapPath(route) + (all ? '&moves=all' : '')), opening);
+            landRecap(sequence, getJson(PSL.recapPath(route) + (all ? '&moves=all' : '')), opening, all);
             return;
         }
         // The whole list of a group reads the snapshot on screen again, nothing is computed. Any other read
@@ -7745,7 +7751,7 @@
             if (error.status === 404 || error.status === 405) {
                 // A Hub without the route, or the site's replay of one: the single read of before.
                 state.recapDirect = true;
-                landRecap(sequence, getJson(PSL.recapPath(route) + (all ? '&moves=all' : '')), opening);
+                landRecap(sequence, getJson(PSL.recapPath(route) + (all ? '&moves=all' : '')), opening, all);
                 return;
             }
             if (error.status === 503) {
@@ -7835,7 +7841,7 @@
     function readRecapResult(sequence, job, route, all, opening) {
         getJson(PSL.recapJobResultPath(job.id, route.view, all)).then(function (snapshot) {
             if (sequence !== state.recapSeq) return;
-            landRecap(sequence, Promise.resolve(snapshot), opening);
+            landRecap(sequence, Promise.resolve(snapshot), opening, all);
         }).catch(function (error) {
             if (sequence !== state.recapSeq) return;
             // Expired or forgotten since: computed again, once.
@@ -7895,11 +7901,13 @@
      * @param {number} sequence
      * @param {Promise<RecapSnapshot>} read
      * @param {string | null} opening
+     * @param {boolean} [all] the read asked for every move
      */
-    function landRecap(sequence, read, opening) {
+    function landRecap(sequence, read, opening, all) {
         Promise.all([read, readRecapReports()]).then(function (results) {
             if (sequence !== state.recapSeq) return;
             state.recap = results[0];
+            state.recapMovesWhole = Boolean(all);
             state.recapReports = results[1];
             state.recapError = null;
             if (opening) {
@@ -7920,6 +7928,10 @@
         }).finally(function () {
             if (sequence !== state.recapSeq) return;
             state.recapMovesLoading = null;
+            // A row write stays pending until the recap computed after it is on screen, so the row
+            // never shows its old owner with live buttons while the recompute runs. A write still on its
+            // way (true) keeps its row: freed now, a second click would send it again.
+            state.recapBusy = PSL.recapRowsLanded(state.recapBusy);
             if (currentScreen() !== 'recap') return;
             render();
             if (opening) focusFirstNewMove(opening);
@@ -8618,6 +8630,13 @@
                 text: t('recap.prio.more.' + PSL.plural(snapshot.more_priorities), {count: snapshot.more_priorities})
             }));
         }
+        // The tech list keeps the costliest the Hub ranks, so a list with a rest is long: said once shown whole.
+        if (snapshot.view !== 'pilotage' && snapshot.more_priorities > 0 && state.recapShowAll) {
+            section.appendChild(el('p', {
+                class: 'recap-more',
+                text: t('recap.moves.rest.' + PSL.plural(snapshot.more_priorities), {count: snapshot.more_priorities})
+            }));
+        }
         if (snapshot.truncated) {
             section.appendChild(el('p', {class: 'sources-note', text: PSL.recapTruncatedText(snapshot.view)}));
         }
@@ -8917,7 +8936,7 @@
      */
     function recapActionControls(priority, route) {
         const action = priority.action;
-        const busy = state.recapBusy[priority.signature] === true;
+        const busy = Boolean(state.recapBusy[priority.signature]);
         const ack = el('a', {
             class: 'ack-link', href: PSL.ackRouteHash(priority.signature, null, route.environment),
             text: t('recap.action.ack')
@@ -8935,7 +8954,7 @@
             take.addEventListener('click', function () {
                 recapWrite(priority.signature, 'POST', '/api/actions', {signature: priority.signature, take: true});
             });
-            return [take, recapAssignButton(priority), ack];
+            return [take, recapAssignButton(priority), ack, recapPending(busy)];
         }
         const select = el('select', {
                 class: 'refresh-select',
@@ -8955,7 +8974,17 @@
         });
         const confirmation = PSL.confirmationLabel(action.confirmation);
         return [recapOwner(action), ...recapOwnerButtons(priority, busy), select,
-            confirmation ? recapStateChip(action.confirmation, confirmation) : null, recapWhen(action), ack];
+            confirmation ? recapStateChip(action.confirmation, confirmation) : null, recapWhen(action), ack,
+            recapPending(busy)];
+    }
+
+    /**
+     * Says a row write is on its way: the write itself is quick, the recap computed after it can take
+     * seconds on a large base, and buttons merely greyed out read as a click that did nothing.
+     * @param {boolean} busy
+     */
+    function recapPending(busy) {
+        return busy ? el('span', {class: 'recap-pending', role: 'status', text: t('recap.action.pending')}) : null;
     }
 
     /**
@@ -8996,7 +9025,8 @@
     function recapAssignButton(priority) {
         const button = el('button', {
             class: 'recap-link', type: 'button', text: t('recap.action.assign'),
-            'aria-label': t('recap.action.assign.aria', {subject: priority.service + ' ' + (priority.endpoint || '')})
+            'aria-label': t('recap.action.assign.aria', {subject: priority.service + ' ' + (priority.endpoint || '')}),
+            disabled: state.recapBusy[/** @type {string} */ (priority.signature)] ? 'disabled' : null
         });
         button.addEventListener('click', function () {
             state.recapAssigning = state.recapAssigning === priority.signature ? null : priority.signature;
@@ -9014,6 +9044,7 @@
      */
     function recapAssignEditor(priority) {
         const signature = /** @type {string} */ (priority.signature);
+        const busy = Boolean(state.recapBusy[signature]);
         const choices = PSL.recapOwnerChoices(state.recap ? state.recap.priorities : [],
             state.status && state.status.identity);
         const input = el('input', {
@@ -9025,19 +9056,27 @@
             placeholder: t('recap.assign.placeholder'),
             'aria-label': t('recap.assign.input', {subject: priority.service + ' ' + (priority.endpoint || '')}),
             autocomplete: 'off',
-            spellcheck: 'false'
+            spellcheck: 'false',
+            readonly: busy ? 'readonly' : null
         });
         const options = el('datalist', {id: 'recap-owner-choices'}, choices.map(function (choice) {
             return el('option', {value: choice.value, label: choice.label});
         }));
-        const save = el('button', {class: 'pill-button pill-sm', type: 'submit', text: t('recap.assign.save')});
-        const cancel = el('button', {class: 'recap-link', type: 'button', text: t('recap.name.cancel')});
+        const save = el('button', {
+            class: 'pill-button pill-sm', type: 'submit', text: t('recap.assign.save'),
+            disabled: busy ? 'disabled' : null
+        });
+        // Greyed while the write is out: it would close the editor, not stop a write already sent.
+        const cancel = el('button', {
+            class: 'recap-link', type: 'button', text: t('recap.name.cancel'),
+            disabled: busy ? 'disabled' : null
+        });
         cancel.addEventListener('click', function () {
             state.recapAssigning = null;
             state.recapAssignDraft = null;
             render();
         });
-        const form = el('form', {class: 'recap-name'}, [input, options, save, cancel]);
+        const form = el('form', {class: 'recap-name'}, [input, options, save, cancel, recapPending(busy)]);
         form.addEventListener('submit', function (event) {
             event.preventDefault();
             const owner = input.value.trim() || null;
@@ -9048,11 +9087,13 @@
             // A second Enter while the first is out would POST again and show a 409 over an assignment that landed.
             if (state.recapBusy[signature]) return;
             state.recapBusy[signature] = true;
+            state.recapAssignDraft = input.value;
+            renderFocus('.recap-owner-input');
             recapSend(priority.action ? 'PATCH' : 'POST', '/api/actions', priority.action
                 ? {signature: signature, owner: owner}
                 : {signature: signature, status: 'todo', owner: owner})
                 .then(function (failure) {
-                    delete state.recapBusy[signature];
+                    state.recapBusy = PSL.recapWriteAnswered(state.recapBusy, signature, Boolean(failure));
                     if (failure) {
                         state.recapRowError[signature] = failure;
                         state.recapAssignDraft = owner || '';
@@ -9132,9 +9173,11 @@
         state.recapBusy[signature] = true;
         render();
         recapSend(method, path, body).then(function (failure) {
-            delete state.recapBusy[signature];
-            if (failure) state.recapRowError[signature] = failure;
-            else delete state.recapRowError[signature];
+            state.recapBusy = PSL.recapWriteAnswered(state.recapBusy, signature, Boolean(failure));
+            if (failure) {
+                state.recapRowError[signature] = failure;
+                render();
+            } else delete state.recapRowError[signature];
             // A write that landed changes the recap: computed again. A refused one changed nothing.
             loadRecap(true, !failure);
         });
@@ -9192,7 +9235,8 @@
     function recapNameButton(target) {
         const button = el('button', {
             class: 'recap-link', type: 'button', text: target.label ? target.rename : target.name,
-            'aria-label': t(target.label ? 'recap.name.aria.rename' : 'recap.name.aria', {subject: target.subject})
+            'aria-label': t(target.label ? 'recap.name.aria.rename' : 'recap.name.aria', {subject: target.subject}),
+            disabled: state.recapBusy[target.row] ? 'disabled' : null
         });
         button.addEventListener('click', function () {
             state.recapNaming = state.recapNaming === target.key ? null : target.key;
@@ -9208,6 +9252,7 @@
      * @param {NameTarget} target
      */
     function recapNameEditor(target) {
+        const busy = Boolean(state.recapBusy[target.row]);
         const input = el('input', {
             class: 'recap-input recap-name-input',
             type: 'text',
@@ -9215,16 +9260,24 @@
             value: state.recapNameDraft !== null ? state.recapNameDraft : target.label || '',
             placeholder: target.placeholder,
             'aria-label': t('recap.name.input', {subject: target.subject}),
-            spellcheck: 'false'
+            spellcheck: 'false',
+            readonly: busy ? 'readonly' : null
         });
-        const save = el('button', {class: 'pill-button pill-sm', type: 'submit', text: t('recap.name.save')});
-        const cancel = el('button', {class: 'recap-link', type: 'button', text: t('recap.name.cancel')});
+        const save = el('button', {
+            class: 'pill-button pill-sm', type: 'submit', text: t('recap.name.save'),
+            disabled: busy ? 'disabled' : null
+        });
+        // Greyed while the write is out: it would close the editor, not stop a write already sent.
+        const cancel = el('button', {
+            class: 'recap-link', type: 'button', text: t('recap.name.cancel'),
+            disabled: busy ? 'disabled' : null
+        });
         cancel.addEventListener('click', function () {
             state.recapNaming = null;
             state.recapNameDraft = null;
             render();
         });
-        const form = el('form', {class: 'recap-name'}, [input, save, cancel]);
+        const form = el('form', {class: 'recap-name'}, [input, save, cancel, recapPending(busy)]);
         form.addEventListener('submit', function (event) {
             event.preventDefault();
             recapNameSave(target, input.value.trim() || null);
@@ -9237,11 +9290,15 @@
      * @param {string | null} label
      */
     function recapNameSave(target, label) {
+        if (state.recapBusy[target.row]) return;
+        state.recapBusy[target.row] = true;
+        state.recapNameDraft = label === null ? '' : label;
+        renderFocus('.recap-name-input');
         recapSend('PUT', target.path, Object.assign({}, target.body, {label: label}))
             .then(function (failure) {
+                state.recapBusy = PSL.recapWriteAnswered(state.recapBusy, target.row, Boolean(failure));
                 if (failure) {
                     state.recapRowError[target.row] = failure;
-                    state.recapNameDraft = label === null ? '' : label;
                     render();
                     return;
                 }
@@ -9390,19 +9447,22 @@
     }
 
     /**
-     * A whole list that could not be read says so, and how much the Hub did not send.
+     * How much of a list the Hub did not send: once its whole list failed to read, or once a list
+     * the Hub kept the costliest of is opened.
      * @param {RecapMovements} moves
      * @param {RecapPriority[]} items
      * @param {string} key
      */
     function recapMovesRest(moves, items, key) {
         const rest = recapMovesTotal(moves, items, key) - items.length;
-        if (rest <= 0 || state.recapMovesFailed !== key) return null;
-        const announce = state.recapMovesAnnounce;
-        state.recapMovesAnnounce = false;
+        const failed = state.recapMovesFailed === key;
+        // Read whole, a list the Hub kept the costliest of says what it left out once opened.
+        if (rest <= 0 || !(failed || (state.recapMovesWhole && state.recapMovesOpen[key]))) return null;
+        const announce = failed && state.recapMovesAnnounce;
+        if (failed) state.recapMovesAnnounce = false;
         return el('p', {
             class: 'recap-more', role: announce ? 'alert' : null,
-            text: t('recap.moves.failed') + ' ' + t('recap.moves.rest.' + PSL.plural(rest), {count: rest})
+            text: (failed ? t('recap.moves.failed') + ' ' : '') + t('recap.moves.rest.' + PSL.plural(rest), {count: rest})
         });
     }
 
@@ -9424,7 +9484,8 @@
      */
     function recapMovesMore(moves, items, key) {
         const total = recapMovesTotal(moves, items, key);
-        const cut = total > items.length;
+        // Read whole, nothing more is to be asked: a shorter list is all the Hub keeps.
+        const cut = !state.recapMovesWhole && total > items.length;
         if ((state.recapMovesOpen[key] && !cut) || total <= RECAP_MOVES_FIRST) return null;
         const loading = state.recapMovesLoading === key;
         const more = el('button', {
@@ -9434,7 +9495,8 @@
             // aria-disabled, not disabled: the focus stays on the button while the list is read.
             'aria-disabled': loading ? 'true' : null,
             'aria-busy': loading ? 'true' : null,
-            text: loading ? t('recap.moves.loading') : t('recap.prio.show_all', {count: total})
+            // A kept list opens what the Hub sent, not its whole length: the rest line says the others.
+            text: loading ? t('recap.moves.loading') : t('recap.prio.show_all', {count: cut ? total : items.length})
         });
         more.addEventListener('click', function () {
             if (state.recapMovesLoading) return;
