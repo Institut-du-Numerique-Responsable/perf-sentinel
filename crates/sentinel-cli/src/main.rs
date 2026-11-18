@@ -1004,7 +1004,7 @@ fn apply_acknowledgments_or_exit(
         report,
         &acks,
         config,
-        chrono::Utc::now(),
+        jiff::Timestamp::now(),
         origin,
     );
 }

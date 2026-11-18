@@ -193,7 +193,7 @@ Pressing `u` on an acknowledged finding opens a confirmation modal.
 Mirrors the CLI ack helper (since 0.5.22):
 
 - Empty: no expiration, ack persists until manually revoked
-- `24h`, `7d`, `30m`: relative duration parsed by humantime
+- `24h`, `7d`, `30m`, `1w`: relative duration, a day counting 24 hours. Months and years are refused, they have no fixed length
 - `2026-05-11T00:00:00Z`: ISO8601 absolute datetime
 
 Invalid input shows `expires: <error>` in the modal footer without

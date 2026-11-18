@@ -220,7 +220,7 @@ pub(crate) fn cmd_disclose_tui(
         org_config.to_path_buf(),
         strict_attribution,
         archive_range,
-        chrono::Utc::now().date_naive(),
+        crate::render::utc_date(jiff::Timestamp::now()),
     )
     .with_total_requests_cli(total_requests_in_period);
 

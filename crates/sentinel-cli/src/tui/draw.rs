@@ -345,7 +345,11 @@ fn draw_disclose_settings(f: &mut Frame, state: &DiscloseState, area: Rect) {
     ];
 
     let archive = match state.archive_range() {
-        Some((min, max)) => format!("Archive: {} .. {}", min.date_naive(), max.date_naive()),
+        Some((min, max)) => format!(
+            "Archive: {} .. {}",
+            crate::render::utc_date(min),
+            crate::render::utc_date(max)
+        ),
         None => "Archive: empty".to_string(),
     };
     lines.push(Line::from(Span::styled(archive, dim)));

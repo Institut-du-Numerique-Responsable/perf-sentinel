@@ -355,9 +355,144 @@ fn civil_date_to_days(year: u64, month: u64, day: u64) -> u64 {
     era * 146_097 + doe - 719_468
 }
 
+/// `ts` as RFC 3339 in UTC, byte for byte what chrono wrote for a
+/// `DateTime<Utc>`: a `Z` suffix and a fraction of 0, 3, 6 or 9 digits, the
+/// fewest that hold the value. The disclosure `content_hash` and every file
+/// the daemon persisted (acks, archives, rollups) were written in this form.
+#[must_use]
+pub fn rfc3339(ts: jiff::Timestamp) -> String {
+    let nanos = ts.subsec_nanosecond().rem_euclid(1_000_000_000);
+    let digits = if nanos == 0 {
+        0
+    } else if nanos % 1_000_000 == 0 {
+        3
+    } else if nanos % 1_000 == 0 {
+        6
+    } else {
+        9
+    };
+    format!("{ts:.digits$}")
+}
+
+/// The UTC calendar day of `ts`.
+#[must_use]
+pub fn utc_date(ts: jiff::Timestamp) -> jiff::civil::Date {
+    jiff::tz::Offset::UTC.to_datetime(ts).date()
+}
+
+/// Midnight UTC at the start of `day`.
+#[must_use]
+pub fn utc_midnight(day: jiff::civil::Date) -> jiff::Timestamp {
+    jiff::tz::Offset::UTC
+        .to_timestamp(day.to_datetime(jiff::civil::Time::midnight()))
+        .expect("every civil date jiff holds has a UTC midnight")
+}
+
+/// The last second of `day` in UTC, 23:59:59: a date-only expiry holds
+/// through its whole day.
+#[must_use]
+pub(crate) fn utc_end_of_day(day: jiff::civil::Date) -> jiff::Timestamp {
+    jiff::tz::Offset::UTC
+        .to_timestamp(day.at(23, 59, 59, 0))
+        .expect("every civil date jiff holds has a UTC end of day")
+}
+
+/// `y-mo-d h:mi:s` UTC, for tests.
+#[cfg(test)]
+pub(crate) fn utc(y: i16, mo: i8, d: i8, h: i8, mi: i8, s: i8) -> jiff::Timestamp {
+    jiff::tz::Offset::UTC
+        .to_timestamp(jiff::civil::datetime(y, mo, d, h, mi, s, 0))
+        .expect("valid test instant")
+}
+
+/// Serde adapter writing a [`jiff::Timestamp`] in the [`rfc3339`] form.
+/// Reading accepts any RFC 3339 offset, as chrono did.
+pub(crate) mod rfc3339_serde {
+    use jiff::Timestamp;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(ts: &Timestamp, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&super::rfc3339(*ts))
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Timestamp, D::Error> {
+        Timestamp::deserialize(d)
+    }
+
+    /// The same adapter for an `Option<Timestamp>`. Only daemon types use it.
+    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+    pub(crate) mod option {
+        use jiff::Timestamp;
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        #[allow(clippy::ref_option)] // serde's `with` hands the field by reference
+        pub(crate) fn serialize<S: Serializer>(
+            ts: &Option<Timestamp>,
+            s: S,
+        ) -> Result<S::Ok, S::Error> {
+            match ts {
+                Some(ts) => s.serialize_some(&super::super::rfc3339(*ts)),
+                None => s.serialize_none(),
+            }
+        }
+
+        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<Option<Timestamp>, D::Error> {
+            Option::<Timestamp>::deserialize(d)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rfc3339_matches_chrono_auto_si_digits() {
+        let at = |s: &str| s.parse::<jiff::Timestamp>().unwrap();
+        for (input, want) in [
+            ("2026-02-01T00:00:00Z", "2026-02-01T00:00:00Z"),
+            ("2026-02-01T00:00:00.5Z", "2026-02-01T00:00:00.500Z"),
+            ("2026-02-01T00:00:00.120Z", "2026-02-01T00:00:00.120Z"),
+            ("2026-02-01T00:00:00.000001Z", "2026-02-01T00:00:00.000001Z"),
+            (
+                "2026-02-01T00:00:00.1234567Z",
+                "2026-02-01T00:00:00.123456700Z",
+            ),
+            ("2026-02-01T02:00:00+02:00", "2026-02-01T00:00:00Z"),
+            ("1969-12-31T23:59:59.5Z", "1969-12-31T23:59:59.500Z"),
+        ] {
+            assert_eq!(rfc3339(at(input)), want, "{input}");
+        }
+    }
+
+    #[test]
+    fn serde_adapter_round_trips_what_chrono_wrote() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Stamp {
+            #[serde(with = "rfc3339_serde")]
+            at: jiff::Timestamp,
+            #[serde(with = "rfc3339_serde::option")]
+            maybe: Option<jiff::Timestamp>,
+        }
+        for json in [
+            r#"{"at":"2026-01-04T10:00:00.500Z","maybe":"2026-03-29T18:00:00.123456789Z"}"#,
+            r#"{"at":"2026-02-01T12:00:00.123456Z","maybe":null}"#,
+            r#"{"at":"2026-03-30T00:00:00Z","maybe":"2026-03-30T00:00:00.001Z"}"#,
+        ] {
+            let stamp: Stamp = serde_json::from_str(json).unwrap();
+            assert_eq!(serde_json::to_string(&stamp).unwrap(), json);
+        }
+    }
+
+    #[test]
+    fn utc_date_and_midnight_round_trip() {
+        let ts: jiff::Timestamp = "2026-03-31T23:59:59.9Z".parse().unwrap();
+        let day = utc_date(ts);
+        assert_eq!(day.to_string(), "2026-03-31");
+        assert_eq!(rfc3339(utc_midnight(day)), "2026-03-31T00:00:00Z");
+    }
 
     #[test]
     fn fixed_layout_agrees_with_general_parser() {

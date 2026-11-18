@@ -1,7 +1,7 @@
 //! Fingrid open data (Finland): emission factor of production (dataset 266)
 //! or of consumption (265), gCO2/kWh, every 3 minutes, behind a free key.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 
 use super::config::FingridDataset;
@@ -19,7 +19,7 @@ pub(super) fn url(endpoint: &str, dataset: FingridDataset) -> String {
     format!("{endpoint}/datasets/{}/data/latest", dataset.id())
 }
 
-pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, FeedError> {
+pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, Timestamp)>, FeedError> {
     let latest: Latest =
         serde_json::from_slice(body).map_err(|e| FeedError::Parse(e.to_string()))?;
     let value = check_value(latest.value)?;
@@ -52,7 +52,7 @@ mod tests {
         let zones = parse(BODY.as_bytes()).unwrap();
         assert_eq!(zones[0].0, "FI");
         assert!((zones[0].1 - 72.5).abs() < f64::EPSILON);
-        assert_eq!(zones[0].2.to_rfc3339(), "2026-10-20T12:24:00+00:00");
+        assert_eq!(zones[0].2.to_string(), "2026-10-20T12:24:00Z");
     }
 
     #[test]

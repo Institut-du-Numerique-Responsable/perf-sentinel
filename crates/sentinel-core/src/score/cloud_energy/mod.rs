@@ -56,7 +56,7 @@ mod tests {
     fn embedded_date_is_the_bare_iso_date() {
         let date = embedded_specpower_date();
         assert!(
-            chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok(),
+            jiff::civil::Date::strptime("%Y-%m-%d", date).is_ok(),
             "got {date:?}"
         );
         assert!(embedded_specpower_vintage().starts_with(date));

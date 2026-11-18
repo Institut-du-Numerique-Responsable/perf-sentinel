@@ -18,7 +18,9 @@ use std::fmt::Write as _;
 use std::io::Read;
 use std::path::Path;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::Timestamp;
+
+use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -276,7 +278,7 @@ pub fn load_from_file_if_present(
 
     for (idx, ack) in parsed.acknowledged.iter().enumerate() {
         if let Some(ref expires) = ack.expires_at {
-            NaiveDate::parse_from_str(expires, "%Y-%m-%d").map_err(|e| {
+            Date::strptime("%Y-%m-%d", expires).map_err(|e| {
                 AcknowledgmentLoadError::InvalidDate {
                     entry_index: idx,
                     field: "expires_at",
@@ -315,7 +317,7 @@ pub fn apply_to_report(
     report: &mut Report,
     acks: &AcknowledgmentsFile,
     config: &Config,
-    now: DateTime<Utc>,
+    now: Timestamp,
     origin: ReportOrigin,
 ) {
     // The caller may have loaded a baseline that already carried
@@ -569,21 +571,18 @@ fn unmatched_message(
     }
 }
 
-pub(crate) fn is_ack_active(ack: &Acknowledgment, now: DateTime<Utc>) -> bool {
+pub(crate) fn is_ack_active(ack: &Acknowledgment, now: Timestamp) -> bool {
     let Some(ref expires) = ack.expires_at else {
         return true;
     };
-    let Ok(parsed) = NaiveDate::parse_from_str(expires, "%Y-%m-%d") else {
+    let Ok(parsed) = Date::strptime("%Y-%m-%d", expires) else {
         // Malformed dates are rejected at load time. Defensively treat a
         // bad value as inactive rather than ack-everything.
         return false;
     };
     // Treat the entire expiry day as still valid: an ack `expires_at =
     // 2026-12-31` is honored through 2026-12-31 23:59:59 UTC.
-    let Some(end_of_day) = parsed.and_hms_opt(23, 59, 59) else {
-        return false;
-    };
-    end_of_day.and_utc() >= now
+    crate::time::utc_end_of_day(parsed) >= now
 }
 
 /// Errors that can occur when loading the acknowledgments file.

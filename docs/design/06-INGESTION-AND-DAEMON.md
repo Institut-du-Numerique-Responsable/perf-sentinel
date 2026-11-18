@@ -64,7 +64,7 @@ Converting Unix nanoseconds to `YYYY-MM-DDTHH:MM:SS.mmmZ` uses the civil date al
 3. Compute the era (400-year cycle) and day-of-era
 4. Derive year-of-era, day-of-year, month and day using a lookup-free formula
 
-This avoids the [chrono](https://docs.rs/chrono/) crate (~150KB binary overhead) and its ~200ns parse overhead. The hand-rolled algorithm handles leap years correctly (verified by a test with `2024-02-29`).
+This keeps [jiff](https://docs.rs/jiff/), which the crate uses for its other dates, off the span hot path. The hand-rolled algorithm handles leap years correctly (verified by a test with `2024-02-29`).
 
 ### Event type priority
 

@@ -2,7 +2,6 @@ use super::*;
 use crate::detect::{FindingType, Severity};
 use crate::report::{Analysis, GreenSummary, QualityGate};
 use crate::test_helpers::make_finding;
-use chrono::TimeZone;
 use core::assert_matches;
 
 #[test]
@@ -73,8 +72,8 @@ fn ack(signature: &str, expires_at: Option<&str>) -> Acknowledgment {
     }
 }
 
-fn now_2026_05_02() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 5, 2, 12, 0, 0).unwrap()
+fn now_2026_05_02() -> jiff::Timestamp {
+    crate::time::utc(2026, 5, 2, 12, 0, 0)
 }
 
 #[test]

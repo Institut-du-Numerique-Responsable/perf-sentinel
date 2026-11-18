@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 
 use super::scraper::{FeedError, check_value, parse_naive_utc};
@@ -33,10 +33,10 @@ pub(super) fn url(endpoint: &str) -> String {
 
 /// Latest value per zone. The newest slot is picked in code: the order
 /// of zones within a slot is not documented.
-pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, FeedError> {
+pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, Timestamp)>, FeedError> {
     let response: Response =
         serde_json::from_slice(body).map_err(|e| FeedError::Parse(e.to_string()))?;
-    let mut latest: BTreeMap<String, (f64, DateTime<Utc>)> = BTreeMap::new();
+    let mut latest: BTreeMap<String, (f64, Timestamp)> = BTreeMap::new();
     for record in response.records {
         let Ok(value) = check_value(record.co2_emission) else {
             continue;
@@ -88,7 +88,7 @@ mod tests {
         assert_eq!(zones.len(), 2);
         assert_eq!(zones[0].0, "DK1");
         assert!((zones[0].1 - 123.0).abs() < f64::EPSILON);
-        assert_eq!(zones[0].2.to_rfc3339(), "2026-10-20T12:25:00+00:00");
+        assert_eq!(zones[0].2.to_string(), "2026-10-20T12:25:00Z");
         assert_eq!(zones[1].0, "DK2");
         assert!((zones[1].1 - 85.0).abs() < f64::EPSILON);
     }

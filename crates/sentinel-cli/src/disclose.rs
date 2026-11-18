@@ -7,7 +7,9 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{NaiveDate, Utc};
+use jiff::Timestamp;
+
+use jiff::civil::Date;
 use sentinel_core::detect::FindingType;
 use sentinel_core::report::periodic::aggregator::{
     AggregateInputs, AntiPatternAccumulator, ServiceAccumulator, UNATTRIBUTED_SERVICE,
@@ -110,8 +112,8 @@ pub fn cmd_disclose(
     intent: ReportIntentCli,
     confidentiality: ConfidentialityCli,
     period_type: PeriodTypeCli,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     input: &[PathBuf],
     output: &Path,
     org_config_path: &Path,
@@ -135,7 +137,7 @@ pub fn cmd_disclose(
     };
     apply_total_requests_override(&mut org, total_requests_in_period);
 
-    let days_covered = match (to - from).num_days() {
+    let days_covered = match (to - from).get_days() {
         n if n < 0 => {
             eprintln!("Error: to_date precedes from_date");
             return 2;
@@ -237,9 +239,10 @@ fn archive_start_gap(aggregate: &AggregateInputs, period: &Period) -> Option<Str
     if archive_reaches_period_start(aggregate.earliest_archived_window, period) {
         return None;
     }
-    let start = aggregate
-        .earliest_archived_window
-        .map_or_else(|| "nowhere".to_string(), |ts| ts.date_naive().to_string());
+    let start = aggregate.earliest_archived_window.map_or_else(
+        || "nowhere".to_string(),
+        |ts| crate::render::utc_date(ts).to_string(),
+    );
     Some(format!(
         "the archive starts on {start}, after the period's first day {}. Windows \
          before it were pruned by rotation ([daemon.archive] max_files, max_size_mb) \
@@ -524,7 +527,7 @@ pub(crate) fn build_report(
             intent,
             confidentiality_level: confidentiality,
             integrity_level: IntegrityLevel::None,
-            generated_at: Utc::now(),
+            generated_at: Timestamp::now(),
             generated_by,
             perf_sentinel_version: env!("CARGO_PKG_VERSION").to_string(),
             report_uuid: Uuid::new_v4(),
@@ -763,8 +766,8 @@ const fn sentence_noun(subsystem: Subsystem) -> &'static str {
 
 fn build_applications(
     per_service: &BTreeMap<String, ServiceAccumulator>,
-    first_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
-    last_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
+    first_seen: &BTreeMap<(String, String), Timestamp>,
+    last_seen: &BTreeMap<(String, String), Timestamp>,
     confidentiality: Confidentiality,
 ) -> Vec<Application> {
     let mut out = Vec::with_capacity(per_service.len());
@@ -848,12 +851,12 @@ fn service_energy_per_op(accum: &ServiceAccumulator) -> f64 {
 fn build_anti_pattern_details(
     service: &str,
     anti_patterns: &BTreeMap<String, AntiPatternAccumulator>,
-    first_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
-    last_seen: &BTreeMap<(String, String), chrono::DateTime<Utc>>,
+    first_seen: &BTreeMap<(String, String), Timestamp>,
+    last_seen: &BTreeMap<(String, String), Timestamp>,
     per_op_kwh: f64,
     service_carbon_kwh_ratio: f64,
 ) -> Vec<AntiPatternDetail> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let mut out = Vec::with_capacity(anti_patterns.len());
     for (pattern, accum) in anti_patterns {
         let key = (service.to_string(), pattern.clone());
@@ -1190,7 +1193,7 @@ mod tests {
     fn one_day_report(org: &OrgConfig, requests: u64) -> PeriodicReport {
         let mut aggregate = AggregateInputs::default();
         aggregate.aggregate.total_requests = requests;
-        let day = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let day = jiff::civil::date(2026, 1, 1);
         let period = Period {
             from_date: day,
             to_date: day,
@@ -1354,7 +1357,7 @@ mod tests {
         org.notes.disclaimers = vec!["Our own wording.".to_string()];
         let mut aggregate = AggregateInputs::default();
         aggregate.aggregate.database_waste = Some(partial_host_block());
-        let day = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let day = jiff::civil::date(2026, 1, 1);
         let report = build_report(
             &org,
             Period {
@@ -1401,8 +1404,8 @@ mod tests {
             });
         aggregate.embodied_gco2_total = 0.0001;
         let period = Period {
-            from_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-            to_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            from_date: jiff::civil::date(2026, 1, 1),
+            to_date: jiff::civil::date(2026, 1, 1),
             period_type: PeriodType::Custom,
             days_covered: 1,
         };

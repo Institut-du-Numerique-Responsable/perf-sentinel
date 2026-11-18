@@ -101,7 +101,7 @@ fn parse_timestamp_ms(ts: &str) -> Option<u64> {
 }
 ```
 
-**Why not [chrono](https://docs.rs/chrono/)?** chrono adds ~150KB to the binary and parses ~200ns per timestamp. This hand-rolled parser handles the fixed format (`YYYY-MM-DDTHH:MM:SS.mmmZ`) in ~5ns by splitting on known delimiters and using iterator `.next()` calls instead of collecting into Vecs.
+**Why not [jiff](https://docs.rs/jiff/)?** jiff handles the other dates of the crate, but its parser accepts the whole ISO 8601 grammar, offsets and annotations included. This hand-rolled parser handles the fixed format (`YYYY-MM-DDTHH:MM:SS.mmmZ`) in ~5ns by splitting on known delimiters and using iterator `.next()` calls instead of collecting into Vecs.
 
 The parser uses iterators throughout (`split(':')` -> `.next()`, `split('.')` -> `.next()`) to avoid allocating intermediate `Vec<&str>` collections.
 

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use chrono::Utc;
+use jiff::Timestamp;
 use serde::Serialize;
 
 use super::ack::{AckEntry, AckStore};
@@ -791,7 +791,7 @@ async fn annotate(batch: &[PendingExport], acks: &AckSources) -> Vec<FindingResp
     // One snapshot for the whole batch, so a reload mid-annotation cannot split
     // an envelope across two revisions of the file.
     let toml = acks.toml.load();
-    let now = Utc::now();
+    let now = Timestamp::now();
     batch
         .iter()
         .map(|item| FindingResponse {

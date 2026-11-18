@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
+use jiff::Timestamp;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -201,7 +201,7 @@ pub(crate) enum AckSubmitOp {
     Create {
         by: String,
         reason: String,
-        expires_at: Option<DateTime<Utc>>,
+        expires_at: Option<Timestamp>,
     },
     Revoke,
 }

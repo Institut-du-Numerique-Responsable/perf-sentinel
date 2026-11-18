@@ -101,7 +101,7 @@ fn parse_timestamp_ms(ts: &str) -> Option<u64> {
 }
 ```
 
-**Pourquoi pas [chrono](https://docs.rs/chrono/) ?** chrono ajoute ~150 Ko au binaire et parse ~200ns par horodatage. Ce parseur artisanal gère le format fixe (`YYYY-MM-DDTHH:MM:SS.mmmZ`) en ~5ns en découpant sur des délimiteurs connus et en utilisant des appels itérateurs `.next()` au lieu de collecter dans des Vecs.
+**Pourquoi pas [jiff](https://docs.rs/jiff/) ?** jiff gère les autres dates du crate, mais son parseur accepte toute la grammaire ISO 8601, décalages et annotations compris. Ce parseur artisanal gère le format fixe (`YYYY-MM-DDTHH:MM:SS.mmmZ`) en ~5ns en découpant sur des délimiteurs connus et en utilisant des appels itérateurs `.next()` au lieu de collecter dans des Vecs.
 
 Le parseur utilise des itérateurs partout (`split(':')` -> `.next()`, `split('.')` -> `.next()`) pour éviter d'allouer des collections `Vec<&str>` intermédiaires.
 

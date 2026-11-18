@@ -6,7 +6,8 @@
 //! Timestamps follow AEMO's interval-ending convention: 14:35 covers 14:30
 //! to 14:35.
 
-use chrono::{DateTime, TimeDelta, Utc};
+use jiff::Timestamp;
+
 use serde::Deserialize;
 
 use super::scraper::{FeedError, check_value, parse_rfc3339};
@@ -41,7 +42,7 @@ const NETWORKS: [Network; 2] = [
 
 /// Rooftop solar lands up to an hour and a half behind the rest of the
 /// series on the WEM.
-const LOOKBACK: TimeDelta = TimeDelta::hours(3);
+const LOOKBACK: jiff::SignedDuration = jiff::SignedDuration::from_hours(3);
 /// Net storage and loads: counting them would count the same energy twice.
 const NOT_GENERATION: [&str; 3] = ["battery", "battery_charging", "pumps"];
 const ROOFTOP: &str = "solar_rooftop";
@@ -75,7 +76,7 @@ struct Columns {
 pub(super) fn requests<'a>(
     endpoint: &str,
     wanted: &[&'a str],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Vec<(String, Vec<&'a str>)> {
     NETWORKS
         .iter()
@@ -88,8 +89,9 @@ pub(super) fn requests<'a>(
             if zones.is_empty() {
                 return None;
             }
-            let start = (now + TimeDelta::hours(network.utc_offset_hours) - LOOKBACK)
-                .format("%Y-%m-%dT%H:%M:%S");
+            let start = (now + jiff::SignedDuration::from_hours(network.utc_offset_hours)
+                - LOOKBACK)
+                .strftime("%Y-%m-%dT%H:%M:%S");
             let url = format!(
                 "{endpoint}/data/network/{}?metrics=energy&metrics=emissions&interval=5m\
                  &primary_grouping=network_region&secondary_grouping=fueltech&date_start={start}",
@@ -103,7 +105,7 @@ pub(super) fn requests<'a>(
 /// Per region: emissions over generation at the newest interval rooftop
 /// solar covers, or the newest of any series when the region has none.
 /// Reading past it would leave rooftop out and overstate the intensity.
-pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, FeedError> {
+pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, Timestamp)>, FeedError> {
     let response: Response =
         serde_json::from_slice(body).map_err(|e| FeedError::Parse(e.to_string()))?;
     if !response.success {
@@ -153,7 +155,7 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
 /// The interval to read for one region's energy series.
 fn interval<'a>(
     energy: impl Iterator<Item = &'a SeriesResult>,
-) -> Result<Option<DateTime<Utc>>, FeedError> {
+) -> Result<Option<Timestamp>, FeedError> {
     let mut newest = None;
     for result in energy {
         let Some((raw, _)) = result.data.iter().rev().find(|(_, v)| v.is_some()) else {
@@ -168,7 +170,7 @@ fn interval<'a>(
     Ok(newest)
 }
 
-fn value_at(result: &SeriesResult, at: DateTime<Utc>) -> Result<Option<f64>, FeedError> {
+fn value_at(result: &SeriesResult, at: Timestamp) -> Result<Option<f64>, FeedError> {
     for (raw, value) in &result.data {
         if parse_rfc3339(raw, "data")? == at {
             return Ok(*value);
@@ -181,8 +183,8 @@ fn value_at(result: &SeriesResult, at: DateTime<Utc>) -> Result<Option<f64>, Fee
 mod tests {
     use super::*;
 
-    fn at(s: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    fn at(s: &str) -> Timestamp {
+        s.parse::<Timestamp>().unwrap()
     }
 
     /// Metric, region, fueltech and points of one series.

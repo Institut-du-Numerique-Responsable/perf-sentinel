@@ -8,8 +8,6 @@ mod extract;
 pub(crate) mod layout;
 pub(crate) mod logo;
 pub(crate) mod pages;
-
-use chrono::{Datelike, Timelike};
 use krilla::color::rgb;
 use krilla::configure::{Archival, ConfigurationBuilder};
 use krilla::embed::{AssociationKind, EmbeddedFile, MimeType};
@@ -573,8 +571,9 @@ pub(crate) fn embed(
 }
 
 /// A document's own date, never the clock, so a render is reproducible.
-pub(crate) fn pdf_date(at: chrono::DateTime<chrono::Utc>) -> DateTime {
-    let narrow = |v: u32| u8::try_from(v).expect("calendar fields fit in u8");
+pub(crate) fn pdf_date(at: jiff::Timestamp) -> DateTime {
+    let at = jiff::tz::Offset::UTC.to_datetime(at);
+    let narrow = |v: i8| u8::try_from(v).expect("calendar fields fit in u8");
     DateTime::new(u16::try_from(at.year()).unwrap_or(9999))
         .month(narrow(at.month()))
         .day(narrow(at.day()))

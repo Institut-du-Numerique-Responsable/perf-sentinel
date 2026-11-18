@@ -197,7 +197,7 @@ Presser `u` sur un finding acquitté ouvre une modale de confirmation.
 Identique à l'utilitaire ack du CLI (depuis 0.5.22) :
 
 - Vide : pas d'expiration, l'ack persiste jusqu'à révocation manuelle
-- `24h`, `7d`, `30m` : durée relative analysée par humantime
+- `24h`, `7d`, `30m`, `1w` : durée relative, un jour comptant 24 heures. Les mois et les années sont refusés, leur durée n'est pas fixe
 - `2026-05-11T00:00:00Z` : datetime ISO8601 absolu
 
 Une entrée invalide affiche `expires: <error>` en bas de la modale

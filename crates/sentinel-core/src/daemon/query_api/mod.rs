@@ -12,7 +12,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::ack::{self, AckAction, AckEntry, AckError, AckStore};
@@ -96,7 +96,7 @@ pub struct QueryApiState {
     /// CI-side TOML acks loaded at daemon startup. Read-only baseline,
     /// unioned with `ack_store` at query time. TOML wins on conflict.
     /// The `expires_at` string is pre-parsed at startup into a
-    /// [`ResolvedTomlAck`] so the hot query path does no chrono parse.
+    /// [`ResolvedTomlAck`] so the hot query path does no date parse.
     pub toml_acks: Arc<crate::daemon::ack_toml_state::AckTomlState>,
     /// Recorded incidents. `None` when `[daemon.incidents] enabled =
     /// false`, in which case both incident routes return 503.
@@ -381,7 +381,7 @@ struct AcksParams {
 struct AckRequest {
     by: Option<String>,
     reason: Option<String>,
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<Timestamp>,
 }
 
 /// CI TOML ack with its expiry pre-parsed at startup. Stored in
@@ -393,7 +393,7 @@ pub struct ResolvedTomlAck {
     pub inner: Acknowledgment,
     /// Pre-parsed expiry, end-of-day in UTC for the `YYYY-MM-DD` value.
     /// `None` means the ack never expires.
-    pub expires_at_dt: Option<DateTime<Utc>>,
+    pub expires_at_dt: Option<Timestamp>,
 }
 
 impl ResolvedTomlAck {
@@ -401,7 +401,7 @@ impl ResolvedTomlAck {
     /// daemon-side [`ack::is_expired`] predicate but adapted to the
     /// pre-parsed end-of-day datetime.
     #[must_use]
-    pub fn is_active(&self, now: DateTime<Utc>) -> bool {
+    pub fn is_active(&self, now: Timestamp) -> bool {
         self.expires_at_dt.is_none_or(|e| e >= now)
     }
 }
@@ -420,11 +420,16 @@ pub enum AckSource {
     },
     Daemon {
         by: String,
-        at: DateTime<Utc>,
+        #[serde(with = "crate::time::rfc3339_serde")]
+        at: Timestamp,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        expires_at: Option<DateTime<Utc>>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "crate::time::rfc3339_serde::option"
+        )]
+        expires_at: Option<Timestamp>,
     },
 }
 
@@ -461,8 +466,11 @@ enum AckListItem {
         /// The baseline's `acknowledged_at`, verbatim: the file never
         /// constrains its format.
         at: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        expires_at: Option<DateTime<Utc>>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "crate::time::rfc3339_serde::option::serialize"
+        )]
+        expires_at: Option<Timestamp>,
         source: &'static str,
     },
 }
@@ -512,16 +520,20 @@ struct StatusResponse {
 
 #[derive(Serialize)]
 struct DisclosureArchiveStatus {
-    oldest_day: chrono::NaiveDate,
+    oldest_day: jiff::civil::Date,
     days: u64,
-    last_closed_day: chrono::NaiveDate,
+    last_closed_day: jiff::civil::Date,
 }
 
 fn disclosure_archive_status(metrics: &MetricsState) -> Option<DisclosureArchiveStatus> {
     let days = u64::try_from(metrics.archive_rollup_days.get())
         .ok()
         .filter(|d| *d > 0)?;
-    let day = |seconds: i64| DateTime::from_timestamp(seconds, 0).map(|t| t.date_naive());
+    let day = |seconds: i64| {
+        jiff::Timestamp::from_second(seconds)
+            .ok()
+            .map(crate::time::utc_date)
+    };
     Some(DisclosureArchiveStatus {
         oldest_day: day(metrics.archive_oldest_day_seconds.get())?,
         days,
@@ -571,7 +583,7 @@ async fn handle_findings(
     // landing mid-filter must not leave the listing spanning two revisions of
     // the file, and re-loading per finding would pay an atomic refcount for it.
     let toml_snapshot = state.toml_acks.load();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let result: Vec<FindingResponse> = stored
         .into_iter()
         .filter_map(|s| {
@@ -625,7 +637,7 @@ pub(super) fn lookup_ack(
     signature: &str,
     toml: &HashMap<String, ResolvedTomlAck>,
     daemon: &HashMap<String, AckEntry>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Option<AckSource> {
     if let Some(t) = toml.get(signature)
         && t.is_active(now)
@@ -653,7 +665,7 @@ pub(super) fn lookup_ack(
 /// The active CI TOML baseline acks as listing rows, sorted by
 /// signature so a capped listing keeps the same rows from one read to
 /// the next.
-fn toml_ack_items(toml: &HashMap<String, ResolvedTomlAck>, now: DateTime<Utc>) -> Vec<AckListItem> {
+fn toml_ack_items(toml: &HashMap<String, ResolvedTomlAck>, now: Timestamp) -> Vec<AckListItem> {
     let mut active: Vec<(&String, &ResolvedTomlAck)> =
         toml.iter().filter(|(_, t)| t.is_active(now)).collect();
     active.sort_unstable_by_key(|(signature, _)| *signature);
@@ -1286,7 +1298,7 @@ async fn handle_ack(
     // TOML metadata in the response, leaving the operator confused
     // about which entry "took effect".
     if let Some(t) = state.toml_acks.load().get(&signature)
-        && t.is_active(Utc::now())
+        && t.is_active(Timestamp::now())
     {
         state
             .metrics
@@ -1302,7 +1314,7 @@ async fn handle_ack(
         signature,
         by,
         reason: body.reason,
-        at: Utc::now(),
+        at: Timestamp::now(),
         expires_at: body.expires_at,
     };
     match store.ack(entry).await {
@@ -1443,7 +1455,7 @@ async fn handle_list_acks(
             source: "daemon",
         })
         .collect();
-    all.extend(toml_ack_items(&state.toml_acks.load(), Utc::now()));
+    all.extend(toml_ack_items(&state.toml_acks.load(), Timestamp::now()));
     all.truncate(MAX_ACKS_RESPONSE);
     Ok(Json(all).into_response())
 }

@@ -547,12 +547,12 @@ impl IncidentSlim {
 pub(crate) fn fmt_local_time(ms: u64) -> String {
     i64::try_from(ms)
         .ok()
-        .and_then(chrono::DateTime::from_timestamp_millis)
+        .and_then(|ms| jiff::Timestamp::from_millisecond(ms).ok())
         .map_or_else(
             || ms.to_string(),
             |t| {
-                crate::render::to_local(&t)
-                    .format(LOCAL_TIME_FORMAT)
+                crate::render::to_local(t)
+                    .strftime(LOCAL_TIME_FORMAT)
                     .to_string()
             },
         )

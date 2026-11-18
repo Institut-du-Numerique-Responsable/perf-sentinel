@@ -785,8 +785,8 @@ fn cap_detail(raw: &str) -> String {
 /// parser, kept strict for the hot path, would refuse every alert from a
 /// non-UTC deployment.
 fn parse_rfc3339_ms(raw: &str) -> Option<u64> {
-    let stamp = chrono::DateTime::parse_from_rfc3339(raw.trim()).ok()?;
-    u64::try_from(stamp.timestamp_millis()).ok()
+    let stamp: jiff::Timestamp = raw.trim().parse().ok()?;
+    u64::try_from(stamp.as_millisecond()).ok()
 }
 
 #[cfg(test)]

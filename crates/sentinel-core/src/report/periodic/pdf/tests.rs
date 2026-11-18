@@ -235,7 +235,6 @@ fn exit_contract_reasons() {
 }
 
 mod layout_and_pages {
-    use chrono::NaiveDate;
 
     use super::super::layout::{Face, group4, text_width, wrap};
     use super::super::pages::{Op, PageContext, layout_pages};
@@ -1031,15 +1030,15 @@ mod layout_and_pages {
     fn the_cover_title_names_the_period_once() {
         let (mut report, _) = baked_report();
         report.period.period_type = PeriodType::CalendarMonth;
-        report.period.from_date = NaiveDate::from_ymd_opt(2026, 3, 1).expect("date");
-        report.period.to_date = NaiveDate::from_ymd_opt(2026, 3, 31).expect("date");
+        report.period.from_date = jiff::civil::date(2026, 3, 1);
+        report.period.to_date = jiff::civil::date(2026, 3, 31);
         let cover = page_text(&layout_pages(&PageContext::for_report(&report))[0]);
         assert!(!cover.contains("March to March"), "{cover}");
         assert!(cover.contains("March 2026"), "{cover}");
 
         report.period.period_type = PeriodType::Custom;
-        report.period.from_date = NaiveDate::from_ymd_opt(2025, 11, 1).expect("date");
-        report.period.to_date = NaiveDate::from_ymd_opt(2026, 1, 31).expect("date");
+        report.period.from_date = jiff::civil::date(2025, 11, 1);
+        report.period.to_date = jiff::civil::date(2026, 1, 31);
         let cover = page_text(&layout_pages(&PageContext::for_report(&report))[0]);
         assert!(cover.contains("November 2025 to January 2026"), "{cover}");
         assert!(

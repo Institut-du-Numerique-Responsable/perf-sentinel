@@ -67,7 +67,8 @@
 //! `placements`, and the CPU-interpolated bucket (`modeled_energy_kwh`,
 //! `modeled_windows`).
 
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::Timestamp;
+use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -189,7 +190,8 @@ pub struct ReportMetadata {
     pub intent: ReportIntent,
     pub confidentiality_level: Confidentiality,
     pub integrity_level: IntegrityLevel,
-    pub generated_at: DateTime<Utc>,
+    #[serde(with = "crate::time::rfc3339_serde")]
+    pub generated_at: Timestamp,
     pub generated_by: String,
     pub perf_sentinel_version: String,
     pub report_uuid: Uuid,
@@ -227,8 +229,8 @@ pub struct OrgIdentifiers {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Period {
-    pub from_date: NaiveDate,
-    pub to_date: NaiveDate,
+    pub from_date: Date,
+    pub to_date: Date,
     pub period_type: PeriodType,
     pub days_covered: u32,
 }
@@ -788,8 +790,10 @@ pub struct AntiPatternDetail {
     pub occurrences: u64,
     pub estimated_waste_kwh: f64,
     pub estimated_waste_kgco2eq: f64,
-    pub first_seen: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
+    #[serde(with = "crate::time::rfc3339_serde")]
+    pub first_seen: Timestamp,
+    #[serde(with = "crate::time::rfc3339_serde")]
+    pub last_seen: Timestamp,
     /// RGESN 2024 criteria this anti-pattern relates to (interpretive
     /// crosswalk, see `docs/METHODOLOGY.md`). Empty for `slow_*` (no direct
     /// criterion). Absent on pre-v1.3 reports.
@@ -952,9 +956,7 @@ mod tests {
             intent: ReportIntent::Internal,
             confidentiality_level: Confidentiality::Internal,
             integrity_level: IntegrityLevel::HashOnly,
-            generated_at: DateTime::parse_from_rfc3339("2026-04-01T00:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
+            generated_at: "2026-04-01T00:00:00Z".parse::<jiff::Timestamp>().unwrap(),
             generated_by: "cli-batch".to_string(),
             perf_sentinel_version: "0.6.2".to_string(),
             report_uuid: Uuid::nil(),
@@ -976,8 +978,8 @@ mod tests {
 
     fn sample_period() -> Period {
         Period {
-            from_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-            to_date: NaiveDate::from_ymd_opt(2026, 3, 31).unwrap(),
+            from_date: jiff::civil::date(2026, 1, 1),
+            to_date: jiff::civil::date(2026, 3, 31),
             period_type: PeriodType::CalendarQuarter,
             days_covered: 90,
         }
@@ -1094,12 +1096,8 @@ mod tests {
                 occurrences: 12,
                 estimated_waste_kwh: 0.05,
                 estimated_waste_kgco2eq: 0.006,
-                first_seen: DateTime::parse_from_rfc3339("2026-01-04T10:00:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
-                last_seen: DateTime::parse_from_rfc3339("2026-03-29T18:00:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
+                first_seen: "2026-01-04T10:00:00Z".parse::<jiff::Timestamp>().unwrap(),
+                last_seen: "2026-03-29T18:00:00Z".parse::<jiff::Timestamp>().unwrap(),
                 rgesn_criteria: Vec::new(),
             }],
         }
@@ -1471,12 +1469,8 @@ mod tests {
             occurrences: 1,
             estimated_waste_kwh: 0.0,
             estimated_waste_kgco2eq: 0.0,
-            first_seen: DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
-            last_seen: DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
+            first_seen: "2026-01-01T00:00:00Z".parse::<jiff::Timestamp>().unwrap(),
+            last_seen: "2026-01-01T00:00:00Z".parse::<jiff::Timestamp>().unwrap(),
             rgesn_criteria: Vec::new(),
         };
         let json = serde_json::to_value(&detail).unwrap();

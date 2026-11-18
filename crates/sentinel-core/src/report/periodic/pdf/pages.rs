@@ -5,8 +5,6 @@
 
 use serde::Serialize;
 
-use chrono::Datelike as _;
-
 use super::annex;
 use super::layout::{Face, fit, group4, text_width, wrap};
 use super::{PAGE_HEIGHT, PAGE_WIDTH};
@@ -532,14 +530,14 @@ fn period_label(report: &PeriodicReport) -> String {
         PeriodType::CalendarQuarter => {
             let month: u32 = period
                 .from_date
-                .format("%m")
+                .strftime("%m")
                 .to_string()
                 .parse()
                 .unwrap_or(1);
-            format!("{} Q{}", period.from_date.format("%Y"), month.div_ceil(3))
+            format!("{} Q{}", period.from_date.strftime("%Y"), month.div_ceil(3))
         }
-        PeriodType::CalendarMonth => period.from_date.format("%B %Y").to_string(),
-        PeriodType::CalendarYear => period.from_date.format("%Y").to_string(),
+        PeriodType::CalendarMonth => period.from_date.strftime("%B %Y").to_string(),
+        PeriodType::CalendarYear => period.from_date.strftime("%Y").to_string(),
         PeriodType::Custom => format!("{} to {}", period.from_date, period.to_date),
     }
 }
@@ -607,8 +605,8 @@ fn cover(w: &mut Writer, context: &PageContext<'_>, verify_page: usize) {
     let subtitle = format!(
         "{}, {} to {}, {} days. Measured by Perf Sentinel {}.",
         capitalised(&wire(&period.period_type).replace('-', " ")),
-        period.from_date.format(from),
-        period.to_date.format("%-d %B %Y"),
+        period.from_date.strftime(from),
+        period.to_date.strftime("%-d %B %Y"),
         period.days_covered,
         metadata.perf_sentinel_version
     );
@@ -633,11 +631,11 @@ fn cover(w: &mut Writer, context: &PageContext<'_>, verify_page: usize) {
 fn period_span(period: &Period) -> String {
     let (from, to) = (period.from_date, period.to_date);
     if from.year() != to.year() {
-        format!("{} to {}", from.format("%B %Y"), to.format("%B %Y"))
+        format!("{} to {}", from.strftime("%B %Y"), to.strftime("%B %Y"))
     } else if from.month() == to.month() {
-        to.format("%B %Y").to_string()
+        to.strftime("%B %Y").to_string()
     } else {
-        format!("{} to {}", from.format("%B"), to.format("%B %Y"))
+        format!("{} to {}", from.strftime("%B"), to.strftime("%B %Y"))
     }
 }
 
@@ -849,7 +847,7 @@ fn proof_block(w: &mut Writer, report: &PeriodicReport, verify_page: usize) {
             report
                 .report_metadata
                 .generated_at
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                .strftime("%Y-%m-%dT%H:%M:%SZ")
         ),
     );
     if let Some(signature) = report.integrity.signature.as_ref() {

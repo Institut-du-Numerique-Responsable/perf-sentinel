@@ -1941,7 +1941,7 @@ async fn process_traces(
             disclosure_waste,
         };
         let archive = super::archive::OwnedArchive {
-            ts: chrono::Utc::now(),
+            ts: jiff::Timestamp::now(),
             report,
         };
         super::archive::try_send(archive_tx, archive, ctx.metrics);

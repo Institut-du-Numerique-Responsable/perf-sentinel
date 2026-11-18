@@ -3,7 +3,9 @@
 //! that day's windows, so a quarter is 92 lines instead of 500,000. See
 //! `docs/design/08-PERIODIC-DISCLOSURE.md`.
 
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::Timestamp;
+
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use super::aggregator::PeriodState;
@@ -18,8 +20,8 @@ pub(crate) const ROLLUP_FORMAT: &str = "perf-sentinel-rollup/v1";
 #[cfg(any(feature = "daemon", test))]
 /// `<stem>-daily-YYYY-MM.ndjson`: one file per month, so retention deletes
 /// whole files and never rewrites a chained one.
-pub(crate) fn rollup_file_name(stem: &str, day: NaiveDate) -> String {
-    format!("{stem}-daily-{}.ndjson", day.format("%Y-%m"))
+pub(crate) fn rollup_file_name(stem: &str, day: Date) -> String {
+    format!("{stem}-daily-{}.ndjson", day.strftime("%Y-%m"))
 }
 
 /// The `(stem, year, month)` a rollup file name encodes.
@@ -45,9 +47,9 @@ pub(crate) fn partial_file_name(stem: &str) -> String {
 #[cfg(any(feature = "daemon", test))]
 /// One UTC day's windows, folded.
 pub(crate) struct ClosedDay {
-    pub day: NaiveDate,
-    pub first_ts: DateTime<Utc>,
-    pub last_ts: DateTime<Utc>,
+    pub day: Date,
+    pub first_ts: Timestamp,
+    pub last_ts: Timestamp,
     pub state: PeriodState,
 }
 
@@ -65,8 +67,8 @@ impl DayAccumulator {
     /// in either direction: a clock stepped back across midnight closes it
     /// too, and the earlier day gets a second line that merges with its
     /// first.
-    pub(crate) fn observe(&mut self, ts: DateTime<Utc>, report: &Report) -> Option<ClosedDay> {
-        let day = ts.date_naive();
+    pub(crate) fn observe(&mut self, ts: Timestamp, report: &Report) -> Option<ClosedDay> {
+        let day = crate::time::utc_date(ts);
         let closed = self.open.take_if(|open| open.day != day);
         let open = self.open.get_or_insert_with(|| ClosedDay {
             day,
@@ -97,9 +99,9 @@ impl DayAccumulator {
 fn body(day: &ClosedDay) -> serde_json::Value {
     serde_json::json!({
         "format": ROLLUP_FORMAT,
-        "ts": day.first_ts,
+        "ts": crate::time::rfc3339(day.first_ts),
         "day": day.day,
-        "last_ts": day.last_ts,
+        "last_ts": crate::time::rfc3339(day.last_ts),
         "state": &day.state,
     })
 }
@@ -157,9 +159,9 @@ pub(crate) fn is_rollup_value(value: &serde_json::Value) -> bool {
 /// read by the chain walk on the raw value.
 #[derive(Deserialize)]
 pub(crate) struct RollupLine {
-    pub ts: DateTime<Utc>,
-    pub day: NaiveDate,
-    pub last_ts: DateTime<Utc>,
+    pub ts: Timestamp,
+    pub day: Date,
+    pub last_ts: Timestamp,
     pub state: PeriodState,
 }
 
@@ -167,10 +169,9 @@ pub(crate) struct RollupLine {
 mod tests {
     use super::*;
     use crate::report::Report;
-    use chrono::TimeZone;
 
-    fn at(d: u32, h: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 1, d, h, 0, 0).unwrap()
+    fn at(d: i8, h: i8) -> Timestamp {
+        crate::time::utc(2026, 1, d, h, 0, 0)
     }
 
     fn window() -> Report {
@@ -186,10 +187,10 @@ mod tests {
         assert!(acc.observe(at(10, 9), &window()).is_none());
         assert!(acc.observe(at(10, 23), &window()).is_none());
         let closed = acc.observe(at(11, 0), &window()).unwrap();
-        assert_eq!(closed.day, at(10, 0).date_naive());
+        assert_eq!(closed.day, crate::time::utc_date(at(10, 0)));
         assert_eq!((closed.first_ts, closed.last_ts), (at(10, 9), at(10, 23)));
         assert_eq!(closed.state.windows_aggregated(), 2);
-        assert_eq!(acc.peek().unwrap().day, at(11, 0).date_naive());
+        assert_eq!(acc.peek().unwrap().day, crate::time::utc_date(at(11, 0)));
     }
 
     #[test]
@@ -198,14 +199,14 @@ mod tests {
         acc.observe(at(10, 23), &window());
         let first = acc.observe(at(11, 0), &window()).unwrap();
         let second = acc.observe(at(10, 23), &window()).unwrap();
-        assert_eq!(first.day, at(10, 0).date_naive());
-        assert_eq!(second.day, at(11, 0).date_naive());
-        assert_eq!(acc.take().unwrap().day, at(10, 0).date_naive());
+        assert_eq!(first.day, crate::time::utc_date(at(10, 0)));
+        assert_eq!(second.day, crate::time::utc_date(at(11, 0)));
+        assert_eq!(acc.take().unwrap().day, crate::time::utc_date(at(10, 0)));
     }
 
     #[test]
     fn rollup_file_names_round_trip() {
-        let name = rollup_file_name("archive", at(9, 0).date_naive());
+        let name = rollup_file_name("archive", crate::time::utc_date(at(9, 0)));
         assert_eq!(name, "archive-daily-2026-01.ndjson");
         assert_eq!(parse_rollup_file_name(&name), Some(("archive", 2026, 1)));
         assert_eq!(

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::Utc;
+use jiff::Timestamp;
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::Duration;
 
@@ -347,7 +347,7 @@ fn load_toml_acks(toml_path: &Path, configured: bool) -> Result<TomlAckLoad, Dae
             return Ok(TomlAckLoad::Unreadable);
         }
     };
-    let now = Utc::now();
+    let now = Timestamp::now();
     let toml_acks: HashMap<_, _> = file
         .acknowledged
         .into_iter()
@@ -390,11 +390,10 @@ async fn init_store(config: &Config) -> Result<Arc<AckStore>, (ack::AckError, Op
     }
 }
 
-fn parse_expires_at_end_of_day(value: Option<&str>) -> Option<chrono::DateTime<Utc>> {
+fn parse_expires_at_end_of_day(value: Option<&str>) -> Option<Timestamp> {
     let raw = value?;
-    let date = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d").ok()?;
-    let end_of_day = date.and_hms_opt(23, 59, 59)?;
-    Some(end_of_day.and_utc())
+    let date = jiff::civil::Date::strptime("%Y-%m-%d", raw).ok()?;
+    Some(crate::time::utc_end_of_day(date))
 }
 
 /// Assemble the OTLP HTTP + metrics + optional query API router, with the

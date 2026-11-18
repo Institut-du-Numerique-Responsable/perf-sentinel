@@ -1,7 +1,7 @@
 //! REE e·sios (Spain): indicator 10355, CO2 of peninsular generation in
 //! real time, every 5 minutes, behind a free personal token.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 
 use super::scraper::{FeedError, check_value, parse_rfc3339};
@@ -12,7 +12,7 @@ pub(super) const ACCEPT: &str = "application/json; application/vnd.esios-api-v1+
 const PENINSULA: u32 = 8741;
 const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%SZ";
 /// Enough points to tell a stalled indicator from an empty one.
-const LOOKBACK: chrono::TimeDelta = chrono::TimeDelta::hours(3);
+const LOOKBACK: jiff::SignedDuration = jiff::SignedDuration::from_hours(3);
 
 #[derive(Deserialize)]
 struct Response {
@@ -33,18 +33,18 @@ struct Point {
 
 /// The last three hours up to now. Moving bounds also miss the CDN cache,
 /// which answers cached URLs without checking the token.
-pub(super) fn url(endpoint: &str, now: DateTime<Utc>) -> String {
-    let from = (now - LOOKBACK).format(TIME_FORMAT);
-    let to = now.format(TIME_FORMAT);
+pub(super) fn url(endpoint: &str, now: Timestamp) -> String {
+    let from = (now - LOOKBACK).strftime(TIME_FORMAT);
+    let to = now.strftime(TIME_FORMAT);
     format!("{endpoint}/indicators/10355?start_date={from}&end_date={to}")
 }
 
 /// The newest peninsular point. The unit reads `tCO2/MW` but the value is
 /// tCO2 per `MWh` generated, so times 1000 gives gCO2/kWh.
-pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, FeedError> {
+pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, Timestamp)>, FeedError> {
     let response: Response =
         serde_json::from_slice(body).map_err(|e| FeedError::Parse(e.to_string()))?;
-    let mut latest: Option<(f64, DateTime<Utc>)> = None;
+    let mut latest: Option<(f64, Timestamp)> = None;
     for point in response.indicator.values {
         // e·sios writes 0 for a missing point, never a carbon-free grid.
         let Some(value) = point.value.filter(|v| *v > 0.0) else {
@@ -70,8 +70,8 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<(String, f64, DateTime<Utc>)>, Fe
 mod tests {
     use super::*;
 
-    fn at(s: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    fn at(s: &str) -> Timestamp {
+        s.parse::<Timestamp>().unwrap()
     }
 
     /// Live answer, 2026-10-20 13:00 UTC, earlier points elided.
