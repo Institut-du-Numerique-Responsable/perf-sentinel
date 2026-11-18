@@ -188,7 +188,7 @@
 <p class="ps-p">Identique à l'utilitaire ack du CLI (depuis 0.5.22) :</p>
 <ul>
 <li>Vide : pas d'expiration, l'ack persiste jusqu'à révocation manuelle</li>
-<li><code class="ps-ic">24h</code>, <code class="ps-ic">7d</code>, <code class="ps-ic">30m</code> : durée relative analysée par humantime</li>
+<li><code class="ps-ic">24h</code>, <code class="ps-ic">7d</code>, <code class="ps-ic">30m</code>, <code class="ps-ic">1w</code> : durée relative, un jour comptant 24 heures. Les mois et les années sont refusés, leur durée n'est pas fixe</li>
 <li><code class="ps-ic">2026-05-11T00:00:00Z</code> : datetime ISO8601 absolu</li>
 </ul>
 <p class="ps-p">Une entrée invalide affiche <code class="ps-ic">expires: &lt;error&gt;</code> en bas de la modale sans envoyer la requête.</p>

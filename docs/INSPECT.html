@@ -188,7 +188,7 @@
 <p class="ps-p">Mirrors the CLI ack helper (since 0.5.22):</p>
 <ul>
 <li>Empty: no expiration, ack persists until manually revoked</li>
-<li><code class="ps-ic">24h</code>, <code class="ps-ic">7d</code>, <code class="ps-ic">30m</code>: relative duration parsed by humantime</li>
+<li><code class="ps-ic">24h</code>, <code class="ps-ic">7d</code>, <code class="ps-ic">30m</code>, <code class="ps-ic">1w</code>: relative duration, a day counting 24 hours. Months and years are refused, they have no fixed length</li>
 <li><code class="ps-ic">2026-05-11T00:00:00Z</code>: ISO8601 absolute datetime</li>
 </ul>
 <p class="ps-p">Invalid input shows <code class="ps-ic">expires: &lt;error&gt;</code> in the modal footer without sending the request.</p>
