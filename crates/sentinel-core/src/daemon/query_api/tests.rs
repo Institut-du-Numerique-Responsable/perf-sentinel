@@ -2367,7 +2367,7 @@ fn tuning_advisor_flags_pair_evictions_only_when_correlation_enabled() {
 fn tuning_advisor_flags_events_dropped_at_the_per_trace_cap() {
     let metrics = MetricsState::new();
     let daemon = crate::config::DaemonConfig::default();
-    assert!(tuning_messages(&metrics, &daemon).is_empty());
+    assert_eq!(tuning_messages(&metrics, &daemon), Vec::<String>::new());
 
     metrics.trace_events_dropped_total.inc_by(250);
     let msgs = tuning_messages(&metrics, &daemon);
