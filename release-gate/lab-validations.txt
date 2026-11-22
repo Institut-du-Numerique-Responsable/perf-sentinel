@@ -830,3 +830,10 @@ v0.46.0	493ef99	2026-11-18	PASS
 # (5/5), disclose-archive-family-baseline, archive-integrity-chain (6 cases),
 # chart-disclose-persistence, on perf-sentinel:0.46.0-092f5333. All PASS.
 v0.46.0	493ef99	2026-11-18	PASS
+
+# v0.47.0 targeted pass on perf-sentinel:0.47.0-4c08878a (per-trace drop
+# counter): limit-trace-shapes (1500 events dropped at cap 1000, counted
+# exactly, tuning warning present, 0.46.0 control fails on the absent
+# counter), limit-multi-source, limit-service-cardinality, query-monitor-api,
+# smoke. All PASS.
+v0.47.0	cb2877b	2026-11-22	PASS
