@@ -1387,8 +1387,8 @@ Each `days` object:
 | `thresholds`            | object  | The thresholds the daemon applied, constant for a `ledger_id`, see below                       |
 | `avoidable_gco2`        | number  | Avoidable CO₂ of the day's analyzed batches, in gCO₂eq: the operational estimate of `green_summary.co2.avoidable.mid`. Absent when green scoring is off, no batch resolved a region or no batch brought it |
 | `avoidable_gco2_low`    | number  | The low bound of the same estimate (`green_summary.co2.avoidable.low`), for a conservative "at least" figure |
-| `avoidable_io_ops`      | number  | Avoidable I/O of the same batches, deduplicated per batch like `green_summary.avoidable_io_ops` |
-| `total_io_ops`          | number  | Total I/O of the same batches (`green_summary.total_io_ops`). `avoidable_io_ops / total_io_ops` is the day's waste ratio, which does not move with traffic the way an absolute volume does |
+| `avoidable_io_ops`      | number  | Avoidable I/O of the same batches whose spans resolved a region, the population `avoidable_gco2` covers, deduplicated per batch like `green_summary.avoidable_io_ops` (equal to it when every span resolves a region) |
+| `total_io_ops`          | number  | Total I/O of the same batches whose spans resolved a region (`green_summary.total_io_ops` when every span does). `avoidable_io_ops / total_io_ops` is the day's waste ratio, which does not move with traffic the way an absolute volume does |
 
 The four carbon fields are present together or absent together. Their
 ratio, `avoidable_gco2 / avoidable_io_ops`, is the day's grams per

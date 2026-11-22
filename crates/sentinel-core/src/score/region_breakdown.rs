@@ -316,8 +316,9 @@ fn select_proxy_co2_model_tag(
 /// Units-neutral and shared by [`finalize_carbon_report`],
 /// `GreenSummary::avoidable_energy_kwh` and the canonical-disclosure rescale
 /// (`score::canonical`) so the operational and canonical avoidable figures
-/// cannot drift on the formula. The clamp guards the pathological case where
-/// avoidable ops from unknown-region spans exceed the accounted denominator.
+/// cannot drift on the formula. Callers pass the accounted avoidable ops, the
+/// ones whose spans resolved a region, so both sides of the ratio cover the
+/// same spans. The clamp stays as a guard.
 #[must_use]
 pub(crate) fn avoidable_share(
     window_total: f64,
@@ -356,8 +357,8 @@ pub(super) fn finalize_carbon_report(
     // themselves as total_mid / traces.len() if needed.
     let total_mid = operational_gco2 + embodied_gco2 + total_transport_gco2;
 
-    // Avoidable CO₂ via region-blind ratio. Denominator excludes the
-    // unknown bucket (operational_gco2 already excludes it, so we match).
+    // Avoidable CO₂ via region-blind ratio. Numerator and denominator both
+    // exclude the unknown bucket (operational_gco2 already excludes it).
     // Embodied is NOT included in avoidable: hardware emissions are fixed
     // regardless of whether the application does N+1 queries.
     let accounted_io_ops = total_io_ops.saturating_sub(unknown_ops);

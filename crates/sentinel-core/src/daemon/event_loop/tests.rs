@@ -410,8 +410,15 @@ async fn ledger_accumulates_the_batch_avoidable_carbon() {
     assert_eq!(row.avoidable_gco2, Some(co2.avoidable.mid));
     assert!(row.avoidable_gco2.unwrap() > 0.0);
     assert_eq!(row.avoidable_gco2_low, Some(co2.avoidable.low));
-    assert_eq!(row.avoidable_io_ops, Some(live.avoidable_io_ops as u64));
-    assert_eq!(row.total_io_ops, Some(live.total_io_ops as u64));
+    // The region-resolved pair `avoidable.mid` is computed over, the same
+    // as the raw counts here since every span resolves a region.
+    assert_eq!(
+        row.avoidable_io_ops,
+        Some(live.accounted_avoidable_io_ops as u64)
+    );
+    assert_eq!(row.total_io_ops, Some(live.accounted_io_ops as u64));
+    assert_eq!(live.accounted_avoidable_io_ops, live.avoidable_io_ops);
+    assert_eq!(live.accounted_io_ops, live.total_io_ops);
 }
 
 #[tokio::test]

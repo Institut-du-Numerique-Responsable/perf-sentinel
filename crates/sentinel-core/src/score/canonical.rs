@@ -15,8 +15,9 @@ use crate::report::{AvoidableTier, DisclosureDbWaste, DisclosureWaste, GreenSumm
 use crate::score::host_static::HostPlacement;
 
 use super::AvoidableIoOps;
-use super::dedup_avoidable_io_ops_by_service;
+use super::UnaccountedSpans;
 use super::region_breakdown::avoidable_share;
+use super::{accounted_avoidable_io_ops, dedup_avoidable_io_ops_by_service};
 
 /// Re-run N+1 at [`DISCLOSURE_N_PLUS_ONE_THRESHOLD`] (then redundant against
 /// that set) over every trace, and dedup the avoidable I/O ops (total and
@@ -26,7 +27,8 @@ use super::region_breakdown::avoidable_share;
 pub(crate) fn compute_canonical_avoidable(
     traces: &[Trace],
     detect_config: &DetectConfig,
-) -> AvoidableIoOps {
+    unaccounted: &UnaccountedSpans,
+) -> (AvoidableIoOps, usize) {
     let mut findings = Vec::new();
     for trace in traces {
         let mut n1 = n_plus_one::detect_n_plus_one(
@@ -40,7 +42,13 @@ pub(crate) fn compute_canonical_avoidable(
         findings.append(&mut n1);
         findings.append(&mut redundant);
     }
-    dedup_avoidable_io_ops_by_service(&findings).0
+    let ops = dedup_avoidable_io_ops_by_service(&findings).0;
+    let accounted = if unaccounted.is_empty() {
+        ops.total
+    } else {
+        accounted_avoidable_io_ops(&findings, unaccounted)
+    };
+    (ops, accounted)
 }
 
 /// Build both avoidable tiers from the scored operational [`GreenSummary`]
@@ -64,7 +72,8 @@ pub(crate) fn compute_disclosure_waste(
     let operational_gco2 = operational.co2.as_ref().map_or(0.0, |r| r.operational_gco2);
     let operational_avoidable_gco2 = operational.co2.as_ref().map_or(0.0, |r| r.avoidable.mid);
 
-    let canonical = compute_canonical_avoidable(traces, detect_config);
+    let (canonical, canonical_accounted) =
+        compute_canonical_avoidable(traces, detect_config, &operational.unaccounted_spans);
     let canonical_io = canonical.total;
     let database = build_db_waste_tiers(operational, canonical.sql);
     let messaging = build_msg_waste_tiers(operational, canonical.messaging);
@@ -74,9 +83,9 @@ pub(crate) fn compute_disclosure_waste(
         canonical: AvoidableTier {
             n_plus_one_threshold: DISCLOSURE_N_PLUS_ONE_THRESHOLD,
             avoidable_io_ops: canonical_io,
-            avoidable_kwh: avoidable_share(app_energy, canonical_io, accounted)
+            avoidable_kwh: avoidable_share(app_energy, canonical_accounted, accounted)
                 + hosts.canonical_kwh,
-            avoidable_gco2: avoidable_share(operational_gco2, canonical_io, accounted)
+            avoidable_gco2: avoidable_share(operational_gco2, canonical_accounted, accounted)
                 + hosts.canonical_gco2,
         },
         operational: AvoidableTier {
@@ -213,8 +222,9 @@ mod tests {
     fn canonical_avoidable_independent_of_operational_threshold() {
         let traces = vec![make_trace(make_n_plus_one_events())];
 
-        let low = compute_canonical_avoidable(&traces, &detect_config(2));
-        let high = compute_canonical_avoidable(&traces, &detect_config(50));
+        let none = UnaccountedSpans::new();
+        let (low, low_accounted) = compute_canonical_avoidable(&traces, &detect_config(2), &none);
+        let (high, _) = compute_canonical_avoidable(&traces, &detect_config(50), &none);
 
         assert_eq!(
             low, high,
@@ -222,6 +232,26 @@ mod tests {
         );
         assert_eq!(low.total, 5);
         assert_eq!(low.sql, 5);
+        assert_eq!(low_accounted, 5);
+    }
+
+    /// The canonical numerator leaves out the ops of a `(trace, service)` pair
+    /// with no region, while the count keeps them. Another service of the
+    /// same trace takes nothing out.
+    #[test]
+    fn canonical_accounted_leaves_out_ops_with_no_region() {
+        let traces = vec![make_trace(make_n_plus_one_events())];
+        let unaccounted =
+            UnaccountedSpans::from([("trace-1".to_string(), ["order-svc".to_string()].into())]);
+        let (ops, accounted) =
+            compute_canonical_avoidable(&traces, &detect_config(50), &unaccounted);
+        assert_eq!(ops.total, 5);
+        assert_eq!(accounted, 0);
+
+        let other =
+            UnaccountedSpans::from([("trace-1".to_string(), ["billing-svc".to_string()].into())]);
+        let (_, accounted) = compute_canonical_avoidable(&traces, &detect_config(50), &other);
+        assert_eq!(accounted, 5);
     }
 
     /// With the operator threshold at 50 the operational tier sees zero
@@ -331,6 +361,7 @@ mod tests {
             total_io_ops: 10,
             avoidable_io_ops: 6,
             accounted_io_ops: 10,
+            accounted_avoidable_io_ops: 6,
             total_sql_io_ops: 6,
             total_messaging_io_ops: 4,
             // 2.0 kWh of services plus both hosts.

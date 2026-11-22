@@ -1444,8 +1444,8 @@ Chaque objet de `days` :
 | `thresholds`            | object  | Les seuils appliqués par le daemon, constants pour un `ledger_id`, voir plus bas             |
 | `avoidable_gco2`        | number  | CO₂ évitable des lots analysés du jour, en gCO₂eq : l'estimation opérationnelle de `green_summary.co2.avoidable.mid`. Absent quand le scoring green est coupé, qu'aucun lot n'a résolu de région ou qu'aucun lot ne l'a apporté |
 | `avoidable_gco2_low`    | number  | La borne basse de la même estimation (`green_summary.co2.avoidable.low`), pour un chiffre prudent de type "au moins" |
-| `avoidable_io_ops`      | number  | I/O évitables des mêmes lots, dédupliquées par lot comme `green_summary.avoidable_io_ops` |
-| `total_io_ops`          | number  | I/O totales des mêmes lots (`green_summary.total_io_ops`). `avoidable_io_ops / total_io_ops` est le ratio de gaspillage du jour, qui ne bouge pas avec le trafic comme un volume absolu |
+| `avoidable_io_ops`      | number  | I/O évitables des mêmes lots dont les spans ont résolu une région, la population que couvre `avoidable_gco2`, dédupliquées par lot comme `green_summary.avoidable_io_ops` (égales à celui-ci quand chaque span résout une région) |
+| `total_io_ops`          | number  | I/O totales des mêmes lots dont les spans ont résolu une région (`green_summary.total_io_ops` quand chaque span en résout une). `avoidable_io_ops / total_io_ops` est le ratio de gaspillage du jour, qui ne bouge pas avec le trafic comme un volume absolu |
 
 Les quatre champs carbone sont présents ensemble ou absents ensemble.
 Leur rapport, `avoidable_gco2 / avoidable_io_ops`, donne les grammes par

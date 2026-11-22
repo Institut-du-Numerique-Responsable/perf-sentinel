@@ -5,9 +5,10 @@
 //! this module is a per-span helper that keeps the hot loop in
 //! [`process_span_for_carbon`] readable.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::correlate::Trace;
+use crate::detect::Finding;
 
 use super::carbon::{
     CarbonContext, CarbonReport, ENERGY_PER_IO_OP_KWH, GENERIC_PUE, IntensitySource,
@@ -20,6 +21,11 @@ use super::region_breakdown::{
     RegionAccumulator, build_region_breakdowns, finalize_carbon_report, select_co2_model_tag,
     sort_regions_by_co2_desc,
 };
+
+/// `trace_id` to the services of that trace with a span left in the unknown
+/// bucket (no region, or folded by the region cap). Their avoidable ops sit
+/// outside `accounted_io_ops`, so the avoidable numerator leaves them out too.
+pub(crate) type UnaccountedSpans = BTreeMap<String, BTreeSet<String>>;
 
 /// Maximum number of distinct regions allowed in a single scoring pass.
 ///
@@ -38,6 +44,8 @@ struct CarbonRunState {
     per_region: BTreeMap<String, RegionAccumulator>,
     per_service: BTreeMap<String, ServiceCarbonAccumulator>,
     unknown_ops: usize,
+    /// The `(trace, service)` pairs behind `unknown_ops`, see [`UnaccountedSpans`].
+    unaccounted: UnaccountedSpans,
     overflow_warned: bool,
     total_transport_gco2: f64,
     multi_region_active: bool,
@@ -140,6 +148,13 @@ pub(super) struct CarbonComputeOutputs {
     /// surfaced so the disclosure path can rescale avoidable at a
     /// canonical threshold without a second carbon pass.
     pub accounted_io_ops: usize,
+    /// The avoidable ops whose spans resolved a region: the numerator
+    /// `accounted_io_ops` is paired with, so a service with no region cannot
+    /// charge its waste to the energy of the services that have one.
+    pub accounted_avoidable_io_ops: usize,
+    /// The `(trace, service)` pairs left out of both, for the canonical
+    /// disclosure tier. Empty when every span resolved a region, or none did.
+    pub unaccounted: UnaccountedSpans,
     /// Energy of the window's region-resolved SQL spans.
     pub sql_energy_kwh: f64,
     /// Operational gCO₂ of the region-resolved SQL spans.
@@ -157,6 +172,7 @@ pub(super) fn compute_carbon_report(
     traces: &[Trace],
     ctx: &CarbonContext,
     total_io_ops: usize,
+    findings: &[Finding],
     avoidable_io_ops: usize,
 ) -> CarbonComputeOutputs {
     // Multi-region flag seeded from config, then updated from span
@@ -179,6 +195,8 @@ pub(super) fn compute_carbon_report(
             window_model: "",
             calibrated: false,
             accounted_io_ops: 0,
+            accounted_avoidable_io_ops: 0,
+            unaccounted: UnaccountedSpans::new(),
             sql_energy_kwh: 0.0,
             sql_gco2: 0.0,
             messaging_energy_kwh: 0.0,
@@ -192,6 +210,17 @@ pub(super) fn compute_carbon_report(
         }
     }
 
+    let accounted_io_ops = total_io_ops.saturating_sub(state.unknown_ops);
+    let accounted_avoidable_io_ops = if state.unaccounted.is_empty() {
+        avoidable_io_ops
+    } else if accounted_io_ops == 0 {
+        // Nothing resolved a region, so every share is 0: skip the recount
+        // and keep the map off the live cell and the archive.
+        state.unaccounted.clear();
+        0
+    } else {
+        super::accounted_avoidable_io_ops(findings, &state.unaccounted)
+    };
     let (mut regions, flags, operational_gco2) =
         build_region_breakdowns(state.per_region, state.unknown_ops);
     let model = select_co2_model_tag(flags);
@@ -200,7 +229,7 @@ pub(super) fn compute_carbon_report(
         operational_gco2,
         state.total_transport_gco2,
         total_io_ops,
-        avoidable_io_ops,
+        accounted_avoidable_io_ops,
         state.unknown_ops,
         ctx.embodied_per_request_gco2,
         model,
@@ -213,7 +242,9 @@ pub(super) fn compute_carbon_report(
         per_service: state.per_service,
         window_model: model,
         calibrated: flags.any_calibrated(),
-        accounted_io_ops: total_io_ops.saturating_sub(state.unknown_ops),
+        accounted_io_ops,
+        accounted_avoidable_io_ops,
+        unaccounted: state.unaccounted,
         sql_energy_kwh: state.sql_energy_kwh,
         sql_gco2: state.sql_gco2,
         messaging_energy_kwh: state.messaging_energy_kwh,
@@ -301,17 +332,32 @@ fn process_span_for_carbon(
         network_transport_contribution(span, region_ref, intensity_value, pue, ctx);
 }
 
+/// Count a span in the unknown bucket and remember its `(trace, service)`.
+fn record_unaccounted(state: &mut CarbonRunState, span: &crate::normalize::NormalizedEvent) {
+    state.unknown_ops += 1;
+    let services = match state.unaccounted.get_mut(span.event.trace_id.as_str()) {
+        Some(services) => services,
+        None => state
+            .unaccounted
+            .entry(span.event.trace_id.clone())
+            .or_default(),
+    };
+    if !services.contains(span.event.service.as_ref()) {
+        services.insert(span.event.service.to_string());
+    }
+}
+
 /// Resolve the region for a span, apply the cardinality cap, and
 /// pre-cache the profile references + annual intensity + PUE. Returns
-/// `None` when the region is unresolvable or the cap rejected it, in
-/// which case the caller must bump `unknown_ops`.
+/// `None` when the region is unresolvable or the cap rejected it, the span
+/// then counted in `unknown_ops` by [`record_unaccounted`].
 fn resolve_span_region<'a>(
     span: &'a crate::normalize::NormalizedEvent,
     ctx: &'a CarbonContext,
     state: &mut CarbonRunState,
 ) -> Option<SpanRegionContext<'a>> {
     let Some(region_ref) = resolve_region(&span.event, ctx) else {
-        state.unknown_ops += 1;
+        record_unaccounted(state, span);
         return None;
     };
 
@@ -340,7 +386,7 @@ fn resolve_span_region<'a>(
 
     // Region cardinality cap check.
     if state.per_region.len() >= MAX_REGIONS && !state.per_region.contains_key(region_key_borrow) {
-        state.unknown_ops += 1;
+        record_unaccounted(state, span);
         if !state.overflow_warned {
             tracing::debug!(
                 "Region cardinality cap ({MAX_REGIONS}) exceeded; \

@@ -217,8 +217,10 @@ total.mid = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
 Avoidable CO₂ (via ratio, see "Avoidable via ratio" below):
 ```
 accounted_io_ops = total_io_ops - unknown_ops
-avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops)
+avoidable.mid = operational_gco2 × (accounted_avoidable_io_ops / accounted_io_ops)
 ```
+
+Both sides of the ratio leave out the operations whose span resolved no region. `accounted_io_ops` is `total_io_ops` minus the unknown bucket, and `accounted_avoidable_io_ops` is the deduped avoidable count minus the share of each finding charged to a `(trace, service)` pair with a span in that bucket. A service with no region therefore cannot price its waste against the energy of the services that have one. `avoidable_io_ops` and the waste ratio still count every avoidable call.
 
 The denominator `accounted_io_ops` excludes the synthetic `unknown` bucket so the ratio is consistent with `operational_gco2` (which also excludes it). This keeps the numerator and denominator on the same accounting basis.
 
@@ -254,7 +256,7 @@ To tag this semantic distinction at the data layer, `CarbonEstimate` carries a `
 - `"sci_v1_numerator+transport"`: used on `co2.total`. The `(E × I) + M + T` footprint summed over traces, including when `T` is zero.
 - `"sci_v1_numerator+transport+hosts"`: used on `co2.total` instead when a database or broker host source is configured. The same footprint plus the in-total host terms `G_db + G_msg`, zero included.
 - `"sci_v1_intensity"`: used on `co2.sci_per_trace`. The per-R intensity `((E × I) + M) / R`, R = 1 trace.
-- `"sci_v1_operational_ratio"`: used on `co2.avoidable`. The region-blind global ratio `operational × (avoidable/accounted)`, excluding embodied carbon.
+- `"sci_v1_operational_ratio"`: used on `co2.avoidable`. The region-blind global ratio `operational × (accounted avoidable / accounted)`, excluding embodied carbon.
 - `"sci_v1_operational_ratio+hosts"`: used on `co2.avoidable` on the same windows. The same ratio plus each in-total host term times its own SQL or messaging waste ratio.
 
 The distinct values on `total` and `avoidable` signal to downstream consumers that the two are computed differently and should not be compared as if they were homogeneous quantities.
@@ -266,7 +268,7 @@ Computing avoidable CO₂ accurately per-region would require threading region r
 Instead, Perf Sentinel computes:
 
 ```
-avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops)
+avoidable.mid = operational_gco2 × (accounted_avoidable_io_ops / accounted_io_ops)
 ```
 
 This preserves the relative scale (a 50% waste reduction yields a 50% drop in avoidable CO₂) without requiring per-finding region attribution. The trade-off is that when avoidable ops are concentrated in a high-intensity region, this ratio slightly under-attributes the savings. The simplification is documented as a known limitation and tagged at the data layer via `methodology: "sci_v1_operational_ratio"`.
@@ -282,7 +284,7 @@ A measured or declared database or broker figure (`[green.alumet.database]`, `[g
 ```
 energy_kwh    = Σ per-service energy + D + B
 total.mid     = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
-avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops) + G_db × r_sql + G_msg × r_msg
+avoidable.mid = operational_gco2 × (accounted_avoidable_io_ops / accounted_io_ops) + G_db × r_sql + G_msg × r_msg
 ```
 
 `r_sql` and `r_msg` are the SQL and messaging waste ratios, so each host is priced at the ratio of the operations it serves, never at the all-operations ratio. `compute_disclosure_waste` follows the same split: the application pool takes the all-operations ratio, each in-total host block adds its own canonical and operational legs, and the canonical legs keep the binary-pinned threshold. `operational_gco2`, `regions[]` and the per-service maps stay application-only, since a host is never a service. A window scored with a host source configured carries `sci_v1_numerator+transport+hosts` on `total` and `sci_v1_operational_ratio+hosts` on `avoidable`, zero included, like the transport tag. The estimated figure is already a share of the services' energy and never enters a second time.

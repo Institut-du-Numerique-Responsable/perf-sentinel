@@ -500,7 +500,7 @@ L'unité fonctionnelle R est déclarée sur `co2.functional_unit` (`"trace"`). L
 
 - `co2.total.methodology = "sci_v1_numerator+transport"` : l'empreinte `(E × I) + M + T` sur les traces analysées. `"sci_v1_numerator+transport+hosts"` sur une fenêtre du daemon scorée avec une source d'hôte de base de données ou de broker configurée, dont le carbone d'hôte compté dans les totaux rejoint l'empreinte. Les rapports historiques peuvent porter `"sci_v1_numerator"`.
 - `co2.sci_per_trace.methodology = "sci_v1_intensity"` : l'intensité par R `((E × I) + M) / R`, R = 1 trace.
-- `co2.avoidable.methodology = "sci_v1_operational_ratio"` : `operational × (avoidable_io_ops / accounted_io_ops)`, un ratio global aveugle à la région qui exclut le carbone embarqué. `"sci_v1_operational_ratio+hosts"` sur ces mêmes fenêtres, qui ajoutent chaque terme d'hôte compté dans les totaux multiplié par son propre ratio de gaspillage SQL ou messaging.
+- `co2.avoidable.methodology = "sci_v1_operational_ratio"` : `operational × (accounted_avoidable_io_ops / accounted_io_ops)`, un ratio global aveugle à la région qui exclut le carbone embarqué. Les deux termes laissent de côté les opérations dont la span n'a résolu aucune région. `"sci_v1_operational_ratio+hosts"` sur ces mêmes fenêtres, qui ajoutent chaque terme d'hôte compté dans les totaux multiplié par son propre ratio de gaspillage SQL ou messaging.
 
 ### Positionnement : compteur de gaspillage directionnel
 

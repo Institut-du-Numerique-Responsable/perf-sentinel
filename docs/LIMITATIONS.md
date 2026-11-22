@@ -491,7 +491,7 @@ The functional unit R is declared on `co2.functional_unit` (`"trace"`). Both vie
 
 - `co2.total.methodology = "sci_v1_numerator+transport"`: the `(E × I) + M + T` footprint over analyzed traces. `"sci_v1_numerator+transport+hosts"` on a daemon window scored with a database or broker host source configured, whose in-total host carbon joins the footprint. Legacy reports can carry `"sci_v1_numerator"`.
 - `co2.sci_per_trace.methodology = "sci_v1_intensity"`: the per-R intensity `((E × I) + M) / R`, R = 1 trace.
-- `co2.avoidable.methodology = "sci_v1_operational_ratio"`: `operational × (avoidable_io_ops / accounted_io_ops)`, a region-blind global ratio that excludes embodied carbon. `"sci_v1_operational_ratio+hosts"` on the same windows, which add each in-total host term times its own SQL or messaging waste ratio.
+- `co2.avoidable.methodology = "sci_v1_operational_ratio"`: `operational × (accounted_avoidable_io_ops / accounted_io_ops)`, a region-blind global ratio that excludes embodied carbon. Both sides leave out the operations whose span resolved no region. `"sci_v1_operational_ratio+hosts"` on the same windows, which add each in-total host term times its own SQL or messaging waste ratio.
 
 ### Positioning: directional waste counter
 

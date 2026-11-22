@@ -1995,8 +1995,10 @@ fn record_carbon_in_ledger(ledger: &DetectionLedger, green_summary: &GreenSummar
         let batch = DayCarbon {
             gco2_mid: co2.avoidable.mid,
             gco2_low: co2.avoidable.low,
-            avoidable_io_ops: green_summary.avoidable_io_ops as u64,
-            total_io_ops: green_summary.total_io_ops as u64,
+            // The region-resolved pair `avoidable.mid` is computed over, so the
+            // Hub's grams per avoidable op divides like for like.
+            avoidable_io_ops: green_summary.accounted_avoidable_io_ops as u64,
+            total_io_ops: green_summary.accounted_io_ops as u64,
         };
         ledger.record_avoidable(batch, now_ms);
     }
