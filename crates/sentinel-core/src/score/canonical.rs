@@ -46,7 +46,7 @@ pub(crate) fn compute_canonical_avoidable(
     let accounted = if unaccounted.is_empty() {
         ops.total
     } else {
-        accounted_avoidable_io_ops(&findings, unaccounted)
+        accounted_avoidable_io_ops(&findings, unaccounted).total
     };
     (ops, accounted)
 }
@@ -235,23 +235,33 @@ mod tests {
         assert_eq!(low_accounted, 5);
     }
 
-    /// The canonical numerator leaves out the ops of a `(trace, service)` pair
-    /// with no region, while the count keeps them. Another service of the
-    /// same trace takes nothing out.
+    /// The canonical numerator takes out at most as many ops as the
+    /// `(trace, service)` pair left in the unknown bucket, of the finding's
+    /// own kind, while the count keeps them all. Another service or another
+    /// kind takes nothing out.
     #[test]
     fn canonical_accounted_leaves_out_ops_with_no_region() {
         let traces = vec![make_trace(make_n_plus_one_events())];
-        let unaccounted =
-            UnaccountedSpans::from([("trace-1".to_string(), ["order-svc".to_string()].into())]);
-        let (ops, accounted) =
-            compute_canonical_avoidable(&traces, &detect_config(50), &unaccounted);
+        let unknown = |service: &str, counts: [usize; 3]| {
+            UnaccountedSpans::from([(
+                "trace-1".to_string(),
+                std::collections::BTreeMap::from([(service.to_string(), counts)]),
+            )])
+        };
+        let accounted = |unaccounted: &UnaccountedSpans| {
+            compute_canonical_avoidable(&traces, &detect_config(50), unaccounted).1
+        };
+        // The 6 SQL spans of the N+1, 5 of them avoidable.
+        let (ops, all_out) = compute_canonical_avoidable(
+            &traces,
+            &detect_config(50),
+            &unknown("order-svc", [6, 0, 0]),
+        );
         assert_eq!(ops.total, 5);
-        assert_eq!(accounted, 0);
-
-        let other =
-            UnaccountedSpans::from([("trace-1".to_string(), ["billing-svc".to_string()].into())]);
-        let (_, accounted) = compute_canonical_avoidable(&traces, &detect_config(50), &other);
-        assert_eq!(accounted, 5);
+        assert_eq!(all_out, 0);
+        assert_eq!(accounted(&unknown("order-svc", [2, 0, 0])), 3);
+        assert_eq!(accounted(&unknown("order-svc", [0, 3, 0])), 5);
+        assert_eq!(accounted(&unknown("billing-svc", [6, 0, 0])), 5);
     }
 
     /// With the operator threshold at 50 the operational tier sees zero

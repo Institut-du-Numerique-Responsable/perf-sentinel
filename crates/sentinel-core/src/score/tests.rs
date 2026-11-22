@@ -4048,6 +4048,14 @@ fn avoidable_share_leaves_out_ops_with_no_region() {
     );
     assert!(summary.co2.as_ref().unwrap().avoidable.mid.abs() < 1e-15);
     assert!(summary.unaccounted_spans.contains_key("tb"));
+    // The estimated database waste prices A's SQL energy at the
+    // region-resolved SQL ratio, 0 here, not at B's 9 / 20.
+    let db = summary
+        .database_waste
+        .as_ref()
+        .expect("estimated database waste");
+    assert_eq!(db.model, crate::report::DB_WASTE_MODEL_ESTIMATED);
+    assert!(db.waste_kwh.abs() < 1e-15, "{}", db.waste_kwh);
 
     // B alone resolves nothing: the map is dropped, the share is 0.
     let (_, summary, _) = score_green(&traces[1..], vec![n1.clone()], Some(&ctx));
@@ -4066,4 +4074,39 @@ fn avoidable_share_leaves_out_ops_with_no_region() {
     assert!(summary.unaccounted_spans.is_empty());
     let expected = summary.application_energy_kwh() * 9.0 / 20.0;
     assert!((summary.avoidable_energy_kwh() - expected).abs() < 1e-15);
+}
+
+/// One service, one trace: a 10-call N+1 with a region and one more span
+/// without. The pair loses one avoidable op, the one its unknown span can
+/// account for, not the whole share.
+#[test]
+fn a_pair_mixing_spans_with_and_without_a_region_keeps_its_resolved_share() {
+    let mut events = Vec::new();
+    for i in 0..10 {
+        let mut e = make_sql_event(
+            "tm",
+            &format!("m{i}"),
+            &format!("SELECT * FROM m WHERE id = {i}"),
+            "2025-07-10T14:32:01.001Z",
+        );
+        e.service = Arc::from("m-svc");
+        e.cloud_region = Some(Arc::from("eu-west-3"));
+        events.push(e);
+    }
+    let mut stray = make_sql_event("tm", "m10", "SELECT 1", "2025-07-10T14:32:01.001Z");
+    stray.service = Arc::from("m-svc");
+    events.push(stray);
+    let mut n1 = crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning);
+    n1.trace_id = "tm".to_string();
+    n1.service = "m-svc".to_string();
+    n1.pattern.occurrences = 10;
+
+    let (_, summary, _) = score_green(
+        &[make_trace(events)],
+        vec![n1],
+        Some(&CarbonContext::default()),
+    );
+    assert_eq!(summary.avoidable_io_ops, 9);
+    assert_eq!(summary.accounted_io_ops, 10);
+    assert_eq!(summary.accounted_avoidable_io_ops, 8);
 }

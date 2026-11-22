@@ -5,7 +5,7 @@
 //! this module is a per-span helper that keeps the hot loop in
 //! [`process_span_for_carbon`] readable.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::correlate::Trace;
 use crate::detect::Finding;
@@ -22,10 +22,20 @@ use super::region_breakdown::{
     sort_regions_by_co2_desc,
 };
 
-/// `trace_id` to the services of that trace with a span left in the unknown
-/// bucket (no region, or folded by the region cap). Their avoidable ops sit
-/// outside `accounted_io_ops`, so the avoidable numerator leaves them out too.
-pub(crate) type UnaccountedSpans = BTreeMap<String, BTreeSet<String>>;
+/// `trace_id` to service to the number of that service's spans left in the
+/// unknown bucket (no region, or folded by the region cap), per I/O kind in
+/// [`io_kind_slot`] order. Those spans sit outside `accounted_io_ops`, so the
+/// avoidable numerator takes out at most as many ops of the same kind.
+pub(crate) type UnaccountedSpans = BTreeMap<String, BTreeMap<String, [usize; 3]>>;
+
+/// Slot of an I/O kind in an [`UnaccountedSpans`] count: SQL, HTTP, messaging.
+pub(crate) const fn io_kind_slot(event_type: &crate::event::EventType) -> usize {
+    match event_type {
+        crate::event::EventType::Sql => 0,
+        crate::event::EventType::HttpOut => 1,
+        crate::event::EventType::Messaging => 2,
+    }
+}
 
 /// Maximum number of distinct regions allowed in a single scoring pass.
 ///
@@ -44,8 +54,12 @@ struct CarbonRunState {
     per_region: BTreeMap<String, RegionAccumulator>,
     per_service: BTreeMap<String, ServiceCarbonAccumulator>,
     unknown_ops: usize,
-    /// The `(trace, service)` pairs behind `unknown_ops`, see [`UnaccountedSpans`].
+    /// The `(trace, service)` counts behind `unknown_ops`, see [`UnaccountedSpans`].
     unaccounted: UnaccountedSpans,
+    /// Region-resolved SQL and messaging spans, the populations
+    /// `sql_energy_kwh` and `messaging_energy_kwh` cover.
+    sql_ops: usize,
+    messaging_ops: usize,
     overflow_warned: bool,
     total_transport_gco2: f64,
     multi_region_active: bool,
@@ -148,11 +162,18 @@ pub(super) struct CarbonComputeOutputs {
     /// surfaced so the disclosure path can rescale avoidable at a
     /// canonical threshold without a second carbon pass.
     pub accounted_io_ops: usize,
-    /// The avoidable ops whose spans resolved a region: the numerator
-    /// `accounted_io_ops` is paired with, so a service with no region cannot
-    /// charge its waste to the energy of the services that have one.
-    pub accounted_avoidable_io_ops: usize,
-    /// The `(trace, service)` pairs left out of both, for the canonical
+    /// The avoidable ops whose spans resolved a region, total and per
+    /// subsystem: the numerators `accounted_io_ops`, `accounted_sql_io_ops`
+    /// and `accounted_messaging_io_ops` pair with, so a service with no
+    /// region cannot charge its waste to the energy of the services that
+    /// have one.
+    pub accounted_avoidable: super::AvoidableIoOps,
+    /// Region-resolved SQL spans, the population `sql_energy_kwh` covers.
+    pub accounted_sql_io_ops: usize,
+    /// Region-resolved messaging spans, the population
+    /// `messaging_energy_kwh` covers.
+    pub accounted_messaging_io_ops: usize,
+    /// The unknown-bucket counts left out of both, for the canonical
     /// disclosure tier. Empty when every span resolved a region, or none did.
     pub unaccounted: UnaccountedSpans,
     /// Energy of the window's region-resolved SQL spans.
@@ -173,7 +194,7 @@ pub(super) fn compute_carbon_report(
     ctx: &CarbonContext,
     total_io_ops: usize,
     findings: &[Finding],
-    avoidable_io_ops: usize,
+    avoidable: super::AvoidableIoOps,
 ) -> CarbonComputeOutputs {
     // Multi-region flag seeded from config, then updated from span
     // attributes during the main loop below.
@@ -195,7 +216,9 @@ pub(super) fn compute_carbon_report(
             window_model: "",
             calibrated: false,
             accounted_io_ops: 0,
-            accounted_avoidable_io_ops: 0,
+            accounted_avoidable: super::AvoidableIoOps::default(),
+            accounted_sql_io_ops: 0,
+            accounted_messaging_io_ops: 0,
             unaccounted: UnaccountedSpans::new(),
             sql_energy_kwh: 0.0,
             sql_gco2: 0.0,
@@ -211,13 +234,13 @@ pub(super) fn compute_carbon_report(
     }
 
     let accounted_io_ops = total_io_ops.saturating_sub(state.unknown_ops);
-    let accounted_avoidable_io_ops = if state.unaccounted.is_empty() {
-        avoidable_io_ops
+    let accounted_avoidable = if state.unaccounted.is_empty() {
+        avoidable
     } else if accounted_io_ops == 0 {
         // Nothing resolved a region, so every share is 0: skip the recount
         // and keep the map off the live cell and the archive.
         state.unaccounted.clear();
-        0
+        super::AvoidableIoOps::default()
     } else {
         super::accounted_avoidable_io_ops(findings, &state.unaccounted)
     };
@@ -229,7 +252,7 @@ pub(super) fn compute_carbon_report(
         operational_gco2,
         state.total_transport_gco2,
         total_io_ops,
-        accounted_avoidable_io_ops,
+        accounted_avoidable.total,
         state.unknown_ops,
         ctx.embodied_per_request_gco2,
         model,
@@ -243,7 +266,9 @@ pub(super) fn compute_carbon_report(
         window_model: model,
         calibrated: flags.any_calibrated(),
         accounted_io_ops,
-        accounted_avoidable_io_ops,
+        accounted_avoidable,
+        accounted_sql_io_ops: state.sql_ops,
+        accounted_messaging_io_ops: state.messaging_ops,
         unaccounted: state.unaccounted,
         sql_energy_kwh: state.sql_energy_kwh,
         sql_gco2: state.sql_gco2,
@@ -279,10 +304,12 @@ fn process_span_for_carbon(
         crate::event::EventType::Sql => {
             state.sql_energy_kwh += energy_kwh;
             state.sql_gco2 += op_co2;
+            state.sql_ops += 1;
         }
         crate::event::EventType::Messaging => {
             state.messaging_energy_kwh += energy_kwh;
             state.messaging_gco2 += op_co2;
+            state.messaging_ops += 1;
         }
         crate::event::EventType::HttpOut => {}
     }
@@ -332,7 +359,7 @@ fn process_span_for_carbon(
         network_transport_contribution(span, region_ref, intensity_value, pue, ctx);
 }
 
-/// Count a span in the unknown bucket and remember its `(trace, service)`.
+/// Count a span in the unknown bucket, under its `(trace, service)` and kind.
 fn record_unaccounted(state: &mut CarbonRunState, span: &crate::normalize::NormalizedEvent) {
     state.unknown_ops += 1;
     let services = match state.unaccounted.get_mut(span.event.trace_id.as_str()) {
@@ -342,9 +369,11 @@ fn record_unaccounted(state: &mut CarbonRunState, span: &crate::normalize::Norma
             .entry(span.event.trace_id.clone())
             .or_default(),
     };
-    if !services.contains(span.event.service.as_ref()) {
-        services.insert(span.event.service.to_string());
-    }
+    let counts = match services.get_mut(span.event.service.as_ref()) {
+        Some(counts) => counts,
+        None => services.entry(span.event.service.to_string()).or_default(),
+    };
+    counts[io_kind_slot(&span.event.event_type)] += 1;
 }
 
 /// Resolve the region for a span, apply the cardinality cap, and
