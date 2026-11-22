@@ -130,6 +130,10 @@ fn ring_buffer_overflow() {
         );
     }
 
+    // Two events past the cap, and the count resets once read.
+    assert_eq!(w.take_dropped_events(), 2);
+    assert_eq!(w.take_dropped_events(), 0);
+
     let drained = w.drain_all();
     let t1 = drained.iter().find(|(id, _)| id == "t1").unwrap();
     assert_eq!(t1.1.len(), 3);

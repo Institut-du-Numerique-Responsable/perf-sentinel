@@ -4042,6 +4042,45 @@ async fn ingest_event_batch_labels_io_ops_with_the_spans_grouping() {
 }
 
 #[tokio::test]
+async fn ingest_event_batch_counts_events_past_the_per_trace_cap() {
+    // Five events of one trace against a cap of three: the two oldest are
+    // dropped, counted at ingest but never analysed.
+    let metrics = MetricsState::new();
+    let window = Arc::new(Mutex::new(TraceWindow::new(WindowConfig {
+        max_events_per_trace: 3,
+        trace_ttl_ms: 30_000,
+        max_active_traces: std::num::NonZeroUsize::new(10).expect("nonzero"),
+    })));
+    let events = (0..5)
+        .map(|i| {
+            crate::test_helpers::make_sql_event_with_duration(
+                "trace-cap",
+                &format!("span-{i}"),
+                &format!("SELECT {i}"),
+                "2025-07-10T14:32:01.123Z",
+                100,
+            )
+        })
+        .collect();
+    let mut service_meter = ServiceMeter::new(MAX_SERVICE_CARDINALITY, true);
+
+    ingest_event_batch(
+        super::super::IngestBatch {
+            stitch_records: Vec::new(),
+            events,
+            source_endpoint_updates: vec![],
+        },
+        1.0,
+        &window,
+        &metrics,
+        &mut service_meter,
+    )
+    .await;
+
+    assert_eq!(metrics.trace_events_dropped_total.get(), 2);
+}
+
+#[tokio::test]
 async fn record_slow_durations_labels_the_histogram_with_the_spans_grouping() {
     // 600 ms against the default 500 ms threshold: the only test
     // that reaches `record_slow_durations` with a slow span.

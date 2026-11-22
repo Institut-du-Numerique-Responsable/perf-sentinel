@@ -332,6 +332,20 @@ pub(super) fn collect_warning_details(
         ));
     }
 
+    let dropped = metrics.trace_events_dropped_total.get();
+    if dropped > 0 {
+        let cap = daemon.max_events_per_trace;
+        details.push(crate::report::Warning::new(
+            TUNING,
+            format!(
+                "{dropped} I/O events dropped at the per-trace cap: the largest \
+                 traces are analysed in part only, so their findings undercount \
+                 the waste. Raise [daemon] max_events_per_trace (currently {cap}) \
+                 against the memory it costs"
+            ),
+        ));
+    }
+
     details.extend(hub_export_drop_warning(metrics, daemon));
 
     // A high not_io share is healthy on a well-instrumented fleet

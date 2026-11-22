@@ -242,6 +242,11 @@ pub struct MetricsState {
     /// cap and lowest-count pairs are silently recycled, so
     /// `/api/correlations` may drop entries between reads.
     pub correlator_pairs_evicted_total: IntCounter,
+    /// I/O events dropped by the per-trace `max_events_per_trace` ring
+    /// buffer, oldest first. They were counted at ingest
+    /// (`service_io_ops_total`) and never reach analysis, so a sustained
+    /// rate means the largest traces are analysed in part only.
+    pub trace_events_dropped_total: IntCounter,
     /// New keys refused by the cross-batch slow window's key cap.
     pub slow_window_keys_refused_total: IntCounter,
     /// Cumulative I/O ops per service. Labeled with the
@@ -717,6 +722,12 @@ impl MetricsState {
         )
         .expect("metric creation should not fail");
 
+        let trace_events_dropped_total = IntCounter::new(
+            "perf_sentinel_trace_events_dropped_total",
+            "I/O events dropped by the per-trace max_events_per_trace ring buffer",
+        )
+        .expect("metric creation should not fail");
+
         let slow_window_keys_refused_total = IntCounter::new(
             "perf_sentinel_slow_window_keys_refused_total",
             "Slow spans refused by the cross-batch slow window key cap",
@@ -894,6 +905,9 @@ impl MetricsState {
             .expect("registration should not fail");
         registry
             .register(Box::new(correlator_pairs_evicted_total.clone()))
+            .expect("registration should not fail");
+        registry
+            .register(Box::new(trace_events_dropped_total.clone()))
             .expect("registration should not fail");
         registry
             .register(Box::new(slow_window_keys_refused_total.clone()))
@@ -1358,6 +1372,7 @@ impl MetricsState {
             archive_rollup_days,
             archive_last_closed_day_seconds,
             correlator_pairs_evicted_total,
+            trace_events_dropped_total,
             slow_window_keys_refused_total,
             service_io_ops_total,
             service_io_ops_overflow_total,
