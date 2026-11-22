@@ -1778,7 +1778,7 @@
     },
     {
       "title": "Puissance moyenne (W)",
-      "description": "Puissance électrique moyenne attribuée à la charge analysée, le débit du compteur d'énergie `perf_sentinel_scored_energy_kwh_total`. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Elle couvre l'hôte de chaque service pour les opérations qu'il émet (CPU, mémoire, pile réseau), jamais la base de données, le broker ou le service qu'il appelle : leurs hôtes n'y entrent que si une source d'hôte de base de données ou de broker est configurée. Les serveurs au repos et le stockage n'y sont jamais.\n\nLes fenêtres de scoring n'ont pas toutes la même durée, donc la jauge par fenêtre `perf_sentinel_energy_kwh` se lit comme une énergie par lot, pas comme une puissance : ce panneau la dérive plutôt du compteur. Le détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.",
+      "description": "Puissance électrique moyenne attribuée à la charge analysée, le débit du compteur d'énergie `perf_sentinel_scored_energy_kwh_total`. Selon la configuration, elle est mesurée (un agent qui lit la puissance réelle) ou modélisée à partir du nombre d'opérations, et la ligne de source d'énergie de `query monitor` et du rapport HTML indique lequel des deux. Elle couvre l'hôte de chaque service pour les opérations qu'il émet (CPU, mémoire, pile réseau), jamais la base de données, le broker ou le service qu'il appelle : leurs hôtes n'y entrent que si une source d'hôte de base de données ou de broker est configurée. Les serveurs au repos et le stockage n'y sont jamais.\n\nLes fenêtres de scoring n'ont pas toutes la même durée, donc la jauge par fenêtre `perf_sentinel_energy_kwh` se lit comme une énergie par lot, pas comme une puissance : ce panneau la dérive plutôt du compteur. Le détail par service et par région est tenu hors de /metrics et se trouve dans le monitor de requêtes.\n\nLa série évitable est la part de cette énergie dépensée par les opérations I/O évitables (N+1 et appels redondants, le numérateur du ratio de gaspillage), sur les mêmes fenêtres de scoring : `perf_sentinel_scored_avoidable_energy_kwh_total` (depuis 0.48.0). Elle a le même périmètre : sans source d'hôte de base de données ou de broker, elle ne compte pas le travail que ces appels imposent à la base et au broker.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1795,6 +1795,11 @@
           "expr": "rate(perf_sentinel_scored_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
           "refId": "A",
           "legendFormat": "puissance {{instance}}"
+        },
+        {
+          "expr": "rate(perf_sentinel_scored_avoidable_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
+          "refId": "B",
+          "legendFormat": "puissance évitable {{instance}}"
         }
       ],
       "fieldConfig": {
@@ -1812,7 +1817,7 @@
     },
     {
       "title": "Carbone par heure (gCO2e/h)",
-      "description": "Émissions opérationnelles par heure, le débit du compteur `perf_sentinel_scored_carbon_gco2_total`, sommées sur les régions : l'énergie multipliée par l'intensité carbone du réseau local. Quand une source d'hôte de base de données ou de broker est configurée, elles comprennent aussi le carbone de ces hôtes compté dans les totaux.\n\nElles bougent avec la charge mais aussi avec le réseau électrique, donc une baisse peut être une heure plus propre plutôt qu'une optimisation. Les émissions de fabrication sont exclues.",
+      "description": "Émissions opérationnelles par heure, le débit du compteur `perf_sentinel_scored_carbon_gco2_total`, sommées sur les régions : l'énergie multipliée par l'intensité carbone du réseau local. Quand une source d'hôte de base de données ou de broker est configurée, elles comprennent aussi le carbone de ces hôtes compté dans les totaux.\n\nElles bougent avec la charge mais aussi avec le réseau électrique, donc une baisse peut être une heure plus propre plutôt qu'une optimisation. Les émissions de fabrication sont exclues.\n\nLa série évitable est la part de ce carbone due aux opérations I/O évitables (N+1 et appels redondants, le numérateur du ratio de gaspillage), sur les mêmes fenêtres de scoring : `perf_sentinel_scored_avoidable_carbon_gco2_total` (depuis 0.48.0). Elle a le même périmètre : sans source d'hôte de base de données ou de broker, elle ne compte pas le travail que ces appels imposent à la base et au broker.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1829,6 +1834,11 @@
           "expr": "rate(perf_sentinel_scored_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
           "refId": "A",
           "legendFormat": "carbone {{instance}}"
+        },
+        {
+          "expr": "rate(perf_sentinel_scored_avoidable_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
+          "refId": "B",
+          "legendFormat": "carbone évitable {{instance}}"
         }
       ],
       "fieldConfig": {
@@ -1846,7 +1856,7 @@
     },
     {
       "title": "Énergie sur la plage choisie (kWh)",
-      "description": "Électricité attribuée à la charge analysée. Même périmètre que la puissance moyenne : l'hôte de chaque service, les hôtes de base de données et de broker seulement si une source d'hôte est configurée, jamais les serveurs au repos ni le stockage. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner la jauge par fenêtre `perf_sentinel_energy_kwh` compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.",
+      "description": "Électricité attribuée à la charge analysée. Même périmètre que la puissance moyenne : l'hôte de chaque service, les hôtes de base de données et de broker seulement si une source d'hôte est configurée, jamais les serveurs au repos ni le stockage. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner la jauge par fenêtre `perf_sentinel_energy_kwh` compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.\n\nLa série évitable est la part de cette énergie dépensée par les opérations I/O évitables (N+1 et appels redondants, le numérateur du ratio de gaspillage), sur les mêmes fenêtres de scoring : `perf_sentinel_scored_avoidable_energy_kwh_total` (depuis 0.48.0). Elle a le même périmètre : sans source d'hôte de base de données ou de broker, elle ne compte pas le travail que ces appels imposent à la base et au broker.",
       "type": "stat",
       "gridPos": {
         "h": 6,
@@ -1864,6 +1874,12 @@
           "refId": "A",
           "instant": true,
           "legendFormat": "total"
+        },
+        {
+          "expr": "sum(increase(perf_sentinel_scored_avoidable_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "refId": "B",
+          "legendFormat": "évitable",
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -1874,7 +1890,7 @@
     },
     {
       "title": "Carbone sur la plage choisie (gCO2e)",
-      "description": "Carbone opérationnel de la charge analysée, hors carbone incorporé et transport réseau. Quand une source d'hôte de base de données ou de broker est configurée, il comprend aussi le carbone de ces hôtes compté dans les totaux. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner la jauge par fenêtre `perf_sentinel_carbon_gco2` compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.",
+      "description": "Carbone opérationnel de la charge analysée, hors carbone incorporé et transport réseau. Quand une source d'hôte de base de données ou de broker est configurée, il comprend aussi le carbone de ces hôtes compté dans les totaux. Additionné sur la plage de temps choisie en haut du tableau de bord, chaque fenêtre de scoring comptée une seule fois. `increase()` sur le compteur cumulé tient aux redémarrages du daemon, là où additionner la jauge par fenêtre `perf_sentinel_carbon_gco2` compterait une fenêtre autant de fois qu'elle a été scrapée. Pas de données sur une plage antérieure au compteur.\n\nLa série évitable est la part de ce carbone due aux opérations I/O évitables (N+1 et appels redondants, le numérateur du ratio de gaspillage), sur les mêmes fenêtres de scoring : `perf_sentinel_scored_avoidable_carbon_gco2_total` (depuis 0.48.0). Elle a le même périmètre : sans source d'hôte de base de données ou de broker, elle ne compte pas le travail que ces appels imposent à la base et au broker.",
       "type": "stat",
       "gridPos": {
         "h": 6,
@@ -1892,6 +1908,12 @@
           "refId": "A",
           "instant": true,
           "legendFormat": "total"
+        },
+        {
+          "expr": "sum(increase(perf_sentinel_scored_avoidable_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "refId": "B",
+          "legendFormat": "évitable",
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -2043,6 +2065,6 @@
   "timezone": "browser",
   "title": "perf-sentinel overview",
   "uid": "perf-sentinel-overview",
-  "version": 12,
+  "version": 13,
   "refresh": "1m"
 }

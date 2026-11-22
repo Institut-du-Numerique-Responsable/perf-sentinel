@@ -313,13 +313,13 @@ fn select_proxy_co2_model_tag(
 /// scaled by the fraction of accounted I/O ops that are avoidable, clamped
 /// to 1.0.
 ///
-/// Units-neutral and shared by [`finalize_carbon_report`] and the
-/// canonical-disclosure rescale (`score::canonical`) so the operational and
-/// canonical avoidable figures cannot drift on the formula. The clamp guards
-/// the pathological case where avoidable ops from unknown-region spans exceed
-/// the accounted denominator.
+/// Units-neutral and shared by [`finalize_carbon_report`],
+/// `GreenSummary::avoidable_energy_kwh` and the canonical-disclosure rescale
+/// (`score::canonical`) so the operational and canonical avoidable figures
+/// cannot drift on the formula. The clamp guards the pathological case where
+/// avoidable ops from unknown-region spans exceed the accounted denominator.
 #[must_use]
-pub(super) fn avoidable_share(
+pub(crate) fn avoidable_share(
     window_total: f64,
     avoidable_io_ops: usize,
     accounted_io_ops: usize,

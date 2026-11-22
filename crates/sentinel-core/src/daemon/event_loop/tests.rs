@@ -1633,9 +1633,23 @@ async fn energy_and_carbon_counters_sum_every_window() {
     assert!(kwh > 0.0 && gco2 > 0.0, "the windows scored nothing");
     assert!((metrics.energy_kwh_total.get() - kwh).abs() < 1e-12);
     assert!((metrics.carbon_gco2_total.get() - gco2).abs() < 1e-9);
+    // Each trace is an N+1: 5 of its 6 queries are avoidable, so the
+    // avoidable parts are 5/6 of the totals.
+    let avoidable_kwh = metrics.scored_avoidable_energy_kwh_total.get();
+    let avoidable_gco2 = metrics.scored_avoidable_carbon_gco2_total.get();
+    assert!(
+        (avoidable_kwh - kwh * 5.0 / 6.0).abs() < 1e-12,
+        "{avoidable_kwh} of {kwh}"
+    );
+    assert!(
+        (avoidable_gco2 - gco2 * 5.0 / 6.0).abs() < 1e-9,
+        "{avoidable_gco2} of {gco2}"
+    );
     let output = metrics.render();
     assert!(output.contains("perf_sentinel_scored_energy_kwh_total"));
     assert!(output.contains("perf_sentinel_scored_carbon_gco2_total"));
+    assert!(output.contains("perf_sentinel_scored_avoidable_energy_kwh_total"));
+    assert!(output.contains("perf_sentinel_scored_avoidable_carbon_gco2_total"));
 }
 
 #[tokio::test]
@@ -1700,15 +1714,18 @@ async fn in_total_host_figures_reach_the_counters_and_restore_outside_the_totals
     }
 }
 
-/// The six scored counters, energy then carbon: total, database, broker.
-fn scored_counters(metrics: &MetricsState) -> [f64; 6] {
+/// The eight scored counters, energy then carbon: total, database, broker,
+/// avoidable.
+fn scored_counters(metrics: &MetricsState) -> [f64; 8] {
     [
         metrics.energy_kwh_total.get(),
         metrics.scored_database_energy_kwh_total.get(),
         metrics.scored_broker_energy_kwh_total.get(),
+        metrics.scored_avoidable_energy_kwh_total.get(),
         metrics.carbon_gco2_total.get(),
         metrics.scored_database_carbon_gco2_total.get(),
         metrics.scored_broker_carbon_gco2_total.get(),
+        metrics.scored_avoidable_carbon_gco2_total.get(),
     ]
 }
 
@@ -1762,7 +1779,7 @@ async fn host_counters_sum_the_in_total_host_figures() {
         expected[2] += co2.database_gco2.unwrap_or(0.0);
         expected[3] += co2.messaging_gco2.unwrap_or(0.0);
     }
-    let [kwh, db_kwh, mw_kwh, gco2, db_g, mw_g] = scored_counters(&metrics);
+    let [kwh, db_kwh, mw_kwh, _, gco2, db_g, mw_g, _] = scored_counters(&metrics);
     assert!((db_kwh - 2.5).abs() < 1e-12 && (mw_kwh - 1.25).abs() < 1e-12);
     for (got, want) in [db_kwh, mw_kwh, db_g, mw_g].into_iter().zip(expected) {
         assert!((got - want).abs() < 1e-9, "{got} vs {want}");
@@ -1770,7 +1787,7 @@ async fn host_counters_sum_the_in_total_host_figures() {
     assert!(db_g > 0.0 && mw_g > 0.0);
     assert!(db_kwh + mw_kwh <= kwh && db_g + mw_g <= gco2);
 
-    // A NaN total moves neither it nor its host parts.
+    // A NaN total moves neither it nor its host and avoidable parts.
     let mut poisoned = cell.read().await.clone();
     assert!(
         poisoned.database_in_totals().is_some(),

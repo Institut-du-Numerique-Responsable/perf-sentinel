@@ -1778,7 +1778,7 @@
     },
     {
       "title": "Average power (W)",
-      "description": "Average electrical power attributed to the analysed workload, the rate of the energy counter `perf_sentinel_scored_energy_kwh_total`. Depending on configuration it is measured (an agent reading real power) or modelled from operation counts, the energy source line of `query monitor` and the HTML report says which. It covers each service's own host for the operations it issues (CPU, memory, network stack), never the database, broker or downstream service it calls: their hosts are in it only when a database or broker host source is configured. Idle servers and storage are never in it.\n\nScoring windows do not all last the same time, so the per-window gauge `perf_sentinel_energy_kwh` reads as energy per batch, not as power: this panel derives it from the counter instead. Per-service and per-region detail is kept off /metrics and lives in the query monitor.",
+      "description": "Average electrical power attributed to the analysed workload, the rate of the energy counter `perf_sentinel_scored_energy_kwh_total`. Depending on configuration it is measured (an agent reading real power) or modelled from operation counts, the energy source line of `query monitor` and the HTML report says which. It covers each service's own host for the operations it issues (CPU, memory, network stack), never the database, broker or downstream service it calls: their hosts are in it only when a database or broker host source is configured. Idle servers and storage are never in it.\n\nScoring windows do not all last the same time, so the per-window gauge `perf_sentinel_energy_kwh` reads as energy per batch, not as power: this panel derives it from the counter instead. Per-service and per-region detail is kept off /metrics and lives in the query monitor.\n\nThe avoidable series is the part of it spent on avoidable I/O ops (N+1 and redundant calls, the waste ratio's numerator), from the same scoring windows: `perf_sentinel_scored_avoidable_energy_kwh_total` (since 0.48.0). It has the same scope, so without a database or broker host source it leaves out the work those calls cause on the database and the broker.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1795,6 +1795,11 @@
           "expr": "rate(perf_sentinel_scored_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
           "refId": "A",
           "legendFormat": "power {{instance}}"
+        },
+        {
+          "expr": "rate(perf_sentinel_scored_avoidable_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
+          "refId": "B",
+          "legendFormat": "avoidable power {{instance}}"
         }
       ],
       "fieldConfig": {
@@ -1812,7 +1817,7 @@
     },
     {
       "title": "Carbon per hour (gCO2e/h)",
-      "description": "Operational emissions per hour, the rate of the counter `perf_sentinel_scored_carbon_gco2_total`, summed across regions: energy multiplied by the local grid intensity. When a database or broker host source is configured, it includes their host carbon counted in the totals.\n\nIt moves with the grid as well as the workload, so a drop can be a cleaner hour rather than an optimisation. Manufacturing emissions are excluded.",
+      "description": "Operational emissions per hour, the rate of the counter `perf_sentinel_scored_carbon_gco2_total`, summed across regions: energy multiplied by the local grid intensity. When a database or broker host source is configured, it includes their host carbon counted in the totals.\n\nIt moves with the grid as well as the workload, so a drop can be a cleaner hour rather than an optimisation. Manufacturing emissions are excluded.\n\nThe avoidable series is the part of it caused by avoidable I/O ops (N+1 and redundant calls, the waste ratio's numerator), from the same scoring windows: `perf_sentinel_scored_avoidable_carbon_gco2_total` (since 0.48.0). It has the same scope, so without a database or broker host source it leaves out the work those calls cause on the database and the broker.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -1829,6 +1834,11 @@
           "expr": "rate(perf_sentinel_scored_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
           "refId": "A",
           "legendFormat": "carbon {{instance}}"
+        },
+        {
+          "expr": "rate(perf_sentinel_scored_avoidable_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__rate_interval]) * 3600",
+          "refId": "B",
+          "legendFormat": "avoidable carbon {{instance}}"
         }
       ],
       "fieldConfig": {
@@ -1846,7 +1856,7 @@
     },
     {
       "title": "Energy over the selected range (kWh)",
-      "description": "Electricity attributed to the analysed workload. Same scope as Average power: each service's own host, the database and broker hosts only when a host source is configured, never idle servers or storage. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window gauge `perf_sentinel_energy_kwh` would count a window once per scrape. No data on a range that predates the counter.",
+      "description": "Electricity attributed to the analysed workload. Same scope as Average power: each service's own host, the database and broker hosts only when a host source is configured, never idle servers or storage. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window gauge `perf_sentinel_energy_kwh` would count a window once per scrape. No data on a range that predates the counter.\n\nThe avoidable series is the part of it spent on avoidable I/O ops (N+1 and redundant calls, the waste ratio's numerator), from the same scoring windows: `perf_sentinel_scored_avoidable_energy_kwh_total` (since 0.48.0). It has the same scope, so without a database or broker host source it leaves out the work those calls cause on the database and the broker.",
       "type": "stat",
       "gridPos": {
         "h": 6,
@@ -1864,6 +1874,12 @@
           "refId": "A",
           "instant": true,
           "legendFormat": "total"
+        },
+        {
+          "expr": "sum(increase(perf_sentinel_scored_avoidable_energy_kwh_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "refId": "B",
+          "legendFormat": "avoidable",
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -1874,7 +1890,7 @@
     },
     {
       "title": "Carbon over the selected range (gCO2e)",
-      "description": "Operational carbon of the analysed workload, embodied and network transport excluded. When a database or broker host source is configured, it includes their host carbon counted in the totals. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window gauge `perf_sentinel_carbon_gco2` would count a window once per scrape. No data on a range that predates the counter.",
+      "description": "Operational carbon of the analysed workload, embodied and network transport excluded. When a database or broker host source is configured, it includes their host carbon counted in the totals. Summed over the time range picked at the top of the dashboard, every scoring window counted once. `increase()` over the running counter survives daemon restarts, where summing the per-window gauge `perf_sentinel_carbon_gco2` would count a window once per scrape. No data on a range that predates the counter.\n\nThe avoidable series is the part of it caused by avoidable I/O ops (N+1 and redundant calls, the waste ratio's numerator), from the same scoring windows: `perf_sentinel_scored_avoidable_carbon_gco2_total` (since 0.48.0). It has the same scope, so without a database or broker host source it leaves out the work those calls cause on the database and the broker.",
       "type": "stat",
       "gridPos": {
         "h": 6,
@@ -1892,6 +1908,12 @@
           "refId": "A",
           "instant": true,
           "legendFormat": "total"
+        },
+        {
+          "expr": "sum(increase(perf_sentinel_scored_avoidable_carbon_gco2_total{job=~\"$job\", namespace=~\"$namespace\"}[$__range]))",
+          "refId": "B",
+          "legendFormat": "avoidable",
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -2043,6 +2065,6 @@
   "timezone": "browser",
   "title": "perf-sentinel overview",
   "uid": "perf-sentinel-overview",
-  "version": 12,
+  "version": 13,
   "refresh": "1m"
 }

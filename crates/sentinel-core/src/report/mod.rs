@@ -736,6 +736,20 @@ impl GreenSummary {
         (self.energy_kwh - self.host_energy_in_totals_kwh()).max(0.0)
     }
 
+    /// Avoidable energy: the application energy priced at the avoidable
+    /// share of the accounted I/O ops, plus the waste of the in-total
+    /// database and broker hosts. The operational tier of a disclosure, and
+    /// what `perf_sentinel_scored_avoidable_energy_kwh_total` sums.
+    #[must_use]
+    pub fn avoidable_energy_kwh(&self) -> f64 {
+        crate::score::avoidable_share(
+            self.application_energy_kwh(),
+            self.avoidable_io_ops,
+            self.accounted_io_ops,
+        ) + self.database_in_totals().map_or(0.0, |w| w.waste_kwh)
+            + self.messaging_in_totals().map_or(0.0, |w| w.waste_kwh)
+    }
+
     /// Scored carbon: the regions' operational gCO₂ plus the in-total
     /// database and broker host terms. Embodied and transport stay out.
     /// Reads the host terms without their `in_totals` flag: it relies on

@@ -171,6 +171,12 @@ pub struct MetricsState {
     pub scored_broker_energy_kwh_total: Counter,
     /// The broker twin of `scored_database_carbon_gco2_total`.
     pub scored_broker_carbon_gco2_total: Counter,
+    /// The avoidable part of `energy_kwh_total`: each window's
+    /// [`crate::report::GreenSummary::avoidable_energy_kwh`], a subset of it.
+    pub scored_avoidable_energy_kwh_total: Counter,
+    /// The avoidable part of `carbon_gco2_total`: each window's operational
+    /// avoidable gCO₂ (`co2.avoidable.mid`), a subset of it.
+    pub scored_avoidable_carbon_gco2_total: Counter,
     /// Configured cap of the correlation window (`[daemon]
     /// max_active_traces`), set once at startup. Pairs with
     /// `active_traces` for a headroom panel.
@@ -576,24 +582,32 @@ impl MetricsState {
         )
         .expect("metric creation should not fail");
 
-        let host_counter = |name: &str, help: &str| {
+        let scored_counter = |name: &str, help: &str| {
             Counter::new(name, help).expect("metric creation should not fail")
         };
-        let scored_database_energy_kwh_total = host_counter(
+        let scored_database_energy_kwh_total = scored_counter(
             "perf_sentinel_scored_database_energy_kwh_total",
             "Database host energy inside perf_sentinel_scored_energy_kwh_total, kWh",
         );
-        let scored_database_carbon_gco2_total = host_counter(
+        let scored_database_carbon_gco2_total = scored_counter(
             "perf_sentinel_scored_database_carbon_gco2_total",
             "Database host carbon inside perf_sentinel_scored_carbon_gco2_total, grams CO2e",
         );
-        let scored_broker_energy_kwh_total = host_counter(
+        let scored_broker_energy_kwh_total = scored_counter(
             "perf_sentinel_scored_broker_energy_kwh_total",
             "Broker host energy inside perf_sentinel_scored_energy_kwh_total, kWh",
         );
-        let scored_broker_carbon_gco2_total = host_counter(
+        let scored_broker_carbon_gco2_total = scored_counter(
             "perf_sentinel_scored_broker_carbon_gco2_total",
             "Broker host carbon inside perf_sentinel_scored_carbon_gco2_total, grams CO2e",
+        );
+        let scored_avoidable_energy_kwh_total = scored_counter(
+            "perf_sentinel_scored_avoidable_energy_kwh_total",
+            "Avoidable part of perf_sentinel_scored_energy_kwh_total, the energy of the avoidable I/O ops, kWh",
+        );
+        let scored_avoidable_carbon_gco2_total = scored_counter(
+            "perf_sentinel_scored_avoidable_carbon_gco2_total",
+            "Avoidable part of perf_sentinel_scored_carbon_gco2_total, the carbon of the avoidable I/O ops, grams CO2e",
         );
 
         let max_active_traces = Gauge::new(
@@ -838,6 +852,8 @@ impl MetricsState {
             &scored_database_carbon_gco2_total,
             &scored_broker_energy_kwh_total,
             &scored_broker_carbon_gco2_total,
+            &scored_avoidable_energy_kwh_total,
+            &scored_avoidable_carbon_gco2_total,
         ] {
             registry
                 .register(Box::new(counter.clone()))
@@ -1347,6 +1363,8 @@ impl MetricsState {
             scored_database_carbon_gco2_total,
             scored_broker_energy_kwh_total,
             scored_broker_carbon_gco2_total,
+            scored_avoidable_energy_kwh_total,
+            scored_avoidable_carbon_gco2_total,
             max_active_traces,
             analysis_queue_capacity,
             max_retained_findings,
