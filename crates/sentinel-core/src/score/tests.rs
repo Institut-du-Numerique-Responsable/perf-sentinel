@@ -539,6 +539,11 @@ fn database_waste_multiplies_window_energy_by_sql_ratio() {
     assert_eq!(db.placement, None);
     assert!((summary.application_energy_kwh() - (summary.energy_kwh - 2.0)).abs() < 1e-12);
     assert!(summary.application_energy_kwh() < 1.0);
+    // No application I/O is accounted here, so the avoidable energy is the
+    // database host's own waste (the application share is covered by the
+    // daemon's counter test).
+    assert_eq!(summary.accounted_io_ops, 0);
+    assert!((summary.avoidable_energy_kwh() - db.waste_kwh).abs() < 1e-12);
 }
 
 #[test]

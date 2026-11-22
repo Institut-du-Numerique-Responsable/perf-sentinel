@@ -1493,10 +1493,10 @@ fn record_slow_durations(
 }
 
 /// Add a window's scored figure to its running counter, and its database
-/// and broker host parts to theirs. The parts move only when the total
-/// does, so each stays a subset of it. `inc_by` panics on a negative
-/// value, and a NaN would poison the sum.
-fn inc_scored(total: &prometheus::Counter, value: f64, parts: [(&prometheus::Counter, f64); 2]) {
+/// host, broker host and avoidable parts to theirs. The parts move only
+/// when the total does, so each stays a subset of it. `inc_by` panics on a
+/// negative value, and a NaN would poison the sum.
+fn inc_scored(total: &prometheus::Counter, value: f64, parts: [(&prometheus::Counter, f64); 3]) {
     let counts = |v: f64| v.is_finite() && v > 0.0;
     if !counts(value) {
         return;
@@ -1559,6 +1559,10 @@ fn emit_findings_and_update_metrics(
                     .messaging_in_totals()
                     .map_or(0.0, |w| w.energy_kwh),
             ),
+            (
+                &metrics.scored_avoidable_energy_kwh_total,
+                green_summary.avoidable_energy_kwh(),
+            ),
         ],
     );
     inc_scored(
@@ -1572,6 +1576,10 @@ fn emit_findings_and_update_metrics(
             (
                 &metrics.scored_broker_carbon_gco2_total,
                 co2.and_then(|c| c.messaging_gco2).unwrap_or(0.0),
+            ),
+            (
+                &metrics.scored_avoidable_carbon_gco2_total,
+                co2.map_or(0.0, |c| c.avoidable.mid),
             ),
         ],
     );

@@ -82,8 +82,7 @@ pub(crate) fn compute_disclosure_waste(
         operational: AvoidableTier {
             n_plus_one_threshold: detect_config.n_plus_one_threshold,
             avoidable_io_ops: operational.avoidable_io_ops,
-            avoidable_kwh: avoidable_share(app_energy, operational.avoidable_io_ops, accounted)
-                + hosts.operational_kwh,
+            avoidable_kwh: operational.avoidable_energy_kwh(),
             avoidable_gco2: operational_avoidable_gco2,
         },
         database,
@@ -91,13 +90,13 @@ pub(crate) fn compute_disclosure_waste(
     }
 }
 
-/// Sum of the waste legs of the host blocks inside the totals. The
-/// operational gCO₂ leg is already in `co2.avoidable`.
+/// Sum of the canonical waste legs of the host blocks inside the totals.
+/// The operational legs are already in `co2.avoidable` and
+/// [`GreenSummary::avoidable_energy_kwh`].
 #[derive(Default)]
 struct HostLegs {
     canonical_kwh: f64,
     canonical_gco2: f64,
-    operational_kwh: f64,
 }
 
 impl HostLegs {
@@ -109,7 +108,6 @@ impl HostLegs {
             .fold(Self::default(), |acc, b| Self {
                 canonical_kwh: acc.canonical_kwh + b.canonical_waste_kwh,
                 canonical_gco2: acc.canonical_gco2 + b.canonical_waste_gco2.unwrap_or(0.0),
-                operational_kwh: acc.operational_kwh + b.operational_waste_kwh,
             })
     }
 }

@@ -41,6 +41,7 @@ pub mod scaphandre;
 pub(crate) mod canonical;
 mod carbon_compute;
 mod region_breakdown;
+pub(crate) use region_breakdown::avoidable_share;
 
 use std::collections::{BTreeMap, HashMap};
 
