@@ -847,3 +847,13 @@ v0.47.0	cb2877b	2026-11-22	PASS
 # 0.47.0 control fails it the same way, so a scenario fragility, not a
 # regression. Not run: the cluster scenarios.
 v0.48.0	072101a	2026-11-22	PASS
+
+# v0.48.1 targeted pass, no cluster (avoidable share leaves out spans with no
+# region): database-host-groups (B2 avoidable counters inside their totals)
+# and alumet-db-waste (flood fixed in 60e6421, D-conservation PASS) on the
+# local 0.48.1 release binary at 40332e64, disclose (10/10), disclose-temporal
+# (5/5) and disclose-archive-family-baseline on perf-sentinel:0.48.1-40332e64,
+# rerun on perf-sentinel:0.48.1-d34acca1 after the Qodana refactor of the
+# disclosure tiers. All PASS. No lab scenario sends spans with no region: that
+# case rests on the unit tests. Not run: the cluster scenarios.
+v0.48.1	60e6421	2026-11-22	PASS
