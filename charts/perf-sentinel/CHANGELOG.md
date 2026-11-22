@@ -10,6 +10,16 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.47.0]
+
+### Added
+
+- **`appVersion` moves to `0.47.0`.** The daemon counts the I/O events its
+  per-trace `max_events_per_trace` cap drops in
+  `perf_sentinel_trace_events_dropped_total`, warns once on the first drop of
+  a run, and names the count and the current cap in the `tuning` warnings of
+  `/api/export/report`. No chart value or template changes.
+
 ## [0.46.0]
 
 ### Changed
