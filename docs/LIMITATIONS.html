@@ -425,7 +425,7 @@ high = mid × 2.0   (twice the midpoint)</code></pre></div>
 <ul>
 <li><code class="ps-ic">co2.total.methodology = "sci_v1_numerator+transport"</code>: the <code class="ps-ic">(E × I) + M + T</code> footprint over analyzed traces. <code class="ps-ic">"sci_v1_numerator+transport+hosts"</code> on a daemon window scored with a database or broker host source configured, whose in-total host carbon joins the footprint. Legacy reports can carry <code class="ps-ic">"sci_v1_numerator"</code>.</li>
 <li><code class="ps-ic">co2.sci_per_trace.methodology = "sci_v1_intensity"</code>: the per-R intensity <code class="ps-ic">((E × I) + M) / R</code>, R = 1 trace.</li>
-<li><code class="ps-ic">co2.avoidable.methodology = "sci_v1_operational_ratio"</code>: <code class="ps-ic">operational × (avoidable_io_ops / accounted_io_ops)</code>, a region-blind global ratio that excludes embodied carbon. <code class="ps-ic">"sci_v1_operational_ratio+hosts"</code> on the same windows, which add each in-total host term times its own SQL or messaging waste ratio.</li>
+<li><code class="ps-ic">co2.avoidable.methodology = "sci_v1_operational_ratio"</code>: <code class="ps-ic">operational × (accounted_avoidable_io_ops / accounted_io_ops)</code>, a region-blind global ratio that excludes embodied carbon. Both sides leave out the operations whose span resolved no region. <code class="ps-ic">"sci_v1_operational_ratio+hosts"</code> on the same windows, which add each in-total host term times its own SQL or messaging waste ratio.</li>
 </ul>
 <h3 id="positioning-directional-waste-counter" class="ps-h3">Positioning: directional waste counter</h3>
 <p class="ps-p">Perf Sentinel is a <strong>directional waste counter</strong> designed to:</p>
