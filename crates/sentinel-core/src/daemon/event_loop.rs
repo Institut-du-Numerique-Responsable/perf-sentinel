@@ -1063,6 +1063,7 @@ async fn ingest_event_batch(
                 lru_evicted.push(evicted);
             }
         }
+        record_trace_event_drops(w.take_dropped_events(), metrics);
         metrics.active_traces.set(w.active_traces() as f64);
     }
     lru_evicted
@@ -1623,6 +1624,23 @@ fn emit_findings_and_update_metrics(
         {
             let _ = writeln!(out);
         }
+    }
+}
+
+/// Count the events the per-trace ring buffer dropped, and warn once per
+/// run: those events were counted at ingest and never reach analysis.
+fn record_trace_event_drops(dropped: u64, metrics: &MetricsState) {
+    static CAP_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if dropped == 0 {
+        return;
+    }
+    metrics.trace_events_dropped_total.inc_by(dropped);
+    if !CAP_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        tracing::warn!(
+            dropped,
+            "max_events_per_trace reached, dropping the oldest events of a trace (see \
+             perf_sentinel_trace_events_dropped_total)"
+        );
     }
 }
 

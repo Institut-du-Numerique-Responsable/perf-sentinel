@@ -123,6 +123,9 @@ pub struct TraceWindow {
     config: WindowConfig,
     traces: LruCache<String, TraceBuffer>,
     next_source_endpoint_generation: u64,
+    /// Events the per-trace ring buffer dropped since the last
+    /// [`Self::take_dropped_events`].
+    dropped_events: u64,
     #[cfg(all(test, feature = "daemon"))]
     reconciliation_passes: usize,
 }
@@ -135,9 +138,16 @@ impl TraceWindow {
             config,
             traces: LruCache::new(cap),
             next_source_endpoint_generation: 0,
+            dropped_events: 0,
             #[cfg(all(test, feature = "daemon"))]
             reconciliation_passes: 0,
         }
+    }
+
+    /// Events the per-trace ring buffer dropped since the last call, oldest
+    /// first under `max_events_per_trace`. Reading resets the count.
+    pub fn take_dropped_events(&mut self) -> u64 {
+        std::mem::take(&mut self.dropped_events)
     }
 
     /// Push a normalized event into the window.
@@ -167,6 +177,7 @@ impl TraceWindow {
             // Ring buffer: drop oldest if over capacity
             if buf.events.len() > self.config.max_events_per_trace {
                 buf.events.pop_front();
+                self.dropped_events += 1;
             }
             return None;
         }

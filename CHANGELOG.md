@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- `perf_sentinel_trace_events_dropped_total` counts the I/O events the per-trace `max_events_per_trace` ring buffer drops, oldest first. Those events were counted at ingest by `perf_sentinel_service_io_ops_total` and never reached analysis, with nothing to show it: on a production daemon, 8 to 20 % of the ingested I/O ops were never analysed, and the cap was one of two causes nothing measured. The first drop of a run logs a warning once, and the `tuning` warnings of `/api/export/report` name the count and the current cap, until now only an out-of-range value at startup did. `docs/METRICS.md`, its French mirror and the tuning table name it.
+
 ## [0.46.0] - 2026-11-18
 
 ### Added
