@@ -197,25 +197,29 @@ fn build_waste_tiers(
     }
 }
 
+/// The [`WasteTierInput`] of a database or messaging figure, two types that
+/// carry the same fields.
+macro_rules! tier_input {
+    ($figure:expr) => {
+        WasteTierInput {
+            energy_kwh: $figure.energy_kwh,
+            model: &$figure.model,
+            waste_kwh: $figure.waste_kwh,
+            waste_gco2: $figure.waste_gco2,
+            energy_gco2: $figure.energy_gco2,
+            in_totals: $figure.in_totals,
+            placement: $figure.placement,
+        }
+    };
+}
+
 fn build_db_waste_tiers(
     operational: &GreenSummary,
     ops: (usize, usize),
     accounted: (usize, usize),
 ) -> Option<DisclosureDbWaste> {
     let db = operational.database_waste.as_ref()?;
-    Some(build_waste_tiers(
-        &WasteTierInput {
-            energy_kwh: db.energy_kwh,
-            model: &db.model,
-            waste_kwh: db.waste_kwh,
-            waste_gco2: db.waste_gco2,
-            energy_gco2: db.energy_gco2,
-            in_totals: db.in_totals,
-            placement: db.placement,
-        },
-        ops,
-        accounted,
-    ))
+    Some(build_waste_tiers(&tier_input!(db), ops, accounted))
 }
 
 fn build_msg_waste_tiers(
@@ -224,19 +228,7 @@ fn build_msg_waste_tiers(
     accounted: (usize, usize),
 ) -> Option<crate::report::DisclosureMsgWaste> {
     let mw = operational.messaging_waste.as_ref()?;
-    Some(build_waste_tiers(
-        &WasteTierInput {
-            energy_kwh: mw.energy_kwh,
-            model: &mw.model,
-            waste_kwh: mw.waste_kwh,
-            waste_gco2: mw.waste_gco2,
-            energy_gco2: mw.energy_gco2,
-            in_totals: mw.in_totals,
-            placement: mw.placement,
-        },
-        ops,
-        accounted,
-    ))
+    Some(build_waste_tiers(&tier_input!(mw), ops, accounted))
 }
 
 #[cfg(test)]
