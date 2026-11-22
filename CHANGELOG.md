@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-22
+
 ### Added
 
 - `perf_sentinel_scored_avoidable_energy_kwh_total` and `perf_sentinel_scored_avoidable_carbon_gco2_total` sum the avoidable part of the two scored counters, window by window. Until now `/metrics` only carried the energy and carbon of the whole analysed workload, so a dashboard could not show what the waste costs, and multiplying the total by the waste ratio mixed a count of calls with an energy. The energy is the operational tier a disclosure already computes, the application energy priced at the avoidable share of the accounted I/O ops plus the waste of the in-total database and broker hosts, now read from one `GreenSummary::avoidable_energy_kwh` that the disclosure uses too. The carbon is the window's `co2.avoidable.mid`, the figure the detection ledger hands PerfSentinelHub. Both share the totals' scope, so without a database or broker host source they leave out what the waste costs there. The Prometheus dashboard's `Average power`, `Carbon per hour` and both range totals gain an `avoidable` series beside the total, dashboard `version` 13, and the French variant is regenerated. `docs/METRICS.md` and its French mirror describe the two counters.

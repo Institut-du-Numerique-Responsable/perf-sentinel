@@ -10,6 +10,16 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.48.0]
+
+### Added
+
+- **`appVersion` moves to `0.48.0`.** The daemon publishes the avoidable part
+  of its scored energy and carbon in
+  `perf_sentinel_scored_avoidable_energy_kwh_total` and
+  `perf_sentinel_scored_avoidable_carbon_gco2_total`, the operational tier a
+  disclosure computes. No chart value or template changes.
+
 ## [0.47.0]
 
 ### Added
