@@ -380,7 +380,9 @@ fn credited_avoidable(findings: &[Finding]) -> HashMap<DedupKey<'_>, KeyOps<'_>>
 /// match `accounted_io_ops` and its SQL and messaging parts. Each finding's
 /// share of a `(trace, service)` loses at most as many ops of its kind as that
 /// pair left in the bucket, so a pair mixing spans with and without a region
-/// keeps the share its resolved spans carry.
+/// no longer loses its whole share. An upper bound on the removal: a finding
+/// does not say which spans it is made of, so an unrelated span with no
+/// region of the same pair and kind still takes one op out.
 pub(crate) fn accounted_avoidable_io_ops(
     findings: &[Finding],
     unaccounted: &UnaccountedSpans,

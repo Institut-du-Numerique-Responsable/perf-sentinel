@@ -573,7 +573,8 @@ pub struct DatabaseWaste {
     /// estimated path (no database was declared).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
-    /// `avoidable_sql_io_ops / total_sql_io_ops`, in `[0, 1]`.
+    /// `avoidable_sql_io_ops / total_sql_io_ops`, in `[0, 1]`. On the
+    /// estimated path, the same ratio over the region-resolved SQL spans.
     pub sql_waste_ratio: f64,
     /// Provenance tag: `alumet_rapl` when the energy is measured on the
     /// declared database cgroup, `cloud_specpower` for declared hosts
@@ -622,6 +623,8 @@ pub struct MessagingWaste {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     /// `avoidable_messaging_io_ops / total_messaging_io_ops`, in `[0, 1]`.
+    /// On the estimated path, the same ratio over the region-resolved
+    /// publish spans.
     pub messaging_waste_ratio: f64,
     /// Provenance: `alumet_rapl` measured on the declared cgroup,
     /// `cloud_specpower` for declared hosts priced from their `cpu_query`,

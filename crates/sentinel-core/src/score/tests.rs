@@ -4077,10 +4077,10 @@ fn avoidable_share_leaves_out_ops_with_no_region() {
 }
 
 /// One service, one trace: a 10-call N+1 with a region and one more span
-/// without. The pair loses one avoidable op, the one its unknown span can
-/// account for, not the whole share.
+/// without. The pair loses at most one avoidable op, as many as it left in
+/// the unknown bucket, not the whole share.
 #[test]
-fn a_pair_mixing_spans_with_and_without_a_region_keeps_its_resolved_share() {
+fn a_pair_mixing_spans_with_and_without_a_region_loses_at_most_its_unknown_spans() {
     let mut events = Vec::new();
     for i in 0..10 {
         let mut e = make_sql_event(
