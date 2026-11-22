@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.48.1] - 2026-11-22
+
 ### Fixed
 
 - The avoidable energy and carbon no longer charge the waste of a span with no region to the services that have one. The share was the deduped avoidable ops over `accounted_io_ops`, and the numerator counted the calls of spans in the unknown-region bucket that the denominator and the energy leave out: with no `default_region`, a service with no region and a 10-call N+1 priced 90 % of a clean service's energy as avoidable. The numerator now drops the avoidable share of each `(trace, service)` pair the carbon pass puts in the unknown bucket, so a pair that mixes spans with and without a region loses its whole share. `co2.avoidable`, `perf_sentinel_scored_avoidable_energy_kwh_total`, `perf_sentinel_scored_avoidable_carbon_gco2_total`, both disclosure tiers and the detection ledger's `avoidable_gco2` follow, and the ledger's `avoidable_io_ops` and `total_io_ops` now count the same region-resolved ops, so the Hub's grams per avoidable op divides like for like. When every span resolves a region, nothing changes. `avoidable_io_ops` and the waste ratio still count every avoidable call. `docs/METRICS.md` and its French mirror also say that the detection ledger skips a window where no span resolved a region, which the avoidable carbon counter does not.
