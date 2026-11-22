@@ -1449,7 +1449,10 @@ Chaque objet de `days` :
 
 Les quatre champs carbone sont présents ensemble ou absents ensemble.
 Leur rapport, `avoidable_gco2 / avoidable_io_ops`, donne les grammes par
-opération d'I/O évitable du jour. Appliqué au `extra_io_ops` d'une
+opération d'I/O évitable du jour, en moyenne sur toutes les opérations
+évitables : une opération dont la span n'a résolu aucune région ne porte
+pas de carbone applicatif dans `avoidable_gco2`, et un jour qui en compte
+lit donc moins par opération. Appliqué au `extra_io_ops` d'une
 signature, il ne donne qu'un ordre de grandeur, puisque `extra_io_ops`
 n'est pas dédupliqué entre findings comme le `avoidable_io_ops` d'un
 lot. Comme les compteurs, les quatre sommes couvrent la part

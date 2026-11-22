@@ -15,18 +15,21 @@ use crate::report::{AvoidableTier, DisclosureDbWaste, DisclosureWaste, GreenSumm
 use crate::score::host_static::HostPlacement;
 
 use super::AvoidableIoOps;
-use super::dedup_avoidable_io_ops_by_service;
+use super::UnaccountedSpans;
 use super::region_breakdown::avoidable_share;
+use super::{accounted_avoidable_io_ops, dedup_avoidable_io_ops_by_service};
 
 /// Re-run N+1 at [`DISCLOSURE_N_PLUS_ONE_THRESHOLD`] (then redundant against
-/// that set) over every trace, and dedup the avoidable I/O ops (total and
-/// SQL-only). Only the N+1 threshold is overridden. The window, the
-/// sanitizer mode and its variance threshold stay as configured.
+/// that set) over every trace, and dedup the avoidable I/O ops (total, SQL
+/// and messaging), first over every span, then without the ops `unaccounted`
+/// leaves outside every region. Only the N+1 threshold is overridden. The
+/// window, the sanitizer mode and its variance threshold stay as configured.
 #[must_use]
 pub(crate) fn compute_canonical_avoidable(
     traces: &[Trace],
     detect_config: &DetectConfig,
-) -> AvoidableIoOps {
+    unaccounted: &UnaccountedSpans,
+) -> (AvoidableIoOps, AvoidableIoOps) {
     let mut findings = Vec::new();
     for trace in traces {
         let mut n1 = n_plus_one::detect_n_plus_one(
@@ -40,7 +43,23 @@ pub(crate) fn compute_canonical_avoidable(
         findings.append(&mut n1);
         findings.append(&mut redundant);
     }
-    dedup_avoidable_io_ops_by_service(&findings).0
+    let ops = dedup_avoidable_io_ops_by_service(&findings).0;
+    let accounted = if unaccounted.is_empty() {
+        ops
+    } else {
+        accounted_avoidable_io_ops(&findings, unaccounted)
+    };
+    (ops, accounted)
+}
+
+/// Spans left in the unknown bucket per I/O kind, summed over every pair.
+fn unknown_by_kind(unaccounted: &UnaccountedSpans) -> [usize; 3] {
+    unaccounted
+        .values()
+        .flat_map(std::collections::BTreeMap::values)
+        .fold([0; 3], |acc, c| {
+            [acc[0] + c[0], acc[1] + c[1], acc[2] + c[2]]
+        })
 }
 
 /// Build both avoidable tiers from the scored operational [`GreenSummary`]
@@ -64,19 +83,36 @@ pub(crate) fn compute_disclosure_waste(
     let operational_gco2 = operational.co2.as_ref().map_or(0.0, |r| r.operational_gco2);
     let operational_avoidable_gco2 = operational.co2.as_ref().map_or(0.0, |r| r.avoidable.mid);
 
-    let canonical = compute_canonical_avoidable(traces, detect_config);
+    let (canonical, canonical_accounted) =
+        compute_canonical_avoidable(traces, detect_config, &operational.unaccounted_spans);
     let canonical_io = canonical.total;
-    let database = build_db_waste_tiers(operational, canonical.sql);
-    let messaging = build_msg_waste_tiers(operational, canonical.messaging);
+    // An estimated host figure covers the region-resolved spans only, so its
+    // canonical leg takes the resolved pair, as `build_waste_figure` does.
+    let unknown = unknown_by_kind(&operational.unaccounted_spans);
+    let sql = operational.total_sql_io_ops;
+    let msg = operational.total_messaging_io_ops;
+    let database = build_db_waste_tiers(
+        operational,
+        (sql, canonical.sql),
+        (sql.saturating_sub(unknown[0]), canonical_accounted.sql),
+    );
+    let messaging = build_msg_waste_tiers(
+        operational,
+        (msg, canonical.messaging),
+        (
+            msg.saturating_sub(unknown[2]),
+            canonical_accounted.messaging,
+        ),
+    );
     let hosts = HostLegs::of([database.as_ref(), messaging.as_ref()]);
 
     DisclosureWaste {
         canonical: AvoidableTier {
             n_plus_one_threshold: DISCLOSURE_N_PLUS_ONE_THRESHOLD,
             avoidable_io_ops: canonical_io,
-            avoidable_kwh: avoidable_share(app_energy, canonical_io, accounted)
+            avoidable_kwh: avoidable_share(app_energy, canonical_accounted.total, accounted)
                 + hosts.canonical_kwh,
-            avoidable_gco2: avoidable_share(operational_gco2, canonical_io, accounted)
+            avoidable_gco2: avoidable_share(operational_gco2, canonical_accounted.total, accounted)
                 + hosts.canonical_gco2,
         },
         operational: AvoidableTier {
@@ -128,11 +164,20 @@ struct WasteTierInput<'a> {
 /// scales the ratio-independent `energy_gco2` base, so an operator
 /// threshold that zeroes the operational figure cannot zero the canonical
 /// carbon leg.
+///
+/// `ops` is `(total, canonical avoidable)` over every span, the ratio a
+/// measured or declared host serving them all is priced at. `accounted` is
+/// the same pair over the region-resolved spans an estimate covers.
 fn build_waste_tiers(
     figure: &WasteTierInput<'_>,
-    canonical_avoidable: usize,
-    total: usize,
+    ops: (usize, usize),
+    accounted: (usize, usize),
 ) -> DisclosureDbWaste {
+    let (total, canonical_avoidable) = if figure.model == crate::report::DB_WASTE_MODEL_ESTIMATED {
+        accounted
+    } else {
+        ops
+    };
     #[allow(clippy::cast_precision_loss)] // counts, far below 2^53
     let canonical_ratio = if total == 0 {
         0.0
@@ -152,44 +197,38 @@ fn build_waste_tiers(
     }
 }
 
+/// The [`WasteTierInput`] of a database or messaging figure, two types that
+/// carry the same fields.
+macro_rules! tier_input {
+    ($figure:expr) => {
+        WasteTierInput {
+            energy_kwh: $figure.energy_kwh,
+            model: &$figure.model,
+            waste_kwh: $figure.waste_kwh,
+            waste_gco2: $figure.waste_gco2,
+            energy_gco2: $figure.energy_gco2,
+            in_totals: $figure.in_totals,
+            placement: $figure.placement,
+        }
+    };
+}
+
 fn build_db_waste_tiers(
     operational: &GreenSummary,
-    canonical_sql_avoidable: usize,
+    ops: (usize, usize),
+    accounted: (usize, usize),
 ) -> Option<DisclosureDbWaste> {
     let db = operational.database_waste.as_ref()?;
-    Some(build_waste_tiers(
-        &WasteTierInput {
-            energy_kwh: db.energy_kwh,
-            model: &db.model,
-            waste_kwh: db.waste_kwh,
-            waste_gco2: db.waste_gco2,
-            energy_gco2: db.energy_gco2,
-            in_totals: db.in_totals,
-            placement: db.placement,
-        },
-        canonical_sql_avoidable,
-        operational.total_sql_io_ops,
-    ))
+    Some(build_waste_tiers(&tier_input!(db), ops, accounted))
 }
 
 fn build_msg_waste_tiers(
     operational: &GreenSummary,
-    canonical_messaging_avoidable: usize,
+    ops: (usize, usize),
+    accounted: (usize, usize),
 ) -> Option<crate::report::DisclosureMsgWaste> {
     let mw = operational.messaging_waste.as_ref()?;
-    Some(build_waste_tiers(
-        &WasteTierInput {
-            energy_kwh: mw.energy_kwh,
-            model: &mw.model,
-            waste_kwh: mw.waste_kwh,
-            waste_gco2: mw.waste_gco2,
-            energy_gco2: mw.energy_gco2,
-            in_totals: mw.in_totals,
-            placement: mw.placement,
-        },
-        canonical_messaging_avoidable,
-        operational.total_messaging_io_ops,
-    ))
+    Some(build_waste_tiers(&tier_input!(mw), ops, accounted))
 }
 
 #[cfg(test)]
@@ -213,8 +252,9 @@ mod tests {
     fn canonical_avoidable_independent_of_operational_threshold() {
         let traces = vec![make_trace(make_n_plus_one_events())];
 
-        let low = compute_canonical_avoidable(&traces, &detect_config(2));
-        let high = compute_canonical_avoidable(&traces, &detect_config(50));
+        let none = UnaccountedSpans::new();
+        let (low, low_accounted) = compute_canonical_avoidable(&traces, &detect_config(2), &none);
+        let (high, _) = compute_canonical_avoidable(&traces, &detect_config(50), &none);
 
         assert_eq!(
             low, high,
@@ -222,6 +262,38 @@ mod tests {
         );
         assert_eq!(low.total, 5);
         assert_eq!(low.sql, 5);
+        assert_eq!(low_accounted, low);
+    }
+
+    /// The canonical numerator takes out at most as many ops as the
+    /// `(trace, service)` pair left in the unknown bucket, of the finding's
+    /// own kind, while the count keeps them all. Another service or another
+    /// kind takes nothing out.
+    #[test]
+    fn canonical_accounted_leaves_out_ops_with_no_region() {
+        let traces = vec![make_trace(make_n_plus_one_events())];
+        let unknown = |service: &str, counts: [usize; 3]| {
+            UnaccountedSpans::from([(
+                "trace-1".to_string(),
+                std::collections::BTreeMap::from([(service.to_string(), counts)]),
+            )])
+        };
+        let accounted = |unaccounted: &UnaccountedSpans| {
+            compute_canonical_avoidable(&traces, &detect_config(50), unaccounted)
+                .1
+                .total
+        };
+        // The 6 SQL spans of the N+1, 5 of them avoidable.
+        let (ops, all_out) = compute_canonical_avoidable(
+            &traces,
+            &detect_config(50),
+            &unknown("order-svc", [6, 0, 0]),
+        );
+        assert_eq!(ops.total, 5);
+        assert_eq!(all_out, AvoidableIoOps::default());
+        assert_eq!(accounted(&unknown("order-svc", [2, 0, 0])), 3);
+        assert_eq!(accounted(&unknown("order-svc", [0, 3, 0])), 5);
+        assert_eq!(accounted(&unknown("billing-svc", [6, 0, 0])), 5);
     }
 
     /// With the operator threshold at 50 the operational tier sees zero
@@ -331,6 +403,7 @@ mod tests {
             total_io_ops: 10,
             avoidable_io_ops: 6,
             accounted_io_ops: 10,
+            accounted_avoidable_io_ops: 6,
             total_sql_io_ops: 6,
             total_messaging_io_ops: 4,
             // 2.0 kWh of services plus both hosts.
@@ -405,8 +478,61 @@ mod tests {
             in_totals: false,
             placement: None,
         });
-        let db = build_db_waste_tiers(&operational, 0).expect("tiers");
+        let db = build_db_waste_tiers(&operational, (0, 0), (0, 0)).expect("tiers");
         assert!(db.canonical_waste_kwh.abs() < 1e-12);
         assert!(db.canonical_waste_gco2.expect("carbon leg").abs() < 1e-12);
+    }
+
+    /// A clean service with a region and a service with none running a
+    /// 10-call N+1: the estimated database figure covers the clean SQL energy
+    /// only, so its canonical leg is 0, not that energy at 9 / 20.
+    #[test]
+    fn estimated_db_canonical_leg_leaves_out_ops_with_no_region() {
+        use crate::test_helpers::make_sql_event;
+        use std::sync::Arc;
+        let sql =
+            |trace: &str, service: &str, region: Option<&str>, target: fn(usize) -> String| {
+                (0..10)
+                    .map(|i| {
+                        let mut e = make_sql_event(
+                            trace,
+                            &format!("{trace}{i}"),
+                            &target(i),
+                            "2025-07-10T14:32:01.001Z",
+                        );
+                        e.service = Arc::from(service);
+                        e.cloud_region = region.map(Arc::from);
+                        e
+                    })
+                    .collect::<Vec<_>>()
+            };
+        // Ten distinct tables on A, one template ten times on B.
+        let traces = vec![
+            make_trace(sql("ta", "a", Some("eu-west-3"), |i| {
+                format!("SELECT * FROM a{i}")
+            })),
+            make_trace(sql("tb", "b", None, |i| {
+                format!("SELECT * FROM b WHERE id = {i}")
+            })),
+        ];
+        let ctx = crate::score::carbon::CarbonContext::default();
+        let (_, operational, _) = crate::score::score_green(&traces, Vec::new(), Some(&ctx));
+        assert_eq!(
+            operational
+                .database_waste
+                .as_ref()
+                .map(|d| d.model.as_str()),
+            Some(crate::report::DB_WASTE_MODEL_ESTIMATED)
+        );
+
+        let waste = compute_disclosure_waste(&traces, &operational, &detect_config(50));
+        assert_eq!(waste.canonical.avoidable_io_ops, 9);
+        assert!(waste.canonical.avoidable_kwh.abs() < 1e-15);
+        let db = waste.database.expect("database tiers");
+        assert!(
+            db.canonical_waste_kwh.abs() < 1e-15,
+            "{}",
+            db.canonical_waste_kwh
+        );
     }
 }

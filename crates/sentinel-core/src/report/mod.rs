@@ -326,6 +326,17 @@ pub struct GreenSummary {
     /// read by the daemon to rescale avoidable at the canonical threshold.
     #[serde(skip)]
     pub accounted_io_ops: usize,
+    /// The share of `avoidable_io_ops` whose spans resolved a region: the
+    /// numerator `co2.avoidable` and [`Self::avoidable_energy_kwh`] pair with
+    /// `accounted_io_ops`. `avoidable_io_ops` itself stays a count of every
+    /// avoidable call. In-process only, like its denominator.
+    #[serde(skip)]
+    pub accounted_avoidable_io_ops: usize,
+    /// The `(trace, service)` pairs with a span outside every region, so the
+    /// canonical disclosure tier leaves their avoidable ops out the same way.
+    /// In-process only, empty when every span resolved a region, or none did.
+    #[serde(skip)]
+    pub unaccounted_spans: crate::score::UnaccountedSpans,
     /// Split of `avoidable_io_ops` per `(service, grouping)`, from the
     /// same dedup pass. The grouping is the finding's effective one
     /// (`""` when its span carried none): a finding whose spans come
@@ -562,7 +573,8 @@ pub struct DatabaseWaste {
     /// estimated path (no database was declared).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
-    /// `avoidable_sql_io_ops / total_sql_io_ops`, in `[0, 1]`.
+    /// `avoidable_sql_io_ops / total_sql_io_ops`, in `[0, 1]`. On the
+    /// estimated path, the same ratio over the region-resolved SQL spans.
     pub sql_waste_ratio: f64,
     /// Provenance tag: `alumet_rapl` when the energy is measured on the
     /// declared database cgroup, `cloud_specpower` for declared hosts
@@ -611,6 +623,8 @@ pub struct MessagingWaste {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     /// `avoidable_messaging_io_ops / total_messaging_io_ops`, in `[0, 1]`.
+    /// On the estimated path, the same ratio over the region-resolved
+    /// publish spans.
     pub messaging_waste_ratio: f64,
     /// Provenance: `alumet_rapl` measured on the declared cgroup,
     /// `cloud_specpower` for declared hosts priced from their `cpu_query`,
@@ -688,6 +702,8 @@ impl GreenSummary {
             total_messaging_io_ops: 0,
             avoidable_messaging_io_ops: 0,
             accounted_io_ops: total_io_ops,
+            accounted_avoidable_io_ops: 0,
+            unaccounted_spans: crate::score::UnaccountedSpans::new(),
             avoidable_per_service: BTreeMap::new(),
             analyzed_per_service: BTreeMap::new(),
             io_waste_ratio: 0.0,
@@ -744,7 +760,7 @@ impl GreenSummary {
     pub fn avoidable_energy_kwh(&self) -> f64 {
         crate::score::avoidable_share(
             self.application_energy_kwh(),
-            self.avoidable_io_ops,
+            self.accounted_avoidable_io_ops,
             self.accounted_io_ops,
         ) + self.database_in_totals().map_or(0.0, |w| w.waste_kwh)
             + self.messaging_in_totals().map_or(0.0, |w| w.waste_kwh)

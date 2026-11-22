@@ -60,6 +60,11 @@ For frozen frames you can zoom into panel by panel, jump to [Still frames](#stil
 </picture>
 
 <picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/energy-dark.png">
+  <img alt="Grafana overview dashboard, energy and carbon section: average power and carbon per hour with their avoidable part, and the energy and carbon over the selected range, total and avoidable" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/energy.png">
+</picture>
+
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings-dark.png">
   <img alt="Grafana findings dashboard: the daemon status line with its Compatibility badge, the findings table naming operation, endpoint and call site, and the cross-service correlations" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings.png">
 </picture>

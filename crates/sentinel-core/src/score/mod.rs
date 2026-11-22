@@ -41,6 +41,7 @@ pub mod scaphandre;
 pub(crate) mod canonical;
 mod carbon_compute;
 mod region_breakdown;
+pub(crate) use carbon_compute::UnaccountedSpans;
 pub(crate) use region_breakdown::avoidable_share;
 
 use std::collections::{BTreeMap, HashMap};
@@ -180,8 +181,8 @@ fn endpoint_stats_to_per_endpoint_io_ops(
 /// region (SCI `O = E × I`, bucketed via [`resolve_region`]), embodied
 /// CO₂ (SCI `M`, `traces.len() × embodied_per_request_gco2`), 2×
 /// multiplicative confidence intervals, and avoidable CO₂
-/// (`operational × avoidable_io_ops / accounted_io_ops`, excluding the
-/// synthetic unknown bucket). When `None`, the deprecated scalar fields
+/// (`operational × accounted_avoidable_io_ops / accounted_io_ops`, both
+/// sides excluding the synthetic unknown bucket). When `None`, the deprecated scalar fields
 /// and the `co2` / `regions` fields are all left empty.
 ///
 /// The step-by-step algorithm (count, IIS, dedup, enrich, rank, then
@@ -213,7 +214,7 @@ pub fn score_green(
     let enriched = enrich_findings_with_iis(findings, &iis_map);
 
     let carbon_outputs = match carbon {
-        Some(ctx) => compute_carbon_report(traces, ctx, total_io_ops, avoidable_io_ops),
+        Some(ctx) => compute_carbon_report(traces, ctx, total_io_ops, &enriched, avoidable),
         None => carbon_compute::CarbonComputeOutputs {
             report: None,
             regions: Vec::new(),
@@ -222,6 +223,10 @@ pub fn score_green(
             window_model: "",
             calibrated: false,
             accounted_io_ops: total_io_ops,
+            accounted_avoidable: avoidable,
+            accounted_sql_io_ops: total_sql_io_ops,
+            accounted_messaging_io_ops: total_messaging_io_ops,
+            unaccounted: UnaccountedSpans::new(),
             sql_energy_kwh: 0.0,
             sql_gco2: 0.0,
             messaging_energy_kwh: 0.0,
@@ -269,6 +274,8 @@ pub fn score_green(
         total_messaging_io_ops,
         avoidable_messaging_io_ops: avoidable.messaging,
         accounted_io_ops: carbon_outputs.accounted_io_ops,
+        accounted_avoidable_io_ops: carbon_outputs.accounted_avoidable.total,
+        unaccounted_spans: carbon_outputs.unaccounted,
         avoidable_per_service,
         analyzed_per_service,
         io_waste_ratio,
@@ -299,7 +306,7 @@ pub fn score_green(
 }
 
 /// Total, SQL-only and messaging-only sums of the deduped avoidable I/O ops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct AvoidableIoOps {
     pub total: usize,
     pub sql: usize,
@@ -309,26 +316,6 @@ pub(crate) struct AvoidableIoOps {
 /// `(trace_id, template, source_endpoint, grouping identity)`.
 type DedupKey<'a> = (&'a str, &'a str, &'a str, Option<(&'a str, &'a str)>);
 
-/// Dedup avoidable I/O ops by (`trace_id`, template, `source_endpoint`,
-/// grouping), keeping per key the larger of its N+1 figure and its
-/// redundant findings summed (see [`KeyOps`]), plus the per-service split of the same deduped ops (so
-/// `service_avoidable_io_ops_total` cannot diverge from the global
-/// counter). Slow findings are not avoidable I/O: necessary operations
-/// that happen to be slow.
-///
-/// The split is a `BTreeMap` keyed by `(service, grouping)` so its
-/// consumers inherit a deterministic order instead of re-collecting one.
-/// A group whose spans came from several services is credited through
-/// [`Finding::avoidable_by_service`]: each service its own repeats, the
-/// finding's service one less for the necessary call. Every share lands
-/// under the finding's own grouping (`""` when it has none): the split
-/// on `Pattern` knows services, not groupings, and its shape is pinned
-/// by the v1 report schema. Crediting the finding's grouping is exact
-/// because the N+1 and redundant detectors key their groups on the
-/// grouping identity, so every span a finding charges already carries
-/// it, and the same template in two groupings of one trace is two
-/// disjoint span sets. The approximate part of the split is which
-/// service made the one necessary call.
 /// Avoidable ops seen at one dedup key. N+1 findings at one key describe
 /// the same spans, so the largest stands for them. Redundant findings at
 /// one key differ by their params, so their span sets are disjoint and
@@ -363,14 +350,13 @@ impl<'a> KeyOps<'a> {
     }
 }
 
-pub(crate) fn dedup_avoidable_io_ops_by_service(
-    findings: &[Finding],
-) -> (AvoidableIoOps, BTreeMap<(String, String), usize>) {
+/// The deduped avoidable findings, keyed as [`dedup_avoidable_io_ops_by_service`]
+/// keys them, each with the avoidable ops it is credited.
+fn credited_avoidable(findings: &[Finding]) -> HashMap<DedupKey<'_>, KeyOps<'_>> {
     let capacity = findings
         .iter()
         .filter(|f| f.finding_type.is_avoidable_io())
         .count();
-    // The credited findings carry their type and per-service split along.
     let mut dedup: HashMap<DedupKey<'_>, KeyOps<'_>> = HashMap::with_capacity(capacity);
     for f in findings {
         if !f.finding_type.is_avoidable_io() {
@@ -386,6 +372,91 @@ pub(crate) fn dedup_avoidable_io_ops_by_service(
             .or_default()
             .add(f.pattern.occurrences.saturating_sub(1), f);
     }
+    dedup
+}
+
+/// The deduped avoidable ops left once the ops of the spans in the unknown
+/// region bucket are taken out, total and per subsystem: the numerators that
+/// match `accounted_io_ops` and its SQL and messaging parts. Each finding's
+/// share of a `(trace, service)` loses at most as many ops of its kind as that
+/// pair left in the bucket, so a pair mixing spans with and without a region
+/// no longer loses its whole share. An upper bound on the removal: a finding
+/// does not say which spans it is made of, so an unrelated span with no
+/// region of the same pair and kind still takes one op out.
+pub(crate) fn accounted_avoidable_io_ops(
+    findings: &[Finding],
+    unaccounted: &UnaccountedSpans,
+) -> AvoidableIoOps {
+    let dedup = credited_avoidable(findings);
+    // Sorted, so which finding draws on a shared budget first is stable.
+    let mut credited: Vec<(usize, &Finding)> =
+        dedup.values().flat_map(KeyOps::credited).copied().collect();
+    credited.sort_by(|a, b| {
+        (&a.1.trace_id, &a.1.pattern.template, &a.1.source_endpoint).cmp(&(
+            &b.1.trace_id,
+            &b.1.pattern.template,
+            &b.1.source_endpoint,
+        ))
+    });
+    let mut budget = unaccounted.clone();
+    let mut out = AvoidableIoOps::default();
+    for (avoidable, f) in credited {
+        let slot = carbon_compute::io_kind_slot(&finding_io_kind(&f.finding_type));
+        let mut outside = 0;
+        if let Some(services) = budget.get_mut(f.trace_id.as_str()) {
+            for (service, ops) in f.avoidable_by_service() {
+                if let Some(counts) = services.get_mut(service) {
+                    let taken = ops.min(counts[slot]);
+                    counts[slot] -= taken;
+                    outside += taken;
+                }
+            }
+        }
+        let kept = avoidable.saturating_sub(outside);
+        out.total += kept;
+        match slot {
+            0 => out.sql += kept,
+            2 => out.messaging += kept,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The I/O kind an avoidable finding's spans carry.
+const fn finding_io_kind(finding_type: &FindingType) -> EventType {
+    match finding_type {
+        FindingType::NPlusOneHttp | FindingType::RedundantHttp => EventType::HttpOut,
+        FindingType::NPlusOneMessaging => EventType::Messaging,
+        _ => EventType::Sql,
+    }
+}
+
+/// Dedup avoidable I/O ops by (`trace_id`, template, `source_endpoint`,
+/// grouping), keeping per key the larger of its N+1 figure and its
+/// redundant findings summed (see [`KeyOps`]), plus the per-service split of the same deduped ops (so
+/// `service_avoidable_io_ops_total` cannot diverge from the global
+/// counter). Slow findings are not avoidable I/O: necessary operations
+/// that happen to be slow.
+///
+/// The split is a `BTreeMap` keyed by `(service, grouping)` so its
+/// consumers inherit a deterministic order instead of re-collecting one.
+/// A group whose spans came from several services is credited through
+/// [`Finding::avoidable_by_service`]: each service its own repeats, the
+/// finding's service one less for the necessary call. Every share lands
+/// under the finding's own grouping (`""` when it has none): the split
+/// on `Pattern` knows services, not groupings, and its shape is pinned
+/// by the v1 report schema. Crediting the finding's grouping is exact
+/// because the N+1 and redundant detectors key their groups on the
+/// grouping identity, so every span a finding charges already carries
+/// it, and the same template in two groupings of one trace is two
+/// disjoint span sets. The approximate part of the split is which
+/// service made the one necessary call.
+pub(crate) fn dedup_avoidable_io_ops_by_service(
+    findings: &[Finding],
+) -> (AvoidableIoOps, BTreeMap<(String, String), usize>) {
+    // The credited findings carry their type and per-service split along.
+    let dedup = credited_avoidable(findings);
     let mut out = AvoidableIoOps {
         total: 0,
         sql: 0,
@@ -531,20 +602,27 @@ fn fold_host_terms(
 /// energy for a later window, so an estimate here would double-count it.
 /// Only when NO workload is declared does the figure fall back to an
 /// estimate from the modeled energy of the window's own spans.
+///
+/// `ops` is `(total, avoidable)` over every span, the ratio a host that
+/// serves them all is priced at. `accounted` is the same pair over the
+/// region-resolved spans, the population the estimated energy covers.
 fn build_waste_figure(
     ctx: &CarbonContext,
     declared: Option<&carbon::DbEnergyContext>,
     estimated_kwh: f64,
     estimated_gco2: f64,
-    total_ops: usize,
-    avoidable_ops: usize,
+    ops: (usize, usize),
+    accounted: (usize, usize),
 ) -> Option<WasteFigure> {
-    let ratio = if total_ops == 0 {
-        0.0
-    } else {
-        (avoidable_ops as f64 / total_ops as f64).min(1.0)
+    let share = |(total, avoidable): (usize, usize)| {
+        if total == 0 {
+            0.0
+        } else {
+            (avoidable as f64 / total as f64).min(1.0)
+        }
     };
     if let Some(declared) = declared {
+        let ratio = share(ops);
         // is_finite too: NaN slips a plain <= 0.0 check and would serialize null.
         if !declared.window_kwh.is_finite() || declared.window_kwh <= 0.0 {
             return None;
@@ -569,9 +647,10 @@ fn build_waste_figure(
         });
     }
     // is_finite too: NaN slips a plain <= 0.0 check.
-    if !estimated_kwh.is_finite() || estimated_kwh <= 0.0 || total_ops == 0 {
+    if !estimated_kwh.is_finite() || estimated_kwh <= 0.0 || accounted.0 == 0 {
         return None;
     }
+    let ratio = share(accounted);
     let energy_gco2 =
         (estimated_gco2.is_finite() && estimated_gco2 > 0.0).then_some(estimated_gco2);
     Some(WasteFigure {
@@ -599,8 +678,11 @@ fn database_figure(
         ctx.db_energy.as_ref(),
         outputs.sql_energy_kwh,
         outputs.sql_gco2,
-        total_sql_io_ops,
-        avoidable_sql_io_ops,
+        (total_sql_io_ops, avoidable_sql_io_ops),
+        (
+            outputs.accounted_sql_io_ops,
+            outputs.accounted_avoidable.sql,
+        ),
     )
 }
 
@@ -618,8 +700,11 @@ fn messaging_figure(
         ctx.broker_energy.as_ref(),
         outputs.messaging_energy_kwh,
         outputs.messaging_gco2,
-        total_messaging_io_ops,
-        avoidable_messaging_io_ops,
+        (total_messaging_io_ops, avoidable_messaging_io_ops),
+        (
+            outputs.accounted_messaging_io_ops,
+            outputs.accounted_avoidable.messaging,
+        ),
     )
 }
 

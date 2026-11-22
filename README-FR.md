@@ -60,6 +60,11 @@ Pour des images fixes à examiner panneau par panneau, allez aux [Captures](#cap
 </picture>
 
 <picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/energy-dark.png">
+  <img alt="tableau de bord Grafana d'aperçu, section énergie et carbone : puissance moyenne et carbone par heure avec leur part évitable, et l'énergie et le carbone sur la période choisie, total et évitable" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/energy.png">
+</picture>
+
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings-dark.png">
   <img alt="tableau de bord Grafana findings : la ligne d'état du daemon avec sa pastille Compatibility, la table des findings qui nomme l'opération, l'endpoint et le site d'appel, et les corrélations entre services" src="https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/docs/img/grafana/findings.png">
 </picture>

@@ -217,8 +217,10 @@ total.mid = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
 CO₂ évitable (via ratio, voir "Évitable via ratio" ci-dessous) :
 ```
 accounted_io_ops = total_io_ops - unknown_ops
-avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops)
+avoidable.mid = operational_gco2 × (accounted_avoidable_io_ops / accounted_io_ops)
 ```
+
+Les deux termes du ratio laissent de côté les opérations dont la span n'a résolu aucune région. `accounted_io_ops` vaut `total_io_ops` moins le bucket inconnu, et `accounted_avoidable_io_ops` vaut le compte évitable dédoublonné moins, pour chaque finding, autant de ses opérations que sa paire `(trace, service)` a laissé de spans du même type (SQL, HTTP ou messaging) dans ce bucket. Le retrait est une borne haute, puisqu'un finding ne dit pas de quelles spans il est fait : une paire qui mêle des spans avec et sans région ne perd plus toute sa part, mais une span sans région hors du finding en retire quand même une opération. Un service sans région ne peut pas chiffrer son gaspillage sur l'énergie des services qui en ont une. Les `database_waste` et `messaging_waste` estimés suivent la même règle : leur ratio rapporte les opérations évitables SQL ou messaging résolues aux opérations SQL ou messaging résolues, la population que couvre leur énergie estimée. Un hôte mesuré ou déclaré garde le ratio sur toutes les spans, puisqu'il les sert toutes. `avoidable_io_ops` et le taux de gaspillage comptent toujours chaque appel évitable.
 
 Le dénominateur `accounted_io_ops` exclut le bucket synthétique `unknown` pour que le ratio soit cohérent avec `operational_gco2` (qui l'exclut aussi). Numérateur et dénominateur sur la même base comptable.
 
@@ -254,7 +256,7 @@ Pour étiqueter cette distinction sémantique au niveau des données, `CarbonEst
 - `"sci_v1_numerator+transport"` : utilisé sur `co2.total`. L'empreinte `(E × I) + M + T` sommée sur les traces, y compris quand `T` vaut zéro.
 - `"sci_v1_numerator+transport+hosts"` : utilisé à la place sur `co2.total` quand une source d'hôte de base de données ou de broker est configurée. La même empreinte plus les termes d'hôte comptés dans les totaux `G_db + G_msg`, zéro compris.
 - `"sci_v1_intensity"` : utilisé sur `co2.sci_per_trace`. L'intensité par R `((E × I) + M) / R`, R = 1 trace.
-- `"sci_v1_operational_ratio"` : utilisé sur `co2.avoidable`. Le ratio global aveugle à la région `operational × (avoidable/accounted)`, excluant le carbone embarqué.
+- `"sci_v1_operational_ratio"` : utilisé sur `co2.avoidable`. Le ratio global aveugle à la région `operational × (évitable comptabilisé / comptabilisé)`, excluant le carbone embarqué.
 - `"sci_v1_operational_ratio+hosts"` : utilisé sur `co2.avoidable` sur ces mêmes fenêtres. Le même ratio plus chaque terme d'hôte compté dans les totaux multiplié par son propre ratio de gaspillage SQL ou messaging.
 
 Les valeurs distinctes de `total` et `avoidable` signalent aux consommateurs en aval que les deux sont calculés différemment et ne doivent pas être comparés comme s'ils étaient des quantités homogènes.
@@ -266,7 +268,7 @@ Calculer le CO₂ évitable de manière précise par région nécessiterait de p
 À la place, Perf Sentinel calcule :
 
 ```
-avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops)
+avoidable.mid = operational_gco2 × (accounted_avoidable_io_ops / accounted_io_ops)
 ```
 
 Cela préserve l'échelle relative (une réduction de 50% du gaspillage donne une chute de 50% du CO₂ évitable) sans nécessiter d'attribution de région par finding. En contrepartie, quand les ops évitables sont concentrées dans une région à haute intensité, ce ratio sous-attribue légèrement les économies. La simplification est documentée comme limitation connue et étiquetée au niveau des données via `methodology: "sci_v1_operational_ratio"`.
@@ -282,7 +284,7 @@ Un chiffre de base de données ou de broker mesuré ou déclaré (`[green.alumet
 ```
 energy_kwh    = Σ énergie par service + D + B
 total.mid     = operational_gco2 + embodied_gco2 + transport_gco2 + G_db + G_msg
-avoidable.mid = operational_gco2 × (avoidable_io_ops / accounted_io_ops) + G_db × r_sql + G_msg × r_msg
+avoidable.mid = operational_gco2 × (accounted_avoidable_io_ops / accounted_io_ops) + G_db × r_sql + G_msg × r_msg
 ```
 
 `r_sql` et `r_msg` sont les ratios de gaspillage SQL et messaging : chaque hôte est chiffré au ratio des opérations qu'il sert, jamais au ratio de toutes les opérations. `compute_disclosure_waste` suit le même découpage : le réservoir applicatif prend le ratio de toutes les opérations, chaque bloc d'hôte compté dans les totaux ajoute ses propres parts canonique et opérationnelle, et les parts canoniques gardent le seuil figé dans le binaire. `operational_gco2`, `regions[]` et les maps par service restent purement applicatifs, puisqu'un hôte n'est jamais un service. Une fenêtre scorée avec une source d'hôte configurée porte `sci_v1_numerator+transport+hosts` sur `total` et `sci_v1_operational_ratio+hosts` sur `avoidable`, zéro compris, comme l'étiquette du transport. Le chiffre estimé est déjà une part de l'énergie des services et n'entre jamais une seconde fois.

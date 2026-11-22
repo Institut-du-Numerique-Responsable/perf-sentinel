@@ -1769,7 +1769,7 @@ impl ProcessTracesCtx<'_> {
 /// Copy the batch summary onto the shared cell, with both waste figures
 /// bridged over their scrape gaps. The per-window archive keeps the
 /// batch-scoped truth. Only the live cell gets the TTL-bounded figures.
-async fn publish_live_summary(green_summary: &GreenSummary, ctx: &mut ProcessTracesCtx<'_>) {
+async fn publish_live_summary(green_summary: &mut GreenSummary, ctx: &mut ProcessTracesCtx<'_>) {
     let now_ms = current_time_ms();
     let mut restored = sticky_waste_figure(
         green_summary.database_waste.as_ref(),
@@ -1795,10 +1795,15 @@ async fn publish_live_summary(green_summary: &GreenSummary, ctx: &mut ProcessTra
     {
         w.in_totals = false;
     }
+    // Only the canonical tier reads the per-trace map, so the cell and its
+    // `/api/export/report` clones go without it.
+    let unaccounted = std::mem::take(&mut green_summary.unaccounted_spans);
     let mut cell = ctx.green_summary_cell.write().await;
     cell.clone_from(green_summary);
     cell.database_waste = restored;
     cell.messaging_waste = restored_msg;
+    drop(cell);
+    green_summary.unaccounted_spans = unaccounted;
 }
 
 /// Live-cell stickiness for a waste figure: keep the last one for up to
@@ -1866,7 +1871,7 @@ async fn process_traces(
     // Keep `per_endpoint_io_ops` for the periodic-disclosure archive
     // (design doc 08), computed by `score_green`'s single pass along
     // with the per-service avoidable split on the summary.
-    let (mut findings, green_summary, per_endpoint_io_ops) =
+    let (mut findings, mut green_summary, per_endpoint_io_ops) =
         score_batch(&trace_structs, findings, &ctx);
 
     // Publish the per-batch summary on the shared cell so live daemon
@@ -1875,7 +1880,7 @@ async fn process_traces(
     // `score_green` (it travels through `CarbonContext`), but the
     // handler unconditionally re-applies it from `state.scoring_config`
     // so the audit-trail metadata cannot drift from the startup config.
-    publish_live_summary(&green_summary, &mut ctx).await;
+    publish_live_summary(&mut green_summary, &mut ctx).await;
 
     // Stamp the daemon's confidence label. Same shared helper as
     // `pipeline::analyze`, so the two paths cannot drift on the loop.
@@ -1995,6 +2000,9 @@ fn record_carbon_in_ledger(ledger: &DetectionLedger, green_summary: &GreenSummar
         let batch = DayCarbon {
             gco2_mid: co2.avoidable.mid,
             gco2_low: co2.avoidable.low,
+            // Every span, like the daemon's own waste ratio: a quotient of 0
+            // ops never pairs with positive grams, and an op with no region
+            // simply carries no application carbon in the average.
             avoidable_io_ops: green_summary.avoidable_io_ops as u64,
             total_io_ops: green_summary.total_io_ops as u64,
         };

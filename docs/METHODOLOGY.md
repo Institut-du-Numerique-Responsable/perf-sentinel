@@ -28,7 +28,7 @@ If you have not implemented carbon scoring for software workloads before, this s
 - **I (Grid intensity)** is the carbon emitted per kWh by the local electrical grid, in gCO2eq/kWh. Perf Sentinel ships a static table (covering all major cloud regions and the main national grids) and accepts a live override via the Electricity Maps API when `[green.electricity_maps]` is configured. Nationally-gridded rows are regenerated semiannually from Ember yearly data (generation-based) through a reviewed PR opened by the `refresh-datasets` workflow. Subnational rows (North America, Brazil BR-CS) are hand-maintained from consumption-based zonal sources. The source is surfaced in `methodology.calibration.carbon_intensity_source` as one of `static_tables`, `electricity_maps`, `rte_eco2mix`, `neso`, `fingrid`, `energinet`, `ree_esios`, `open_electricity`, `mavir`, `em6`, or `mixed`.
 - **M (Embodied carbon)** is the manufacturing emissions of the underlying silicon (CPU, RAM, networking, datacentre construction), amortised per request. Perf Sentinel uses a default coefficient derived from Boavizta plus the HotCarbon 2024 paper, overridable via `[green] embodied_carbon_per_request_gco2`. M is region-independent and is added after `E * I`.
 
-**Who reads which value.** A *sustainability auditor* preparing a CSRD scope-2 submission cares about `total_carbon_kgco2eq` and the `methodology.*` block proving the source of each term. An *SRE optimising the system* cares about `estimated_optimization_potential_kgco2eq`, which is `canonical_waste.carbon_kgco2eq`: the sum over windows of `(operational_gco2 * min(1, canonical_avoidable_io / accounted_io) + G_db * r_c_sql + G_msg * r_c_msg) / 1000`, on whichever backend's energy scored the window. `G_db` and `G_msg` are the database and broker host carbon a window counted inside its totals (zero otherwise), `r_c_sql` and `r_c_msg` their SQL and messaging ratios at the canonical threshold, so each host term counts once, at the ratio of the operations it serves. It excludes M because you cannot un-manufacture silicon by fixing an N+1 query. The `efficiency_score` (0-100) is the operator-friendly summary derived from `io_waste_ratio` only, not from absolute emissions.
+**Who reads which value.** A *sustainability auditor* preparing a CSRD scope-2 submission cares about `total_carbon_kgco2eq` and the `methodology.*` block proving the source of each term. An *SRE optimising the system* cares about `estimated_optimization_potential_kgco2eq`, which is `canonical_waste.carbon_kgco2eq`: the sum over windows of `(operational_gco2 * min(1, accounted_canonical_io / accounted_io) + G_db * r_c_sql + G_msg * r_c_msg) / 1000`, on whichever backend's energy scored the window. `G_db` and `G_msg` are the database and broker host carbon a window counted inside its totals (zero otherwise), `r_c_sql` and `r_c_msg` their SQL and messaging ratios at the canonical threshold, so each host term counts once, at the ratio of the operations it serves. It excludes M because you cannot un-manufacture silicon by fixing an N+1 query. The `efficiency_score` (0-100) is the operator-friendly summary derived from `io_waste_ratio` only, not from absolute emissions.
 
 **Known limitation: 2x uncertainty bracket.** The carbon estimate ships with an explicit `2x` multiplicative bracket. The bracket signals that the directional model (especially the I/O proxy and the static grid tables) is unsuitable for regulatory-grade emissions reporting. Tightening the bracket requires a measured E term (any backend of the [ENERGY.md fidelity ladder](ENERGY.md#the-fidelity-ladder): Alumet or Scaphandre RAPL, Kepler, Redfish BMC, cloud SPECpower) and live Electricity Maps for the I term. The full uncertainty discussion lives in [docs/LIMITATIONS.md](LIMITATIONS.md).
 
@@ -99,20 +99,20 @@ energy_kwh         = A + D + B
 co2.database_gco2  = G_db
 co2.messaging_gco2 = G_msg
 co2.total.mid      = O + M + T + G_db + G_msg
-co2.avoidable.mid  = O * min(1, avoidable_io / accounted_io) + G_db * r_sql + G_msg * r_msg
+co2.avoidable.mid  = O * min(1, accounted_avoidable_io / accounted_io) + G_db * r_sql + G_msg * r_msg
 co2.sci_per_trace  = co2.total.mid / traces
 ```
 
 `operational_gco2`, `regions[]` and the `per_service_*` maps hold the application only: a host is never a service. The disclosure waste tiers price the application pool and each host pool apart, each host at the ratio of its own subsystem, so a database is never priced at the ratio of calls it does not serve:
 
 ```
-canonical.energy_kwh   = A * min(1, canonical_io / accounted_io) + D * r_c_sql + B * r_c_msg
-canonical.gco2         = O * min(1, canonical_io / accounted_io) + G_db * r_c_sql + G_msg * r_c_msg
-operational.energy_kwh = A * min(1, avoidable_io / accounted_io) + D * r_sql + B * r_msg
+canonical.energy_kwh   = A * min(1, accounted_canonical_io / accounted_io) + D * r_c_sql + B * r_c_msg
+canonical.gco2         = O * min(1, accounted_canonical_io / accounted_io) + G_db * r_c_sql + G_msg * r_c_msg
+operational.energy_kwh = A * min(1, accounted_avoidable_io / accounted_io) + D * r_sql + B * r_msg
 operational.gco2       = co2.avoidable.mid
 ```
 
-`r_c_sql` and `r_c_msg` recompute the SQL and messaging ratios at the binary-pinned canonical threshold. The broker ratio counts one publish span as one round-trip, an upper bound on Kafka, whose producer batches writes on the wire (see [docs/LIMITATIONS.md](LIMITATIONS.md#messaging-producer-side-only-no-consumer-analysis)).
+`accounted_io` counts the operations whose span resolved a region. `accounted_avoidable_io` and `accounted_canonical_io` are the avoidable operations at the operator's and at the canonical threshold, minus, for each finding, as many of its operations as its `(trace, service)` pair left outside every region in spans of the same kind (SQL, HTTP or messaging), so the numerator leaves out at most as many operations as the denominator does. `r_c_sql` and `r_c_msg` recompute the SQL and messaging ratios at the binary-pinned canonical threshold. The broker ratio counts one publish span as one round-trip, an upper bound on Kafka, whose producer batches writes on the wire (see [docs/LIMITATIONS.md](LIMITATIONS.md#messaging-producer-side-only-no-consumer-analysis)).
 
 Every window scored with a host source configured tags `co2.total` with `sci_v1_numerator+transport+hosts` and `co2.avoidable` with `sci_v1_operational_ratio+hosts`, zero host energy included, as the transport tag does. `co2.sci_per_trace` keeps `sci_v1_intensity`. The estimated figures (`model = "estimated"`) stay shares of `A` and never enter the totals a second time.
 

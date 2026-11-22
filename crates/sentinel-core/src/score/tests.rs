@@ -3998,3 +3998,115 @@ fn dedup_charges_a_shared_finding_under_its_own_grouping() {
     );
     assert_eq!(per_service.values().sum::<usize>(), out.total);
 }
+
+/// Service A has a region and 10 clean calls, service B none and a 10-call
+/// N+1. B's 9 avoidable calls sit outside `accounted_io_ops`, so they must
+/// not price A's energy as avoidable: the region-blind share read 9 / 10.
+#[test]
+fn avoidable_share_leaves_out_ops_with_no_region() {
+    let mut events = Vec::new();
+    for i in 0..10 {
+        let mut a = make_sql_event(
+            "ta",
+            &format!("a{i}"),
+            &format!("SELECT * FROM a WHERE k = {i}"),
+            "2025-07-10T14:32:01.001Z",
+        );
+        a.service = Arc::from("a-svc");
+        a.cloud_region = Some(Arc::from("eu-west-3"));
+        events.push(a);
+    }
+    let mut b_events = Vec::new();
+    for i in 0..10 {
+        let mut b = make_sql_event(
+            "tb",
+            &format!("b{i}"),
+            &format!("SELECT * FROM b WHERE id = {i}"),
+            "2025-07-10T14:32:01.001Z",
+        );
+        b.service = Arc::from("b-svc");
+        b_events.push(b);
+    }
+    let traces = vec![make_trace(events), make_trace(b_events)];
+    let mut n1 = crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning);
+    n1.trace_id = "tb".to_string();
+    n1.service = "b-svc".to_string();
+    n1.pattern.occurrences = 10;
+    let ctx = CarbonContext::default();
+
+    let (_, summary, _) = score_green(&traces, vec![n1.clone()], Some(&ctx));
+    assert_eq!(
+        summary.avoidable_io_ops, 9,
+        "the count keeps every avoidable call"
+    );
+    assert_eq!(summary.accounted_io_ops, 10);
+    assert_eq!(summary.accounted_avoidable_io_ops, 0);
+    assert!(
+        summary.avoidable_energy_kwh().abs() < 1e-15,
+        "{}",
+        summary.avoidable_energy_kwh()
+    );
+    assert!(summary.co2.as_ref().unwrap().avoidable.mid.abs() < 1e-15);
+    assert!(summary.unaccounted_spans.contains_key("tb"));
+    // The estimated database waste prices A's SQL energy at the
+    // region-resolved SQL ratio, 0 here, not at B's 9 / 20.
+    let db = summary
+        .database_waste
+        .as_ref()
+        .expect("estimated database waste");
+    assert_eq!(db.model, crate::report::DB_WASTE_MODEL_ESTIMATED);
+    assert!(db.waste_kwh.abs() < 1e-15, "{}", db.waste_kwh);
+
+    // B alone resolves nothing: the map is dropped, the share is 0.
+    let (_, summary, _) = score_green(&traces[1..], vec![n1.clone()], Some(&ctx));
+    assert_eq!(summary.accounted_io_ops, 0);
+    assert_eq!(summary.accounted_avoidable_io_ops, 0);
+    assert!(summary.unaccounted_spans.is_empty());
+
+    // With a default region B resolves too, and its waste counts again.
+    let ctx = CarbonContext {
+        default_region: Some("eu-west-3".to_string()),
+        ..CarbonContext::default()
+    };
+    let (_, summary, _) = score_green(&traces, vec![n1], Some(&ctx));
+    assert_eq!(summary.accounted_io_ops, 20);
+    assert_eq!(summary.accounted_avoidable_io_ops, 9);
+    assert!(summary.unaccounted_spans.is_empty());
+    let expected = summary.application_energy_kwh() * 9.0 / 20.0;
+    assert!((summary.avoidable_energy_kwh() - expected).abs() < 1e-15);
+}
+
+/// One service, one trace: a 10-call N+1 with a region and one more span
+/// without. The pair loses at most one avoidable op, as many as it left in
+/// the unknown bucket, not the whole share.
+#[test]
+fn a_pair_mixing_spans_with_and_without_a_region_loses_at_most_its_unknown_spans() {
+    let mut events = Vec::new();
+    for i in 0..10 {
+        let mut e = make_sql_event(
+            "tm",
+            &format!("m{i}"),
+            &format!("SELECT * FROM m WHERE id = {i}"),
+            "2025-07-10T14:32:01.001Z",
+        );
+        e.service = Arc::from("m-svc");
+        e.cloud_region = Some(Arc::from("eu-west-3"));
+        events.push(e);
+    }
+    let mut stray = make_sql_event("tm", "m10", "SELECT 1", "2025-07-10T14:32:01.001Z");
+    stray.service = Arc::from("m-svc");
+    events.push(stray);
+    let mut n1 = crate::test_helpers::make_finding(FindingType::NPlusOneSql, Severity::Warning);
+    n1.trace_id = "tm".to_string();
+    n1.service = "m-svc".to_string();
+    n1.pattern.occurrences = 10;
+
+    let (_, summary, _) = score_green(
+        &[make_trace(events)],
+        vec![n1],
+        Some(&CarbonContext::default()),
+    );
+    assert_eq!(summary.avoidable_io_ops, 9);
+    assert_eq!(summary.accounted_io_ops, 10);
+    assert_eq!(summary.accounted_avoidable_io_ops, 8);
+}

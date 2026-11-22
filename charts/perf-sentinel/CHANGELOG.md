@@ -10,6 +10,15 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.48.1]
+
+### Fixed
+
+- **`appVersion` moves to `0.48.1`.** The daemon's avoidable energy and
+  carbon no longer charge the waste of spans with no region to the services
+  that have one, and the detection ledger sends the region-resolved op counts
+  that go with that carbon. No chart value or template changes.
+
 ## [0.48.0]
 
 ### Added

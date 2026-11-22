@@ -1392,7 +1392,9 @@ Each `days` object:
 
 The four carbon fields are present together or absent together. Their
 ratio, `avoidable_gco2 / avoidable_io_ops`, is the day's grams per
-avoidable I/O operation. Applied to a signature's `extra_io_ops` it gives
+avoidable I/O operation, averaged over every avoidable op: one whose span
+resolved no region carries no application carbon in `avoidable_gco2`, so a
+day with such ops reads lower per op. Applied to a signature's `extra_io_ops` it gives
 an order of magnitude only, since `extra_io_ops` is not deduplicated
 across findings the way a batch's `avoidable_io_ops` is. Like the counts,
 the four sums cover the `sampling_rate` share of the traces: the ratios
