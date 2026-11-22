@@ -837,3 +837,13 @@ v0.46.0	493ef99	2026-11-18	PASS
 # counter), limit-multi-source, limit-service-cardinality, query-monitor-api,
 # smoke. All PASS.
 v0.47.0	cb2877b	2026-11-22	PASS
+
+# v0.48.0 targeted pass, no cluster (avoidable energy and carbon counters):
+# database-host-groups with its new leg B2 on the local 0.48.0 release binary
+# (avoidable counters grow inside their totals, the 0.47.0 control fails B2),
+# disclose (10/10), disclose-temporal (5/5) and disclose-archive-family-baseline
+# on perf-sentinel:0.48.0-12dc455a. alumet-db-waste passes every leg but
+# D-conservation, whose 4x8 flood no longer sheds a batch on this machine: the
+# 0.47.0 control fails it the same way, so a scenario fragility, not a
+# regression. Not run: the cluster scenarios.
+v0.48.0	072101a	2026-11-22	PASS
