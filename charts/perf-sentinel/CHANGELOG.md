@@ -10,6 +10,16 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.49.0]
+
+### Added
+
+- **`appVersion` moves to `0.49.0`.** An incident carries the saturation of
+  the resource its alert is about, read from the alert annotation named by
+  `[daemon.incidents] saturation_annotation` (default
+  `perf_sentinel_saturation`). A config that sets the new key is refused by an
+  older daemon. No chart value or template changes.
+
 ## [0.48.1]
 
 ### Fixed

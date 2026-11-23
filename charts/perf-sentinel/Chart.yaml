@@ -6,8 +6,8 @@ description: |
   pool saturation, serialized parallelizable calls, fanout. Scores I/O
   intensity per endpoint (GreenOps).
 type: application
-version: 0.48.1
-appVersion: "0.48.1"
+version: 0.49.0
+appVersion: "0.49.0"
 kubeVersion: ">=1.24.0-0"
 home: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel
 icon: https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel/main/logo/logo-horizontal.svg
@@ -36,11 +36,11 @@ annotations:
     - name: Helm deployment guide
       url: https://github.com/Institut-du-Numerique-Responsable/perf-sentinel/blob/main/docs/HELM-DEPLOYMENT.md
   artifacthub.io/changes: |
-    - kind: fixed
-      description: "appVersion 0.48.1. The daemon's avoidable energy and carbon no longer charge the waste of spans with no region to the services that have one, and the detection ledger sends the region-resolved op counts that go with that carbon. No chart value or template changes."
+    - kind: added
+      description: "appVersion 0.49.0. An incident carries the saturation of its resource, read from the alert annotation named by [daemon.incidents] saturation_annotation (default perf_sentinel_saturation). No chart value or template changes."
   artifacthub.io/images: |
     - name: perf-sentinel
-      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.48.1
+      image: ghcr.io/institut-du-numerique-responsable/perf-sentinel:0.49.0
       platforms:
         - linux/amd64
         - linux/arm64
