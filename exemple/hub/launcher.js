@@ -1081,6 +1081,118 @@
     }
 
     /**
+     * The frozen findings an incident's table draws: those that match the
+     * filter and, when one is asked for, the link level, the first `limit` of
+     * them, in the order they came in.
+     * @template T
+     * @param {T[]} rows
+     * @param {string} query
+     * @param {number} limit
+     * @param {string} [level] '' or absent for any, else a link level
+     * @returns {{shown: T[], matched: number}}
+     */
+    function pageFindings(rows, query, limit, level) {
+        const matched = rows.filter(function (row) {
+            const link = /** @type {{link?: {level: string}}} */ (row).link;
+            return (!level || (link != null && link.level === level))
+                && findingMatches(/** @type {{finding?: any}} */ (row), query);
+        });
+        return {shown: matched.slice(0, limit), matched: matched.length};
+    }
+
+    /**
+     * An incident's saturation as a rounded percentage, or null when absent or outside 0 to 1:
+     * the daemon sends a ratio, so any other value is a malformed push and reads as no saturation.
+     * @param {unknown} value
+     * @returns {number | null}
+     */
+    function saturationPercent(value) {
+        return typeof value === 'number' && value >= 0 && value <= 1 ? Math.round(value * 100) : null;
+    }
+
+    /**
+     * The text key and the numbers behind one reason of a finding's link.
+     * @param {import('../types').IncidentLinkReason} reason
+     * @returns {{key: string, params: Record<string, number>}}
+     */
+    function linkReasonParts(reason) {
+        const key = 'incidents.link.reason.' + reason.code;
+        /** @param {number | undefined} x */
+        const percent = function (x) {
+            return Math.round(x * 100);
+        };
+        // An absent number is unknown, not zero: the text without a number says so.
+        if (reason.code === 'intensity') {
+            if (reason.ratio == null) return {key: key + '_no_number', params: {}};
+            return {key, params: {ratio: Math.round(reason.ratio * 10) / 10}};
+        }
+        if (reason.code === 'recurrence') {
+            // Absent counts are hidden from this caller, an absent share is unknown: neither reads as zero.
+            if (reason.k == null || reason.n == null) return {key: key + '_no_numbers', params: {}};
+            if (reason.usual_share == null) return {key: key + '_no_usual', params: {k: reason.k, n: reason.n}};
+            return {key, params: {k: reason.k, n: reason.n, usual: percent(reason.usual_share)}};
+        }
+        if (reason.code === 'saturation') {
+            if (reason.value == null) return {key: key + '_no_number', params: {}};
+            return {key, params: {value: percent(reason.value)}};
+        }
+        return {key, params: {}};
+    }
+
+    /**
+     * The text key of a link level: its own, or a neutral one for a level this build does not know.
+     * @param {string} level
+     * @returns {string}
+     */
+    function linkLevelKey(level) {
+        const key = 'incidents.link.level.' + level;
+        return hasText(key) ? key : 'incidents.link.level.unknown';
+    }
+
+    /**
+     * "4 OOM kill, 2 restart": the incidents of each kind, the most first, then by kind.
+     * @param {Record<string, number>} byKind
+     * @returns {string}
+     */
+    function incidentKindsText(byKind) {
+        return Object.keys(byKind).filter(function (kind) {
+            return byKind[kind] > 0;
+        }).sort(function (a, b) {
+            return byKind[b] - byKind[a] || (a < b ? -1 : a > b ? 1 : 0);
+        }).map(function (kind) {
+            return byKind[kind] + ' ' + (INCIDENT_KIND_LABEL[kind] || kind);
+        }).join(', ');
+    }
+
+    /**
+     * Why a finding is a recurring suspect, as a sentence: strong in some kinds of incident, medium in
+     * others. "other" only follows a strong part, which already counted some incidents.
+     * @param {import('../types').RecapSuspect} suspect
+     * @returns {string}
+     */
+    function recapSuspectWhy(suspect) {
+        const parts = [];
+        if (suspect.strong > 0) parts.push(t('recap.suspect.strong', {kinds: incidentKindsText(suspect.strong_by_kind)}));
+        if (suspect.medium > 0) {
+            parts.push(t((suspect.strong > 0 ? 'recap.suspect.medium.' : 'recap.suspect.medium_only.')
+                + plural(suspect.medium), {count: suspect.medium}));
+        }
+        const text = parts.join(', ');
+        return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
+    }
+
+    /**
+     * What a frozen row's link chip shows: null for a row without a signature, which never gets a link,
+     * 'pending' until the Hub has assessed the incident, else the level.
+     * @param {{finding?: {signature?: string}, link?: import('../types').IncidentLink}} row
+     * @returns {string | null}
+     */
+    function linkChipLevel(row) {
+        if (!row.finding || !row.finding.signature) return null;
+        return row.link ? row.link.level : 'pending';
+    }
+
+    /**
      * The daemon-side ack, for a finding this Hub cannot acknowledge itself. The
      * reason is left for the operator to write, the flag order is the CLI's own:
      * `--daemon` belongs to `ack`, before the subcommand.
@@ -1095,12 +1207,14 @@
             + quote(signature) + ' --reason ' + quote(t('ack.command.reason'));
     }
 
+    const LINK_RANK = {strong: 3, medium: 2, weak: 1};
+
     /**
      * An incident's frozen findings in the order a column asks for. Ties fall
      * back to the default reading order, worst and most seen first, so equal
      * rows never shuffle between two renders.
      * @param {Array<{seen_count?: number, first_seen_ms: number, finding?: any}>} rows
-     * @param {'type' | 'severity' | 'impact' | 'endpoint' | 'template' | 'seen' | 'first'} key
+     * @param {'type' | 'severity' | 'impact' | 'endpoint' | 'template' | 'seen' | 'first' | 'link'} key
      * @param {'asc' | 'desc'} dir
      * @returns {Array<any>}
      */
@@ -1127,6 +1241,11 @@
             },
             seen: function (row) {
                 return row.seen_count || 0;
+            },
+            // Unassessed below weak, so a descending sort leads with the likeliest.
+            link: function (row) {
+                const link = /** @type {{link?: {level: string}}} */ (row).link;
+                return link ? LINK_RANK[link.level] || 0 : 0;
             },
             first: function (row) {
                 return row.first_seen_ms;
@@ -2957,14 +3076,15 @@
      * @param {number} sourcesWithoutCoefficient
      * @param {string | null | undefined} missingReason
      * @param {string} [view]
+     * @param {number} [days] the distinct days left unpriced, see co2Tail
      * @returns {string}
      */
-    function co2Text(grams, sourcesWithoutCoefficient, missingReason, view) {
+    function co2Text(grams, sourcesWithoutCoefficient, missingReason, view, days) {
         const parts = co2Parts(grams, sourcesWithoutCoefficient, missingReason, view);
         if (grams === null || grams === undefined) return parts.figure + ' ' + parts.unit;
         return t('recap.co2.text', {
             value: (parts.lead ? parts.lead + ' ' : '') + parts.figure + ' ' + parts.unit,
-            tail: co2Tail(sourcesWithoutCoefficient, view)
+            tail: co2Tail(sourcesWithoutCoefficient, view, days)
         });
     }
 
@@ -2972,13 +3092,20 @@
      * What a partial carbon figure leaves out, after a comma, or nothing when it is whole.
      * @param {number} sourcesWithoutCoefficient
      * @param {string} [view]
+     * @param {number} [days] the distinct days left unpriced; absent on a report frozen before they were counted
      * @returns {string}
      */
-    function co2Tail(sourcesWithoutCoefficient, view) {
+    function co2Tail(sourcesWithoutCoefficient, view, days) {
         if (!(sourcesWithoutCoefficient > 0)) return '';
-        return view === 'pilotage'
-            ? t('recap.co2.tail.pilotage')
-            : t('recap.co2.tail.tech.' + plural(sourcesWithoutCoefficient), {count: sourcesWithoutCoefficient});
+        if (view === 'pilotage') return t('recap.co2.tail.pilotage');
+        const count = plural(sourcesWithoutCoefficient);
+        if (!(days !== undefined && days > 0)) {
+            return t('recap.co2.tail.tech.' + count, {count: sourcesWithoutCoefficient});
+        }
+        return t('recap.co2.tail.tech.days.' + count, {
+            count: sourcesWithoutCoefficient,
+            days: t('recap.co2.days.' + plural(days), {count: days})
+        });
     }
 
     /**
@@ -3408,6 +3535,7 @@
         if (snapshot.priorities.length) steps.push(guideRowStep(snapshot.priorities[0]));
         steps.push(
             guideStep('below', ['recap.below']),
+            recapIncidentsStep(snapshot, guideText),
             guideMovedStep(snapshot),
             guideStep('reports', ['recap.reports']),
             guideStep('card', ['recap.card']),
@@ -3547,6 +3675,19 @@
         });
     }
 
+    /**
+     * The incidents tile, then the recurring suspects when the screen lists some. The controller drops
+     * the step on a snapshot without incidents, where the screen draws no section.
+     * @param {import('../types').RecapSnapshot} snapshot
+     * @param {(key: string, vars?: Record<string, string | number>) => string} text the view's texts
+     * @returns {import('../types').GuideStep}
+     */
+    function recapIncidentsStep(snapshot, text) {
+        const body = [text('incidents.body')];
+        if (snapshot.incidents && hasItems(snapshot.incidents.suspects)) body.push(text('incidents.suspects'));
+        return guideStep('incidents', ['recap.incidents'], {body}, text);
+    }
+
     // ---- the guide of the technical recap
 
     /**
@@ -3603,6 +3744,7 @@
         if (first) steps.push(techActStep(first));
         steps.push(
             techStep('below', ['recap.below']),
+            recapIncidentsStep(snapshot, techText),
             techMovedStep(snapshot, (ctx && ctx.movesOpen) || {}, Boolean(ctx && ctx.movesWhole)),
             techStep('reports', ['recap.reports']),
             guideStep('card', ['recap.card']),
@@ -3659,7 +3801,12 @@
         const without = tiles.co2_sources_without_coefficient;
         const body = [techText('co2.body')];
         if (co2Parts(tiles.co2_grams, without, tiles.co2_missing_reason, 'tech').lead) {
-            body.push(techText('co2.least.' + plural(without), {count: String(without)}));
+            const days = tiles.co2_days_without_coefficient;
+            body.push(days !== undefined && days > 0
+                ? techText('co2.least.days.' + plural(without), {
+                    count: String(without), days: t('recap.co2.days.' + plural(days), {count: days})
+                })
+                : techText('co2.least.' + plural(without), {count: String(without)}));
         }
         return techStep('co2', ['recap.co2'], {body});
     }
@@ -4096,8 +4243,10 @@
         if (ctx.panel === 'gone') steps.push(guideStep('panel', ['incidents.panel'], {body: [text('panel.gone')]}, text));
         else if (ctx.panel) {
             steps.push(guideStep('panel', ['incidents.panel'], {
-                body: [text(ctx.panel === 'none' ? 'panel.none' : 'panel.before'), text('panel.analyse'),
-                    text('panel.correlations')]
+                body: (ctx.saturation ? [text('panel.saturation')] : []).concat(ctx.panel === 'none'
+                    ? [text('panel.none'), text('panel.analyse'), text('panel.correlations')]
+                    : [text('panel.before'), text('panel.link'), text('panel.filter'), text('panel.paging'),
+                        text('panel.scroll'), text('panel.analyse'), text('panel.correlations')])
             }, text));
         }
         steps.push(
@@ -5258,10 +5407,17 @@
         incidentCapture,
         findingPhase,
         sortFindings,
+        linkReasonParts,
+        saturationPercent,
+        linkChipLevel,
+        linkLevelKey,
+        incidentKindsText,
+        recapSuspectWhy,
         moreFiltersLabel,
         findingTemplate,
         findingImpact,
         findingMatches,
+        pageFindings,
         ackCommand,
         phaseLabel,
         INCIDENT_READ_STATE,

@@ -1164,6 +1164,55 @@ a.shell-identity[aria-current="page"] {
     max-width: 320px;
 }
 
+/* A thousand frozen findings made the unfolded incident pages tall: past this height the
+   table scrolls inside the panel, its heads kept in view. */
+.findings-wrap {
+    max-height: min(70vh, 720px);
+    overflow-y: auto;
+}
+
+.findings-wrap thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+}
+
+/* The text filter and the level select side by side, their note under both. */
+.findings-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px 16px;
+}
+
+.findings-controls .field-note {
+    flex-basis: 100%;
+    margin: 0;
+}
+
+/* How suspect a finding is: the three levels on the severity tones, unassessed stays neutral. */
+.chip[data-link="strong"] {
+    background: var(--crit-bg);
+    color: var(--crit-fg);
+}
+
+.chip[data-link="medium"] {
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+}
+
+.chip[data-link="weak"] {
+    background: var(--info-bg);
+    color: var(--info-fg);
+}
+
+.findings-more {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .table-findings td.table-mono {
     overflow-wrap: anywhere;
 }
@@ -5205,6 +5254,34 @@ a.chip {
     font-weight: 400;
     color: var(--text-3);
     letter-spacing: 0;
+}
+
+.recap-h3 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    margin: 22px 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.recap-h3 span {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+/* A suspect has no figure column: its rank and what it is. */
+.recap-row.recap-suspect {
+    grid-template-columns: 26px minmax(0, 1fr);
+}
+
+.recap-why {
+    max-width: 68ch;
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--text-2);
 }
 
 .recap-period {

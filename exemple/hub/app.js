@@ -411,11 +411,15 @@
         ack: null,
         // The route an in-app Ack link was followed from, for the page's way back.
         ackReturn: null,
-        // How an incident's frozen findings are ordered: worst, then most seen, first.
-        findingSort: {key: 'severity', dir: 'desc'},
+        // How an incident's frozen findings are ordered: strongest link first, ties worst and most seen first.
+        findingSort: {key: 'link', dir: 'desc'},
         incidentFiltersOpen: false,
         // What was typed above each incident's findings, by incident key.
         findingQuery: {},
+        // How many of each incident's findings the table draws, by incident key: FINDINGS_PAGE until asked for more.
+        findingLimit: {},
+        // The link level each incident's findings are narrowed to, by incident key: '' or absent for all.
+        findingLevel: {},
         // The incident a `#/new?from=…` link pre-filled the form from, or null.
         /** @type {?Handoff} */
         handoff: null,
@@ -1299,13 +1303,17 @@
         const refused = (state.sources || []).find(function (source) {
             return source.incidents_state === 'unauthorized';
         });
-        const panels = state.incidents.map(incidentGuidePanel).filter(Boolean);
+        const opened = state.incidents.find(incidentGuidePanel);
+        const panel = opened ? incidentGuidePanel(opened) : null;
+        const detail = opened && panel !== 'gone' ? state.incidentDetails[opened.id] : null;
         return {
             status: 'ready', steps: PSL.incidentsSteps({
                 stale: state.incidentsError === 'stale',
                 unauthorized: refused ? refused.name : null,
                 filtered: Object.values(state.incidentFilter).some(Boolean),
-                panel: panels[0] || null,
+                panel,
+                saturation: detail !== null && typeof detail === 'object'
+                    && PSL.saturationPercent(detail.saturation) !== null,
                 unfolded: state.incidents.some(function (incident) {
                     return state.panelOpen[foldKey(incident)] === true;
                 })
@@ -6414,7 +6422,14 @@
             ]);
         }
         const capture = PSL.incidentCapture(detail);
-        const findings = PSL.sortFindings(detail.findings || [], state.findingSort.key, state.findingSort.dir);
+        // The Hub's assessment rides on each row, so the sort and the filter read it like any other column.
+        const links = detail.links || {};
+        const findings = PSL.sortFindings((detail.findings || []).map(function (row) {
+            // Own keys only: a signature such as `constructor` must not read Object.prototype.
+            const signature = row.finding && row.finding.signature;
+            const link = signature && Object.prototype.hasOwnProperty.call(links, signature) ? links[signature] : undefined;
+            return link ? {...row, link: link} : row;
+        }), state.findingSort.key, state.findingSort.dir);
         // A link, so it opens in a new tab too. Its end is clamped to the moment it is followed.
         const analyse = el('a', {class: 'pill-button', href: PSL.incidentHandoffHash(detail, Date.now())}, [
             svg([['path', {d: 'M5 12h14M13 6l6 6-6 6'}]], 14),
@@ -6423,6 +6438,7 @@
         // The button comes after the note that describes the window, since it
         // is the action the note argues for. A bare row, so the panel's own
         // gap sets the distance and no margin adds a second one.
+        const saturation = PSL.saturationPercent(detail.saturation);
         return el('div', {class: 'daemon-panel', ...foldGuide('incidents.panel', opened)}, [
             el('p', {class: 'overline daemon-audience', text: t('incidents.panel.overline')}),
             el('p', {
@@ -6430,13 +6446,17 @@
                 text: t(INCIDENT_CAPTURE[capture]) + ' ' + t('incidents.panel.window', {
                     before: PSL.dur(detail.at_ms - detail.window_from_ms),
                     after: PSL.dur(detail.window_to_ms - detail.at_ms)
-                })
+                }) + (saturation == null ? '' : ' ' + t('incidents.panel.saturation', {value: saturation}))
             }),
             el('div', {}, [analyse]),
             findings.length === 0
                 ? el('p', {class: 'daemon-lead', text: t('incidents.panel.no_finding')})
                 : findingsFilter(detail),
-            findings.length === 0 ? null : el('div', {class: 'sources-wrap'}, [incidentFindingsTable(findings, detail)]),
+            findings.length === 0 ? null : el('div', {
+                class: 'sources-wrap findings-wrap', role: 'region', tabindex: '0',
+                'aria-label': t('incidents.findings.region')
+            }, [incidentFindingsTable(findings, detail)]),
+            findings.length === 0 ? null : findingsMore(detail),
             incidentCorrelationsBlock(incident)
         ]);
     }
@@ -6451,26 +6471,34 @@
             type: 'search', class: 'input findings-filter', placeholder: t('incidents.filter.placeholder'),
             value: state.findingQuery[key] || '', autocomplete: 'off', spellcheck: 'false'
         });
-        const count = el('span', {class: 'field-gloss', 'aria-live': 'polite'});
-        const apply = function () {
+        const count = el('span', {class: 'field-gloss', 'aria-live': 'polite', 'data-findings-count': key});
+        input.addEventListener('input', function () {
             state.findingQuery[key] = input.value;
-            const rows = document.querySelectorAll(`[data-findings="${CSS.escape(key)}"] tbody tr`);
-            let shown = 0;
-            Array.prototype.forEach.call(rows, function (/** @type {HTMLElement} */ row) {
-                row.hidden = !PSL.findingMatches(FINDING_ROW.get(row), input.value);
-                if (!row.hidden) shown += 1;
+            // A new query starts again from the first page of what it matches.
+            delete state.findingLimit[key];
+            fillFindings(key);
+        });
+        const level = el('select', {class: 'input', 'data-findings-level': key}, ['', 'strong', 'medium', 'weak'].map(function (name) {
+            return el('option', {
+                value: name, text: t(name ? 'incidents.link.level.' + name : 'incidents.link.filter.any')
             });
-            count.textContent = input.value.trim() === '' ? '' : t('incidents.filter.shown', {
-                shown: shown,
-                total: rows.length
-            });
-        };
-        input.addEventListener('input', apply);
-        // Once the table beside it is in the page, so a query kept across a sort applies again.
-        queueMicrotask(apply);
+        }));
+        level.value = state.findingLevel[key] || '';
+        level.addEventListener('change', function () {
+            state.findingLevel[key] = level.value;
+            delete state.findingLimit[key];
+            fillFindings(key);
+        });
         const row = field(t('incidents.filter.label'), input, null);
         row.appendChild(count);
-        return row;
+        // The select is described by the note: a suspect level is not a proven cause.
+        const noteId = 'link-note-' + (++fieldCount);
+        level.setAttribute('aria-describedby', noteId);
+        return el('div', {class: 'findings-controls'}, [
+            row,
+            field(t('incidents.link.filter'), level, null),
+            el('p', {class: 'field-note', id: noteId, text: t('incidents.link.note')})
+        ]);
     }
 
     /**
@@ -6481,8 +6509,81 @@
         return severity && PSL.hasText('severity.' + severity) ? t('severity.' + severity) : severity || '?';
     }
 
-    // Each table row's frozen finding, for the filter to test without reading it back from the cells.
-    const FINDING_ROW = new WeakMap();
+    // An incident's findings arrive by the hundred: the table draws this many, and more on demand.
+    const FINDINGS_PAGE = 20;
+
+    // Each findings table's sorted rows and how to draw one, for the filter and the more buttons to redraw its body.
+    const FINDING_TABLE = new WeakMap();
+
+    /**
+     * Draws the page of an incident's findings that its query and limit select, with the count
+     * beside the filter and the more buttons under the table. The filter field keeps its focus.
+     * @param {string} key
+     */
+    function fillFindings(key) {
+        const name = CSS.escape(key);
+        // Two copies of one incident unfold the same detail, so both panels carry its key: each one is filled.
+        const tables = Array.from(document.querySelectorAll(`[data-findings="${name}"]`));
+        const held = tables.length > 0 ? FINDING_TABLE.get(tables[0]) : undefined;
+        if (!held) return;
+        const query = state.findingQuery[key] || '';
+        const level = state.findingLevel[key] || '';
+        const page = PSL.pageFindings(held.findings, query, state.findingLimit[key] || FINDINGS_PAGE, level);
+        // A level that no finding has would leave an empty table: say so in a row instead. Only when the
+        // level alone empties it, so a text query that matches nothing is not blamed on the level.
+        const none = page.matched === 0 && level !== ''
+            && PSL.pageFindings(held.findings, '', 0, level).matched === 0;
+        tables.forEach(function (table) {
+            table.querySelector('tbody').replaceChildren(...(none
+                ? [el('tr', {}, [el('td', {
+                    colspan: String(table.querySelectorAll('thead th').length), text: t('incidents.link.filter.none')
+                })])]
+                : page.shown.map(held.row)));
+        });
+        document.querySelectorAll(`[data-findings-count="${name}"]`).forEach(function (count) {
+            count.textContent = query.trim() === '' && level === '' ? '' : t('incidents.filter.shown', {
+                shown: page.matched,
+                total: held.findings.length
+            });
+        });
+        const left = page.matched - page.shown.length;
+        document.querySelectorAll(`[data-findings-more="${name}"]`).forEach(function (/** @type {HTMLElement} */ more) {
+            more.hidden = left === 0;
+            const next = /** @type {HTMLElement} */ (more.querySelector('[data-step="page"]'));
+            next.textContent = t('incidents.findings.more', {count: Math.min(FINDINGS_PAGE, left)});
+            // The page button would read the same as this one on the last page.
+            next.hidden = left <= FINDINGS_PAGE;
+            more.querySelector('[data-step="all"]').textContent = t('incidents.findings.all', {left: left});
+        });
+    }
+
+    /**
+     * The buttons that draw more of an incident's findings, a page or all of them, under its table.
+     * @param {Incident} incident
+     */
+    function findingsMore(incident) {
+        const key = incidentKey(incident);
+        /** @param {'page' | 'all'} step */
+        const button = function (step) {
+            const node = el('button', {type: 'button', class: 'pill-button', 'data-step': step});
+            node.addEventListener('click', function () {
+                // This panel's own table: another copy of the incident may draw one under the same key.
+                const panel = node.closest('.daemon-panel');
+                const table = panel && panel.querySelector(`[data-findings="${CSS.escape(key)}"]`);
+                const total = table ? FINDING_TABLE.get(table).findings.length : 0;
+                state.findingLimit[key] = step === 'all'
+                    ? total
+                    : (state.findingLimit[key] || FINDINGS_PAGE) + FINDINGS_PAGE;
+                fillFindings(key);
+                // A button that hid itself would drop the focus to the page: the rows it drew take it.
+                const wrap = /** @type {HTMLElement | null} */ (table && table.closest('.findings-wrap'));
+                if (node.offsetParent === null && wrap) wrap.focus();
+            });
+            return node;
+        };
+        return el('div', {class: 'findings-more', 'data-findings-more': key, hidden: ''},
+            [button('page'), button('all')]);
+    }
 
     /**
      * @param {StoredFindingRow[]} findings
@@ -6493,11 +6594,12 @@
         const canAck = (state.sources || []).some(function (source) {
             return source.ack_relay;
         });
-        const columns = ['type', 'severity', 'impact', 'endpoint', 'template', 'seen', 'first'].concat(canAck ? ['ack'] : []);
+        const columns = ['type', 'severity', 'link', 'impact', 'endpoint', 'template', 'seen', 'first'].concat(canAck ? ['ack'] : []);
         const head = el('tr', {}, columns.map(function (name) {
             return findingHead(name, incident);
         }));
-        const rows = findings.map(function (row) {
+        /** @param {StoredFindingRow} row */
+        const draw = function (row) {
             /** @type {Partial<Finding>} */
             const finding = row.finding || {};
             const phase = PSL.findingPhase(row, incident);
@@ -6512,6 +6614,7 @@
                     'data-sev': finding.severity || null,
                     text: severityLabel(finding.severity)
                 })]),
+                el('td', {}, [linkChip(row)]),
                 el('td', {'data-align': 'right', text: impact == null ? '—' : PSL.num(impact)}),
                 el('td', {class: 'table-mono'}, [breakable(finding.source_endpoint || '?')]),
                 // Whole, wrapped: the template is what tells two rows apart.
@@ -6525,11 +6628,16 @@
                 // The daemon that froze the finding is the only one the page checks.
                 canAck ? el('td', {}, [finding.signature ? ackLink(finding, incident) : null]) : null
             ]);
-            FINDING_ROW.set(tr, row);
             return tr;
+        };
+        const key = incidentKey(incident);
+        const table = el('table', {class: 'table table-findings', 'data-findings': key},
+            [el('thead', {}, [head]), el('tbody', {}, [])]);
+        FINDING_TABLE.set(table, {findings: findings, row: draw});
+        // Once the table and the controls around it are in the page, so a query or a limit kept across a sort applies again.
+        queueMicrotask(function () {
+            fillFindings(key);
         });
-        const table = el('table', {class: 'table table-findings', 'data-findings': incidentKey(incident)},
-            [el('thead', {}, [head]), el('tbody', {}, rows)]);
         if (canAck) return table;
         return el('div', {}, [table, el('p', {
             class: 'field-note',
@@ -6576,7 +6684,7 @@
     }
 
     /** The columns a click sorts on, each under the sort key of its name. The ack column does not sort. */
-    const FINDING_SORT_KEY = ['type', 'severity', 'impact', 'endpoint', 'template', 'seen', 'first'];
+    const FINDING_SORT_KEY = ['type', 'severity', 'link', 'impact', 'endpoint', 'template', 'seen', 'first'];
 
     /**
      * A column head that sorts on click. Counts and severity read worst first, the rest A to Z.
@@ -6604,12 +6712,36 @@
         button.addEventListener('click', function () {
             state.findingSort = active
                 ? {key: key, dir: sort.dir === 'asc' ? 'desc' : 'asc'}
-                : {key: key, dir: key === 'severity' || key === 'impact' || key === 'seen' ? 'desc' : 'asc'};
+                : {key: key, dir: key === 'severity' || key === 'link' || key === 'impact' || key === 'seen' ? 'desc' : 'asc'};
             // The ids come from the daemon: escaped, so a quote in one cannot break the selector.
             renderFocus('[data-sort="' + CSS.escape(id) + '"]');
         });
         th.appendChild(button);
         return th;
+    }
+
+    /**
+     * How suspect a finding is, as a chip. The reasons ride in the tooltip and in a visually hidden
+     * span, which a keyboard or a screen reader reaches where a tooltip alone would not.
+     * @param {StoredFindingRow & {link?: import('../types').IncidentLink}} row
+     */
+    function linkChip(row) {
+        const level = PSL.linkChipLevel(row);
+        if (level === null) return null;
+        const link = row.link;
+        if (!link) return el('span', {class: 'chip', 'data-link': 'pending', text: t('incidents.link.pending')});
+        const reasons = (link.reasons || []).map(function (reason) {
+            const part = PSL.linkReasonParts(reason);
+            // The ratio is the one decimal among the numbers: a comma in French.
+            const params = part.params.ratio == null ? part.params : {...part.params, ratio: PSL.decimal(part.params.ratio)};
+            return PSL.hasText(part.key) ? t(part.key, params) : '';
+        }).filter(Boolean).join(' ');
+        const chip = el('span', {
+            class: 'chip', 'data-link': link.level, title: reasons || null,
+            text: t(PSL.linkLevelKey(link.level))
+        });
+        if (reasons) chip.appendChild(el('span', {class: 'visually-hidden', text: ' ' + t('incidents.link.reasons', {list: reasons})}));
+        return chip;
     }
 
     /**
@@ -7976,7 +8108,7 @@
         const snapshot = state.recap;
         const labels = PSL.RECAP_LABELS[snapshot.view === 'pilotage' ? 'pilotage' : 'tech'];
         [recapFreshnessLine(route), recapPeriodBlock(snapshot), recapTiles(snapshot, labels), recapPriorities(snapshot, route),
-            recapMoved(snapshot, labels), recapReportsPanel(route), recapCardPanel(route)].forEach(function (part) {
+            recapIncidents(snapshot), recapMoved(snapshot, labels), recapReportsPanel(route), recapCardPanel(route)].forEach(function (part) {
             if (part) section.appendChild(part);
         });
         return section;
@@ -8358,7 +8490,7 @@
     }
 
     /**
-     * A heading with its "?" beside it, never inside it, centred on the heading's line.
+     * A heading with its "?" beside it, never inside it, centred on the heading's line; none without a help text.
      * @param {string} id
      * @param {string} text
      * @param {string} hint
@@ -8372,7 +8504,7 @@
                 id: id,
                 tabindex: '-1'
             }, [document.createTextNode(text), hint ? el('span', {text: hint}) : null]),
-            helpDot(help, topic)
+            help ? helpDot(help, topic) : null
         ]);
     }
 
@@ -8490,14 +8622,17 @@
         // The full sentence stays on the figure for a reader the small print does not reach.
         const value = el('span', {
             class: 'disc-figure-value',
-            title: PSL.co2Text(tiles.co2_grams, without, tiles.co2_missing_reason, snapshot.view)
+            title: PSL.co2Text(tiles.co2_grams, without, tiles.co2_missing_reason, snapshot.view,
+                tiles.co2_days_without_coefficient)
         }, [
             co2.lead ? el('small', {text: co2.lead}) : null,
             document.createTextNode(co2.figure),
             el('span', {class: 'disc-figure-unit', text: co2.unit})
         ]);
         return recapTile(t('recap.tile.co2'), recapProgressChip(snapshot), value, [
-            known ? t('recap.tile.magnitude', {tail: PSL.co2Tail(without, snapshot.view)}) : '',
+            known ? t('recap.tile.magnitude', {
+                tail: PSL.co2Tail(without, snapshot.view, tiles.co2_days_without_coefficient)
+            }) : '',
             previous ? recapPreviousText(snapshot, previous) : ''
         ], recapHelp(snapshot, 'co2'), t('recap.topic.co2'), 'recap.co2');
     }
@@ -8532,6 +8667,68 @@
                 t('recap.tile.actions.open', {in_progress: actions.in_progress, todo: actions.todo})
             ], recapHelp(snapshot, 'actions'), t('recap.topic.actions'), 'recap.actions')
         ]);
+    }
+
+    // ---- the incidents and their recurring suspects
+
+    /**
+     * The period's incidents and the findings linked to them, as the report shows them.
+     * Absent from a snapshot taken before incidents were counted, and from a period without any.
+     * @param {RecapSnapshot} snapshot
+     */
+    function recapIncidents(snapshot) {
+        const incidents = snapshot.incidents;
+        if (!incidents || (incidents.count === 0 && incidents.suspects.length === 0)) return null;
+        const management = snapshot.view === 'pilotage';
+        const section = el('section', {
+            class: 'recap-section', 'aria-labelledby': 'recap-h-incidents', 'data-guide': 'recap.incidents'
+        }, [
+            ruledOverline(t('recap.incidents.overline')),
+            recapHeading('recap-h-incidents', t('recap.incidents.title'), t('recap.incidents.hint'), '', ''),
+            el('div', {class: 'disc-figures recap-tiles'}, [
+                el('div', {class: 'disc-figure'}, [
+                    el('span', {class: 'disc-figure-label'}, [document.createTextNode(t('recap.incidents.tile')),
+                        recapProgressChip(snapshot)]),
+                    el('span', {class: 'disc-figure-value', text: String(incidents.count)})
+                ].concat([recapPreviousText(snapshot, incidents.previous_count), PSL.incidentKindsText(incidents.by_kind)]
+                    .filter(Boolean).map(function (sub) {
+                        return el('span', {class: 'disc-figure-sub', text: sub});
+                    })))
+            ])
+        ]);
+        if (incidents.suspects.length === 0) return section;
+        const list = el('ol', {class: 'recap-list'}, incidents.suspects.map(function (suspect) {
+            return el('li', {class: 'run-card recap-row recap-suspect'}, [
+                el('span', {class: 'recap-rank', text: String(suspect.rank)}),
+                el('div', {class: 'recap-what'}, [
+                    el('div', {class: 'recap-head'}, [
+                        el('span', {
+                            class: 'chip', 'data-type': suspect.finding_type,
+                            text: PSL.FINDING_TYPE_LABEL[suspect.finding_type] || suspect.finding_type
+                        }),
+                        el('span', {class: 'table-strong', text: suspect.service}),
+                        suspect.endpoint ? el('span', {class: 'recap-endpoint', text: suspect.endpoint}) : null
+                    ]),
+                    el('p', {class: 'recap-why'}, [
+                        document.createTextNode(PSL.recapSuspectWhy(suspect) + ' '),
+                        el('a', {href: '#/incidents', text: t('recap.suspect.link')})
+                    ])
+                ])
+            ]);
+        }));
+        section.appendChild(el('div', {'data-guide': 'recap.suspects'}, [
+            el('h3', {class: 'recap-h3'}, [document.createTextNode(t('recap.suspects.title')),
+                el('span', {text: t('recap.suspects.hint')})]),
+            list
+        ]));
+        const more = incidents.more_suspects;
+        if (more > 0) {
+            section.appendChild(el('p', {
+                class: 'recap-more',
+                text: t('recap.suspects.more.' + (management ? 'pilotage.' : 'tech.') + PSL.plural(more), {count: more})
+            }));
+        }
+        return section;
     }
 
     // ---- the priorities
