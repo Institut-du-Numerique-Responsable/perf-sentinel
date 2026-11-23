@@ -408,7 +408,8 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 #                                                  # whose k8s.namespace.name grouping attribute names another
 #                                                  # is left out, so it needs k8s.namespace.name among
 #                                                  # [detection] grouping_attributes
-# saturation_annotation = "perf_sentinel_saturation"  # default "perf_sentinel_saturation". Alert annotation read as
+# saturation_annotation = "perf_sentinel_saturation"
+#                                                  # default "perf_sentinel_saturation". Alert annotation read as
 #                                                  # the incident saturation, a ratio in [0, 1] or a percentage in (1, 100].
 # ignored_kinds = ["deploy", "restart"]            # default. Alerts of these kinds are acknowledged and dropped:
 #                                                  # not frozen, kept, archived nor pushed to the Hub. A rollout

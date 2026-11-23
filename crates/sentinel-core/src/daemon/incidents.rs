@@ -719,7 +719,8 @@ pub struct IncidentRequest {
 /// Read one alert into an [`IncidentRequest`].
 ///
 /// `service_label`, `kind_label` and `namespace_label` name the labels to
-/// read, `saturation_annotation` the annotation carrying the saturation. A missing or unrecognized kind is [`IncidentKind::Other`].
+/// read, `saturation_annotation` the annotation carrying the saturation.
+/// A missing or unrecognized kind is [`IncidentKind::Other`].
 /// Guessing it from `alertname` would be a heuristic nobody can see
 /// failing. A missing namespace is left absent.
 ///
@@ -781,11 +782,13 @@ pub fn read_alert(
 #[must_use]
 pub fn parse_saturation(raw: &str) -> Option<f64> {
     let v: f64 = raw.trim().parse().ok()?;
-    match v {
-        _ if !v.is_finite() => None,
-        _ if (0.0..=1.0).contains(&v) => Some(v),
-        _ if v > 1.0 && v <= 100.0 => Some(v / 100.0),
-        _ => None,
+    // `+ 0.0` turns a `-0` into `0`, so it never reaches the wire as `-0.0`.
+    if !v.is_finite() || !(0.0..=100.0).contains(&v) {
+        None
+    } else if v <= 1.0 {
+        Some(v + 0.0)
+    } else {
+        Some(v / 100.0)
     }
 }
 
@@ -884,6 +887,8 @@ mod tests {
         assert_eq!(parse_saturation("0.98"), Some(0.98));
         assert_eq!(parse_saturation(" 1 "), Some(1.0));
         assert_eq!(parse_saturation("98"), Some(0.98));
+        let zero = parse_saturation("-0").unwrap();
+        assert!(zero == 0.0 && zero.is_sign_positive());
         assert_eq!(parse_saturation("100"), Some(1.0));
         for bad in ["", "NaN", "inf", "-1", "250", "98%", "abc"] {
             assert_eq!(parse_saturation(bad), None, "{bad}");
