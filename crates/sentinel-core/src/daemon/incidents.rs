@@ -116,6 +116,12 @@ pub struct Incident {
     /// Free text from the alert, sanitized and capped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// Saturation of the resource at the incident, a ratio in `[0, 1]`,
+    /// read from the alert annotation named by
+    /// [`crate::config::DaemonIncidentsConfig::saturation_annotation`].
+    /// Absent when the alert carried none or it was unreadable.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub saturation: Option<f64>,
     /// Lower bound of the window the findings were taken from, `at_ms`
     /// minus the configured lookback. Stored rather than derived because
     /// the archive must describe itself after a config change.
@@ -191,6 +197,8 @@ pub(crate) struct IncidentSummary {
     ended_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    saturation: Option<f64>,
     window_from_ms: u64,
     window_to_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -210,6 +218,7 @@ impl IncidentSummary {
             at_ms,
             ended_at_ms,
             detail,
+            saturation,
             window_from_ms,
             window_to_ms,
             oldest_finding_ms,
@@ -223,6 +232,7 @@ impl IncidentSummary {
             at_ms: *at_ms,
             ended_at_ms: *ended_at_ms,
             detail: detail.clone(),
+            saturation: *saturation,
             window_from_ms: *window_from_ms,
             window_to_ms: *window_to_ms,
             oldest_finding_ms: *oldest_finding_ms,
@@ -693,7 +703,7 @@ pub enum RejectedAlert {
 /// What one alert asks for, once validated. The caller resolves the
 /// window and builds the [`Incident`], which keeps this function free of
 /// the store and testable on its own.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IncidentRequest {
     /// [`Incident::compute_id`] of the fields below, computed once.
     pub id: String,
@@ -703,12 +713,13 @@ pub struct IncidentRequest {
     pub at_ms: u64,
     pub ended_at_ms: Option<u64>,
     pub detail: Option<String>,
+    pub saturation: Option<f64>,
 }
 
 /// Read one alert into an [`IncidentRequest`].
 ///
 /// `service_label`, `kind_label` and `namespace_label` name the labels to
-/// read. A missing or unrecognized kind is [`IncidentKind::Other`].
+/// read, `saturation_annotation` the annotation carrying the saturation. A missing or unrecognized kind is [`IncidentKind::Other`].
 /// Guessing it from `alertname` would be a heuristic nobody can see
 /// failing. A missing namespace is left absent.
 ///
@@ -720,6 +731,7 @@ pub fn read_alert(
     service_label: &str,
     kind_label: &str,
     namespace_label: &str,
+    saturation_annotation: &str,
 ) -> Result<IncidentRequest, RejectedAlert> {
     let service = read_label(alert, service_label).ok_or(RejectedAlert::NoService)?;
     // The id separator is dropped from the namespace, otherwise
@@ -747,6 +759,10 @@ pub fn read_alert(
         .get("summary")
         .or_else(|| alert.annotations.get("description"))
         .map(|d| cap_detail(d));
+    let saturation = alert
+        .annotations
+        .get(saturation_annotation)
+        .and_then(|v| parse_saturation(v));
     Ok(IncidentRequest {
         id: Incident::compute_id(&service, namespace.as_deref(), kind, at_ms),
         service,
@@ -755,7 +771,22 @@ pub fn read_alert(
         at_ms,
         ended_at_ms,
         detail,
+        saturation,
     })
+}
+
+/// A saturation as a ratio in `[0, 1]`. A value in `(1, 100]` is a
+/// percentage and is divided by 100. Anything else, including a non-finite
+/// number or a trailing `%`, is `None`.
+#[must_use]
+pub fn parse_saturation(raw: &str) -> Option<f64> {
+    let v: f64 = raw.trim().parse().ok()?;
+    match v {
+        _ if !v.is_finite() => None,
+        _ if (0.0..=1.0).contains(&v) => Some(v),
+        _ if v > 1.0 && v <= 100.0 => Some(v / 100.0),
+        _ => None,
+    }
 }
 
 /// One label's value, trimmed like the stamp is since quoted YAML keeps
@@ -840,11 +871,66 @@ mod tests {
             at_ms,
             ended_at_ms: None,
             detail: None,
+            saturation: None,
             window_from_ms: at_ms.saturating_sub(1000),
             window_to_ms: at_ms,
             oldest_finding_ms: None,
             findings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn saturation_reads_a_ratio_or_a_percentage_and_drops_anything_else() {
+        assert_eq!(parse_saturation("0.98"), Some(0.98));
+        assert_eq!(parse_saturation(" 1 "), Some(1.0));
+        assert_eq!(parse_saturation("98"), Some(0.98));
+        assert_eq!(parse_saturation("100"), Some(1.0));
+        for bad in ["", "NaN", "inf", "-1", "250", "98%", "abc"] {
+            assert_eq!(parse_saturation(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_alert_carries_its_saturation_and_one_without_is_still_recorded() {
+        let mut a = alert(&[("service", "checkout")], "2026-05-01T10:00:00Z", "firing");
+        a.annotations
+            .insert("perf_sentinel_saturation".to_string(), "0.97".to_string());
+        let read = |a: &WebhookAlert| {
+            read_alert(
+                a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation",
+            )
+            .unwrap()
+        };
+        let req = read(&a);
+        assert_eq!(req.saturation, Some(0.97));
+        a.annotations
+            .insert("perf_sentinel_saturation".to_string(), "oops".to_string());
+        let bad = read(&a);
+        assert_eq!(bad.saturation, None);
+        assert_eq!(bad.id, req.id, "saturation is not part of the id");
+    }
+
+    #[test]
+    fn saturation_is_serialized_only_when_present() {
+        let mut i = incident("a", IncidentKind::Restart, 1000);
+        assert!(
+            serde_json::to_value(&i)
+                .unwrap()
+                .get("saturation")
+                .is_none()
+        );
+        i.saturation = Some(0.5);
+        assert_eq!(
+            serde_json::to_string(&i)
+                .unwrap()
+                .matches("\"saturation\":0.5")
+                .count(),
+            1
+        );
     }
 
     fn stored(template: &str, stamp: u64) -> StoredFinding {
@@ -867,7 +953,13 @@ mod tests {
             "firing",
         );
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace"),
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            ),
             Err(RejectedAlert::NoService),
             "the service is the join key to the findings, there is no useful fallback"
         );
@@ -883,7 +975,14 @@ mod tests {
             "2026-09-05T14:03:00Z",
             "firing",
         );
-        let req = read_alert(&a, "service", "perf_sentinel_kind", "namespace").unwrap();
+        let req = read_alert(
+            &a,
+            "service",
+            "perf_sentinel_kind",
+            "namespace",
+            "perf_sentinel_saturation",
+        )
+        .unwrap();
         assert_eq!(req.kind, IncidentKind::Other);
         assert_eq!(req.service, "cart-svc");
         assert_eq!(req.at_ms, 1_788_616_980_000);
@@ -898,9 +997,15 @@ mod tests {
             "firing",
         );
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace")
-                .unwrap()
-                .kind,
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            )
+            .unwrap()
+            .kind,
             IncidentKind::OomKill
         );
     }
@@ -917,7 +1022,14 @@ mod tests {
             " 2026-09-05T14:03:00Z ",
             "firing",
         );
-        let req = read_alert(&a, "service", "perf_sentinel_kind", "namespace").unwrap();
+        let req = read_alert(
+            &a,
+            "service",
+            "perf_sentinel_kind",
+            "namespace",
+            "perf_sentinel_saturation",
+        )
+        .unwrap();
         assert_eq!(req.service, "cart-svc");
         assert_eq!(req.kind, IncidentKind::OomKill);
     }
@@ -929,7 +1041,14 @@ mod tests {
             "2026-09-05T14:03:00Z",
             "firing",
         );
-        let req = read_alert(&a, "service", "perf_sentinel_kind", "namespace").unwrap();
+        let req = read_alert(
+            &a,
+            "service",
+            "perf_sentinel_kind",
+            "namespace",
+            "perf_sentinel_saturation",
+        )
+        .unwrap();
         assert_eq!(req.namespace.as_deref(), Some("shop"));
         assert_eq!(
             req.id,
@@ -945,10 +1064,16 @@ mod tests {
             "firing",
         );
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace")
-                .unwrap()
-                .namespace
-                .as_deref(),
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            )
+            .unwrap()
+            .namespace
+            .as_deref(),
             Some("shop"),
             "bidi and invisible characters are stripped like on the service"
         );
@@ -960,7 +1085,14 @@ mod tests {
             &[("service", "cart-svc")][..],
         ] {
             let a = alert(labels, "2026-09-05T14:03:00Z", "firing");
-            let req = read_alert(&a, "service", "perf_sentinel_kind", "namespace").unwrap();
+            let req = read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation",
+            )
+            .unwrap();
             assert_eq!(req.namespace, None, "empty or missing is simply absent");
         }
     }
@@ -983,8 +1115,22 @@ mod tests {
             "1970-01-01T00:00:00.005Z",
             "firing",
         );
-        let forged = read_alert(&forged, "service", "perf_sentinel_kind", "namespace").unwrap();
-        let plain = read_alert(&plain, "service", "perf_sentinel_kind", "namespace").unwrap();
+        let forged = read_alert(
+            &forged,
+            "service",
+            "perf_sentinel_kind",
+            "namespace",
+            "perf_sentinel_saturation",
+        )
+        .unwrap();
+        let plain = read_alert(
+            &plain,
+            "service",
+            "perf_sentinel_kind",
+            "namespace",
+            "perf_sentinel_saturation",
+        )
+        .unwrap();
         assert_eq!(forged.namespace.as_deref(), Some("other5"));
         assert_eq!((forged.at_ms, plain.at_ms), (1000, 5));
         assert_ne!(forged.id, plain.id);
@@ -995,18 +1141,30 @@ mod tests {
         let mut a = alert(&[("service", "svc")], "2026-09-05T14:03:00Z", "firing");
         a.ends_at = "0001-01-01T00:00:00Z".to_string();
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace")
-                .unwrap()
-                .ended_at_ms,
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            )
+            .unwrap()
+            .ended_at_ms,
             None
         );
 
         let mut a = alert(&[("service", "svc")], "2026-09-05T14:03:00Z", "resolved");
         a.ends_at = "2026-09-05T14:09:00Z".to_string();
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace")
-                .unwrap()
-                .ended_at_ms,
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            )
+            .unwrap()
+            .ended_at_ms,
             Some(1_788_617_340_000)
         );
     }
@@ -1018,16 +1176,28 @@ mod tests {
         let mut a = alert(&[("service", "svc")], "2026-09-05T14:03:00Z", "resolved");
         a.ends_at = "1970-01-01T00:00:00Z".to_string();
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace")
-                .unwrap()
-                .ended_at_ms,
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            )
+            .unwrap()
+            .ended_at_ms,
             None
         );
         a.ends_at = "2026-09-05T14:03:00Z".to_string();
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace")
-                .unwrap()
-                .ended_at_ms,
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            )
+            .unwrap()
+            .ended_at_ms,
             Some(1_788_616_980_000),
             "an end equal to the start is the shortest incident, not a bad one"
         );
@@ -1042,14 +1212,26 @@ mod tests {
             "firing",
         );
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace")
-                .unwrap()
-                .at_ms,
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            )
+            .unwrap()
+            .at_ms,
             1_788_616_980_123
         );
         let a = alert(&[("service", "svc")], "not a stamp", "firing");
         assert_eq!(
-            read_alert(&a, "service", "perf_sentinel_kind", "namespace"),
+            read_alert(
+                &a,
+                "service",
+                "perf_sentinel_kind",
+                "namespace",
+                "perf_sentinel_saturation"
+            ),
             Err(RejectedAlert::UnparsableTime)
         );
     }
@@ -1066,10 +1248,16 @@ mod tests {
     fn detail_is_sanitized_and_capped_on_a_character_boundary() {
         let mut a = alert(&[("service", "svc")], "2026-09-05T14:03:00Z", "firing");
         a.annotations.insert("summary".to_string(), "é".repeat(400));
-        let detail = read_alert(&a, "service", "perf_sentinel_kind", "namespace")
-            .unwrap()
-            .detail
-            .unwrap();
+        let detail = read_alert(
+            &a,
+            "service",
+            "perf_sentinel_kind",
+            "namespace",
+            "perf_sentinel_saturation",
+        )
+        .unwrap()
+        .detail
+        .unwrap();
         assert!(detail.len() <= MAX_DETAIL_BYTES);
         assert!(
             detail.chars().all(|c| c == 'é'),

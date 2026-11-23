@@ -285,6 +285,7 @@ impl Config {
             ("service_label", &incidents.service_label),
             ("kind_label", &incidents.kind_label),
             ("namespace_label", &incidents.namespace_label),
+            ("saturation_annotation", &incidents.saturation_annotation),
         ];
         let optional = incidents.archive_path.as_ref().map(|p| ("archive_path", p));
         for (name, value) in required.into_iter().chain(optional) {

@@ -4,6 +4,10 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+### Added
+
+- An incident can carry a `saturation`, the saturation of the resource the alert is about, read from the alert annotation named by `[daemon.incidents] saturation_annotation` (default `perf_sentinel_saturation`). A value in `[0, 1]` is kept as a ratio, a value in `(1, 100]` is a percentage divided by 100, anything else is dropped and the incident is recorded without one. It is not part of the incident id, and is serialized only when present, in `GET /api/incidents` and its summaries. `docs/CONFIGURATION.md`, `docs/QUERY-API.md` and their French mirrors describe it.
+
 ## [0.48.1] - 2026-11-22
 
 ### Fixed

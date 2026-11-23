@@ -536,6 +536,11 @@ pub struct DaemonIncidentsConfig {
     /// all the same, frozen by service alone, and the label is never a
     /// Prometheus label here.
     pub namespace_label: String,
+    /// Alert annotation carrying the saturation of the resource the alert
+    /// is about, a ratio in `[0, 1]` or a percentage in `(1, 100]`.
+    /// Default `perf_sentinel_saturation`. Absent or unreadable, the
+    /// incident is recorded without one.
+    pub saturation_annotation: String,
     /// Kinds whose alerts are acknowledged and dropped: neither frozen, nor
     /// kept in the ring or the archive, nor pushed to the Hub. Default
     /// [`DEFAULT_IGNORED_INCIDENT_KINDS`]; `[]` records every kind. Each must
@@ -559,6 +564,7 @@ impl Default for DaemonIncidentsConfig {
             service_label: "service".to_string(),
             kind_label: "perf_sentinel_kind".to_string(),
             namespace_label: "namespace".to_string(),
+            saturation_annotation: "perf_sentinel_saturation".to_string(),
             ignored_kinds: DEFAULT_IGNORED_INCIDENT_KINDS.map(str::to_string).to_vec(),
             archive_path: None,
         }

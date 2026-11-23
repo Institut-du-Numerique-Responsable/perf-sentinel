@@ -5525,6 +5525,31 @@ namespace_label = \"\"
 }
 
 #[test]
+fn parse_daemon_incidents_saturation_annotation_defaults_reads_and_refuses_empty() {
+    let cfg = load_from_str("[daemon.incidents]\nenabled = false\n").unwrap();
+    assert_eq!(
+        cfg.daemon.incidents.saturation_annotation,
+        "perf_sentinel_saturation"
+    );
+
+    let set = "
+[daemon.incidents]
+enabled = true
+api_key = \"a-long-random-string\"
+saturation_annotation = \"mem_ratio\"
+";
+    let cfg = load_from_str(set).unwrap();
+    assert_eq!(cfg.daemon.incidents.saturation_annotation, "mem_ratio");
+
+    let empty = set.replace("mem_ratio", "");
+    let msg = format!("{}", load_from_str(&empty).unwrap_err());
+    assert!(
+        msg.contains("[daemon.incidents] saturation_annotation must not be empty"),
+        "{msg}"
+    );
+}
+
+#[test]
 fn detections_defaults_are_enabled_8_days_10000_signatures() {
     let cfg = load_from_str("").unwrap();
     assert!(cfg.daemon.detections.enabled);

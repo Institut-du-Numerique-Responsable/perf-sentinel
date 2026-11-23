@@ -1213,6 +1213,7 @@ Trois libellés sont lus, tous configurables :
 | `[daemon.incidents] service_label`   | `service`            | Le nom de service Perf Sentinel. C'est la clé de jointure avec les findings, une alerte qui ne le porte pas est refusée                                                                                                                 |
 | `[daemon.incidents] kind_label`      | `perf_sentinel_kind` | L'un de `oom_kill`, `memory_saturation`, `restart`, `deploy`, `other`. Tout le reste vaut `other`                                                                                                                                       |
 | `[daemon.incidents] namespace_label` | `namespace`          | Optionnel. Sa valeur est portée sur l'incident comme `namespace`, restreint le gel aux findings de ce namespace (voir plus bas) et c'est sur elle que filtre le paramètre `namespace` de `GET /api/incidents`. Jamais un motif de refus |
+| `[daemon.incidents] saturation_annotation` | `perf_sentinel_saturation` | Annotation lue comme `saturation` de l'incident, un ratio dans `[0, 1]` ou un pourcentage dans `(1, 100]`. Tout le reste est ignoré |
 | `[daemon.incidents] ignored_kinds`   | `["deploy", "restart"]` | Pas un libellé : les genres dont les alertes sont acquittées puis écartées, jamais gelées ni gardées. `[]` enregistre tous les genres |
 
 **Un incident avec un namespace fige les findings de ce namespace.** Un
@@ -1339,6 +1340,7 @@ appelant sans elle reçoit toujours 401.
 | `at_ms`             | number | Début, en millisecondes epoch Unix                                                                       |
 | `ended_at_ms`       | number | Fin, absent tant que l'alerte est active                                                                 |
 | `detail`            | string | Le `summary` ou la `description` de l'alerte, assaini et plafonné à 512 octets, absent si aucun des deux |
+| `saturation`        | nombre | Saturation de la ressource, un ratio dans `[0, 1]`, absente si l'alerte n'en portait pas ou si elle était illisible |
 | `window_from_ms`    | number | `at_ms` moins `[daemon.incidents] lookback_ms`                                                           |
 | `window_to_ms`      | number | `at_ms` plus deux `trace_ttl_ms`, voir plus haut                                                         |
 | `oldest_finding_ms` | number | Plus ancien finding que le ring détenait à la capture, absent s'il était vide                            |

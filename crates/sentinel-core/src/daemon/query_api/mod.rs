@@ -1607,6 +1607,7 @@ async fn freeze_window(
         at_ms: req.at_ms,
         ended_at_ms: req.ended_at_ms,
         detail: req.detail.clone(),
+        saturation: req.saturation,
         window_from_ms: from,
         window_to_ms: to,
         oldest_finding_ms,
@@ -1743,6 +1744,7 @@ async fn handle_post_incidents(
             &cfg.service_label,
             &cfg.kind_label,
             &cfg.namespace_label,
+            &cfg.saturation_annotation,
         ) {
             Ok(req) => req,
             Err(super::incidents::RejectedAlert::NoService) => {
