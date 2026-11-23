@@ -196,6 +196,7 @@ spec:
             perf_sentinel_kind: memory_saturation
           annotations:
             summary: "{{ $labels.namespace }}/{{ $labels.service }}: working set above 90% of its memory limit"
+            perf_sentinel_saturation: "{{ $value }}"
         # A deploy is posted for the same reason as a restart: to freeze what
         # was already firing before the rollout, and so a restart the rollout
         # causes is not read as a crash.

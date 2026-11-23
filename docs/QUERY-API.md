@@ -1172,7 +1172,7 @@ Three labels are read, all configurable:
 | `[daemon.incidents] service_label`   | `service`            | The Perf Sentinel service name. This is the join key to the findings, so an alert without it is refused                                                                                                                                |
 | `[daemon.incidents] kind_label`      | `perf_sentinel_kind` | One of `oom_kill`, `memory_saturation`, `restart`, `deploy`, `other`. Anything else is `other`                                                                                                                                         |
 | `[daemon.incidents] namespace_label` | `namespace`          | Optional. Its value is carried on the incident as `namespace`, narrows the freeze to that namespace's findings (see below) and is what the `namespace` parameter of `GET /api/incidents` filters on. Never a reason to refuse an alert |
-| `[daemon.incidents] saturation_annotation` | `perf_sentinel_saturation` | Annotation read as the incident's `saturation`, a ratio in `[0, 1]` or a percentage in `(1, 100]`. Anything else is dropped |
+| `[daemon.incidents] saturation_annotation` | `perf_sentinel_saturation` | Annotation read as the incident's `saturation`, a bare number read as a ratio or a number ending in `%` read as a percentage, capped at 1. Anything else is dropped |
 | `[daemon.incidents] ignored_kinds`   | `["deploy", "restart"]` | Not a label: the kinds whose alerts are acknowledged and dropped, never frozen nor kept. `[]` records every kind |
 
 **An incident with a namespace freezes that namespace's findings.** A

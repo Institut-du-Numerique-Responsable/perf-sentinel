@@ -776,20 +776,30 @@ pub fn read_alert(
     })
 }
 
-/// A saturation as a ratio in `[0, 1]`. A value in `(1, 100]` is a
-/// percentage and is divided by 100. Anything else, including a non-finite
-/// number or a trailing `%`, is `None`.
-#[must_use]
-pub fn parse_saturation(raw: &str) -> Option<f64> {
-    let v: f64 = raw.trim().parse().ok()?;
-    // `+ 0.0` turns a `-0` into `0`, so it never reaches the wire as `-0.0`.
-    if !v.is_finite() || !(0.0..=100.0).contains(&v) {
-        None
-    } else if v <= 1.0 {
-        Some(v + 0.0)
-    } else {
-        Some(v / 100.0)
+/// A saturation as a ratio in `[0, 1]`. A bare number is a ratio, a
+/// number followed by `%` (what `humanizePercentage` renders) is a
+/// percentage. Above full is capped at 1, since usage past the limit
+/// (rate jitter, a stale limit series) still means saturated. A negative
+/// or non-finite number, or anything unparsable, is `None`.
+fn parse_saturation(raw: &str) -> Option<f64> {
+    let raw = raw.trim();
+    let (number, percent) = match raw.strip_suffix('%') {
+        Some(n) => (n.trim_end(), true),
+        None => (raw, false),
+    };
+    let v: f64 = number.parse().ok()?;
+    if !v.is_finite() || v < 0.0 {
+        return None;
     }
+    let ratio = if percent {
+        // Shifting the decimal point and parsing again rounds once, where
+        // `v / 100.0` writes `99.9` as `0.9990000000000001`.
+        format!("{v}e-2").parse::<f64>().ok()?
+    } else {
+        v
+    };
+    // `+ 0.0` turns a `-0` into `0`, so it never reaches the wire as `-0.0`.
+    Some(ratio.min(1.0) + 0.0)
 }
 
 /// One label's value, trimmed like the stamp is since quoted YAML keeps
@@ -865,6 +875,17 @@ mod tests {
         }
     }
 
+    /// [`read_alert`] with the default label and annotation names.
+    fn read(a: &WebhookAlert) -> Result<IncidentRequest, RejectedAlert> {
+        read_alert(
+            a,
+            "service",
+            "perf_sentinel_kind",
+            "namespace",
+            "perf_sentinel_saturation",
+        )
+    }
+
     fn incident(service: &str, kind: IncidentKind, at_ms: u64) -> Incident {
         Incident {
             id: Incident::compute_id(service, None, kind, at_ms),
@@ -886,11 +907,17 @@ mod tests {
     fn saturation_reads_a_ratio_or_a_percentage_and_drops_anything_else() {
         assert_eq!(parse_saturation("0.98"), Some(0.98));
         assert_eq!(parse_saturation(" 1 "), Some(1.0));
-        assert_eq!(parse_saturation("98"), Some(0.98));
         let zero = parse_saturation("-0").unwrap();
         assert!(zero == 0.0 && zero.is_sign_positive());
-        assert_eq!(parse_saturation("100"), Some(1.0));
-        for bad in ["", "NaN", "inf", "-1", "250", "98%", "abc"] {
+        assert_eq!(parse_saturation("98%"), Some(0.98));
+        assert_eq!(parse_saturation("97.35 %"), Some(0.9735));
+        assert_eq!(parse_saturation("99.9%"), Some(0.999));
+        assert_eq!(parse_saturation("33.3%"), Some(0.333));
+        assert_eq!(parse_saturation("0.5%"), Some(0.005));
+        // Past full is capped, not misread as a percentage.
+        assert_eq!(parse_saturation("1.03"), Some(1.0));
+        assert_eq!(parse_saturation("103%"), Some(1.0));
+        for bad in ["", "%", "NaN", "inf", "-1", "-5%", "abc", "98%%"] {
             assert_eq!(parse_saturation(bad), None, "{bad}");
         }
     }
@@ -900,21 +927,11 @@ mod tests {
         let mut a = alert(&[("service", "checkout")], "2026-05-01T10:00:00Z", "firing");
         a.annotations
             .insert("perf_sentinel_saturation".to_string(), "0.97".to_string());
-        let read = |a: &WebhookAlert| {
-            read_alert(
-                a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation",
-            )
-            .unwrap()
-        };
-        let req = read(&a);
+        let req = read(&a).unwrap();
         assert_eq!(req.saturation, Some(0.97));
         a.annotations
             .insert("perf_sentinel_saturation".to_string(), "oops".to_string());
-        let bad = read(&a);
+        let bad = read(&a).unwrap();
         assert_eq!(bad.saturation, None);
         assert_eq!(bad.id, req.id, "saturation is not part of the id");
     }
@@ -958,13 +975,7 @@ mod tests {
             "firing",
         );
         assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            ),
+            read(&a),
             Err(RejectedAlert::NoService),
             "the service is the join key to the findings, there is no useful fallback"
         );
@@ -980,14 +991,7 @@ mod tests {
             "2026-09-05T14:03:00Z",
             "firing",
         );
-        let req = read_alert(
-            &a,
-            "service",
-            "perf_sentinel_kind",
-            "namespace",
-            "perf_sentinel_saturation",
-        )
-        .unwrap();
+        let req = read(&a).unwrap();
         assert_eq!(req.kind, IncidentKind::Other);
         assert_eq!(req.service, "cart-svc");
         assert_eq!(req.at_ms, 1_788_616_980_000);
@@ -1001,18 +1005,7 @@ mod tests {
             "2026-09-05T14:03:00Z",
             "firing",
         );
-        assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            )
-            .unwrap()
-            .kind,
-            IncidentKind::OomKill
-        );
+        assert_eq!(read(&a).unwrap().kind, IncidentKind::OomKill);
     }
 
     #[test]
@@ -1027,14 +1020,7 @@ mod tests {
             " 2026-09-05T14:03:00Z ",
             "firing",
         );
-        let req = read_alert(
-            &a,
-            "service",
-            "perf_sentinel_kind",
-            "namespace",
-            "perf_sentinel_saturation",
-        )
-        .unwrap();
+        let req = read(&a).unwrap();
         assert_eq!(req.service, "cart-svc");
         assert_eq!(req.kind, IncidentKind::OomKill);
     }
@@ -1046,14 +1032,7 @@ mod tests {
             "2026-09-05T14:03:00Z",
             "firing",
         );
-        let req = read_alert(
-            &a,
-            "service",
-            "perf_sentinel_kind",
-            "namespace",
-            "perf_sentinel_saturation",
-        )
-        .unwrap();
+        let req = read(&a).unwrap();
         assert_eq!(req.namespace.as_deref(), Some("shop"));
         assert_eq!(
             req.id,
@@ -1069,16 +1048,7 @@ mod tests {
             "firing",
         );
         assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            )
-            .unwrap()
-            .namespace
-            .as_deref(),
+            read(&a).unwrap().namespace.as_deref(),
             Some("shop"),
             "bidi and invisible characters are stripped like on the service"
         );
@@ -1090,14 +1060,7 @@ mod tests {
             &[("service", "cart-svc")][..],
         ] {
             let a = alert(labels, "2026-09-05T14:03:00Z", "firing");
-            let req = read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation",
-            )
-            .unwrap();
+            let req = read(&a).unwrap();
             assert_eq!(req.namespace, None, "empty or missing is simply absent");
         }
     }
@@ -1120,22 +1083,8 @@ mod tests {
             "1970-01-01T00:00:00.005Z",
             "firing",
         );
-        let forged = read_alert(
-            &forged,
-            "service",
-            "perf_sentinel_kind",
-            "namespace",
-            "perf_sentinel_saturation",
-        )
-        .unwrap();
-        let plain = read_alert(
-            &plain,
-            "service",
-            "perf_sentinel_kind",
-            "namespace",
-            "perf_sentinel_saturation",
-        )
-        .unwrap();
+        let forged = read(&forged).unwrap();
+        let plain = read(&plain).unwrap();
         assert_eq!(forged.namespace.as_deref(), Some("other5"));
         assert_eq!((forged.at_ms, plain.at_ms), (1000, 5));
         assert_ne!(forged.id, plain.id);
@@ -1145,33 +1094,11 @@ mod tests {
     fn a_firing_alert_has_no_end_even_when_alertmanager_sends_the_zero_time() {
         let mut a = alert(&[("service", "svc")], "2026-09-05T14:03:00Z", "firing");
         a.ends_at = "0001-01-01T00:00:00Z".to_string();
-        assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            )
-            .unwrap()
-            .ended_at_ms,
-            None
-        );
+        assert_eq!(read(&a).unwrap().ended_at_ms, None);
 
         let mut a = alert(&[("service", "svc")], "2026-09-05T14:03:00Z", "resolved");
         a.ends_at = "2026-09-05T14:09:00Z".to_string();
-        assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            )
-            .unwrap()
-            .ended_at_ms,
-            Some(1_788_617_340_000)
-        );
+        assert_eq!(read(&a).unwrap().ended_at_ms, Some(1_788_617_340_000));
     }
 
     #[test]
@@ -1180,29 +1107,10 @@ mod tests {
         // corrected resolve that follows.
         let mut a = alert(&[("service", "svc")], "2026-09-05T14:03:00Z", "resolved");
         a.ends_at = "1970-01-01T00:00:00Z".to_string();
-        assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            )
-            .unwrap()
-            .ended_at_ms,
-            None
-        );
+        assert_eq!(read(&a).unwrap().ended_at_ms, None);
         a.ends_at = "2026-09-05T14:03:00Z".to_string();
         assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            )
-            .unwrap()
-            .ended_at_ms,
+            read(&a).unwrap().ended_at_ms,
             Some(1_788_616_980_000),
             "an end equal to the start is the shortest incident, not a bad one"
         );
@@ -1216,29 +1124,9 @@ mod tests {
             "2026-09-05T16:03:00.123456789+02:00",
             "firing",
         );
-        assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            )
-            .unwrap()
-            .at_ms,
-            1_788_616_980_123
-        );
+        assert_eq!(read(&a).unwrap().at_ms, 1_788_616_980_123);
         let a = alert(&[("service", "svc")], "not a stamp", "firing");
-        assert_eq!(
-            read_alert(
-                &a,
-                "service",
-                "perf_sentinel_kind",
-                "namespace",
-                "perf_sentinel_saturation"
-            ),
-            Err(RejectedAlert::UnparsableTime)
-        );
+        assert_eq!(read(&a), Err(RejectedAlert::UnparsableTime));
     }
 
     #[test]
@@ -1253,16 +1141,7 @@ mod tests {
     fn detail_is_sanitized_and_capped_on_a_character_boundary() {
         let mut a = alert(&[("service", "svc")], "2026-09-05T14:03:00Z", "firing");
         a.annotations.insert("summary".to_string(), "é".repeat(400));
-        let detail = read_alert(
-            &a,
-            "service",
-            "perf_sentinel_kind",
-            "namespace",
-            "perf_sentinel_saturation",
-        )
-        .unwrap()
-        .detail
-        .unwrap();
+        let detail = read(&a).unwrap().detail.unwrap();
         assert!(detail.len() <= MAX_DETAIL_BYTES);
         assert!(
             detail.chars().all(|c| c == 'é'),

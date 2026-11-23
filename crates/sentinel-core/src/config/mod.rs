@@ -537,7 +537,7 @@ pub struct DaemonIncidentsConfig {
     /// Prometheus label here.
     pub namespace_label: String,
     /// Alert annotation carrying the saturation of the resource the alert
-    /// is about, a ratio in `[0, 1]` or a percentage in `(1, 100]`.
+    /// is about, a bare ratio or a percentage ending in `%`, capped at 1.
     /// Default `perf_sentinel_saturation`. Absent or unreadable, the
     /// incident is recorded without one.
     pub saturation_annotation: String,

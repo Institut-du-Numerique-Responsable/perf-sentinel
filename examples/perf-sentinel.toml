@@ -410,7 +410,7 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 #                                                  # [detection] grouping_attributes
 # saturation_annotation = "perf_sentinel_saturation"
 #                                                  # default "perf_sentinel_saturation". Alert annotation read as
-#                                                  # the incident saturation, a ratio in [0, 1] or a percentage in (1, 100].
+#                                                  # the incident saturation, a bare ratio or a percentage ending in %, capped at 1.
 # ignored_kinds = ["deploy", "restart"]            # default. Alerts of these kinds are acknowledged and dropped:
 #                                                  # not frozen, kept, archived nor pushed to the Hub. A rollout
 #                                                  # fires one per service it touches. [] records every kind
