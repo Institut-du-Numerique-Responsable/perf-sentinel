@@ -104,6 +104,7 @@ spec:
             perf_sentinel_kind: memory_saturation
           annotations:
             summary: "{{ $labels.namespace }}/{{ $labels.service }}: working set above 90% of its memory limit"
+            perf_sentinel_saturation: "{{ $value }}"
         # A deploy is a NEW ReplicaSet, never the Deployment's generation: the
         # HPA advances that one too, so every autoscale would post an incident.
         # Both sides of the `group_left` are aggregated first, or the

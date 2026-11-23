@@ -4,6 +4,12 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-23
+
+### Added
+
+- An incident can carry a `saturation`, the saturation of the resource the alert is about, read from the alert annotation named by `[daemon.incidents] saturation_annotation` (default `perf_sentinel_saturation`). A bare number is a ratio and a number ending in `%` (what `humanizePercentage` renders) a percentage, both capped at 1 since usage past the limit still means saturated, anything else is dropped and the incident is recorded without one. It is not part of the incident id, and is serialized only when present, in `GET /api/incidents` and its summaries, the incident archive and the incidents pushed to the Hub. `docs/CONFIGURATION.md`, `docs/QUERY-API.md` and their French mirrors describe it, and the `memory_saturation` rules of `examples/incident-alerts-*.yaml` set the annotation. Public API: `sentinel_core::daemon::incidents::read_alert` takes the annotation name as a fifth argument, `IncidentRequest` gains the public field `saturation` and is no longer `Eq`, and `sentinel_core::config::DaemonIncidentsConfig` gains `saturation_annotation`, neither struct `#[non_exhaustive]`, so the release bumps the minor. Older binaries reject the new key at load.
+
 ## [0.48.1] - 2026-11-22
 
 ### Fixed

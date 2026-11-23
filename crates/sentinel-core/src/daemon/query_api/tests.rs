@@ -1122,7 +1122,10 @@ async fn findings_false_lists_each_incident_with_a_count_instead() {
         .oneshot(post_incidents_request(&serde_json::json!([{
             "status": "resolved",
             "labels": {"service": "cart-svc", "namespace": "shop", "perf_sentinel_kind": "oom_kill"},
-            "annotations": {"summary": "container exceeded its memory limit"},
+            "annotations": {
+                "summary": "container exceeded its memory limit",
+                "perf_sentinel_saturation": "97%"
+            },
             "startsAt": "2026-09-01T14:03:00Z",
             "endsAt": "2026-09-01T14:05:00Z"
         }])))
@@ -1131,6 +1134,7 @@ async fn findings_false_lists_each_incident_with_a_count_instead() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let full = list_incidents(Arc::clone(&state), "").await;
+    assert_eq!(full[0]["saturation"], 0.97);
     assert_eq!(
         full,
         list_incidents(Arc::clone(&state), "?findings=true").await,

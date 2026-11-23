@@ -857,3 +857,12 @@ v0.48.0	072101a	2026-11-22	PASS
 # disclosure tiers. All PASS. No lab scenario sends spans with no region: that
 # case rests on the unit tests. Not run: the cluster scenarios.
 v0.48.1	60e6421	2026-11-22	PASS
+
+# v0.49.0 targeted pass, no cluster (incident saturation read from an alert
+# annotation): incident-window-capture with its new leg J (bare ratio,
+# humanizePercentage, past full capped at 1, unreadable and absent, read back
+# from the listing and the archive) and incident-namespace-scope, on the local
+# 0.49.0 release binary at 5b9a5bb9. All PASS. Control: the 0.48.1 release
+# binary fails leg J, no saturation anywhere. Not run: the cluster scenarios,
+# the Hub side rests on PerfSentinelHub PR #192 and its tests.
+v0.49.0	473bbe6	2026-11-23	PASS

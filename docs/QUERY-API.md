@@ -1172,6 +1172,7 @@ Three labels are read, all configurable:
 | `[daemon.incidents] service_label`   | `service`            | The Perf Sentinel service name. This is the join key to the findings, so an alert without it is refused                                                                                                                                |
 | `[daemon.incidents] kind_label`      | `perf_sentinel_kind` | One of `oom_kill`, `memory_saturation`, `restart`, `deploy`, `other`. Anything else is `other`                                                                                                                                         |
 | `[daemon.incidents] namespace_label` | `namespace`          | Optional. Its value is carried on the incident as `namespace`, narrows the freeze to that namespace's findings (see below) and is what the `namespace` parameter of `GET /api/incidents` filters on. Never a reason to refuse an alert |
+| `[daemon.incidents] saturation_annotation` | `perf_sentinel_saturation` | Annotation read as the incident's `saturation`, a bare number read as a ratio or a number ending in `%` read as a percentage, capped at 1. Anything else is dropped |
 | `[daemon.incidents] ignored_kinds`   | `["deploy", "restart"]` | Not a label: the kinds whose alerts are acknowledged and dropped, never frozen nor kept. `[]` records every kind |
 
 **An incident with a namespace freezes that namespace's findings.** A
@@ -1289,6 +1290,7 @@ and only once the key is accepted, so a caller without it still gets
 | `at_ms`             | number | When it started, Unix epoch milliseconds                                                       |
 | `ended_at_ms`       | number | When it ended, absent while firing                                                             |
 | `detail`            | string | The alert's `summary` or `description`, sanitized and capped at 512 bytes, absent when neither |
+| `saturation`        | number | Saturation of the resource, a ratio in `[0, 1]`, absent when the alert carried none or it was unreadable |
 | `window_from_ms`    | number | `at_ms` minus `[daemon.incidents] lookback_ms`                                                 |
 | `window_to_ms`      | number | `at_ms` plus two `trace_ttl_ms`, see above                                                     |
 | `oldest_finding_ms` | number | Oldest finding the ring held at capture time, absent when it was empty                         |
