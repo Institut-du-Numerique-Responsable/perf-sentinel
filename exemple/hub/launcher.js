@@ -1111,11 +1111,13 @@
     }
 
     /**
-     * The text key and the numbers behind one reason of a finding's link.
+     * The text key and the numbers behind one reason of a finding's link. An intensity ratio from rules before
+     * version 4 compared a count to a daily rate, not a share, and keeps the wording it was computed with.
      * @param {import('../types').IncidentLinkReason} reason
+     * @param {number} [rulesVersion]
      * @returns {{key: string, params: Record<string, number>}}
      */
-    function linkReasonParts(reason) {
+    function linkReasonParts(reason, rulesVersion) {
         const key = 'incidents.link.reason.' + reason.code;
         /** @param {number | undefined} x */
         const percent = function (x) {
@@ -1123,8 +1125,9 @@
         };
         // An absent number is unknown, not zero: the text without a number says so.
         if (reason.code === 'intensity') {
-            if (reason.ratio == null) return {key: key + '_no_number', params: {}};
-            return {key, params: {ratio: Math.round(reason.ratio * 10) / 10}};
+            const base = rulesVersion != null && rulesVersion < 4 ? key + '_rate' : key;
+            if (reason.ratio == null) return {key: base + '_no_number', params: {}};
+            return {key: base, params: {ratio: Math.round(reason.ratio * 10) / 10}};
         }
         if (reason.code === 'recurrence') {
             // Absent counts are hidden from this caller, an absent share is unknown: neither reads as zero.

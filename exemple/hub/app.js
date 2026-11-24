@@ -6731,7 +6731,7 @@
         const link = row.link;
         if (!link) return el('span', {class: 'chip', 'data-link': 'pending', text: t('incidents.link.pending')});
         const reasons = (link.reasons || []).map(function (reason) {
-            const part = PSL.linkReasonParts(reason);
+            const part = PSL.linkReasonParts(reason, link.rules_version);
             // The ratio is the one decimal among the numbers: a comma in French.
             const params = part.params.ratio == null ? part.params : {...part.params, ratio: PSL.decimal(part.params.ratio)};
             return PSL.hasText(part.key) ? t(part.key, params) : '';
