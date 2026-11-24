@@ -312,7 +312,7 @@ async fn ledger_after_below_batch(watch: bool) -> (DetectionLedger, String) {
 async fn watched_slow_signature_counts_below_threshold_passes() {
     let (ledger, signature) = ledger_after_below_batch(true).await;
     let today = ledger.status().current_day;
-    let page = ledger.page(Some(today), None, 100);
+    let page = ledger.page(Some(today), None, 100, false);
     let row = page
         .counts
         .iter()
@@ -326,7 +326,7 @@ async fn watched_slow_signature_counts_below_threshold_passes() {
 async fn no_watch_list_adds_no_row() {
     let (ledger, signature) = ledger_after_below_batch(false).await;
     let today = ledger.status().current_day;
-    let page = ledger.page(Some(today), None, 100);
+    let page = ledger.page(Some(today), None, 100, false);
     assert!(page.counts.iter().all(|r| r.signature != signature));
 }
 
@@ -386,7 +386,7 @@ async fn run_ledger_batches(
 /// The ledger's current day row, read the way the Hub push reads it.
 fn current_day_row(ledger: &DetectionLedger) -> super::super::detection_ledger::DayRow {
     let today = ledger.status().current_day;
-    let page = ledger.page(Some(today), None, 5000);
+    let page = ledger.page(Some(today), None, 5000, false);
     page.days
         .into_iter()
         .find(|row| row.day == today)
@@ -419,7 +419,7 @@ async fn ledger_carries_no_carbon_when_green_is_off() {
     let (ledger, _cell) = run_ledger_batches(false, &region_ctx(), vec![n_plus_one_batch()]).await;
     let today = ledger.status().current_day;
     assert_no_carbon(&current_day_row(&ledger));
-    let page = ledger.page(Some(today), None, 5000);
+    let page = ledger.page(Some(today), None, 5000, false);
     assert_eq!(page.counts.len(), 1);
     assert!(page.counts[0].signature.starts_with("n_plus_one_sql:"));
     assert_eq!(page.counts[0].detections, 1);

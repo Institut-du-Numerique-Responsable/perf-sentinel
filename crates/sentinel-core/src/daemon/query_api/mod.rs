@@ -16,6 +16,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::ack::{self, AckAction, AckEntry, AckError, AckStore};
+use super::detection_ledger::LedgerCursor;
 use super::findings_store::{FindingsFilter, FindingsStore, StoredFinding};
 use crate::acknowledgments::{Acknowledgment, compute_signature};
 use crate::correlate::Trace;
@@ -790,12 +791,18 @@ async fn handle_detections(
         .after
         .as_deref()
         .map(|raw| {
-            parse_after(raw).ok_or_else(|| {
-                ErrorResponse::new(StatusCode::BAD_REQUEST, "after must be <day>:<signature>")
-            })
+            parse_after(raw)
+                .map(|(day, signature)| LedgerCursor {
+                    day,
+                    signature: signature.to_string(),
+                    grouping: String::new(),
+                })
+                .ok_or_else(|| {
+                    ErrorResponse::new(StatusCode::BAD_REQUEST, "after must be <day>:<signature>")
+                })
         })
         .transpose()?;
-    Ok(Json(ledger.page(params.since_day, after, limit)).into_response())
+    Ok(Json(ledger.page(params.since_day, after, limit, false)).into_response())
 }
 
 /// Splits a `<day>:<signature>` cursor at its first `:`, since signatures

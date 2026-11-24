@@ -388,7 +388,7 @@ mod tests {
 
     fn day_row(ledger: &DetectionLedger, day: u64) -> DayRow {
         ledger
-            .page(None, None, 5000)
+            .page(None, None, 5000, false)
             .days
             .into_iter()
             .find(|row| u64::from(row.day) == day)

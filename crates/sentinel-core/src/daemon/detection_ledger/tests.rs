@@ -27,6 +27,23 @@ fn finding(signature: &str, io: usize) -> Finding {
     f
 }
 
+fn grouped(signature: &str, grouping: &str, io: usize) -> Finding {
+    let mut f = finding(signature, io);
+    f.grouping = vec![crate::event::GroupingAttribute {
+        key: Arc::from("k8s.namespace.name"),
+        value: Arc::from(grouping),
+    }];
+    f
+}
+
+fn at(day: u32, signature: &str) -> LedgerCursor {
+    LedgerCursor {
+        day,
+        signature: signature.to_string(),
+        grouping: String::new(),
+    }
+}
+
 fn bucket<R>(ledger: &DetectionLedger, day: u32, read: impl FnOnce(&DayBucket) -> R) -> R {
     read(&ledger.lock().days[&day])
 }
@@ -196,11 +213,11 @@ fn page_days(page: &DetectionsPage) -> Vec<u32> {
 #[test]
 fn page_walks_days_and_signatures_in_order() {
     let ledger = two_full_days();
-    let first = ledger.page(None, None, 2);
+    let first = ledger.page(None, None, 2, false);
     assert_eq!(first.next_after.as_deref(), Some("3:b"));
-    let second = ledger.page(None, Some((3, "b")), 2);
+    let second = ledger.page(None, Some(at(3, "b")), 2, false);
     assert_eq!(second.next_after.as_deref(), Some("4:a"));
-    let third = ledger.page(None, Some((4, "a")), 2);
+    let third = ledger.page(None, Some(at(4, "a")), 2, false);
     assert_eq!(third.next_after, None);
     let all: Vec<String> = [&first, &second, &third]
         .into_iter()
@@ -216,18 +233,27 @@ fn page_walks_days_and_signatures_in_order() {
 #[test]
 fn day_rows_follow_their_last_count() {
     let ledger = two_full_days();
-    assert_eq!(page_days(&ledger.page(None, None, 2)), Vec::<u32>::new());
-    let second = ledger.page(None, Some((3, "b")), 2);
+    assert_eq!(
+        page_days(&ledger.page(None, None, 2, false)),
+        Vec::<u32>::new()
+    );
+    let second = ledger.page(None, Some(at(3, "b")), 2, false);
     assert_eq!(page_days(&second), [3]);
     assert!(second.days[0].gap, "day 3 opened the ledger");
-    assert_eq!(page_days(&ledger.page(None, Some((4, "a")), 2)), [4]);
+    assert_eq!(
+        page_days(&ledger.page(None, Some(at(4, "a")), 2, false)),
+        [4]
+    );
     // A page ending on day 3's last row carries day 3, the next one never.
-    let ends_on_3 = ledger.page(None, None, 3);
+    let ends_on_3 = ledger.page(None, None, 3, false);
     assert_eq!(
         (keys(&ends_on_3).len(), page_days(&ends_on_3)),
         (3, vec![3])
     );
-    assert_eq!(page_days(&ledger.page(None, Some((3, "c")), 3)), [4]);
+    assert_eq!(
+        page_days(&ledger.page(None, Some(at(3, "c")), 3, false)),
+        [4]
+    );
 }
 
 #[test]
@@ -235,7 +261,7 @@ fn an_empty_day_still_gets_its_row() {
     let ledger = ledger_at(3, false);
     ledger.tick(4 * DAY_MS, 7, 0);
     ledger.record(&[finding("a", 1)], 5 * DAY_MS);
-    let page = ledger.page(None, None, 10);
+    let page = ledger.page(None, None, 10, false);
     assert_eq!(keys(&page), ["5:a"]);
     assert_eq!(page_days(&page), [3, 4, 5]);
     assert_eq!(page.days[1].shed_traces, 7);
@@ -254,9 +280,9 @@ fn an_empty_day_rides_one_page_only() {
     );
     ledger.tick(4 * DAY_MS, 0, 0);
     ledger.record(&[finding("a", 1)], 5 * DAY_MS);
-    let first = ledger.page(None, None, 3);
+    let first = ledger.page(None, None, 3, false);
     assert_eq!(first.next_after.as_deref(), Some("3:c"));
-    let second = ledger.page(None, Some((3, "c")), 3);
+    let second = ledger.page(None, Some(at(3, "c")), 3, false);
     assert_eq!(keys(&second), ["5:a"]);
     let all: Vec<u32> = [&first, &second].into_iter().flat_map(page_days).collect();
     assert_eq!(all, [3, 4, 5]);
@@ -265,14 +291,14 @@ fn an_empty_day_rides_one_page_only() {
 #[test]
 fn page_starts_at_since_day() {
     let ledger = two_full_days();
-    let page = ledger.page(Some(4), None, 10);
+    let page = ledger.page(Some(4), None, 10, false);
     assert_eq!(keys(&page), ["4:a", "4:b", "4:c"]);
     assert_eq!(page_days(&page), [4]);
     assert_eq!(
         page.oldest_day, 3,
         "the horizon is the ledger's, not the page's"
     );
-    assert!(ledger.page(Some(5), None, 10).counts.is_empty());
+    assert!(ledger.page(Some(5), None, 10, false).counts.is_empty());
 }
 
 #[test]
@@ -282,7 +308,7 @@ fn page_stops_at_the_byte_budget() {
         .map(|i| finding(&format!("{i:04}{}", "x".repeat(996)), 0))
         .collect();
     ledger.record(&batch, 3 * DAY_MS);
-    let page = ledger.page(None, None, 5000);
+    let page = ledger.page(None, None, 5000, false);
     let fits = MAX_PAGE_BYTES / (1000 + ROW_OVERHEAD_BYTES);
     assert_eq!(page.counts.len(), fits);
     assert!(page.days.is_empty(), "day 3 has rows left");
@@ -297,7 +323,7 @@ fn page_bytes_count_the_json_escapes() {
         .map(|i| finding(&format!("{i:04}{}", "\"".repeat(996)), 0))
         .collect();
     ledger.record(&batch, 3 * DAY_MS);
-    let page = ledger.page(None, None, 5000);
+    let page = ledger.page(None, None, 5000, false);
     assert!(page.next_after.is_some(), "the budget must cut the page");
     let body = serde_json::to_vec(&page).expect("serialize");
     assert!(body.len() <= MAX_PAGE_BYTES, "{} bytes", body.len());
@@ -305,7 +331,7 @@ fn page_bytes_count_the_json_escapes() {
 
 fn day_row(ledger: &DetectionLedger, day: u32) -> DayRow {
     ledger
-        .page(None, None, 5000)
+        .page(None, None, 5000, false)
         .days
         .into_iter()
         .find(|row| row.day == day)
@@ -419,7 +445,7 @@ fn passes(entries: &[(&str, u64)]) -> HashMap<Arc<str>, u64> {
 
 fn row(ledger: &DetectionLedger, day: u32, signature: &str) -> Option<CountRow> {
     ledger
-        .page(None, None, 5000)
+        .page(None, None, 5000, false)
         .counts
         .into_iter()
         .find(|r| r.day == day && r.signature == signature)
@@ -567,4 +593,201 @@ fn every_day_row_carries_the_ledger_thresholds() {
             "serialized_min_calls": 3
         })
     );
+}
+
+/// `(signature, grouping, detections)` of a split page.
+fn split_rows(ledger: &DetectionLedger) -> Vec<(String, String, u64)> {
+    ledger
+        .page(None, None, 5000, true)
+        .counts
+        .into_iter()
+        .map(|r| (r.signature, r.grouping.to_string(), r.detections))
+        .collect()
+}
+
+fn owned(rows: &[(&str, &str, u64)]) -> Vec<(String, String, u64)> {
+    rows.iter()
+        .map(|&(s, g, n)| (s.to_string(), g.to_string(), n))
+        .collect()
+}
+
+#[test]
+fn a_signature_counts_apart_in_each_grouping() {
+    let ledger = ledger_at(3, true);
+    let overflowed = ledger.record(
+        &[
+            grouped("a", "ns-a", 1),
+            grouped("a", "ns-b", 2),
+            finding("a", 3),
+        ],
+        3 * DAY_MS,
+    );
+    assert_eq!(overflowed, 0);
+    assert_eq!(
+        split_rows(&ledger),
+        owned(&[("a", "", 1), ("a", "ns-a", 1), ("a", "ns-b", 1)])
+    );
+    let page = ledger.page(None, None, 5000, true);
+    let json = serde_json::to_value(&page).expect("serialize");
+    assert_eq!(json["split"], "grouping");
+    assert!(
+        json["counts"][0].get("grouping").is_none(),
+        "empty is omitted"
+    );
+    assert_eq!(json["counts"][1]["grouping"], "ns-a");
+    assert_eq!(json["counts"][2]["extra_io_ops"], 2);
+}
+
+#[test]
+fn the_cap_counts_rows_not_signatures() {
+    let ledger = DetectionLedger::new(&cfg(8, 2), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
+    let overflowed = ledger.record(
+        &[
+            grouped("a", "ns-a", 1),
+            grouped("a", "ns-b", 1),
+            grouped("a", "ns-c", 1),
+        ],
+        3 * DAY_MS,
+    );
+    assert_eq!(overflowed, 1);
+    assert_eq!(ledger.overflow(3), 1);
+    assert_eq!(
+        split_rows(&ledger),
+        owned(&[("a", "ns-a", 1), ("a", "ns-b", 1)])
+    );
+}
+
+#[test]
+fn below_threshold_passes_land_on_the_ungrouped_row() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[grouped(SLOW, "ns-a", 0)], 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 2)]), 3 * DAY_MS);
+    let page = ledger.page(None, None, 5000, true);
+    let rows: Vec<_> = page
+        .counts
+        .iter()
+        .map(|r| (&*r.grouping, r.detections, r.below_threshold_passes))
+        .collect();
+    assert_eq!(rows, [("", 0, Some(2)), ("ns-a", 1, None)]);
+}
+
+#[test]
+fn an_unsplit_page_sums_a_signature_over_its_groupings() {
+    let ledger = ledger_at(3, true);
+    ledger.record(
+        &[
+            grouped(SLOW, "ns-a", 1),
+            grouped(SLOW, "ns-b", 2),
+            finding(SLOW, 4),
+        ],
+        3 * DAY_MS,
+    );
+    ledger.record_below(&passes(&[(SLOW, 3)]), 3 * DAY_MS);
+    let page = ledger.page(None, None, 5000, false);
+    assert_eq!(page.counts.len(), 1);
+    let row = &page.counts[0];
+    assert_eq!(row.signature, SLOW);
+    assert_eq!(row.detections, 3);
+    assert_eq!(row.extra_io_ops, Some(7));
+    assert_eq!(row.below_threshold_passes, Some(3));
+    let json = serde_json::to_value(&page).expect("serialize");
+    assert!(json["counts"][0].get("grouping").is_none());
+    assert!(json.get("split").is_none());
+    assert!(json.get("next_after_grouping").is_none());
+}
+
+#[test]
+fn an_unsplit_cursor_skips_every_grouping_of_its_signature() {
+    let ledger = ledger_at(3, true);
+    ledger.record(
+        &[
+            grouped("a", "ns-a", 1),
+            grouped("a", "ns-b", 1),
+            grouped("b", "ns-a", 1),
+        ],
+        3 * DAY_MS,
+    );
+    let first = ledger.page(None, None, 1, false);
+    assert_eq!(keys(&first), ["3:a"]);
+    assert_eq!(first.counts[0].detections, 2);
+    assert_eq!(first.next_after.as_deref(), Some("3:a"));
+    assert_eq!(first.next_after_grouping, None);
+    let second = ledger.page(None, Some(at(3, "a")), 1, false);
+    assert_eq!(keys(&second), ["3:b"]);
+    assert_eq!(second.next_after, None);
+}
+
+#[test]
+fn a_split_cursor_resumes_inside_a_signature() {
+    let ledger = ledger_at(3, true);
+    ledger.record(
+        &[
+            grouped("a", "ns-a", 1),
+            grouped("a", "ns-b", 1),
+            finding("b", 1),
+        ],
+        3 * DAY_MS,
+    );
+    let first = ledger.page(None, None, 1, true);
+    assert_eq!(first.next_after.as_deref(), Some("3:a"));
+    assert_eq!(first.next_after_grouping.as_deref(), Some("ns-a"));
+    let cursor = LedgerCursor {
+        grouping: "ns-a".to_string(),
+        ..at(3, "a")
+    };
+    let second = ledger.page(None, Some(cursor), 5000, true);
+    let rest: Vec<_> = second
+        .counts
+        .iter()
+        .map(|r| (r.signature.as_str(), &*r.grouping))
+        .collect();
+    assert_eq!(rest, [("a", "ns-b"), ("b", "")]);
+}
+
+#[test]
+fn a_split_page_budget_counts_the_grouping() {
+    let ledger = ledger_at(3, true);
+    let grouping = "g".repeat(500);
+    let batch: Vec<Finding> = (0..8000)
+        .map(|i| grouped(&format!("{i:04}{}", "x".repeat(496)), &grouping, 0))
+        .collect();
+    ledger.record(&batch, 3 * DAY_MS);
+    let page = ledger.page(None, None, 5000, true);
+    assert_eq!(
+        page.counts.len(),
+        MAX_PAGE_BYTES / (1000 + ROW_OVERHEAD_BYTES)
+    );
+    // Without the grouping a row fits twice, so the limit cuts first.
+    assert_eq!(ledger.page(None, None, 5000, false).counts.len(), 5000);
+}
+
+#[test]
+fn dirty_days_send_a_signature_summed_over_its_groupings() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[grouped("a", "ns-a", 1)], 3 * DAY_MS);
+    ledger.ack_day(3, ledger.dirty_days()[0].rev);
+    ledger.record(&[grouped("a", "ns-b", 1), finding("b", 1)], 3 * DAY_MS);
+    let dirty = ledger.dirty_days();
+    let rows: Vec<_> = dirty[0]
+        .rows
+        .iter()
+        .map(|r| (r.signature.as_str(), &*r.grouping, r.detections))
+        .collect();
+    assert_eq!(rows, [("a", "", 2), ("b", "", 1)], "the Hub keeps the max");
+}
+
+#[test]
+fn the_signatures_gauge_counts_rows() {
+    let ledger = ledger_at(3, true);
+    ledger.record(
+        &[
+            grouped("a", "ns-a", 1),
+            grouped("a", "ns-b", 1),
+            finding("a", 1),
+        ],
+        3 * DAY_MS,
+    );
+    let metrics = MetricsState::new();
+    tick_once(&ledger, &metrics, 3 * DAY_MS + 1);
+    assert_eq!(metrics.detection_ledger_signatures.get(), 3);
 }
