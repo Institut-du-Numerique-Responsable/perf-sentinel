@@ -1107,13 +1107,13 @@ and a restart starts a new one. On by default. Daemon-only.
 |--------------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`                | boolean | `true`  | Record every detection in the per-day ledger. `false` skips the ledger, and the bounds below are still checked                                                                                                                                                                                                            |
 | `retained_days`          | integer | `8`     | Days of ledger kept in memory, today included, 2 to 31. The older days are dropped                                                                                                                                                                                                                                        |
-| `max_signatures_per_day` | integer | `10000` | Rows tracked per day, 1 to 1000000, a row being one signature in one grouping (`GET /api/detections?split=grouping`), so a fleet with N groupings needs a cap scaled by about N. Past it, a detection in a new grouping counts on its signature's ungrouped row when the signature already has a row that day, and in the day's overflow otherwise, so a counted signature never loses a detection to the overflow. A signature longer than 1024 bytes or holding a control character is not tracked and counts in the overflow too. The ceiling keeps a typo from sizing the ledger past memory |
+| `max_signatures_per_day` | integer | `50000` | Rows tracked per day, 1 to 1000000, a row being one signature in one grouping (`GET /api/detections?split=grouping`), so a fleet with N groupings needs a cap scaled by about N. Past it, a detection in a new grouping counts on its signature's ungrouped row when the signature already has a row that day, and in the day's overflow otherwise, so a counted signature never loses a detection to the overflow. A signature longer than 1024 bytes or holding a control character is not tracked and counts in the overflow too. The ceiling keeps a typo from sizing the ledger past memory |
 
 ```toml
 [daemon.detections]
 enabled = true
 retained_days = 8
-max_signatures_per_day = 10000
+max_signatures_per_day = 50000
 ```
 
 #### `[daemon.cors]` (optional, since 0.5.23)
@@ -1305,7 +1305,7 @@ memory_high_water_pct = 0
 # [daemon.detections]
 # enabled = true
 # retained_days = 8
-# max_signatures_per_day = 10000
+# max_signatures_per_day = 50000
 
 # Optional: trace bodies `perf-sentinel tempo` reads at once (1 to 64)
 # [tempo]

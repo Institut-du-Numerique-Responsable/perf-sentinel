@@ -5550,11 +5550,11 @@ saturation_annotation = \"mem_ratio\"
 }
 
 #[test]
-fn detections_defaults_are_enabled_8_days_10000_signatures() {
+fn detections_defaults_are_enabled_8_days_50000_rows() {
     let cfg = load_from_str("").unwrap();
     assert!(cfg.daemon.detections.enabled);
     assert_eq!(cfg.daemon.detections.retained_days, 8);
-    assert_eq!(cfg.daemon.detections.max_signatures_per_day, 10_000);
+    assert_eq!(cfg.daemon.detections.max_signatures_per_day, 50_000);
 }
 
 #[test]

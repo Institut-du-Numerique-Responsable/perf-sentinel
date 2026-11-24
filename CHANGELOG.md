@@ -12,7 +12,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 ### Changed
 
 - The `perf_sentinel_detection_ledger_signatures` gauge now counts rows, one per signature, grouping and day, so it rises on a fleet with groupings.
-- `[daemon.detections] max_signatures_per_day` now caps rows, a row being one signature in one grouping: raise it on a grouped fleet. Past it, a detection in a new grouping counts on its signature's ungrouped row when the signature already has a row that day, so only a signature new that day goes to the overflow, as before.
+- `[daemon.detections] max_signatures_per_day` now caps rows, a row being one signature in one grouping, and its default goes from 10000 to 50000: raise it further on a fleet with many groupings. Past it, a detection in a new grouping counts on its signature's ungrouped row when the signature already has a row that day, so only a signature new that day goes to the overflow, as before.
 
 ## [0.49.0] - 2026-11-23
 

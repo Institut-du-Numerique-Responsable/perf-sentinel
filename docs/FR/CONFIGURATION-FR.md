@@ -1145,13 +1145,13 @@ Actif par défaut. Daemon uniquement.
 |--------------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`                | booléen | `true`  | Enregistre chaque détection dans le registre par jour. `false` saute le registre, et les bornes ci-dessous restent vérifiées                                                                                                                                                                                                                                                          |
 | `retained_days`          | entier  | `8`     | Jours de registre gardés en mémoire, aujourd'hui compris, de 2 à 31. Les jours plus anciens sont abandonnés                                                                                                                                                                                                                                                                           |
-| `max_signatures_per_day` | entier  | `10000` | Lignes suivies par jour, de 1 à 1000000, une ligne étant une signature dans un grouping (`GET /api/detections?split=grouping`) : une flotte de N groupings demande un plafond multiplié d'environ N. Au-delà, une détection dans un nouveau grouping compte sur la ligne sans grouping de sa signature quand celle-ci a déjà une ligne ce jour-là, et dans l'overflow du jour sinon : une signature déjà comptée ne perd jamais de détection dans l'overflow. Une signature de plus de 1024 octets ou contenant un caractère de contrôle n'est pas suivie et compte aussi en overflow. Le plafond évite qu'une faute de frappe ne dimensionne le registre au-delà de la mémoire |
+| `max_signatures_per_day` | entier  | `50000` | Lignes suivies par jour, de 1 à 1000000, une ligne étant une signature dans un grouping (`GET /api/detections?split=grouping`) : une flotte de N groupings demande un plafond multiplié d'environ N. Au-delà, une détection dans un nouveau grouping compte sur la ligne sans grouping de sa signature quand celle-ci a déjà une ligne ce jour-là, et dans l'overflow du jour sinon : une signature déjà comptée ne perd jamais de détection dans l'overflow. Une signature de plus de 1024 octets ou contenant un caractère de contrôle n'est pas suivie et compte aussi en overflow. Le plafond évite qu'une faute de frappe ne dimensionne le registre au-delà de la mémoire |
 
 ```toml
 [daemon.detections]
 enabled = true
 retained_days = 8
-max_signatures_per_day = 10000
+max_signatures_per_day = 50000
 ```
 
 #### `[daemon.cors]` (optionnel, depuis 0.5.23)
@@ -1351,7 +1351,7 @@ memory_high_water_pct = 0
 # [daemon.detections]
 # enabled = true
 # retained_days = 8
-# max_signatures_per_day = 10000
+# max_signatures_per_day = 50000
 
 # Optionnel : corps de traces lus à la fois par `perf-sentinel tempo` (de 1 à 64)
 # [tempo]
