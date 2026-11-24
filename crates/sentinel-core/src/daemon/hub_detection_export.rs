@@ -109,6 +109,8 @@ pub(crate) struct DetectionExport {
     ledger: Arc<DetectionLedger>,
     /// The split route, until a Hub answers that it has none.
     split_uri: Option<http_client::Uri>,
+    /// Set once the split route accepted a page: that Hub has the route.
+    accepted_split: bool,
     /// The unsplit route, for a Hub without the split one.
     uri: http_client::Uri,
     /// The days of the last snapshot still to send, oldest first.
@@ -135,6 +137,7 @@ impl DetectionExport {
             header: ledger.status(),
             ledger,
             split_uri: Some(split_uri),
+            accepted_split: false,
             uri,
             queue: VecDeque::new(),
             sent: 0,
@@ -216,11 +219,15 @@ impl DetectionExport {
             return true;
         };
         let outcome = match post_batch_with_reply(client, self.uri(), api_key, body).await {
-            Ok((status, _)) if is_missing_route(status) && split => {
+            Ok((status, _)) if is_missing_route(status) && split && !self.accepted_split => {
                 self.fall_back();
                 self.due = tokio::time::Instant::now();
                 return true;
             }
+            // Unsplit rows would land beside the split ones of a Hub that has the route.
+            Ok((status, _)) if is_missing_route(status) && split => ExportOutcome::Retry(format!(
+                "per-grouping route answered {status} after accepting a page"
+            )),
             Ok((status, _)) if is_missing_route(status) => {
                 self.unsupported();
                 self.due = tokio::time::Instant::now() + pace;
@@ -228,6 +235,7 @@ impl DetectionExport {
             }
             reply => self.outcome_of(reply),
         };
+        self.accepted_split |= split && matches!(outcome, ExportOutcome::Accepted);
         let mut delay = self.apply(&outcome, rows, metrics, flush_interval);
         if self.queue.is_empty() {
             delay = delay.max(pace);
@@ -346,7 +354,8 @@ impl DetectionExport {
         self.split_uri.as_ref().unwrap_or(&self.uri)
     }
 
-    /// An older Hub: the unsplit route from now on, every retained day sent
+    /// An older Hub, refusing the split route before accepting any page of
+    /// it: the unsplit route from now on, every retained day sent
     /// again whole, the refused page's rows among them, so none is lost.
     fn fall_back(&mut self) {
         if let Some(split_uri) = self.split_uri.take() {
@@ -360,6 +369,8 @@ impl DetectionExport {
         self.ledger.forget_acks();
         self.queue.clear();
         self.refill();
+        // A drain stops on a failure; the split route's ones are not the old route's.
+        self.failures = 0;
     }
 
     fn unsupported(&mut self) {
@@ -635,6 +646,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_split_route_lost_after_an_accepted_page_is_retried() {
+        let (base, seen) = fake_hub_sequence(vec![200, 404]).await;
+        let ledger = ledger_at(DAY);
+        record_grouped(&ledger, DAY, &[("a", "ns-a")]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        // A Hub that took a split page has the route: a 404 is transient.
+        record_grouped(&ledger, DAY, &[("a", "ns-b")]);
+        export.start_at(tokio::time::Instant::now());
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        assert_eq!(2, count(&seen, "/api/import/detections/by-grouping"));
+        assert_eq!(0, unsplit_bodies(&seen).len());
+        assert_eq!(1, ledger.dirty_days(true).len());
+        assert!(export.due() > tokio::time::Instant::now(), "it backs off");
+        assert_eq!(0, metrics.hub_export_dropped_total.get());
+    }
+
+    #[tokio::test]
+    async fn a_drain_after_a_failure_finishes_the_unsplit_resend() {
+        let (base, seen) = fake_hub_sequence(vec![503, 404, 200]).await;
+        let ledger = ledger_at(DAY);
+        record_grouped(&ledger, DAY, &[("a", "ns-a")]);
+        let metrics = MetricsState::new();
+        let client = HubClient::new(Duration::from_secs(10));
+        let mut export = export(&base, &ledger);
+        let key = "k".repeat(32);
+        assert!(
+            export
+                .round(&client, &key, &metrics, Duration::ZERO, false)
+                .await
+        );
+
+        assert!(
+            export
+                .round(&client, &key, &metrics, Duration::ZERO, true)
+                .await
+        );
+
+        assert_eq!(1, unsplit_bodies(&seen).len());
+        assert!(ledger.dirty_days(false).is_empty());
+    }
+
+    #[tokio::test]
     async fn pushes_each_dirty_day_once_then_goes_quiet() {
         let (base, seen) = fake_hub(200).await;
         let ledger = ledger_at(DAY);
@@ -821,6 +878,8 @@ mod tests {
 
         assert_eq!(2, metrics.hub_export_dropped_total.get());
         assert_eq!(2, seen.lock().expect("lock").len());
+        // A 400 on the split route drops the page, it never falls back.
+        assert_eq!(2, count(&seen, "/api/import/detections/by-grouping"));
         assert!(day_row(&ledger, DAY + 1).gap);
         assert_eq!(0, ledger.dirty_days(false).len());
     }

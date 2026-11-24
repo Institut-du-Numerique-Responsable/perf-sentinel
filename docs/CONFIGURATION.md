@@ -1020,12 +1020,13 @@ rows and 4 MiB each, the day's `days` entry on its last page. The Hub keeps the 
 of each row, so the unchanged ones need not travel again. The daemon pushes the rows split by
 grouping first, one per signature and grouping, each grouping row sent again when it changes,
 on `/api/import/detections/by-grouping`, its pages carrying `"split": "grouping"`. A Hub that
-answers 404 or 405 there predates that route: the daemon logs one warning and, until it
-restarts, pushes to `/api/import/detections` the rows summed per signature, every retained day
-sent again whole, the refused page's rows among them, so that Hub misses no count and no day
-is set to `gap = true`. Rounds start at most once a
-minute, or once per `flush_interval_secs` when that is longer, and a failed page is retried
-with the same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
+answers 404 or 405 there before accepting any page of it predates that route: the daemon logs
+one warning and, until it restarts, pushes to `/api/import/detections` the rows summed per
+signature, every retained day sent again whole, the refused page's rows among them, so that
+Hub misses no count and no day is set to `gap = true`. Once the Hub has accepted a split page,
+a 404 or 405 there is retried like any failed page. Rounds start at most once a minute, or
+once per `flush_interval_secs` when that is longer, and a failed page is retried with the
+same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
 and pushes once more, after the findings, incidents and episodes still pending, so a long
 ledger never spends their drain budget. A page the Hub rejects with an unretryable 4xx is dropped, its rows
 counted in `perf_sentinel_hub_export_dropped_total`, and its day set to `gap = true` in the

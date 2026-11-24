@@ -1050,13 +1050,14 @@ depuis, en pages de la forme d'une page de `GET /api/detections`, au plus 5 000 
 compte de chaque ligne, les lignes inchangées n'ont donc pas à repartir. Le daemon pousse
 d'abord les lignes réparties par grouping, une par signature et grouping, chaque ligne de
 grouping renvoyée quand elle change, sur `/api/import/detections/by-grouping`, ses pages
-portant `"split": "grouping"`. Un Hub qui répond 404 ou 405 sur cette route la précède : le
-daemon journalise un avertissement et, jusqu'à son redémarrage, pousse vers
-`/api/import/detections` les lignes sommées par signature, chaque jour retenu renvoyé en
-entier, les lignes de la page refusée comprises, pour que ce Hub ne perde aucun compte et
-qu'aucun jour ne passe à `gap = true`. Les tours démarrent
-au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus long, et
-une page en échec est retentée avec le même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
+portant `"split": "grouping"`. Un Hub qui répond 404 ou 405 sur cette route avant d'en avoir
+accepté une page la précède : le daemon journalise un avertissement et, jusqu'à son
+redémarrage, pousse vers `/api/import/detections` les lignes sommées par signature, chaque
+jour retenu renvoyé en entier, les lignes de la page refusée comprises, pour que ce Hub ne
+perde aucun compte et qu'aucun jour ne passe à `gap = true`. Une fois qu'une page répartie a
+été acceptée, un 404 ou 405 sur cette route est retenté comme toute page en échec. Les tours
+démarrent au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus
+long, et une page en échec est retentée avec le même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
 pousse une dernière fois, après les findings, incidents et épisodes encore en attente, pour
 qu'un long registre ne consomme pas leur budget de vidange. Une page que le Hub rejette avec un 4xx non rejouable est
 abandonnée, ses lignes comptées dans `perf_sentinel_hub_export_dropped_total`, et son jour
