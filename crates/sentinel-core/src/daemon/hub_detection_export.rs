@@ -42,6 +42,13 @@ struct ImportReply {
     watch: Option<Vec<String>>,
 }
 
+fn is_auth_refusal(status: hyper::StatusCode) -> bool {
+    matches!(
+        status,
+        hyper::StatusCode::UNAUTHORIZED | hyper::StatusCode::FORBIDDEN
+    )
+}
+
 /// The watch list a reply carries: `None` when it does not parse, empty
 /// when it parses without `watch`.
 fn watch_of(reply: &[u8]) -> Option<Vec<String>> {
@@ -218,7 +225,18 @@ impl DetectionExport {
             self.due = tokio::time::Instant::now();
             return true;
         };
-        let outcome = match post_batch_with_reply(client, self.uri(), api_key, body).await {
+        let reply = post_batch_with_reply(client, self.uri(), api_key, body).await;
+        // An older Hub with sign-in answers the unknown split route 401: ask the older route.
+        if split
+            && !self.accepted_split
+            && matches!(&reply, Ok((status, _)) if is_auth_refusal(*status))
+            && self.older_route_accepts(client, api_key).await
+        {
+            self.fall_back();
+            self.due = tokio::time::Instant::now();
+            return true;
+        }
+        let outcome = match reply {
             Ok((status, _)) if is_missing_route(status) && split && !self.accepted_split => {
                 self.fall_back();
                 self.due = tokio::time::Instant::now();
@@ -347,6 +365,27 @@ impl DetectionExport {
             self.queue.pop_front();
             self.sent = 0;
         }
+    }
+
+    /// One unsplit page of the front day to the older route: true when it is
+    /// accepted, so the split route's 401 or 403 meant a Hub without it.
+    async fn older_route_accepts(&self, client: &HubClient, api_key: &str) -> bool {
+        let day = self.queue[0].day;
+        let Some(snapshot) = self
+            .ledger
+            .dirty_days(false)
+            .into_iter()
+            .find(|snapshot| snapshot.day == day)
+        else {
+            return false;
+        };
+        let Some((_, body)) = next_page(&self.header, &snapshot, 0, false) else {
+            return false;
+        };
+        matches!(
+            post_batch_with_reply(client, &self.uri, api_key, body).await,
+            Ok((status, _)) if status.is_success()
+        )
     }
 
     /// The route in use: the split one until the Hub refuses it.
@@ -643,6 +682,53 @@ mod tests {
         assert_eq!(2, pages.len());
         assert_eq!(2, pages[1]["counts"][0]["detections"]);
         assert!(ledger.dirty_days(false).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_older_hub_refusing_the_split_route_401_is_probed_and_falls_back() {
+        // An older Hub with sign-in answers its unknown routes 401.
+        let (base, seen) = fake_hub_split(401).await;
+        let ledger = ledger_at(DAY);
+        record_grouped(&ledger, DAY, &[("a", "ns-a"), ("a", "ns-b")]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        rounds(&mut export, &metrics).await;
+
+        assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
+        let pages = unsplit_bodies(&seen);
+        assert_eq!(2, pages.len(), "the probe, then the whole day again");
+        for page in &pages {
+            assert!(page.get("split").is_none());
+            assert_eq!(2, page["counts"][0]["detections"]);
+        }
+        assert!(ledger.dirty_days(false).is_empty());
+        assert_eq!(0, metrics.hub_export_dropped_total.get());
+
+        record_grouped(&ledger, DAY, &[("a", "ns-b")]);
+        export.start_at(tokio::time::Instant::now());
+        rounds(&mut export, &metrics).await;
+        assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
+        assert_eq!(3, unsplit_bodies(&seen).len());
+    }
+
+    #[tokio::test]
+    async fn a_hub_refusing_both_routes_403_keeps_the_split_route() {
+        // A wrong key: the older route refuses the probe too.
+        let (base, seen) = fake_hub(403).await;
+        let ledger = ledger_at(DAY);
+        record_grouped(&ledger, DAY, &[("a", "ns-a")]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+        assert!(export.due() > tokio::time::Instant::now(), "it backs off");
+
+        export.start_at(tokio::time::Instant::now());
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        assert_eq!(2, count(&seen, "/api/import/detections/by-grouping"));
+        assert_eq!(2, unsplit_bodies(&seen).len(), "one probe a refusal");
+        assert_eq!(1, ledger.dirty_days(true).len());
+        assert_eq!(0, metrics.hub_export_dropped_total.get());
     }
 
     #[tokio::test]
