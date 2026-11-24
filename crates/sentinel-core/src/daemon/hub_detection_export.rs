@@ -40,6 +40,10 @@ pub(super) fn split_detections_endpoint(findings_endpoint: &str) -> String {
 struct ImportReply {
     #[serde(default)]
     watch: Option<Vec<String>>,
+    /// `split` or `unsplit`, the form the Hub stores this ledger in; absent
+    /// on an older Hub or before any page set it.
+    #[serde(default)]
+    ledger_form: Option<String>,
 }
 
 fn is_auth_refusal(status: hyper::StatusCode) -> bool {
@@ -49,12 +53,20 @@ fn is_auth_refusal(status: hyper::StatusCode) -> bool {
     )
 }
 
-/// The watch list a reply carries: `None` when it does not parse, empty
-/// when it parses without `watch`.
-fn watch_of(reply: &[u8]) -> Option<Vec<String>> {
+/// The watch list a reply carries, and whether the Hub stores the ledger
+/// split: `None` when it does not parse, an empty list when it parses
+/// without `watch`, no form when it names none it knows.
+fn reply_of(reply: &[u8]) -> Option<(Vec<String>, Option<bool>)> {
     serde_json::from_slice::<ImportReply>(reply)
         .ok()
-        .map(|reply| reply.watch.unwrap_or_default())
+        .map(|reply| {
+            let split = match reply.ledger_form.as_deref() {
+                Some("split") => Some(true),
+                Some("unsplit") => Some(false),
+                _ => None,
+            };
+            (reply.watch.unwrap_or_default(), split)
+        })
 }
 
 /// A `DetectionsPage` over borrowed rows, so paging a day copies nothing.
@@ -110,15 +122,26 @@ fn next_page(
     Some((batch.len(), body))
 }
 
+/// The route the detection push takes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Route {
+    /// The split route, before it accepted a page.
+    Split,
+    /// The split route once it accepted a page: that Hub has the route.
+    SplitAccepted,
+    /// The older route, for a Hub without the split one or storing the
+    /// ledger unsplit.
+    Unsplit,
+}
+
 /// The exporter task's detection half: it snapshots the dirty days of the
 /// ledger and sends them page by page, on its own clock.
 pub(crate) struct DetectionExport {
     ledger: Arc<DetectionLedger>,
-    /// The split route, until a Hub answers that it has none.
-    split_uri: Option<http_client::Uri>,
-    /// Set once the split route accepted a page: that Hub has the route.
-    accepted_split: bool,
-    /// The unsplit route, for a Hub without the split one.
+    /// The route taking split pages.
+    split_uri: http_client::Uri,
+    route: Route,
+    /// The unsplit route, for a Hub without the split one or storing the ledger unsplit.
     uri: http_client::Uri,
     /// The days of the last snapshot still to send, oldest first.
     queue: VecDeque<DaySnapshot>,
@@ -143,8 +166,8 @@ impl DetectionExport {
         Self {
             header: ledger.status(),
             ledger,
-            split_uri: Some(split_uri),
-            accepted_split: false,
+            split_uri,
+            route: Route::Split,
             uri,
             queue: VecDeque::new(),
             sent: 0,
@@ -218,7 +241,7 @@ impl DetectionExport {
             self.due = tokio::time::Instant::now() + pace;
             return false;
         }
-        let split = self.split_uri.is_some();
+        let split = self.route != Route::Unsplit;
         let Some((rows, body)) = next_page(&self.header, &self.queue[0], self.sent, split) else {
             // A row alone over the cap: no page can carry it.
             self.drop_rows(usize::from(self.sent < self.queue[0].rows.len()), metrics);
@@ -227,8 +250,7 @@ impl DetectionExport {
         };
         let reply = post_batch_with_reply(client, self.uri(), api_key, body).await;
         // An older Hub with sign-in answers the unknown split route 401: ask the older route.
-        if split
-            && !self.accepted_split
+        if self.route == Route::Split
             && matches!(&reply, Ok((status, _)) if is_auth_refusal(*status))
             && self.older_route_accepts(client, api_key).await
         {
@@ -237,7 +259,7 @@ impl DetectionExport {
             return true;
         }
         let outcome = match reply {
-            Ok((status, _)) if is_missing_route(status) && split && !self.accepted_split => {
+            Ok((status, _)) if is_missing_route(status) && self.route == Route::Split => {
                 self.fall_back();
                 self.due = tokio::time::Instant::now();
                 return true;
@@ -251,9 +273,18 @@ impl DetectionExport {
                 self.due = tokio::time::Instant::now() + pace;
                 return false;
             }
-            reply => self.outcome_of(reply),
+            reply => {
+                let (outcome, form) = self.outcome_of(reply);
+                if self.switched(form) {
+                    self.due = tokio::time::Instant::now();
+                    return true;
+                }
+                outcome
+            }
         };
-        self.accepted_split |= split && matches!(outcome, ExportOutcome::Accepted);
+        if self.route == Route::Split && matches!(outcome, ExportOutcome::Accepted) {
+            self.route = Route::SplitAccepted;
+        }
         let mut delay = self.apply(&outcome, rows, metrics, flush_interval);
         if self.queue.is_empty() {
             delay = delay.max(pace);
@@ -262,21 +293,24 @@ impl DetectionExport {
         true
     }
 
-    /// The outcome of one page. An accepted reply replaces the watch list
-    /// when it parses.
+    /// The outcome of one page, and the form an accepted reply says the Hub
+    /// stores the ledger in. An accepted reply replaces the watch list when
+    /// it parses.
     fn outcome_of(
         &self,
         reply: Result<(hyper::StatusCode, bytes::Bytes), http_client::FetchError>,
-    ) -> ExportOutcome {
+    ) -> (ExportOutcome, Option<bool>) {
         match reply {
             Ok((status, body)) => {
                 let outcome = classify(status);
+                let mut form = None;
                 if matches!(outcome, ExportOutcome::Accepted)
-                    && let Some(watch) = watch_of(&body)
+                    && let Some((watch, split)) = reply_of(&body)
                 {
                     self.ledger.set_watch(&watch);
+                    form = split;
                 }
-                outcome
+                (outcome, form)
             }
             // The Hub answers errors with short bodies, so an oversized body
             // is an accepted page carrying a long list.
@@ -285,9 +319,9 @@ impl DetectionExport {
                     endpoint = %http_client::redact_endpoint(self.uri()),
                     "PerfSentinelHub detection reply is over the size cap; counting the page as accepted and keeping the watch list"
                 );
-                ExportOutcome::Accepted
+                (ExportOutcome::Accepted, None)
             }
-            Err(error) => ExportOutcome::Retry(error.to_string()),
+            Err(error) => (ExportOutcome::Retry(error.to_string()), None),
         }
     }
 
@@ -297,7 +331,7 @@ impl DetectionExport {
         if self.queue.is_empty() {
             // The header first, so `sealed_through` never runs ahead of the rows.
             self.header = self.ledger.status();
-            self.queue = self.ledger.dirty_days(self.split_uri.is_some()).into();
+            self.queue = self.ledger.dirty_days(self.route != Route::Unsplit).into();
             self.sent = 0;
         }
         !self.queue.is_empty()
@@ -402,27 +436,58 @@ impl DetectionExport {
         )
     }
 
-    /// The route in use: the split one until the Hub refuses it.
+    /// The route in use: the split one until the Hub refuses it or stores the ledger unsplit.
     fn uri(&self) -> &http_client::Uri {
-        self.split_uri.as_ref().unwrap_or(&self.uri)
+        if self.route == Route::Unsplit {
+            &self.uri
+        } else {
+            &self.split_uri
+        }
     }
 
     /// An older Hub, refusing the split route before accepting any page of
     /// it: the unsplit route from now on, every retained day sent
     /// again whole, the refused page's rows among them, so none is lost.
     fn fall_back(&mut self) {
-        if let Some(split_uri) = self.split_uri.take() {
+        if std::mem::replace(&mut self.route, Route::Unsplit) != Route::Unsplit {
             tracing::warn!(
-                endpoint = %http_client::redact_endpoint(&split_uri),
+                endpoint = %http_client::redact_endpoint(&self.split_uri),
                 "PerfSentinelHub has no per-grouping detection import route; pushing detection counts summed per signature to the older route until restart"
             );
         }
-        // No split page was accepted before the first refusal, but the older
-        // route must get full totals whatever this process sent before.
+        self.resend();
+    }
+
+    /// True when the Hub stores this ledger in the other form than the page
+    /// it just took, so it left the page's counts out (a reply lost after it
+    /// stored a page of that form): that form from now on, every retained day
+    /// sent again whole in it.
+    fn switched(&mut self, form: Option<bool>) -> bool {
+        let Some(split) = form.filter(|split| *split != (self.route != Route::Unsplit)) else {
+            return false;
+        };
+        // A Hub storing a ledger split has the split route.
+        self.route = if split {
+            Route::SplitAccepted
+        } else {
+            Route::Unsplit
+        };
+        tracing::warn!(
+            endpoint = %http_client::redact_endpoint(self.uri()),
+            ledger_form = if split { "split" } else { "unsplit" },
+            "PerfSentinelHub stores this detection ledger in the other form; pushing every retained day again in that form until restart"
+        );
+        self.resend();
+        true
+    }
+
+    /// Every retained day to send again whole on the route in use.
+    fn resend(&mut self) {
+        // The route in use must get full totals whatever this process sent before.
         self.ledger.forget_acks();
         self.queue.clear();
         self.refill();
-        // A drain stops on a failure; the split route's ones are not the old route's.
+        // A drain stops on a failure; the other route's ones are not this one's.
         self.failures = 0;
     }
 
@@ -723,6 +788,171 @@ mod tests {
         rounds(&mut export, &metrics).await;
         assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
         assert_eq!(3, unsplit_bodies(&seen).len());
+    }
+
+    /// A Hub answering each route with the next of its replies, the last one
+    /// from then on: the split route with `split`, the older one with `unsplit`.
+    async fn fake_hub_forms(
+        split: Vec<(u16, &'static str)>,
+        unsplit: Vec<(u16, &'static str)>,
+    ) -> (String, Seen) {
+        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+        let store = seen.clone();
+        let app =
+            axum::Router::new().fallback(move |uri: axum::http::Uri, body: axum::body::Bytes| {
+                let store = store.clone();
+                let replies = if uri.path().ends_with("/by-grouping") {
+                    split.clone()
+                } else {
+                    unsplit.clone()
+                };
+                async move {
+                    let mut requests = store.lock().expect("lock");
+                    let path = uri.path().to_string();
+                    let earlier = requests
+                        .iter()
+                        .filter(|(seen, _, _)| seen.split('?').next() == Some(path.as_str()))
+                        .count();
+                    let (status, reply) = replies[earlier.min(replies.len() - 1)];
+                    requests.push((uri.to_string(), None, body.to_vec()));
+                    (
+                        axum::http::StatusCode::from_u16(status).expect("status"),
+                        reply,
+                    )
+                }
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        (format!("http://{address}"), seen)
+    }
+
+    /// The bodies posted to the split route alone.
+    fn split_bodies(seen: &Seen) -> Vec<serde_json::Value> {
+        seen.lock()
+            .expect("lock")
+            .iter()
+            .filter(|(uri, _, _)| uri.starts_with("/api/import/detections/by-grouping?"))
+            .map(|(_, _, body)| serde_json::from_slice(body).expect("json"))
+            .collect()
+    }
+
+    /// The detections a set of pages carries, per (day, signature, grouping).
+    fn pushed(
+        pages: &[serde_json::Value],
+    ) -> std::collections::BTreeMap<(u64, String, String), u64> {
+        let mut pushed = std::collections::BTreeMap::new();
+        for page in pages {
+            for row in page["counts"].as_array().expect("counts") {
+                let key = (
+                    row["day"].as_u64().expect("day"),
+                    row["signature"].as_str().expect("signature").to_string(),
+                    row["grouping"].as_str().unwrap_or("").to_string(),
+                );
+                *pushed.entry(key).or_insert(0) += row["detections"].as_u64().expect("n");
+            }
+        }
+        pushed
+    }
+
+    const STORED_UNSPLIT: &str =
+        r#"{"accepted":0,"rejected":0,"watch":[],"ledger_form":"unsplit"}"#;
+    const STORED_SPLIT: &str = r#"{"accepted":0,"rejected":0,"watch":[],"ledger_form":"split"}"#;
+
+    #[tokio::test]
+    async fn a_hub_storing_the_ledger_unsplit_gets_every_day_again_unsplit() {
+        // The probe was stored but its reply lost, so the split pages are left out.
+        let (base, seen) =
+            fake_hub_forms(vec![(200, STORED_UNSPLIT)], vec![(200, STORED_UNSPLIT)]).await;
+        let ledger = ledger_at(DAY);
+        ledger.tick((DAY + 1) * DAY_MS, 0, 0);
+        record_grouped(&ledger, DAY + 1, &[("a", "ns-a"), ("a", "ns-b")]);
+        record(&ledger, DAY + 1, &["b"]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+
+        rounds(&mut export, &metrics).await;
+
+        assert_eq!(1, split_bodies(&seen).len());
+        let pages = unsplit_bodies(&seen);
+        assert_eq!(2, pages.len(), "both retained days, unsplit");
+        assert!(pages.iter().all(|page| page.get("split").is_none()));
+        let total =
+            |signature: &str| pushed(&pages)[&(DAY + 1, signature.to_string(), String::new())];
+        assert_eq!((2, 1), (total("a"), total("b")));
+        assert!(ledger.dirty_days(false).is_empty());
+        assert_eq!(0, metrics.hub_export_dropped_total.get());
+
+        record_grouped(&ledger, DAY + 1, &[("a", "ns-b")]);
+        export.start_at(tokio::time::Instant::now());
+        rounds(&mut export, &metrics).await;
+        assert_eq!(1, split_bodies(&seen).len(), "the older route from now on");
+        assert_eq!(3, unsplit_bodies(&seen)[2]["counts"][0]["detections"]);
+    }
+
+    #[tokio::test]
+    async fn a_hub_storing_the_ledger_split_after_a_fall_back_gets_every_day_again_split() {
+        // The first split page was stored but its reply lost; the retry met a 404.
+        let (base, seen) = fake_hub_forms(
+            vec![(404, ""), (200, STORED_SPLIT)],
+            vec![(200, STORED_SPLIT)],
+        )
+        .await;
+        let ledger = ledger_at(DAY);
+        ledger.tick((DAY + 1) * DAY_MS, 0, 0);
+        record_grouped(
+            &ledger,
+            DAY + 1,
+            &[("a", "ns-a"), ("a", "ns-b"), ("a", "ns-b")],
+        );
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+
+        rounds(&mut export, &metrics).await;
+
+        assert_eq!(1, unsplit_bodies(&seen).len(), "one unsplit page, left out");
+        let pages = split_bodies(&seen);
+        assert_eq!(
+            3,
+            pages.len(),
+            "the refused page, then both retained days split"
+        );
+        assert!(pages[1..].iter().all(|page| page["split"] == "grouping"));
+        let held = pushed(&pages[1..]);
+        assert_eq!(1, held[&(DAY + 1, "a".to_string(), "ns-a".to_string())]);
+        assert_eq!(2, held[&(DAY + 1, "a".to_string(), "ns-b".to_string())]);
+        assert!(ledger.dirty_days(true).is_empty());
+
+        record_grouped(&ledger, DAY + 1, &[("a", "ns-a")]);
+        export.start_at(tokio::time::Instant::now());
+        rounds(&mut export, &metrics).await;
+        assert_eq!(
+            1,
+            unsplit_bodies(&seen).len(),
+            "the split route from now on"
+        );
+        assert_eq!(4, split_bodies(&seen).len());
+    }
+
+    #[tokio::test]
+    async fn a_reply_without_ledger_form_keeps_the_route() {
+        let reply = r#"{"accepted":1,"rejected":0,"watch":[]}"#;
+        let (base, seen) = fake_hub_forms(vec![(200, reply)], vec![(200, reply)]).await;
+        let ledger = ledger_at(DAY);
+        record_grouped(&ledger, DAY, &[("a", "ns-a")]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        record_grouped(&ledger, DAY, &[("a", "ns-b")]);
+        export.start_at(tokio::time::Instant::now());
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        assert_eq!(2, split_bodies(&seen).len());
+        assert_eq!(0, unsplit_bodies(&seen).len());
+        assert!(ledger.dirty_days(true).is_empty());
     }
 
     #[tokio::test]

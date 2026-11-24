@@ -1030,7 +1030,13 @@ sends the same day's page unsplit to `/api/import/detections` once, or the oldes
 holds when that day has left the ledger, or a page with no rows when it holds none. If that
 route accepts it, the daemon falls back as on a 404; if it refuses it too, the key is wrong, and the daemon
 stays on the split route and retries it with the usual backoff, probing again on each
-refusal. Rounds start at most once a minute, or
+refusal. A Hub that stores each ledger in one form answers every accepted page with
+`ledger_form`, `split` or `unsplit`, and leaves out the counts of a page in the other form, as
+when the reply to a page it stored was lost and the daemon then changed route. On a
+`ledger_form` other than the form it pushes, the daemon logs one warning and, until it
+restarts, pushes in the Hub's form, `split` on the per-grouping route and `unsplit` on the older
+one, every retained day sent again whole in that form. A reply without `ledger_form`, from an
+older Hub, changes nothing. Rounds start at most once a minute, or
 once per `flush_interval_secs` when that is longer, and a failed page is retried with the
 same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
 and pushes once more, after the findings, incidents and episodes still pending, so a long

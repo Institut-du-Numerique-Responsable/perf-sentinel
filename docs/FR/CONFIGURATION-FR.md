@@ -1062,6 +1062,13 @@ non répartie, vers `/api/import/detections`, ou celle du plus ancien jour qu'il
 quand ce jour a quitté le registre, ou une page sans ligne quand il n'en garde aucun. Si
 cette route l'accepte, le daemon se replie comme sur un 404 ; si elle la refuse aussi, la clé est fausse, et le daemon reste sur la
 route répartie et la retente avec le backoff habituel, en sondant de nouveau à chaque refus.
+Un Hub qui stocke chaque registre sous une seule forme répond à toute page acceptée avec
+`ledger_form`, `split` ou `unsplit`, et écarte les comptes d'une page de l'autre forme, comme
+quand la réponse à une page qu'il a stockée s'est perdue et que le daemon a ensuite changé de
+route. Sur un `ledger_form` autre que la forme qu'il pousse, le daemon journalise un
+avertissement et, jusqu'à son redémarrage, pousse sous la forme du Hub, `split` sur la route
+répartie et `unsplit` sur l'ancienne, chaque jour retenu renvoyé en entier sous cette forme. Une
+réponse sans `ledger_form`, d'un Hub plus ancien, ne change rien.
 Les tours
 démarrent au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus
 long, et une page en échec est retentée avec le même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
