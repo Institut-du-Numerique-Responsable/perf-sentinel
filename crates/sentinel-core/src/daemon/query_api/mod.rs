@@ -366,6 +366,10 @@ struct DetectionsParams {
     since_day: Option<u32>,
     /// `<day>:<signature>` of the last row already read.
     after: Option<String>,
+    /// Grouping of the `after` row, read on a `split=grouping` walk only.
+    after_grouping: Option<String>,
+    /// `grouping` answers one row per (signature, grouping).
+    split: Option<String>,
     limit: Option<usize>,
 }
 
@@ -787,6 +791,17 @@ async fn handle_detections(
             "limit must be between 1 and 5000",
         ));
     }
+    let split = match params.split.as_deref() {
+        None => false,
+        Some("grouping") => true,
+        Some(_) => {
+            return Err(ErrorResponse::new(
+                StatusCode::BAD_REQUEST,
+                "split must be grouping",
+            ));
+        }
+    };
+    let after_grouping = params.after_grouping.filter(|_| split).unwrap_or_default();
     let after = params
         .after
         .as_deref()
@@ -795,14 +810,14 @@ async fn handle_detections(
                 .map(|(day, signature)| LedgerCursor {
                     day,
                     signature: signature.to_string(),
-                    grouping: String::new(),
+                    grouping: after_grouping,
                 })
                 .ok_or_else(|| {
                     ErrorResponse::new(StatusCode::BAD_REQUEST, "after must be <day>:<signature>")
                 })
         })
         .transpose()?;
-    Ok(Json(ledger.page(params.since_day, after, limit, false)).into_response())
+    Ok(Json(ledger.page(params.since_day, after, limit, split)).into_response())
 }
 
 /// Splits a `<day>:<signature>` cursor at its first `:`, since signatures

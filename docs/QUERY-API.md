@@ -1339,6 +1339,12 @@ starts a new ledger with a new `ledger_id`, whose first day is a `gap`.
   it: a service or endpoint name may hold a character the query string
   reserves, such as `&`, `#`, `+` or `%`. Without a `:` or with a day
   that is not a number, `400`.
+- `split`: `grouping` answers one row per (day, signature, grouping)
+  instead of one per (day, signature), see below. Any other value
+  answers `400` with `{"error": "split must be grouping"}`.
+- `after_grouping`: the `next_after_grouping` of the previous page, read
+  only with `split=grouping` and `after`, empty when absent. Percent-encode
+  it like `after`.
 - `limit`: rows per page, default 1000. No page carries more than 5000
   rows, and a `limit` of 0 or above 5000 answers `400`. A page also
   stops near 4 MiB of JSON, before `limit` when signatures are long.
@@ -1373,6 +1379,22 @@ take the place of a detected signature, so a day can list up to twice
 that many rows. Only threshold types are watched. Limits: a fanout or a
 serialized parent outside the trace matches less often, and a passes
 count never proves the absence of a detection on another daemon.
+
+**Split by grouping:** a row counts a signature in one grouping, the
+finding's effective grouping value (for example a Kubernetes namespace),
+empty when it has none. Without `split`, a signature's groupings are
+summed into one row, the shape above. With `split=grouping`, the
+response gains `"split": "grouping"`, each row with a grouping carries a
+`grouping` field (omitted for the ungrouped row), rows come in ascending
+(day, signature, grouping) order, and `next_after_grouping` rides beside
+`next_after`, the grouping of the cursor row (`""` for the ungrouped
+row). Pass both back as `after` and `after_grouping`, so a page boundary
+between two groupings of one signature neither skips nor repeats a row.
+`below_threshold_passes` stays per signature, on its ungrouped row.
+`[daemon.detections] max_signatures_per_day` caps rows, a row being one
+signature in one grouping, so a fleet with many groupings needs a higher
+cap. A grouping longer than 1024 bytes or holding a control character
+counts on the signature's ungrouped row.
 
 Each `days` object:
 
@@ -1450,6 +1472,27 @@ curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode limit=2
   "next_after": "20753:redundant_sql:order-svc:_api_v1_orders:cccccccccccccccccccccccccccccccc"
 }
 ```
+
+Split by grouping, each row names its grouping and the cursor carries it:
+
+```bash
+curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode split=grouping \
+  --data-urlencode limit=1
+```
+
+```json
+{
+  "split": "grouping",
+  "counts": [
+    {"day": 20753, "signature": "n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "grouping": "prod-eu", "detections": 9, "extra_io_ops": 33}
+  ],
+  "next_after": "20753:n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "next_after_grouping": "prod-eu"
+}
+```
+
+The other fields are those of the unsplit page. The next page passes
+`after` and `after_grouping`.
 
 The second page passes that cursor back, percent-encoded by `curl`:
 
@@ -1564,6 +1607,7 @@ path.
 | Malformed query parameter (e.g. `limit=abc`)     | 400    | axum-generated plain-text error                                                                      |
 | `limit` of 0 or above 5000 on `/api/detections`  | 400    | `{"error": "limit must be between 1 and 5000"}`                                                      |
 | `after` not `<day>:<signature>` on `/api/detections` | 400 | `{"error": "after must be <day>:<signature>"}`                                                     |
+| `split` other than `grouping` on `/api/detections` | 400 | `{"error": "split must be grouping"}`                                                                  |
 | `/api/detections` with `[daemon.detections] enabled = false` | 503 | `{"error": "detection ledger disabled"}`                                                   |
 | 8 responses of `/api/findings`, `/api/detections`, `/api/correlations` or `/api/export/report` still being read | 503 | `{"error": "too many large reads in flight, retry shortly"}` |
 | Unknown path (e.g. `/api/does-not-exist`)        | 404    | empty body                                                                                           |
