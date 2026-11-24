@@ -1432,7 +1432,8 @@ chaîne d'un parent pour `serialized_calls`. Absent quand il vaut 0. Une
 signature surveillée peut avoir une ligne avec `detections: 0` ; ces
 lignes ont leur propre plafond, `max_signatures_per_day` par jour, et ne
 prennent jamais la place d'une signature détectée, si bien qu'un jour
-peut lister jusqu'à deux fois ce nombre de lignes. Seuls les types à
+peut lister jusqu'à deux fois ce nombre de lignes, plus la ligne sans
+grouping de chaque signature déjà comptée dans un grouping. Seuls les types à
 seuil sont surveillés. Limites : un fanout ou un parent sérialisé hors
 de la trace correspond moins souvent, et un compte de passages ne
 prouve jamais l'absence de détection sur un autre daemon.

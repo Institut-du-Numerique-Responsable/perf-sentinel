@@ -8,7 +8,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 - `GET /api/detections?split=grouping` answers one row per (day, signature, grouping), each with its `grouping` when it has one, plus `"split": "grouping"` and `next_after_grouping`, the grouping of the cursor row, to pass back as `after_grouping` beside `after`. The detection ledger now counts a signature apart in each grouping, and sums them again when `split` is absent, so the default route output is unchanged. `below_threshold_passes` stays per signature, on its ungrouped row. `docs/QUERY-API.md` and its French mirror describe it.
 
-### Upgrade impact
+### Changed
 
 - The `perf_sentinel_detection_ledger_signatures` gauge now counts rows, one per signature, grouping and day, so it rises on a fleet with groupings.
 - `[daemon.detections] max_signatures_per_day` now caps rows, a row being one signature in one grouping: raise it on a grouped fleet, or the detections past it go to the day's overflow.

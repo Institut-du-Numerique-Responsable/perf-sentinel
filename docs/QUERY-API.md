@@ -1376,7 +1376,8 @@ parent's children for `excessive_fanout`, a trace's outbound calls for
 Absent when 0. A watched signature can have a row with `detections: 0`;
 such rows are capped apart, at `max_signatures_per_day` a day, and never
 take the place of a detected signature, so a day can list up to twice
-that many rows. Only threshold types are watched. Limits: a fanout or a
+that many rows, plus the ungrouped row of each signature already counted
+in a grouping. Only threshold types are watched. Limits: a fanout or a
 serialized parent outside the trace matches less often, and a passes
 count never proves the absence of a detection on another daemon.
 
