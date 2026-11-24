@@ -866,3 +866,14 @@ v0.48.1	60e6421	2026-11-22	PASS
 # binary fails leg J, no saturation anywhere. Not run: the cluster scenarios,
 # the Hub side rests on PerfSentinelHub PR #192 and its tests.
 v0.49.0	473bbe6	2026-11-23	PASS
+
+# v0.50.0 targeted pass, no cluster (detection ledger split by grouping):
+# detection-volume with its new legs V7 to V10 (?split=grouping, one row per
+# namespace and their sum unsplit, the limit=1 walk with next_after_grouping,
+# the push on /api/import/detections/by-grouping, and after a restart the
+# fallback to /api/import/detections on a fake Hub answering 404 there),
+# detection-carbon and card-signal, both now reading the pages of either
+# route, on the local 0.50.0 release binary at e3fd35cb. All PASS. Control:
+# the 0.49.0 release binary fails V7, no split. Not run: the cluster
+# scenarios, the Hub side rests on the PerfSentinelHub branch and its tests.
+v0.50.0	08786fc	2026-11-24	PASS
