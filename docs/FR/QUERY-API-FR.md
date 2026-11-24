@@ -1452,7 +1452,10 @@ entre deux groupings d'une même signature ne saute ni ne répète aucune
 ligne. `below_threshold_passes` reste par signature, sur sa ligne sans
 grouping. `[daemon.detections] max_signatures_per_day` plafonne les
 lignes, une ligne étant une signature dans un grouping : une flotte aux
-groupings nombreux demande un plafond plus haut. Un grouping de plus de
+groupings nombreux demande un plafond plus haut. Au-delà, une détection
+dans un nouveau grouping d'une signature qui a déjà une ligne ce jour-là
+compte sur la ligne sans grouping de cette signature, et seule une
+signature sans ligne ce jour-là va dans l'overflow. Un grouping de plus de
 1024 octets ou contenant un caractère de contrôle compte sur la ligne
 sans grouping de la signature.
 

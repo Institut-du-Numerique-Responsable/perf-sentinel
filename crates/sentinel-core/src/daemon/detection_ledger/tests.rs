@@ -645,16 +645,33 @@ fn the_cap_counts_rows_not_signatures() {
         &[
             grouped("a", "ns-a", 1),
             grouped("a", "ns-b", 1),
+            grouped("b", "ns-a", 1),
             grouped("a", "ns-c", 1),
         ],
         3 * DAY_MS,
     );
-    assert_eq!(overflowed, 1);
+    assert_eq!(
+        overflowed, 1,
+        "a signature without a row that day overflows"
+    );
     assert_eq!(ledger.overflow(3), 1);
     assert_eq!(
         split_rows(&ledger),
-        owned(&[("a", "ns-a", 1), ("a", "ns-b", 1)])
+        owned(&[("a", "", 1), ("a", "ns-a", 1), ("a", "ns-b", 1)])
     );
+}
+
+#[test]
+fn a_watched_signature_at_the_cap_counts_a_new_grouping_on_its_ungrouped_row() {
+    let ledger = DetectionLedger::new(&cfg(8, 2), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 3)]), 3 * DAY_MS);
+    ledger.record(&[finding("a", 1), finding("b", 1)], 3 * DAY_MS);
+    let overflowed = ledger.record(&[grouped(SLOW, "ns-a", 2)], 3 * DAY_MS);
+    assert_eq!(overflowed, 0);
+    assert_eq!(ledger.overflow(3), 0);
+    assert_eq!(ledger.tally(3, SLOW), Some((1, Some(2))));
+    let slow = row(&ledger, 3, SLOW).expect("row");
+    assert_eq!(slow.below_threshold_passes, Some(3));
 }
 
 #[test]

@@ -577,6 +577,15 @@ impl DetectionLedger {
         // An untrackable grouping counts on the ungrouped row, the total stays.
         let grouping = if is_trackable(grouping) { grouping } else { "" };
         let bucket = state.bucket(day, self.sampling_rate);
+        // Watch rows never take a detection slot. The cap counts rows.
+        let at_cap = bucket.counts.len() - bucket.watch_rows >= self.max_signatures_per_day;
+        // At the cap, a signature that holds a row that day counts on its
+        // ungrouped row, opened past the cap if need be, so its total never
+        // leaves its rows: one such row per signature at most.
+        let beyond_cap = at_cap
+            && !bucket.counts.contains_key(row_key(&(signature, grouping)))
+            && holds_signature(bucket, signature);
+        let grouping = if beyond_cap { "" } else { grouping };
         if let Some(tally) = bucket.counts.get_mut(row_key(&(signature, grouping))) {
             if tally.detections == 0 {
                 bucket.watch_rows -= 1;
@@ -584,10 +593,7 @@ impl DetectionLedger {
             tally.add(io, rev);
             return true;
         }
-        // Watch rows never take a detection slot. The cap counts rows.
-        if bucket.counts.len() - bucket.watch_rows >= self.max_signatures_per_day
-            || !is_trackable(signature)
-        {
+        if (at_cap && !beyond_cap) || !is_trackable(signature) {
             bucket.overflow.add(io, rev);
             return false;
         }

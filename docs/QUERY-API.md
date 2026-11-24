@@ -1394,7 +1394,9 @@ between two groupings of one signature neither skips nor repeats a row.
 `below_threshold_passes` stays per signature, on its ungrouped row.
 `[daemon.detections] max_signatures_per_day` caps rows, a row being one
 signature in one grouping, so a fleet with many groupings needs a higher
-cap. A grouping longer than 1024 bytes or holding a control character
+cap. Past it, a detection in a new grouping of a signature that already
+has a row that day counts on that signature's ungrouped row, and only a
+signature without a row that day goes to the overflow. A grouping longer than 1024 bytes or holding a control character
 counts on the signature's ungrouped row.
 
 Each `days` object:
