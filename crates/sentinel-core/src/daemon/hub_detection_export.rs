@@ -367,19 +367,29 @@ impl DetectionExport {
         }
     }
 
-    /// One unsplit page of the front day to the older route: true when it is
-    /// accepted, so the split route's 401 or 403 meant a Hub without it.
+    /// One unsplit page to the older route: true when it is accepted, so the
+    /// split route's 401 or 403 meant a Hub without it. The page holds the
+    /// front day, or the oldest day held once the front one left the ledger,
+    /// or the header alone, so a probe always has something to send.
     async fn older_route_accepts(&self, client: &HubClient, api_key: &str) -> bool {
-        let day = self.queue[0].day;
-        let Some(snapshot) = self
-            .ledger
-            .dirty_days(false)
-            .into_iter()
-            .find(|snapshot| snapshot.day == day)
-        else {
-            return false;
+        // Fresh: the snapshot's header may predate the days the ledger holds now.
+        let header = self.ledger.status();
+        let body = match self.ledger.day_or_oldest(self.queue[0].day) {
+            Some(snapshot) => next_page(&header, &snapshot, 0, false).map(|(_, body)| body),
+            None => serde_json::to_vec(&PushPage {
+                ledger_id: &header.ledger_id,
+                started_ms: header.started_ms,
+                current_day: header.current_day,
+                oldest_day: header.oldest_day,
+                sealed_through: header.sealed_through,
+                counts: &[],
+                days: &[],
+                next_after: None,
+                split: false,
+            })
+            .ok(),
         };
-        let Some((_, body)) = next_page(&self.header, &snapshot, 0, false) else {
+        let Some(body) = body else {
             return false;
         };
         matches!(
@@ -709,6 +719,79 @@ mod tests {
         rounds(&mut export, &metrics).await;
         assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
         assert_eq!(3, unsplit_bodies(&seen).len());
+    }
+
+    #[tokio::test]
+    async fn a_probe_after_the_front_day_left_the_ledger_sends_the_oldest_day_held() {
+        // Split 401, probe 401, split 401 again, then a Hub whose key was fixed.
+        let (base, seen) = fake_hub_sequence(vec![401, 401, 401, 200]).await;
+        let ledger = ledger_at(DAY);
+        record_grouped(&ledger, DAY, &[("a", "ns-a")]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        rounds(&mut export, &metrics).await;
+        assert_eq!(1, unsplit_bodies(&seen).len());
+
+        // The queued day leaves the ledger while the Hub refuses.
+        ledger.tick((DAY + 1) * DAY_MS, 0, 0);
+        record(&ledger, DAY + 1, &["b"]);
+        ledger.tick((DAY + 8) * DAY_MS, 0, 0);
+        export.start_at(tokio::time::Instant::now());
+        rounds(&mut export, &metrics).await;
+
+        let pages = unsplit_bodies(&seen);
+        assert_eq!(4, pages.len(), "the two probes, then both days held");
+        let probe = &pages[1];
+        assert!(probe.get("split").is_none());
+        assert_eq!(DAY + 1, probe["days"][0]["day"]);
+        assert_eq!("b", probe["counts"][0]["signature"]);
+        assert!(probe["counts"][0].get("grouping").is_none());
+        let resent: Vec<_> = pages[2..]
+            .iter()
+            .map(|p| p["days"][0]["day"].clone())
+            .collect();
+        assert_eq!(vec![DAY + 1, DAY + 8], resent);
+        assert!(ledger.dirty_days(false).is_empty());
+        assert_eq!(0, metrics.hub_export_dropped_total.get());
+        export.start_at(tokio::time::Instant::now());
+        assert_eq!(0, rounds(&mut export, &metrics).await);
+    }
+
+    #[tokio::test]
+    async fn a_probe_of_an_empty_ledger_sends_the_header_alone() {
+        let (base, seen) = fake_hub_sequence(vec![401, 401, 401, 200]).await;
+        let cfg = DaemonDetectionsConfig {
+            retained_days: 0,
+            ..DaemonDetectionsConfig::default()
+        };
+        let ledger = Arc::new(DetectionLedger::new(
+            &cfg,
+            true,
+            1.0,
+            DayThresholds::default(),
+            DAY * DAY_MS,
+        ));
+        record_grouped(&ledger, DAY, &[("a", "ns-a")]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        rounds(&mut export, &metrics).await;
+
+        // Retention zero, out of the configurable range: the tick drops every day.
+        ledger.tick(DAY * DAY_MS, 0, 0);
+        export.start_at(tokio::time::Instant::now());
+        rounds(&mut export, &metrics).await;
+
+        let pages = unsplit_bodies(&seen);
+        assert_eq!(
+            2,
+            pages.len(),
+            "the two probes, then nothing held to resend"
+        );
+        assert!(pages[1].get("split").is_none());
+        assert_eq!(pages[1]["counts"], serde_json::json!([]));
+        assert_eq!(pages[1]["days"], serde_json::json!([]));
+        assert_eq!(ledger.status().ledger_id, pages[1]["ledger_id"]);
+        assert_eq!(4, seen.lock().expect("lock").len());
     }
 
     #[tokio::test]

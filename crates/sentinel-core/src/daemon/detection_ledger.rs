@@ -752,6 +752,26 @@ impl DetectionLedger {
             .collect()
     }
 
+    /// `day` whole and unsplit, every row whatever was acked, or the oldest
+    /// day held once `day` left the ledger. `None` when it holds no day.
+    pub(crate) fn day_or_oldest(&self, day: u32) -> Option<DaySnapshot> {
+        let state = self.lock();
+        let (&day, bucket) = state
+            .days
+            .get_key_value(&day)
+            .or_else(|| state.days.iter().next())?;
+        Some(DaySnapshot {
+            day,
+            rev: bucket.rev,
+            rows: merged_rows(bucket.counts.iter(), false, &state.no_grouping)
+                .map(|(signature, grouping, tally)| {
+                    self.count_row(day, signature, grouping, &tally)
+                })
+                .collect(),
+            meta: self.day_row(day, bucket),
+        })
+    }
+
     /// Every retained day unsent again, for a Hub that may hold none of it.
     pub(crate) fn forget_acks(&self) {
         for bucket in self.lock().days.values_mut() {
