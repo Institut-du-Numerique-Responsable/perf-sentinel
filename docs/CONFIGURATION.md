@@ -1017,14 +1017,21 @@ to `/api/import/detections` beside `endpoint`, with the same key and source id, 
 Each round sends every day whose counts moved since the Hub last accepted it, only the rows
 that changed since then, in pages shaped like a `GET /api/detections` page, at most 5,000
 rows and 4 MiB each, the day's `days` entry on its last page. The Hub keeps the larger count
-of each row, so the unchanged ones need not travel again. Rounds start at most once a
+of each row, so the unchanged ones need not travel again. The daemon pushes the rows split by
+grouping first, one per signature and grouping, each grouping row sent again when it changes,
+on `/api/import/detections/by-grouping`, its pages carrying `"split": "grouping"`. A Hub that
+answers 404 or 405 there predates that route: the daemon logs one warning and, until it
+restarts, pushes to `/api/import/detections` the rows summed per signature, every retained day
+sent again whole, the refused page's rows among them, so that Hub misses no count and no day
+is set to `gap = true`. Rounds start at most once a
 minute, or once per `flush_interval_secs` when that is longer, and a failed page is retried
 with the same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
 and pushes once more, after the findings, incidents and episodes still pending, so a long
 ledger never spends their drain budget. A page the Hub rejects with an unretryable 4xx is dropped, its rows
 counted in `perf_sentinel_hub_export_dropped_total`, and its day set to `gap = true` in the
-ledger. A Hub that answers 404 or 405 on that route predates it: the daemon logs one warning
-and stops pushing detection counts until it restarts, while the other exports keep flowing.
+ledger. A Hub that answers 404 or 405 on `/api/import/detections` too predates the detection
+push: the daemon logs one warning and stops pushing detection counts until it restarts, while
+the other exports keep flowing.
 
 The Hub's reply to a detection page can carry `watch`, the signatures of threshold-type
 findings it wants confirmed: a fix marked done with no confirming day yet. The daemon keeps

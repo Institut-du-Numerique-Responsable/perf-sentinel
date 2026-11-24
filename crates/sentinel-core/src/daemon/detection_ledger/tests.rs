@@ -425,11 +425,11 @@ fn non_finite_or_negative_carbon_is_ignored() {
 fn avoidable_carbon_makes_an_acked_day_dirty() {
     let ledger = ledger_at(3, true);
     ledger.record(&[finding("a", 1)], 3 * DAY_MS);
-    let snapshot = ledger.dirty_days().remove(0);
+    let snapshot = ledger.dirty_days(false).remove(0);
     ledger.ack_day(3, snapshot.rev);
-    assert!(ledger.dirty_days().is_empty());
+    assert!(ledger.dirty_days(false).is_empty());
     ledger.record_avoidable(carbon(0.5, 0.25, 1, 4), 3 * DAY_MS);
-    let dirty = ledger.dirty_days();
+    let dirty = ledger.dirty_days(false);
     assert_eq!(dirty.len(), 1);
     assert_eq!(dirty[0].day, 3);
     assert!(dirty[0].rows.is_empty());
@@ -569,9 +569,9 @@ fn a_day_never_holds_more_than_twice_the_cap() {
 fn below_passes_make_an_acked_day_dirty() {
     let ledger = ledger_at(3, true);
     ledger.record(&[finding("a", 1)], 3 * DAY_MS);
-    ledger.ack_day(3, ledger.dirty_days()[0].rev);
+    ledger.ack_day(3, ledger.dirty_days(false)[0].rev);
     ledger.record_below(&passes(&[(SLOW, 1)]), 3 * DAY_MS);
-    let dirty = ledger.dirty_days();
+    let dirty = ledger.dirty_days(false);
     assert_eq!(dirty.len(), 1);
     assert_eq!(dirty[0].day, 3);
     let rows: Vec<&str> = dirty[0].rows.iter().map(|r| r.signature.as_str()).collect();
@@ -765,15 +765,49 @@ fn a_split_page_budget_counts_the_grouping() {
 fn dirty_days_send_a_signature_summed_over_its_groupings() {
     let ledger = ledger_at(3, true);
     ledger.record(&[grouped("a", "ns-a", 1)], 3 * DAY_MS);
-    ledger.ack_day(3, ledger.dirty_days()[0].rev);
+    ledger.ack_day(3, ledger.dirty_days(false)[0].rev);
     ledger.record(&[grouped("a", "ns-b", 1), finding("b", 1)], 3 * DAY_MS);
-    let dirty = ledger.dirty_days();
+    let dirty = ledger.dirty_days(false);
     let rows: Vec<_> = dirty[0]
         .rows
         .iter()
         .map(|r| (r.signature.as_str(), &*r.grouping, r.detections))
         .collect();
     assert_eq!(rows, [("a", "", 2), ("b", "", 1)], "the Hub keeps the max");
+}
+
+#[test]
+fn split_dirty_days_send_only_the_changed_grouping_rows() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[grouped("a", "ns-a", 1)], 3 * DAY_MS);
+    ledger.ack_day(3, ledger.dirty_days(true)[0].rev);
+    ledger.record(&[grouped("a", "ns-b", 1), finding("b", 1)], 3 * DAY_MS);
+    let dirty = ledger.dirty_days(true);
+    let rows: Vec<_> = dirty[0]
+        .rows
+        .iter()
+        .map(|r| (r.signature.as_str(), &*r.grouping, r.detections))
+        .collect();
+    assert_eq!(rows, [("a", "ns-b", 1), ("b", "", 1)]);
+}
+
+#[test]
+fn forgetting_the_acks_makes_every_day_dirty_again() {
+    let ledger = ledger_at(3, true);
+    ledger.record(&[grouped("a", "ns-a", 1), finding("b", 1)], 3 * DAY_MS);
+    for day in ledger.dirty_days(true) {
+        ledger.ack_day(day.day, day.rev);
+    }
+    assert!(ledger.dirty_days(false).is_empty());
+    ledger.forget_acks();
+    let dirty = ledger.dirty_days(false);
+    assert_eq!(dirty.len(), 1);
+    let rows: Vec<&str> = dirty[0].rows.iter().map(|r| r.signature.as_str()).collect();
+    assert_eq!(
+        rows,
+        ["a", "b"],
+        "the whole day, so an unsplit Hub gets full totals"
+    );
 }
 
 #[test]

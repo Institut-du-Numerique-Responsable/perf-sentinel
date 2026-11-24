@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::detection_ledger::{
     CountRow, DayRow, DaySnapshot, DetectionLedger, DetectionLedgerStatus, MAX_PAGE_BYTES,
+    split_name,
 };
 use super::hub_export::{
     ExportOutcome, HubClient, bounded_body, classify, next_delay, post_batch_with_reply,
@@ -27,6 +28,11 @@ const MIN_SNAPSHOT_INTERVAL: Duration = Duration::from_mins(1);
 /// The detection import beside the configured findings import.
 pub(super) fn detections_endpoint(findings_endpoint: &str) -> String {
     import_route(findings_endpoint, "/api/import/detections")
+}
+
+/// The detection import taking rows per (signature, grouping).
+pub(super) fn split_detections_endpoint(findings_endpoint: &str) -> String {
+    import_route(findings_endpoint, "/api/import/detections/by-grouping")
 }
 
 /// The part of the Hub's import reply the daemon reads.
@@ -55,6 +61,11 @@ struct PushPage<'a> {
     counts: &'a [&'a CountRow],
     days: &'a [DayRow],
     next_after: Option<&'a str>,
+    #[serde(
+        skip_serializing_if = "std::ops::Not::not",
+        serialize_with = "split_name"
+    )]
+    split: bool,
 }
 
 /// The rows of `day` from `from` on that fit one page, and its body. The
@@ -63,6 +74,7 @@ fn next_page(
     header: &DetectionLedgerStatus,
     day: &DaySnapshot,
     from: usize,
+    split: bool,
 ) -> Option<(usize, Vec<u8>)> {
     let rest = &day.rows[from..];
     let serialize = |counts: &[&CountRow]| {
@@ -80,6 +92,7 @@ fn next_page(
                 &[]
             },
             next_after: None,
+            split,
         })
     };
     if rest.is_empty() {
@@ -94,6 +107,9 @@ fn next_page(
 /// ledger and sends them page by page, on its own clock.
 pub(crate) struct DetectionExport {
     ledger: Arc<DetectionLedger>,
+    /// The split route, until a Hub answers that it has none.
+    split_uri: Option<http_client::Uri>,
+    /// The unsplit route, for a Hub without the split one.
     uri: http_client::Uri,
     /// The days of the last snapshot still to send, oldest first.
     queue: VecDeque<DaySnapshot>,
@@ -110,10 +126,15 @@ pub(crate) struct DetectionExport {
 }
 
 impl DetectionExport {
-    pub(crate) fn new(ledger: Arc<DetectionLedger>, uri: http_client::Uri) -> Self {
+    pub(crate) fn new(
+        ledger: Arc<DetectionLedger>,
+        split_uri: http_client::Uri,
+        uri: http_client::Uri,
+    ) -> Self {
         Self {
             header: ledger.status(),
             ledger,
+            split_uri: Some(split_uri),
             uri,
             queue: VecDeque::new(),
             sent: 0,
@@ -187,13 +208,19 @@ impl DetectionExport {
             self.due = tokio::time::Instant::now() + pace;
             return false;
         }
-        let Some((rows, body)) = next_page(&self.header, &self.queue[0], self.sent) else {
+        let split = self.split_uri.is_some();
+        let Some((rows, body)) = next_page(&self.header, &self.queue[0], self.sent, split) else {
             // A row alone over the cap: no page can carry it.
             self.drop_rows(usize::from(self.sent < self.queue[0].rows.len()), metrics);
             self.due = tokio::time::Instant::now();
             return true;
         };
-        let outcome = match post_batch_with_reply(client, &self.uri, api_key, body).await {
+        let outcome = match post_batch_with_reply(client, self.uri(), api_key, body).await {
+            Ok((status, _)) if is_missing_route(status) && split => {
+                self.fall_back();
+                self.due = tokio::time::Instant::now();
+                return true;
+            }
             Ok((status, _)) if is_missing_route(status) => {
                 self.unsupported();
                 self.due = tokio::time::Instant::now() + pace;
@@ -229,7 +256,7 @@ impl DetectionExport {
             // is an accepted page carrying a long list.
             Err(http_client::FetchError::BodyTooLarge(_)) => {
                 tracing::warn!(
-                    endpoint = %http_client::redact_endpoint(&self.uri),
+                    endpoint = %http_client::redact_endpoint(self.uri()),
                     "PerfSentinelHub detection reply is over the size cap; counting the page as accepted and keeping the watch list"
                 );
                 ExportOutcome::Accepted
@@ -244,7 +271,7 @@ impl DetectionExport {
         if self.queue.is_empty() {
             // The header first, so `sealed_through` never runs ahead of the rows.
             self.header = self.ledger.status();
-            self.queue = self.ledger.dirty_days().into();
+            self.queue = self.ledger.dirty_days(self.split_uri.is_some()).into();
             self.sent = 0;
         }
         !self.queue.is_empty()
@@ -261,7 +288,7 @@ impl DetectionExport {
             ExportOutcome::Accepted => self.advance(rows),
             ExportOutcome::Rejected(status) => {
                 tracing::error!(
-                    endpoint = %http_client::redact_endpoint(&self.uri),
+                    endpoint = %http_client::redact_endpoint(self.uri()),
                     status = *status,
                     dropped = rows,
                     "PerfSentinelHub rejected a detection page permanently; dropping it and flagging its day incomplete"
@@ -278,7 +305,7 @@ impl DetectionExport {
         );
         if let ExportOutcome::Retry(reason) = outcome {
             tracing::warn!(
-                endpoint = %http_client::redact_endpoint(&self.uri),
+                endpoint = %http_client::redact_endpoint(self.uri()),
                 reason = %reason,
                 retry_seconds = delay.as_secs_f64(),
                 "PerfSentinelHub detection export failed; retaining the day"
@@ -314,11 +341,32 @@ impl DetectionExport {
         }
     }
 
+    /// The route in use: the split one until the Hub refuses it.
+    fn uri(&self) -> &http_client::Uri {
+        self.split_uri.as_ref().unwrap_or(&self.uri)
+    }
+
+    /// An older Hub: the unsplit route from now on, every retained day sent
+    /// again whole, the refused page's rows among them, so none is lost.
+    fn fall_back(&mut self) {
+        if let Some(split_uri) = self.split_uri.take() {
+            tracing::warn!(
+                endpoint = %http_client::redact_endpoint(&split_uri),
+                "PerfSentinelHub has no per-grouping detection import route; pushing detection counts summed per signature to the older route until restart"
+            );
+        }
+        // No split page was accepted before the first refusal, but the older
+        // route must get full totals whatever this process sent before.
+        self.ledger.forget_acks();
+        self.queue.clear();
+        self.refill();
+    }
+
     fn unsupported(&mut self) {
         self.unsupported = true;
         self.queue.clear();
         tracing::warn!(
-            endpoint = %http_client::redact_endpoint(&self.uri),
+            endpoint = %http_client::redact_endpoint(self.uri()),
             "PerfSentinelHub has no detection import route; detection counts are not pushed until restart, the other exports are"
         );
     }
@@ -356,11 +404,72 @@ mod tests {
     }
 
     fn export(base: &str, ledger: &Arc<DetectionLedger>) -> DetectionExport {
-        let uri = format!(
-            "{}?source_id=lab",
-            detections_endpoint(&format!("{base}/api/import/findings"))
-        );
-        DetectionExport::new(ledger.clone(), uri.parse().expect("uri"))
+        let uri = |route: fn(&str) -> String| {
+            format!(
+                "{}?source_id=lab",
+                route(&format!("{base}/api/import/findings"))
+            )
+            .parse()
+            .expect("uri")
+        };
+        DetectionExport::new(
+            ledger.clone(),
+            uri(split_detections_endpoint),
+            uri(detections_endpoint),
+        )
+    }
+
+    fn record_grouped(ledger: &DetectionLedger, day: u64, rows: &[(&str, &str)]) {
+        let findings: Vec<_> = rows
+            .iter()
+            .map(|(signature, grouping)| {
+                let mut f = finding(signature, "trace");
+                f.grouping = vec![crate::event::GroupingAttribute {
+                    key: Arc::from("k8s.namespace.name"),
+                    value: Arc::from(*grouping),
+                }];
+                f
+            })
+            .collect();
+        ledger.record(&findings, day * DAY_MS + 1);
+    }
+
+    /// A Hub that answers the split route with `split` and any other with 200.
+    async fn fake_hub_split(split: u16) -> (String, Seen) {
+        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+        let store = seen.clone();
+        let app =
+            axum::Router::new().fallback(move |uri: axum::http::Uri, body: axum::body::Bytes| {
+                let store = store.clone();
+                async move {
+                    let status = if uri.path().ends_with("/by-grouping") {
+                        split
+                    } else {
+                        200
+                    };
+                    store
+                        .lock()
+                        .expect("lock")
+                        .push((uri.to_string(), None, body.to_vec()));
+                    axum::http::StatusCode::from_u16(status).expect("status")
+                }
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        (format!("http://{address}"), seen)
+    }
+
+    /// The bodies posted to the unsplit route alone.
+    fn unsplit_bodies(seen: &Seen) -> Vec<serde_json::Value> {
+        seen.lock()
+            .expect("lock")
+            .iter()
+            .filter(|(uri, _, _)| uri.starts_with("/api/import/detections?"))
+            .map(|(_, _, body)| serde_json::from_slice(body).expect("json"))
+            .collect()
     }
 
     /// Rounds until one sends nothing, flush interval zero so none waits.
@@ -403,6 +512,128 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_split_route_sits_beside_the_detections_one() {
+        assert_eq!(
+            "https://hub.example.com/api/import/detections/by-grouping",
+            split_detections_endpoint("https://hub.example.com/api/import/findings")
+        );
+    }
+
+    #[tokio::test]
+    async fn pushes_split_pages_to_the_by_grouping_route() {
+        let (base, seen) = fake_hub(200).await;
+        let ledger = ledger_at(DAY);
+        record_grouped(&ledger, DAY, &[("a", "ns-a"), ("a", "ns-b")]);
+        record(&ledger, DAY, &["b"]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        // A changed grouping row goes out again, alone.
+        record_grouped(&ledger, DAY, &[("a", "ns-b")]);
+        export.start_at(tokio::time::Instant::now());
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        for (uri, _, _) in seen.lock().expect("lock").iter() {
+            assert!(
+                uri.ends_with("/api/import/detections/by-grouping?source_id=lab"),
+                "{uri}"
+            );
+        }
+        let pages = bodies(&seen);
+        assert_eq!(2, pages.len());
+        assert_eq!("grouping", pages[0]["split"]);
+        let rows = |page: &serde_json::Value| -> Vec<(String, String, u64)> {
+            page["counts"]
+                .as_array()
+                .expect("counts")
+                .iter()
+                .map(|row| {
+                    (
+                        row["signature"].as_str().expect("signature").to_string(),
+                        row["grouping"].as_str().unwrap_or("").to_string(),
+                        row["detections"].as_u64().expect("detections"),
+                    )
+                })
+                .collect()
+        };
+        let row = |s: &str, g: &str, n: u64| (s.to_string(), g.to_string(), n);
+        assert_eq!(
+            vec![row("a", "ns-a", 1), row("a", "ns-b", 1), row("b", "", 1)],
+            rows(&pages[0])
+        );
+        assert!(pages[0]["counts"][2].get("grouping").is_none());
+        assert_eq!(vec![row("a", "ns-b", 2)], rows(&pages[1]));
+        assert_eq!(DAY, pages[1]["days"][0]["day"]);
+        assert!(ledger.dirty_days(true).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_older_hub_gets_the_same_counts_unsplit_after_a_404() {
+        let (base, seen) = fake_hub_split(404).await;
+        let ledger = ledger_at(DAY);
+        ledger.tick((DAY + 1) * DAY_MS, 0, 0);
+        record_grouped(
+            &ledger,
+            DAY + 1,
+            &[("a", "ns-a"), ("a", "ns-b"), ("a", "ns-b")],
+        );
+        record(&ledger, DAY + 1, &["a", "b"]);
+        let metrics = MetricsState::new();
+
+        assert_eq!(3, rounds(&mut export(&base, &ledger), &metrics).await);
+
+        assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
+        let pages = unsplit_bodies(&seen);
+        assert_eq!(2, pages.len(), "both retained days, unsplit");
+        let mut pushed = std::collections::BTreeMap::new();
+        for page in &pages {
+            assert!(page.get("split").is_none());
+            for row in page["counts"].as_array().expect("counts") {
+                assert!(row.get("grouping").is_none());
+                let key = (
+                    row["day"].as_u64().expect("day"),
+                    row["signature"].as_str().expect("signature").to_string(),
+                );
+                *pushed.entry(key).or_insert(0) += row["detections"].as_u64().expect("n");
+            }
+        }
+        let held: std::collections::BTreeMap<_, _> = ledger
+            .page(None, None, 5000, false)
+            .counts
+            .iter()
+            .map(|row| ((u64::from(row.day), row.signature.clone()), row.detections))
+            .collect();
+        assert_eq!(held, pushed);
+        assert_eq!(4, held[&(DAY + 1, "a".to_string())]);
+        assert_eq!(DAY + 1, pages[1]["days"][0]["day"]);
+        assert_eq!(false, pages[1]["days"][0]["gap"]);
+        assert!(!day_row(&ledger, DAY + 1).gap);
+        assert_eq!(0, metrics.hub_export_dropped_total.get());
+        assert!(ledger.dirty_days(false).is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_fallback_holds_for_the_rest_of_the_process() {
+        let (base, seen) = fake_hub_split(405).await;
+        let ledger = ledger_at(DAY);
+        record_grouped(&ledger, DAY, &[("a", "ns-a")]);
+        let metrics = MetricsState::new();
+        let mut export = export(&base, &ledger);
+        assert_eq!(2, rounds(&mut export, &metrics).await);
+
+        record_grouped(&ledger, DAY, &[("a", "ns-b")]);
+        export.start_at(tokio::time::Instant::now());
+        assert_eq!(1, rounds(&mut export, &metrics).await);
+
+        assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
+        let pages = unsplit_bodies(&seen);
+        assert_eq!(2, pages.len());
+        assert_eq!(2, pages[1]["counts"][0]["detections"]);
+        assert!(ledger.dirty_days(false).is_empty());
+    }
+
     #[tokio::test]
     async fn pushes_each_dirty_day_once_then_goes_quiet() {
         let (base, seen) = fake_hub(200).await;
@@ -420,7 +651,7 @@ mod tests {
         assert_eq!(2, requests.len());
         for (uri, key, _) in &requests {
             assert!(
-                uri.ends_with("/api/import/detections?source_id=lab"),
+                uri.ends_with("/api/import/detections/by-grouping?source_id=lab"),
                 "{uri}"
             );
             assert_eq!(Some("k".repeat(32)), *key);
@@ -439,7 +670,7 @@ mod tests {
             assert_eq!(DAY, page["sealed_through"]);
             assert!(page["next_after"].is_null());
         }
-        assert_eq!(0, ledger.dirty_days().len());
+        assert_eq!(0, ledger.dirty_days(false).len());
     }
 
     #[tokio::test]
@@ -462,7 +693,7 @@ mod tests {
         assert_eq!("a", counts[0]["signature"]);
         assert_eq!(2, counts[0]["detections"]);
         assert_eq!(DAY, pages[1]["days"][0]["day"]);
-        assert_eq!(0, ledger.dirty_days().len());
+        assert_eq!(0, ledger.dirty_days(false).len());
     }
 
     fn some_carbon() -> DayCarbon {
@@ -528,7 +759,7 @@ mod tests {
         assert_eq!(2, pages.len());
         assert_eq!(pages[1]["counts"], serde_json::json!([]));
         assert_eq!(4, pages[1]["days"][0]["avoidable_io_ops"]);
-        assert_eq!(0, ledger.dirty_days().len());
+        assert_eq!(0, ledger.dirty_days(false).len());
     }
 
     #[tokio::test]
@@ -551,7 +782,7 @@ mod tests {
                 )
                 .await
         );
-        assert_eq!(0, ledger.dirty_days().len());
+        assert_eq!(0, ledger.dirty_days(false).len());
         assert!(export.due() >= before + Duration::from_mins(1));
     }
 
@@ -591,7 +822,7 @@ mod tests {
         assert_eq!(2, metrics.hub_export_dropped_total.get());
         assert_eq!(2, seen.lock().expect("lock").len());
         assert!(day_row(&ledger, DAY + 1).gap);
-        assert_eq!(0, ledger.dirty_days().len());
+        assert_eq!(0, ledger.dirty_days(false).len());
     }
 
     #[tokio::test]
@@ -608,8 +839,9 @@ mod tests {
             Duration::from_millis(50),
         );
 
+        // One probe of each detection route.
         wait_for(|| {
-            count(&seen, "/api/import/detections") == 1 && count(&seen, "/api/import/findings") == 1
+            count(&seen, "/api/import/detections") == 2 && count(&seen, "/api/import/findings") == 1
         })
         .await;
         record(&ledger, DAY, &["b"]);
@@ -619,7 +851,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         handle.abort();
 
-        assert_eq!(1, count(&seen, "/api/import/detections"));
+        assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
+        assert_eq!(2, count(&seen, "/api/import/detections"));
         assert_eq!(2, count(&seen, "/api/import/findings"));
     }
 
@@ -661,7 +894,7 @@ mod tests {
                 .round(&client, &"k".repeat(32), &metrics, Duration::ZERO, false)
                 .await
         );
-        assert_eq!(1, ledger.dirty_days().len());
+        assert_eq!(1, ledger.dirty_days(false).len());
         assert!(export.due() > tokio::time::Instant::now(), "it backs off");
         export.start_at(tokio::time::Instant::now());
         assert_eq!(1, rounds(&mut export, &metrics).await);
@@ -670,7 +903,7 @@ mod tests {
         assert_eq!(2, pages.len());
         assert_eq!(pages[0]["counts"], pages[1]["counts"]);
         assert_eq!(0, metrics.hub_export_dropped_total.get());
-        assert_eq!(0, ledger.dirty_days().len());
+        assert_eq!(0, ledger.dirty_days(false).len());
     }
 
     #[tokio::test]
@@ -679,7 +912,7 @@ mod tests {
         let ledger = ledger_at(DAY);
         ledger.tick((DAY + 1) * DAY_MS, 0, 0);
         // The Hub already holds the sealed day, so the 400 lands on the large one.
-        for day in ledger.dirty_days() {
+        for day in ledger.dirty_days(false) {
             ledger.ack_day(day.day, day.rev);
         }
         let signatures: Vec<String> = (0..5_001).map(|i| format!("s{i:05}")).collect();
@@ -697,7 +930,7 @@ mod tests {
         assert_eq!(DAY + 1, pages[1]["days"][0]["day"]);
         assert_eq!(true, pages[1]["days"][0]["gap"]);
         assert_eq!(5_000, metrics.hub_export_dropped_total.get());
-        assert_eq!(0, ledger.dirty_days().len());
+        assert_eq!(0, ledger.dirty_days(false).len());
     }
 
     #[tokio::test]
@@ -718,9 +951,10 @@ mod tests {
             .await
             .expect("the drain ends on the missing route")
             .expect("exporter task panicked");
-        assert_eq!(1, count(&seen, "/api/import/detections"));
+        assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
+        assert_eq!(2, count(&seen, "/api/import/detections"));
         // Not dropped as a refused page: the day waits for a Hub that has the route.
-        assert_eq!(1, ledger.dirty_days().len());
+        assert_eq!(1, ledger.dirty_days(false).len());
     }
 
     #[tokio::test]
@@ -795,7 +1029,7 @@ mod tests {
             .expect("the open day was sent");
         assert_eq!(true, page["days"][0]["gap"]);
         assert_eq!("a", page["counts"][0]["signature"]);
-        assert_eq!(0, ledger.dirty_days().len());
+        assert_eq!(0, ledger.dirty_days(false).len());
     }
 
     const SLOW: &str = "slow_sql:svc:GET__a:0123456789abcdef0123456789abcdef";
@@ -861,7 +1095,7 @@ mod tests {
     async fn an_unparsable_reply_keeps_the_list_and_the_page_counts() {
         let (ledger, seen) = push_once(200, b"not json".to_vec(), true).await;
         assert_eq!(1, ledger.watch().len());
-        assert!(ledger.dirty_days().is_empty());
+        assert!(ledger.dirty_days(false).is_empty());
         assert_eq!(1, seen.lock().expect("lock").len());
     }
 
@@ -869,21 +1103,21 @@ mod tests {
     async fn a_non_string_entry_keeps_the_list() {
         let (ledger, _seen) = push_once(200, br#"{"watch":[1]}"#.to_vec(), true).await;
         assert_eq!(1, ledger.watch().len());
-        assert!(ledger.dirty_days().is_empty());
+        assert!(ledger.dirty_days(false).is_empty());
     }
 
     #[tokio::test]
     async fn a_failed_page_keeps_the_list() {
         let (ledger, _seen) = push_once(503, br#"{"watch":[]}"#.to_vec(), true).await;
         assert_eq!(1, ledger.watch().len());
-        assert_eq!(1, ledger.dirty_days().len());
+        assert_eq!(1, ledger.dirty_days(false).len());
     }
 
     #[tokio::test]
     async fn an_oversized_reply_counts_as_accepted() {
         let reply = vec![b' '; http_client::MAX_BODY_BYTES + 1];
         let (ledger, seen) = push_once(200, reply, true).await;
-        assert!(ledger.dirty_days().is_empty());
+        assert!(ledger.dirty_days(false).is_empty());
         assert_eq!(1, seen.lock().expect("lock").len());
         assert_eq!(1, ledger.watch().len());
     }

@@ -15,7 +15,9 @@ use super::findings_store::StoredFinding;
 use super::hub_correlation_export::{
     CorrelationExport, CorrelationExportBuffer, correlations_endpoint,
 };
-use super::hub_detection_export::{DetectionExport, detections_endpoint};
+use super::hub_detection_export::{
+    DetectionExport, detections_endpoint, split_detections_endpoint,
+};
 use super::hub_incident_export::{
     IncidentExport, IncidentExportBuffer, incident_capacity, incidents_endpoint,
 };
@@ -146,8 +148,11 @@ impl HubExporter {
         let correlation_buffer = correlations.as_ref().map(CorrelationExport::buffer);
         let detections = detection_ledger
             .map(|ledger| {
-                source_uri(&detections_endpoint(endpoint), source_id)
-                    .map(|uri| DetectionExport::new(ledger, uri))
+                Ok::<_, super::DaemonError>(DetectionExport::new(
+                    ledger,
+                    source_uri(&split_detections_endpoint(endpoint), source_id)?,
+                    source_uri(&detections_endpoint(endpoint), source_id)?,
+                ))
             })
             .transpose()?;
         let shutdown = Arc::new(tokio::sync::Notify::new());

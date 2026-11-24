@@ -1047,15 +1047,23 @@ identifiant de source, depuis 0.37.0. Chaque tour envoie chaque jour dont les co
 bougé depuis que le Hub l'a accepté pour la dernière fois, seulement les lignes modifiées
 depuis, en pages de la forme d'une page de `GET /api/detections`, au plus 5 000 lignes et
 4 Mio chacune, l'entrée `days` du jour sur sa dernière page. Le Hub garde le plus grand
-compte de chaque ligne, les lignes inchangées n'ont donc pas à repartir. Les tours démarrent
+compte de chaque ligne, les lignes inchangées n'ont donc pas à repartir. Le daemon pousse
+d'abord les lignes réparties par grouping, une par signature et grouping, chaque ligne de
+grouping renvoyée quand elle change, sur `/api/import/detections/by-grouping`, ses pages
+portant `"split": "grouping"`. Un Hub qui répond 404 ou 405 sur cette route la précède : le
+daemon journalise un avertissement et, jusqu'à son redémarrage, pousse vers
+`/api/import/detections` les lignes sommées par signature, chaque jour retenu renvoyé en
+entier, les lignes de la page refusée comprises, pour que ce Hub ne perde aucun compte et
+qu'aucun jour ne passe à `gap = true`. Les tours démarrent
 au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus long, et
 une page en échec est retentée avec le même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
 pousse une dernière fois, après les findings, incidents et épisodes encore en attente, pour
 qu'un long registre ne consomme pas leur budget de vidange. Une page que le Hub rejette avec un 4xx non rejouable est
 abandonnée, ses lignes comptées dans `perf_sentinel_hub_export_dropped_total`, et son jour
-passé à `gap = true` dans le registre. Un Hub qui répond 404 ou 405 sur cette route la
-précède : le daemon journalise un avertissement et cesse de pousser les comptes de
-détections jusqu'à son redémarrage, tandis que les autres exports continuent.
+passé à `gap = true` dans le registre. Un Hub qui répond 404 ou 405 sur
+`/api/import/detections` aussi précède la poussée des détections : le daemon journalise un
+avertissement et cesse de pousser les comptes de détections jusqu'à son redémarrage, tandis
+que les autres exports continuent.
 
 La réponse du Hub à une page de détections peut porter `watch`, les signatures de findings
 à seuil qu'il veut voir confirmées : un correctif marqué fait, sans jour de confirmation

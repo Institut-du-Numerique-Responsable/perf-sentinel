@@ -307,7 +307,7 @@ pub(crate) struct DetectionsPage {
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde requires the reference
-fn split_name<S: Serializer>(_: &bool, serializer: S) -> Result<S::Ok, S::Error> {
+pub(super) fn split_name<S: Serializer>(_: &bool, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str("grouping")
 }
 
@@ -729,9 +729,10 @@ impl DetectionLedger {
 
     /// Every day whose `rev` moved past `acked_rev`, with only the rows
     /// that changed since then: the Hub keeps the larger count per row, so
-    /// the others need not travel again. A row is a signature summed over
-    /// its groupings, sent whole when any of them changed.
-    pub(crate) fn dirty_days(&self) -> Vec<DaySnapshot> {
+    /// the others need not travel again. A row is one (signature, grouping)
+    /// when `split`, else a signature summed over its groupings, sent whole
+    /// when any of them changed.
+    pub(crate) fn dirty_days(&self, split: bool) -> Vec<DaySnapshot> {
         let state = self.lock();
         state
             .days
@@ -740,7 +741,7 @@ impl DetectionLedger {
             .map(|(&day, bucket)| DaySnapshot {
                 day,
                 rev: bucket.rev,
-                rows: merged_rows(bucket.counts.iter(), false, &state.no_grouping)
+                rows: merged_rows(bucket.counts.iter(), split, &state.no_grouping)
                     .filter(|(_, _, tally)| tally.rev > bucket.acked_rev)
                     .map(|(signature, grouping, tally)| {
                         self.count_row(day, signature, grouping, &tally)
@@ -749,6 +750,13 @@ impl DetectionLedger {
                 meta: self.day_row(day, bucket),
             })
             .collect()
+    }
+
+    /// Every retained day unsent again, for a Hub that may hold none of it.
+    pub(crate) fn forget_acks(&self) {
+        for bucket in self.lock().days.values_mut() {
+            bucket.acked_rev = 0;
+        }
     }
 
     /// The Hub holds `day` as of `rev`.

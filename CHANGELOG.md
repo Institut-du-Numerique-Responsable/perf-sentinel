@@ -7,6 +7,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 ### Added
 
 - `GET /api/detections?split=grouping` answers one row per (day, signature, grouping), each with its `grouping` when it has one, plus `"split": "grouping"` and `next_after_grouping`, the grouping of the cursor row, to pass back as `after_grouping` beside `after`. The detection ledger now counts a signature apart in each grouping, and sums them again when `split` is absent, so the default route output is unchanged. `below_threshold_passes` stays per signature, on its ungrouped row. `docs/QUERY-API.md` and its French mirror describe it.
+- `[daemon.hub_export]` pushes the detection ledger split by grouping, one row per (day, signature, grouping), each grouping row sent again when it changes, with `"split": "grouping"`, on `POST /api/import/detections/by-grouping?source_id=`. A Hub that answers `404` or `405` there predates the route: one warning, then until the daemon restarts the push goes to `/api/import/detections` with the rows summed per signature, every retained day sent again whole, the refused page's rows among them, so no count is dropped and no day is marked a gap. A `404` or `405` on that route too still stops the detection push until restart. `docs/CONFIGURATION.md` and its French mirror describe it.
 
 ### Changed
 
