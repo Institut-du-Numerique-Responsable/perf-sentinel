@@ -1024,7 +1024,12 @@ answers 404 or 405 there before accepting any page of it predates that route: th
 one warning and, until it restarts, pushes to `/api/import/detections` the rows summed per
 signature, every retained day sent again whole, the refused page's rows among them, so that
 Hub misses no count and no day is set to `gap = true`. Once the Hub has accepted a split page,
-a 404 or 405 there is retried like any failed page. Rounds start at most once a minute, or
+a 404 or 405 there is retried like any failed page. A Hub with sign-in that predates the route
+answers it 401 instead: on a 401 or 403 there before any split page was accepted, the daemon
+sends the same day's page unsplit to `/api/import/detections` once. If that route accepts it,
+the daemon falls back as on a 404; if it refuses it too, the key is wrong, and the daemon
+stays on the split route and retries it with the usual backoff, probing again on each
+refusal. Rounds start at most once a minute, or
 once per `flush_interval_secs` when that is longer, and a failed page is retried with the
 same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
 and pushes once more, after the findings, incidents and episodes still pending, so a long
