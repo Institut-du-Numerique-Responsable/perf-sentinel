@@ -215,9 +215,9 @@ fn page_walks_days_and_signatures_in_order() {
     let ledger = two_full_days();
     let first = ledger.page(None, None, 2, false);
     assert_eq!(first.next_after.as_deref(), Some("3:b"));
-    let second = ledger.page(None, Some(at(3, "b")), 2, false);
+    let second = ledger.page(None, Some(&at(3, "b")), 2, false);
     assert_eq!(second.next_after.as_deref(), Some("4:a"));
-    let third = ledger.page(None, Some(at(4, "a")), 2, false);
+    let third = ledger.page(None, Some(&at(4, "a")), 2, false);
     assert_eq!(third.next_after, None);
     let all: Vec<String> = [&first, &second, &third]
         .into_iter()
@@ -237,11 +237,11 @@ fn day_rows_follow_their_last_count() {
         page_days(&ledger.page(None, None, 2, false)),
         Vec::<u32>::new()
     );
-    let second = ledger.page(None, Some(at(3, "b")), 2, false);
+    let second = ledger.page(None, Some(&at(3, "b")), 2, false);
     assert_eq!(page_days(&second), [3]);
     assert!(second.days[0].gap, "day 3 opened the ledger");
     assert_eq!(
-        page_days(&ledger.page(None, Some(at(4, "a")), 2, false)),
+        page_days(&ledger.page(None, Some(&at(4, "a")), 2, false)),
         [4]
     );
     // A page ending on day 3's last row carries day 3, the next one never.
@@ -251,7 +251,7 @@ fn day_rows_follow_their_last_count() {
         (3, vec![3])
     );
     assert_eq!(
-        page_days(&ledger.page(None, Some(at(3, "c")), 3, false)),
+        page_days(&ledger.page(None, Some(&at(3, "c")), 3, false)),
         [4]
     );
 }
@@ -282,7 +282,7 @@ fn an_empty_day_rides_one_page_only() {
     ledger.record(&[finding("a", 1)], 5 * DAY_MS);
     let first = ledger.page(None, None, 3, false);
     assert_eq!(first.next_after.as_deref(), Some("3:c"));
-    let second = ledger.page(None, Some(at(3, "c")), 3, false);
+    let second = ledger.page(None, Some(&at(3, "c")), 3, false);
     assert_eq!(keys(&second), ["5:a"]);
     let all: Vec<u32> = [&first, &second].into_iter().flat_map(page_days).collect();
     assert_eq!(all, [3, 4, 5]);
@@ -729,7 +729,7 @@ fn an_unsplit_cursor_skips_every_grouping_of_its_signature() {
     assert_eq!(first.counts[0].detections, 2);
     assert_eq!(first.next_after.as_deref(), Some("3:a"));
     assert_eq!(first.next_after_grouping, None);
-    let second = ledger.page(None, Some(at(3, "a")), 1, false);
+    let second = ledger.page(None, Some(&at(3, "a")), 1, false);
     assert_eq!(keys(&second), ["3:b"]);
     assert_eq!(second.next_after, None);
 }
@@ -752,7 +752,7 @@ fn a_split_cursor_resumes_inside_a_signature() {
         grouping: "ns-a".to_string(),
         ..at(3, "a")
     };
-    let second = ledger.page(None, Some(cursor), 5000, true);
+    let second = ledger.page(None, Some(&cursor), 5000, true);
     let rest: Vec<_> = second
         .counts
         .iter()

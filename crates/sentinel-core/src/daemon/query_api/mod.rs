@@ -817,7 +817,7 @@ async fn handle_detections(
                 })
         })
         .transpose()?;
-    Ok(Json(ledger.page(params.since_day, after, limit, split)).into_response())
+    Ok(Json(ledger.page(params.since_day, after.as_ref(), limit, split)).into_response())
 }
 
 /// Splits a `<day>:<signature>` cursor at its first `:`, since signatures

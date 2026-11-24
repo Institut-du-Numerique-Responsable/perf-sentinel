@@ -306,7 +306,6 @@ pub(crate) struct DetectionsPage {
     pub(crate) split: bool,
 }
 
-#[allow(clippy::trivially_copy_pass_by_ref)] // serde requires the reference
 pub(super) fn split_name<S: Serializer>(_: &bool, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str("grouping")
 }
@@ -667,19 +666,16 @@ impl DetectionLedger {
     /// grouping) order, one per (day, signature) summed over its groupings
     /// unless `split`. A day's `DayRow` rides with its last count row, or
     /// with the page that passes it when it has none.
-    #[allow(clippy::needless_pass_by_value)] // the caller parses the cursor for this call alone
     pub(crate) fn page(
         &self,
         since_day: Option<u32>,
-        after: Option<LedgerCursor>,
+        after: Option<&LedgerCursor>,
         limit: usize,
         split: bool,
     ) -> DetectionsPage {
         let state = self.lock();
         let status = self.status_of(&state);
-        let start = since_day
-            .unwrap_or(0)
-            .max(after.as_ref().map_or(0, |c| c.day));
+        let start = since_day.unwrap_or(0).max(after.map_or(0, |c| c.day));
         let mut page = DetectionsPage {
             ledger_id: status.ledger_id,
             started_ms: status.started_ms,
@@ -694,7 +690,7 @@ impl DetectionLedger {
         };
         let mut bytes = 0;
         for (&day, bucket) in state.days.range(start..) {
-            let cursor = after.as_ref().filter(|c| c.day == day);
+            let cursor = after.filter(|c| c.day == day);
             // Unsplit, the walk resumes past every grouping of the signature.
             let probe =
                 cursor.map(|c| (c.signature.as_str(), if split { &*c.grouping } else { "" }));
