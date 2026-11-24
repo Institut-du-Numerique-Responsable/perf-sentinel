@@ -1026,8 +1026,9 @@ signature, every retained day sent again whole, the refused page's rows among th
 Hub misses no count and no day is set to `gap = true`. Once the Hub has accepted a split page,
 a 404 or 405 there is retried like any failed page. A Hub with sign-in that predates the route
 answers it 401 instead: on a 401 or 403 there before any split page was accepted, the daemon
-sends the same day's page unsplit to `/api/import/detections` once. If that route accepts it,
-the daemon falls back as on a 404; if it refuses it too, the key is wrong, and the daemon
+sends the same day's page unsplit to `/api/import/detections` once, or the oldest day it still
+holds when that day has left the ledger, or a page with no rows when it holds none. If that
+route accepts it, the daemon falls back as on a 404; if it refuses it too, the key is wrong, and the daemon
 stays on the split route and retries it with the usual backoff, probing again on each
 refusal. Rounds start at most once a minute, or
 once per `flush_interval_secs` when that is longer, and a failed page is retried with the

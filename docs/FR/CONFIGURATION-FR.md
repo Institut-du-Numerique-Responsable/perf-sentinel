@@ -1058,8 +1058,9 @@ perde aucun compte et qu'aucun jour ne passe à `gap = true`. Une fois qu'une pa
 été acceptée, un 404 ou 405 sur cette route est retenté comme toute page en échec. Un Hub avec
 la connexion active qui précède la route y répond 401 à la place : sur un 401 ou 403 sur cette route
 avant qu'une page répartie ait été acceptée, le daemon envoie une fois la page du même jour,
-non répartie, vers `/api/import/detections`. Si cette route l'accepte, le daemon se replie
-comme sur un 404 ; si elle la refuse aussi, la clé est fausse, et le daemon reste sur la
+non répartie, vers `/api/import/detections`, ou celle du plus ancien jour qu'il garde encore
+quand ce jour a quitté le registre, ou une page sans ligne quand il n'en garde aucun. Si
+cette route l'accepte, le daemon se replie comme sur un 404 ; si elle la refuse aussi, la clé est fausse, et le daemon reste sur la
 route répartie et la retente avec le backoff habituel, en sondant de nouveau à chaque refus.
 Les tours
 démarrent au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus
