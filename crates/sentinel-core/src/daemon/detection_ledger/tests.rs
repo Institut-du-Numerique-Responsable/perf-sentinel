@@ -867,3 +867,24 @@ fn an_untrackable_grouping_counts_on_the_ungrouped_row() {
 fn the_row_estimate_covers_the_grouping_key() {
     assert!(ROW_OVERHEAD_BYTES >= 128 + "\"grouping\":\"\",".len());
 }
+
+#[test]
+fn day_or_oldest_copies_at_most_the_rows_asked_unsplit() {
+    let ledger = ledger_at(3, true);
+    ledger.record(
+        &[
+            grouped("a", "ns-a", 1),
+            grouped("a", "ns-b", 1),
+            finding("b", 1),
+            finding("c", 1),
+        ],
+        3 * DAY_MS,
+    );
+    let snapshot = ledger.day_or_oldest(3, 2).expect("day");
+    let rows: Vec<_> = snapshot
+        .rows
+        .iter()
+        .map(|r| (r.signature.as_str(), r.detections))
+        .collect();
+    assert_eq!(rows, [("a", 2), ("b", 1)]);
+}

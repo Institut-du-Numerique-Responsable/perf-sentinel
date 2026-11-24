@@ -758,9 +758,9 @@ impl DetectionLedger {
             .collect()
     }
 
-    /// `day` whole and unsplit, every row whatever was acked, or the oldest
-    /// day held once `day` left the ledger. `None` when it holds no day.
-    pub(crate) fn day_or_oldest(&self, day: u32) -> Option<DaySnapshot> {
+    /// The first `rows` rows of `day` unsplit, whatever was acked, or of the
+    /// oldest day held once `day` left the ledger. `None` when it holds no day.
+    pub(crate) fn day_or_oldest(&self, day: u32, rows: usize) -> Option<DaySnapshot> {
         let state = self.lock();
         let (&day, bucket) = state
             .days
@@ -770,6 +770,7 @@ impl DetectionLedger {
             day,
             rev: bucket.rev,
             rows: merged_rows(bucket.counts.iter(), false, &state.no_grouping)
+                .take(rows)
                 .map(|(signature, grouping, tally)| {
                     self.count_row(day, signature, grouping, &tally)
                 })

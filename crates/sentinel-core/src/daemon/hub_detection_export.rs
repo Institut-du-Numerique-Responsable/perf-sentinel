@@ -374,7 +374,11 @@ impl DetectionExport {
     async fn older_route_accepts(&self, client: &HubClient, api_key: &str) -> bool {
         // Fresh: the snapshot's header may predate the days the ledger holds now.
         let header = self.ledger.status();
-        let body = match self.ledger.day_or_oldest(self.queue[0].day) {
+        // One row past a page, so a longer day keeps its `DayRow` back.
+        let body = match self
+            .ledger
+            .day_or_oldest(self.queue[0].day, MAX_PUSH_ROWS + 1)
+        {
             Some(snapshot) => next_page(&header, &snapshot, 0, false).map(|(_, body)| body),
             None => serde_json::to_vec(&PushPage {
                 ledger_id: &header.ledger_id,
@@ -719,6 +723,20 @@ mod tests {
         rounds(&mut export, &metrics).await;
         assert_eq!(1, count(&seen, "/api/import/detections/by-grouping"));
         assert_eq!(3, unsplit_bodies(&seen).len());
+    }
+
+    #[tokio::test]
+    async fn a_probe_of_a_large_day_sends_one_page_without_its_meta() {
+        let (base, seen) = fake_hub_split(401).await;
+        let ledger = ledger_at(DAY);
+        let signatures: Vec<String> = (0..5_001).map(|i| format!("s{i:05}")).collect();
+        let refs: Vec<&str> = signatures.iter().map(String::as_str).collect();
+        record(&ledger, DAY, &refs);
+        rounds(&mut export(&base, &ledger), &MetricsState::new()).await;
+
+        let probe = &unsplit_bodies(&seen)[0];
+        assert_eq!(5_000, probe["counts"].as_array().expect("counts").len());
+        assert_eq!(probe["days"], serde_json::json!([]), "the day goes on");
     }
 
     #[tokio::test]
