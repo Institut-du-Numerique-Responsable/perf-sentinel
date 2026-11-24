@@ -1063,7 +1063,7 @@ quand ce jour a quitté le registre, ou une page sans ligne quand il n'en garde 
 cette route l'accepte, le daemon se replie comme sur un 404 ; si elle la refuse aussi, la clé est fausse, et le daemon reste sur la
 route répartie et la retente avec le backoff habituel, en sondant de nouveau à chaque refus.
 Un Hub qui stocke chaque registre sous une seule forme répond à toute page acceptée avec
-`ledger_form`, `split` ou `unsplit`, et écarte les comptes d'une page de l'autre forme, comme
+`ledger_form`, `split` ou `unsplit`, dès que le registre a une forme, et écarte les comptes d'une page de l'autre forme, comme
 quand la réponse à une page qu'il a stockée s'est perdue et que le daemon a ensuite changé de
 route. Sur un `ledger_form` autre que la forme qu'il pousse, le daemon journalise un
 avertissement et, jusqu'à son redémarrage, pousse sous la forme du Hub, `split` sur la route
