@@ -10,6 +10,17 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.50.0]
+
+### Added
+
+- **`appVersion` moves to `0.50.0`.** The daemon's detection ledger counts a
+  signature apart in each grouping, serves the split on
+  `GET /api/detections?split=grouping` and pushes it to PerfSentinelHub on
+  `/api/import/detections/by-grouping`, falling back to the older route on a
+  Hub without it. `[daemon.detections] max_signatures_per_day` now caps rows,
+  and its default goes from 10000 to 50000. No chart value or template changes.
+
 ## [0.49.0]
 
 ### Added

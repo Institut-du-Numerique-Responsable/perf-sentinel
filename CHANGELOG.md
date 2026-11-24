@@ -4,6 +4,8 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-24
+
 ### Added
 
 - `GET /api/detections?split=grouping` answers one row per (day, signature, grouping), each with its `grouping` when it has one, plus `"split": "grouping"` and `next_after_grouping`, the grouping of the cursor row, to pass back as `after_grouping` beside `after`. The detection ledger now counts a signature apart in each grouping, and sums them again when `split` is absent, so the default route output is unchanged. `below_threshold_passes` stays per signature, on its ungrouped row. `docs/QUERY-API.md` and its French mirror describe it.
