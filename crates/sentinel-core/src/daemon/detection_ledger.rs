@@ -1,16 +1,20 @@
 //! In-memory per-day ledger of the finding signatures the daemon detected.
 //!
-//! Counts are keyed by UTC epoch day then signature. A periodic tick seals
-//! past days, carries the shed and reject deltas, and drops days past
-//! retention. A restart starts a new ledger (`ledger_id`), so the first day
+//! Counts are keyed by UTC epoch day then (signature, grouping), the grouping
+//! being the finding's effective grouping value, empty when it has none.
+//! Below-threshold passes stay per signature, on its ungrouped row. A
+//! periodic tick seals past days, carries the shed and reject deltas, and
+//! drops days past retention. A restart starts a new ledger (`ledger_id`), so the first day
 //! is always a gap. The lock is never held across an `.await`.
 
-use std::collections::{BTreeMap, HashMap};
+use std::borrow::Borrow;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Bound;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::config::DaemonDetectionsConfig;
 use crate::detect::below_threshold::WatchIndex;
@@ -23,13 +27,62 @@ pub(crate) const MAX_TRACKED_SIGNATURE_BYTES: usize = 1024;
 /// Estimated JSON bytes one page may carry.
 pub(crate) const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 /// Estimated JSON bytes of a `CountRow` beside its signature.
-/// Room for `below_threshold_passes`.
-const ROW_OVERHEAD_BYTES: usize = 128;
+/// Room for `below_threshold_passes` and a split row's `"grouping":"",` key.
+const ROW_OVERHEAD_BYTES: usize = 144;
 
 /// The JSON length of a tracked signature. Control characters never reach a
 /// key (they go to the overflow), so `"` and `\` are the only escapes.
 fn json_string_len(s: &str) -> usize {
     s.len() + s.bytes().filter(|b| matches!(b, b'"' | b'\\')).count()
+}
+
+/// A count row's key, `(signature, grouping)`, looked up by borrowed parts so
+/// a lookup never allocates.
+pub(crate) trait RowKey {
+    fn parts(&self) -> (&str, &str);
+}
+
+impl RowKey for (Arc<str>, Arc<str>) {
+    fn parts(&self) -> (&str, &str) {
+        (&self.0, &self.1)
+    }
+}
+
+impl RowKey for (&str, &str) {
+    fn parts(&self) -> (&str, &str) {
+        *self
+    }
+}
+
+impl<'a> Borrow<dyn RowKey + 'a> for (Arc<str>, Arc<str>) {
+    fn borrow(&self) -> &(dyn RowKey + 'a) {
+        self
+    }
+}
+
+impl PartialEq for dyn RowKey + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.parts() == other.parts()
+    }
+}
+
+impl Eq for dyn RowKey + '_ {}
+
+impl PartialOrd for dyn RowKey + '_ {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// The tuple order, so a borrowed probe walks the map like its keys.
+impl Ord for dyn RowKey + '_ {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.parts().cmp(&other.parts())
+    }
+}
+
+fn row_key<'a>(key: &'a (&'a str, &'a str)) -> &'a (dyn RowKey + 'a) {
+    key
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -47,6 +100,34 @@ impl Tally {
         self.extra_io_ops += extra_io_ops;
         self.rev = rev;
     }
+
+    fn merge(&mut self, other: &Tally) {
+        self.detections += other.detections;
+        self.extra_io_ops += other.extra_io_ops;
+        self.below_threshold_passes += other.below_threshold_passes;
+        self.rev = self.rev.max(other.rev);
+    }
+}
+
+/// `(signature, grouping, tally)` per row when `split`, else per signature
+/// summed over its contiguous grouping rows, with `none` as the grouping.
+fn merged_rows<'a>(
+    rows: impl Iterator<Item = (&'a (Arc<str>, Arc<str>), &'a Tally)>,
+    split: bool,
+    none: &'a Arc<str>,
+) -> impl Iterator<Item = (&'a Arc<str>, &'a Arc<str>, Tally)> {
+    let mut rows = rows.peekable();
+    std::iter::from_fn(move || {
+        let ((signature, grouping), tally) = rows.next()?;
+        let mut sum = *tally;
+        if split {
+            return Some((signature, grouping, sum));
+        }
+        while let Some((_, tally)) = rows.next_if(|((s, _), _)| s == signature) {
+            sum.merge(tally);
+        }
+        Some((signature, none, sum))
+    })
 }
 
 /// One batch's (or one day's summed) operational avoidable carbon and I/O.
@@ -60,7 +141,8 @@ pub(crate) struct DayCarbon {
 
 #[derive(Debug)]
 pub(crate) struct DayBucket {
-    pub(crate) counts: BTreeMap<Arc<str>, Tally>,
+    /// One row per (signature, grouping), a signature's rows contiguous.
+    pub(crate) counts: BTreeMap<(Arc<str>, Arc<str>), Tally>,
     /// Rows opened by below-passes alone (`detections == 0`), capped apart
     /// so they never take a detection slot.
     pub(crate) watch_rows: usize,
@@ -105,6 +187,10 @@ pub(crate) struct LedgerState {
     last_tick_day: u32,
     /// The signatures the Hub asked to watch, replaced on each reply.
     watch: Arc<WatchIndex>,
+    /// The grouping of rows without one, shared by all of them.
+    no_grouping: Arc<str>,
+    /// The other groupings the rows hold, so rows share one `Arc` each.
+    groupings: BTreeSet<Arc<str>>,
 }
 
 impl LedgerState {
@@ -147,12 +233,35 @@ impl LedgerState {
         }
     }
 
-    /// Reuses the key another day already holds, so days share one `Arc`.
-    fn shared_key(&self, signature: &str) -> Arc<str> {
-        self.days
+    /// Reuses the signature any day already holds and the interned
+    /// grouping, so rows and days share one `Arc` per string.
+    fn shared_key(&mut self, signature: &str, grouping: &str) -> (Arc<str>, Arc<str>) {
+        let probe = (signature, "");
+        let from = (Bound::Included(row_key(&probe)), Bound::Unbounded);
+        let shared = self
+            .days
             .values()
-            .find_map(|b| b.counts.get_key_value(signature))
-            .map_or_else(|| Arc::from(signature), |(k, _)| Arc::clone(k))
+            .find_map(|b| {
+                b.counts
+                    .range::<dyn RowKey, _>(from)
+                    .next()
+                    .map(|((s, _), _)| s)
+                    .filter(|s| ***s == *signature)
+            })
+            .map_or_else(|| Arc::from(signature), Arc::clone);
+        (shared, self.shared_grouping(grouping))
+    }
+
+    fn shared_grouping(&mut self, grouping: &str) -> Arc<str> {
+        if grouping.is_empty() {
+            return Arc::clone(&self.no_grouping);
+        }
+        if let Some(shared) = self.groupings.get(grouping) {
+            return Arc::clone(shared);
+        }
+        let shared: Arc<str> = Arc::from(grouping);
+        self.groupings.insert(Arc::clone(&shared));
+        shared
     }
 }
 
@@ -166,6 +275,15 @@ pub(crate) struct DetectionLedgerStatus {
     pub(crate) sealed_through: Option<u32>,
 }
 
+/// The last row a reader holds: `<day>:<signature>`, plus its grouping on a
+/// split walk (ignored on an unsplit one).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LedgerCursor {
+    pub(crate) day: u32,
+    pub(crate) signature: String,
+    pub(crate) grouping: String,
+}
+
 /// One page of `GET /api/detections`, the body of a Hub push page too.
 #[derive(Debug, Serialize)]
 pub(crate) struct DetectionsPage {
@@ -177,12 +295,27 @@ pub(crate) struct DetectionsPage {
     pub(crate) counts: Vec<CountRow>,
     pub(crate) days: Vec<DayRow>,
     pub(crate) next_after: Option<String>,
+    /// The grouping of the cursor row, on a split page only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) next_after_grouping: Option<String>,
+    /// Rows per (signature, grouping), answered as `"split": "grouping"`.
+    #[serde(
+        skip_serializing_if = "std::ops::Not::not",
+        serialize_with = "split_name"
+    )]
+    pub(crate) split: bool,
+}
+
+pub(super) fn split_name<S: Serializer>(_: &bool, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str("grouping")
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct CountRow {
     pub(crate) day: u32,
     pub(crate) signature: String,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub(crate) grouping: Arc<str>,
     pub(crate) detections: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) extra_io_ops: Option<u64>,
@@ -269,6 +402,16 @@ fn day_of(now_ms: u64) -> u32 {
     u32::try_from(now_ms / DAY_MS).unwrap_or(u32::MAX)
 }
 
+/// Whether `bucket` holds a row of `signature` in any grouping.
+fn holds_signature(bucket: &DayBucket, signature: &str) -> bool {
+    let probe = (signature, "");
+    bucket
+        .counts
+        .range::<dyn RowKey, _>((Bound::Included(row_key(&probe)), Bound::Unbounded))
+        .next()
+        .is_some_and(|((s, _), _)| **s == *signature)
+}
+
 fn is_trackable(signature: &str) -> bool {
     signature.len() <= MAX_TRACKED_SIGNATURE_BYTES && !signature.chars().any(char::is_control)
 }
@@ -299,6 +442,8 @@ impl DetectionLedger {
                 last_rejected: 0,
                 last_tick_day: today,
                 watch: Arc::default(),
+                no_grouping: Arc::from(""),
+                groupings: BTreeSet::new(),
             }),
         }
     }
@@ -323,7 +468,8 @@ impl DetectionLedger {
             } else {
                 0
             };
-            if !self.count(&mut state, day, &finding.signature, io, rev) {
+            let grouping = finding.grouping_value().unwrap_or("");
+            if !self.count(&mut state, day, &finding.signature, grouping, io, rev) {
                 overflowed += 1;
             }
             changed = true;
@@ -351,9 +497,10 @@ impl DetectionLedger {
         Arc::clone(&self.lock().watch)
     }
 
-    /// Adds one batch's below-threshold passes to their day. A signature
-    /// without a row gets one only while the day has watch-row room, else
-    /// its passes are dropped, never sent to overflow.
+    /// Adds one batch's below-threshold passes to their day, on each
+    /// signature's ungrouped row. A signature without that row gets one only
+    /// while the day has watch-row room, else its passes are dropped, never
+    /// sent to overflow.
     pub(crate) fn record_below(&self, passes: &HashMap<Arc<str>, u64>, now_ms: u64) {
         // Sorted so the rows kept at the cap do not depend on hash order.
         let mut passes: Vec<_> = passes.iter().filter(|(_, n)| **n > 0).collect();
@@ -361,20 +508,27 @@ impl DetectionLedger {
         let cap = self.max_signatures_per_day;
         let mut state = self.lock();
         let day = state.effective_day(now_ms);
+        let none = Arc::clone(&state.no_grouping);
         let bucket = state.bucket(day, self.sampling_rate);
         let rev = bucket.rev + 1;
         let mut changed = false;
         for (signature, &n) in passes {
-            if let Some(tally) = bucket.counts.get_mut(&**signature) {
+            if let Some(tally) = bucket.counts.get_mut(row_key(&(signature, ""))) {
                 tally.below_threshold_passes += n;
                 tally.rev = rev;
-            } else if bucket.watch_rows < cap && bucket.counts.len() < cap.saturating_mul(2) {
+            } else if holds_signature(bucket, signature)
+                || (bucket.watch_rows < cap && bucket.counts.len() < cap.saturating_mul(2))
+            {
+                // A signature already counted in a grouping takes its ungrouped
+                // row freely, so the unsplit passes do not depend on groupings.
                 let tally = Tally {
                     below_threshold_passes: n,
                     rev,
                     ..Tally::default()
                 };
-                bucket.counts.insert(Arc::clone(signature), tally);
+                bucket
+                    .counts
+                    .insert((Arc::clone(signature), Arc::clone(&none)), tally);
                 bucket.watch_rows += 1;
             } else {
                 continue;
@@ -410,23 +564,39 @@ impl DetectionLedger {
     }
 
     /// Adds one detection to `day`, `false` when it went to overflow.
-    fn count(&self, state: &mut LedgerState, day: u32, signature: &str, io: u64, rev: u64) -> bool {
+    fn count(
+        &self,
+        state: &mut LedgerState,
+        day: u32,
+        signature: &str,
+        grouping: &str,
+        io: u64,
+        rev: u64,
+    ) -> bool {
+        // An untrackable grouping counts on the ungrouped row, the total stays.
+        let grouping = if is_trackable(grouping) { grouping } else { "" };
         let bucket = state.bucket(day, self.sampling_rate);
-        if let Some(tally) = bucket.counts.get_mut(signature) {
+        // Watch rows never take a detection slot. The cap counts rows.
+        let at_cap = bucket.counts.len() - bucket.watch_rows >= self.max_signatures_per_day;
+        // At the cap, a signature that holds a row that day counts on its
+        // ungrouped row, opened past the cap if need be, so its total never
+        // leaves its rows: one such row per signature at most.
+        let beyond_cap = at_cap
+            && !bucket.counts.contains_key(row_key(&(signature, grouping)))
+            && holds_signature(bucket, signature);
+        let grouping = if beyond_cap { "" } else { grouping };
+        if let Some(tally) = bucket.counts.get_mut(row_key(&(signature, grouping))) {
             if tally.detections == 0 {
                 bucket.watch_rows -= 1;
             }
             tally.add(io, rev);
             return true;
         }
-        // Watch rows never take a detection slot.
-        if bucket.counts.len() - bucket.watch_rows >= self.max_signatures_per_day
-            || !is_trackable(signature)
-        {
+        if (at_cap && !beyond_cap) || !is_trackable(signature) {
             bucket.overflow.add(io, rev);
             return false;
         }
-        let key = state.shared_key(signature);
+        let key = state.shared_key(signature, grouping);
         state
             .bucket(day, self.sampling_rate)
             .counts
@@ -437,7 +607,7 @@ impl DetectionLedger {
     }
 
     /// Periodic pass: carries the shed and reject deltas, seals past days,
-    /// drops days past retention. Returns the tracked signature keys left.
+    /// drops days past retention. Returns the tracked rows left.
     pub(crate) fn tick(&self, now_ms: u64, shed_total: u64, rejected_total: u64) -> usize {
         let mut state = self.lock();
         let today = state.effective_day(now_ms);
@@ -460,6 +630,7 @@ impl DetectionLedger {
         }
         let oldest = today.saturating_add(1).saturating_sub(self.retained_days);
         state.days = state.days.split_off(&oldest);
+        state.groupings.retain(|g| Arc::strong_count(g) > 1);
         state.days.values().map(|b| b.counts.len()).sum()
     }
 
@@ -491,18 +662,20 @@ impl DetectionLedger {
         }
     }
 
-    /// Rows strictly after `after`, from `since_day` on, in (day, signature)
-    /// order. A day's `DayRow` rides with its last count row, or with the
-    /// page that passes it when it has none.
+    /// Rows strictly after `after`, from `since_day` on, in (day, signature,
+    /// grouping) order, one per (day, signature) summed over its groupings
+    /// unless `split`. A day's `DayRow` rides with its last count row, or
+    /// with the page that passes it when it has none.
     pub(crate) fn page(
         &self,
         since_day: Option<u32>,
-        after: Option<(u32, &str)>,
+        after: Option<&LedgerCursor>,
         limit: usize,
+        split: bool,
     ) -> DetectionsPage {
         let state = self.lock();
         let status = self.status_of(&state);
-        let start = since_day.unwrap_or(0).max(after.map_or(0, |(day, _)| day));
+        let start = since_day.unwrap_or(0).max(after.map_or(0, |c| c.day));
         let mut page = DetectionsPage {
             ledger_id: status.ledger_id,
             started_ms: status.started_ms,
@@ -512,26 +685,41 @@ impl DetectionLedger {
             counts: Vec::new(),
             days: Vec::new(),
             next_after: None,
+            next_after_grouping: None,
+            split,
         };
         let mut bytes = 0;
         for (&day, bucket) in state.days.range(start..) {
-            let cursor = after.filter(|(d, _)| *d == day).map(|(_, sig)| sig);
-            let from = cursor.map_or(Bound::Unbounded, Bound::Excluded);
-            let rows = bucket.counts.range::<str, _>((from, Bound::Unbounded));
+            let cursor = after.filter(|c| c.day == day);
+            // Unsplit, the walk resumes past every grouping of the signature.
+            let probe =
+                cursor.map(|c| (c.signature.as_str(), if split { &*c.grouping } else { "" }));
+            let from = match &probe {
+                Some(probe) if split => Bound::Excluded(row_key(probe)),
+                Some(probe) => Bound::Included(row_key(probe)),
+                None => Bound::Unbounded,
+            };
+            let rows = bucket
+                .counts
+                .range::<dyn RowKey, _>((from, Bound::Unbounded))
+                .skip_while(|((s, _), _)| !split && cursor.is_some_and(|c| **s == *c.signature));
             let before = page.counts.len();
-            for (signature, tally) in rows {
-                let size = json_string_len(signature) + ROW_OVERHEAD_BYTES;
+            for (signature, grouping, tally) in merged_rows(rows, split, &state.no_grouping) {
+                let size =
+                    json_string_len(signature) + json_string_len(grouping) + ROW_OVERHEAD_BYTES;
                 if page.counts.len() >= limit || bytes + size > MAX_PAGE_BYTES {
                     if let Some(last) = page.counts.last() {
                         // Empty days past the cursor ride the next page, not both.
                         let last_day = last.day;
                         page.days.retain(|d| d.day <= last_day);
                         page.next_after = Some(format!("{}:{}", last.day, last.signature));
+                        page.next_after_grouping = split.then(|| last.grouping.to_string());
                     }
                     return page;
                 }
                 bytes += size;
-                page.counts.push(self.count_row(day, signature, tally));
+                page.counts
+                    .push(self.count_row(day, signature, grouping, &tally));
             }
             // The cursor's own day went out with the page holding its last row.
             if cursor.is_none() || page.counts.len() > before {
@@ -543,8 +731,10 @@ impl DetectionLedger {
 
     /// Every day whose `rev` moved past `acked_rev`, with only the rows
     /// that changed since then: the Hub keeps the larger count per row, so
-    /// the others need not travel again.
-    pub(crate) fn dirty_days(&self) -> Vec<DaySnapshot> {
+    /// the others need not travel again. A row is one (signature, grouping)
+    /// when `split`, else a signature summed over its groupings, sent whole
+    /// when any of them changed.
+    pub(crate) fn dirty_days(&self, split: bool) -> Vec<DaySnapshot> {
         let state = self.lock();
         state
             .days
@@ -553,15 +743,43 @@ impl DetectionLedger {
             .map(|(&day, bucket)| DaySnapshot {
                 day,
                 rev: bucket.rev,
-                rows: bucket
-                    .counts
-                    .iter()
-                    .filter(|(_, tally)| tally.rev > bucket.acked_rev)
-                    .map(|(signature, tally)| self.count_row(day, signature, tally))
+                rows: merged_rows(bucket.counts.iter(), split, &state.no_grouping)
+                    .filter(|(_, _, tally)| tally.rev > bucket.acked_rev)
+                    .map(|(signature, grouping, tally)| {
+                        self.count_row(day, signature, grouping, &tally)
+                    })
                     .collect(),
                 meta: self.day_row(day, bucket),
             })
             .collect()
+    }
+
+    /// The first `rows` rows of `day` unsplit, whatever was acked, or of the
+    /// oldest day held once `day` left the ledger. `None` when it holds no day.
+    pub(crate) fn day_or_oldest(&self, day: u32, rows: usize) -> Option<DaySnapshot> {
+        let state = self.lock();
+        let (&day, bucket) = state
+            .days
+            .get_key_value(&day)
+            .or_else(|| state.days.iter().next())?;
+        Some(DaySnapshot {
+            day,
+            rev: bucket.rev,
+            rows: merged_rows(bucket.counts.iter(), false, &state.no_grouping)
+                .take(rows)
+                .map(|(signature, grouping, tally)| {
+                    self.count_row(day, signature, grouping, &tally)
+                })
+                .collect(),
+            meta: self.day_row(day, bucket),
+        })
+    }
+
+    /// Every retained day unsent again, for a Hub that may hold none of it.
+    pub(crate) fn forget_acks(&self) {
+        for bucket in self.lock().days.values_mut() {
+            bucket.acked_rev = 0;
+        }
     }
 
     /// The Hub holds `day` as of `rev`.
@@ -579,10 +797,11 @@ impl DetectionLedger {
         }
     }
 
-    fn count_row(&self, day: u32, signature: &str, tally: &Tally) -> CountRow {
+    fn count_row(&self, day: u32, signature: &str, grouping: &Arc<str>, tally: &Tally) -> CountRow {
         CountRow {
             day,
             signature: signature.to_string(),
+            grouping: Arc::clone(grouping),
             detections: tally.detections,
             extra_io_ops: self.io_tracked.then_some(tally.extra_io_ops),
             below_threshold_passes: (tally.below_threshold_passes > 0)
@@ -611,7 +830,11 @@ impl DetectionLedger {
     #[cfg(test)]
     pub(crate) fn tally(&self, day: u32, signature: &str) -> Option<(u64, Option<u64>)> {
         let state = self.lock();
-        let tally = state.days.get(&day)?.counts.get(signature)?;
+        let tally = state
+            .days
+            .get(&day)?
+            .counts
+            .get(row_key(&(signature, "")))?;
         Some((
             tally.detections,
             self.io_tracked.then_some(tally.extra_io_ops),

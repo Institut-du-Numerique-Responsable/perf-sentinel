@@ -3998,3 +3998,83 @@ async fn require_read_key_counts_a_refused_incidents_read_like_the_handler_does(
     status_of(&app, get_request("/api/findings")).await;
     assert_eq!(unauthorized(), 2, "a refused findings read is no incident");
 }
+
+fn grouped_finding(signature: &str, grouping: &str) -> detect::Finding {
+    let mut f = crate::test_helpers::make_finding(
+        detect::FindingType::NPlusOneSql,
+        detect::Severity::Warning,
+    );
+    f.signature = signature.to_string();
+    f.grouping = vec![crate::event::GroupingAttribute {
+        key: Arc::from("k8s.namespace.name"),
+        value: Arc::from(grouping),
+    }];
+    f
+}
+
+fn state_with_groupings() -> Arc<QueryApiState> {
+    let state = make_state();
+    let ledger = state.detection_ledger.as_ref().unwrap();
+    ledger.record(
+        &[
+            grouped_finding("sig", "ns-a"),
+            grouped_finding("sig", "ns-b"),
+            grouped_finding("sig", "ns-c"),
+        ],
+        u64::from(LEDGER_DAY) * DAY_MS,
+    );
+    state
+}
+
+#[tokio::test]
+async fn split_rows_carry_their_grouping_and_the_page_says_split() {
+    let app = query_api_router(state_with_groupings());
+    let (status, body) = get_json(app, "/api/detections?split=grouping").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["split"], "grouping");
+    let groupings: Vec<_> = body["counts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["grouping"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(groupings, ["ns-a", "ns-b", "ns-c"]);
+}
+
+#[tokio::test]
+async fn a_split_page_boundary_between_groupings_of_one_signature_neither_skips_nor_repeats() {
+    let app = query_api_router(state_with_groupings());
+    let mut path = "/api/detections?split=grouping&limit=1".to_string();
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        let (status, body) = get_json(app.clone(), &path).await;
+        assert_eq!(status, StatusCode::OK);
+        seen.push(body["counts"][0]["grouping"].as_str().unwrap().to_string());
+        let after = body["next_after"].as_str();
+        let Some(after) = after else { break };
+        let grouping = body["next_after_grouping"].as_str().unwrap();
+        path = format!(
+            "/api/detections?split=grouping&limit=1&after={after}&after_grouping={grouping}"
+        );
+    }
+    assert_eq!(seen, ["ns-a", "ns-b", "ns-c"]);
+}
+
+#[tokio::test]
+async fn without_split_the_route_answers_per_signature_as_before() {
+    let app = query_api_router(state_with_groupings());
+    let (_, body) = get_json(app, "/api/detections?after_grouping=ns-a").await;
+    assert!(body.get("split").is_none());
+    assert!(body.get("next_after_grouping").is_none());
+    assert_eq!(body["counts"].as_array().unwrap().len(), 1);
+    assert_eq!(body["counts"][0]["detections"], 3);
+    assert!(body["counts"][0].get("grouping").is_none());
+}
+
+#[tokio::test]
+async fn an_unknown_split_value_is_refused() {
+    let app = query_api_router(make_state());
+    let (status, body) = get_json(app, "/api/detections?split=service").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, serde_json::json!({"error": "split must be grouping"}));
+}

@@ -13,6 +13,7 @@
 #![allow(clippy::cast_possible_truncation)] // u128 -> u64 for elapsed_ms
 #![allow(clippy::cast_precision_loss)] // usize -> f64 for ratios
 #![allow(clippy::similar_names)] // min_ts/min_ms, max_ts/max_ms are clear
+#![allow(clippy::trivially_copy_pass_by_ref)] // serde's serialize_with passes the field by reference
 
 pub mod acknowledgments;
 pub mod calibrate;

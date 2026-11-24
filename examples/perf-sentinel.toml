@@ -446,7 +446,7 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # [daemon.detections]
 # enabled = true
 # retained_days = 8                # default 8, bounds 2..31, today included
-# max_signatures_per_day = 10000   # default 10000, bounds 1..1000000, the rest counts as overflow
+# max_signatures_per_day = 50000   # default 50000 rows, bounds 1..1000000, the rest counts as overflow
 
 # --- /!\ Browser access to the query API ------------------------------------
 # Empty means no browser origin can read the API, which is the safe state.

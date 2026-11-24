@@ -1393,6 +1393,12 @@ avec un nouveau `ledger_id`, dont le premier jour est un `gap`.
   Encodez-le en pourcent : un nom de service ou d'endpoint peut contenir
   un caractère que la query string réserve, comme `&`, `#`, `+` ou `%`.
   Sans `:` ou avec un jour qui n'est pas un nombre, `400`.
+- `split` : `grouping` répond une ligne par (jour, signature, grouping)
+  au lieu d'une par (jour, signature), voir plus bas. Toute autre valeur
+  répond `400` avec `{"error": "split must be grouping"}`.
+- `after_grouping` : le `next_after_grouping` de la page précédente, lu
+  seulement avec `split=grouping` et `after`, vide quand il est absent.
+  Encodez-le en pourcent comme `after`.
 - `limit` : lignes par page, 1000 par défaut. Aucune page ne porte plus
   de 5000 lignes, et un `limit` à 0 ou au-delà de 5000 répond `400`. Une
   page s'arrête aussi vers 4 Mio de JSON, avant `limit` quand les
@@ -1426,10 +1432,32 @@ chaîne d'un parent pour `serialized_calls`. Absent quand il vaut 0. Une
 signature surveillée peut avoir une ligne avec `detections: 0` ; ces
 lignes ont leur propre plafond, `max_signatures_per_day` par jour, et ne
 prennent jamais la place d'une signature détectée, si bien qu'un jour
-peut lister jusqu'à deux fois ce nombre de lignes. Seuls les types à
+peut lister jusqu'à deux fois ce nombre de lignes, plus la ligne sans
+grouping de chaque signature déjà comptée dans un grouping. Seuls les types à
 seuil sont surveillés. Limites : un fanout ou un parent sérialisé hors
 de la trace correspond moins souvent, et un compte de passages ne
 prouve jamais l'absence de détection sur un autre daemon.
+
+**Découpage par grouping :** une ligne compte une signature dans un
+grouping, la valeur de grouping effective du finding (par exemple un
+namespace Kubernetes), vide quand il n'en a pas. Sans `split`, les
+groupings d'une signature sont additionnés en une seule ligne, la forme
+ci-dessus. Avec `split=grouping`, la réponse gagne `"split": "grouping"`,
+chaque ligne qui a un grouping porte un champ `grouping` (omis pour la
+ligne sans grouping), les lignes viennent par ordre croissant (jour,
+signature, grouping), et `next_after_grouping` accompagne `next_after`,
+le grouping de la ligne du curseur (`""` pour la ligne sans grouping).
+Renvoyez les deux en `after` et `after_grouping` : une frontière de page
+entre deux groupings d'une même signature ne saute ni ne répète aucune
+ligne. `below_threshold_passes` reste par signature, sur sa ligne sans
+grouping. `[daemon.detections] max_signatures_per_day` plafonne les
+lignes, une ligne étant une signature dans un grouping : une flotte aux
+groupings nombreux demande un plafond plus haut. Au-delà, une détection
+dans un nouveau grouping d'une signature qui a déjà une ligne ce jour-là
+compte sur la ligne sans grouping de cette signature, et seule une
+signature sans ligne ce jour-là va dans l'overflow. Un grouping de plus de
+1024 octets ou contenant un caractère de contrôle compte sur la ligne
+sans grouping de la signature.
 
 Chaque objet de `days` :
 
@@ -1511,6 +1539,27 @@ curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode limit=2
   "next_after": "20753:redundant_sql:order-svc:_api_v1_orders:cccccccccccccccccccccccccccccccc"
 }
 ```
+
+Découpé par grouping, chaque ligne nomme son grouping et le curseur le porte :
+
+```bash
+curl -sS -G http://127.0.0.1:4318/api/detections --data-urlencode split=grouping \
+  --data-urlencode limit=1
+```
+
+```json
+{
+  "split": "grouping",
+  "counts": [
+    {"day": 20753, "signature": "n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "grouping": "prod-eu", "detections": 9, "extra_io_ops": 33}
+  ],
+  "next_after": "20753:n_plus_one_sql:order-svc:_api_v1_orders:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "next_after_grouping": "prod-eu"
+}
+```
+
+Les autres champs sont ceux de la page non découpée. La page suivante
+renvoie `after` et `after_grouping`.
 
 La deuxième page renvoie ce curseur, encodé en pourcent par `curl` :
 
@@ -1626,6 +1675,7 @@ findings acquittés même dans le chemin par défaut.
 | Paramètre de requête malformé (ex. `limit=abc`)   | 400    | erreur en texte brut générée par axum                                                                   |
 | `limit` à 0 ou au-delà de 5000 sur `/api/detections` | 400 | `{"error": "limit must be between 1 and 5000"}`                                                      |
 | `after` autre que `<jour>:<signature>` sur `/api/detections` | 400 | `{"error": "after must be <day>:<signature>"}`                                               |
+| `split` autre que `grouping` sur `/api/detections` | 400 | `{"error": "split must be grouping"}`                                                                  |
 | `/api/detections` avec `[daemon.detections] enabled = false` | 503 | `{"error": "detection ledger disabled"}`                                                     |
 | 8 réponses de `/api/findings`, `/api/detections`, `/api/correlations` ou `/api/export/report` encore en lecture | 503 | `{"error": "too many large reads in flight, retry shortly"}` |
 | Chemin inconnu (ex. `/api/does-not-exist`)        | 404    | corps vide                                                                                              |

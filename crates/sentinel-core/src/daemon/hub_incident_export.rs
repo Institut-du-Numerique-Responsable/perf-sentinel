@@ -113,7 +113,7 @@ pub(crate) mod tests {
         fake_hub_routes4(findings, incidents, correlations, incidents).await
     }
 
-    /// `fake_hub_paths`, with the detection import answered `detections`.
+    /// `fake_hub_paths`, with both detection imports answered `detections`.
     pub(crate) async fn fake_hub_routes4(
         findings: u16,
         incidents: u16,
@@ -133,7 +133,7 @@ pub(crate) mod tests {
                     let status = match uri.path() {
                         "/api/import/findings" => findings,
                         "/api/import/correlations" => correlations,
-                        "/api/import/detections" => detections,
+                        p if p.starts_with("/api/import/detections") => detections,
                         _ => incidents,
                     };
                     store

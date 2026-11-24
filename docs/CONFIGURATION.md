@@ -1017,14 +1017,34 @@ to `/api/import/detections` beside `endpoint`, with the same key and source id, 
 Each round sends every day whose counts moved since the Hub last accepted it, only the rows
 that changed since then, in pages shaped like a `GET /api/detections` page, at most 5,000
 rows and 4 MiB each, the day's `days` entry on its last page. The Hub keeps the larger count
-of each row, so the unchanged ones need not travel again. Rounds start at most once a
-minute, or once per `flush_interval_secs` when that is longer, and a failed page is retried
-with the same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
+of each row, so the unchanged ones need not travel again. The daemon pushes the rows split by
+grouping first, one per signature and grouping, each grouping row sent again when it changes,
+on `/api/import/detections/by-grouping`, its pages carrying `"split": "grouping"`. A Hub that
+answers 404 or 405 there before accepting any page of it predates that route: the daemon logs
+one warning and, until it restarts, pushes to `/api/import/detections` the rows summed per
+signature, every retained day sent again whole, the refused page's rows among them, so that
+Hub misses no count and no day is set to `gap = true`. Once the Hub has accepted a split page,
+a 404 or 405 there is retried like any failed page. A Hub with sign-in that predates the route
+answers it 401 instead: on a 401 or 403 there before any split page was accepted, the daemon
+sends the same day's page unsplit to `/api/import/detections` once, or the oldest day it still
+holds when that day has left the ledger, or a page with no rows when it holds none. If that
+route accepts it, the daemon falls back as on a 404; if it refuses it too, the key is wrong, and the daemon
+stays on the split route and retries it with the usual backoff, probing again on each
+refusal. A Hub that stores each ledger in one form answers every accepted page with
+`ledger_form`, `split` or `unsplit`, once the ledger has a form, and leaves out the counts of a page in the other form, as
+when the reply to a page it stored was lost and the daemon then changed route. On a
+`ledger_form` other than the form it pushes, the daemon logs one warning and, until it
+restarts, pushes in the Hub's form, `split` on the per-grouping route and `unsplit` on the older
+one, every retained day sent again whole in that form. A reply without `ledger_form`, from an
+older Hub, changes nothing. Rounds start at most once a minute, or
+once per `flush_interval_secs` when that is longer, and a failed page is retried with the
+same backoff on its own clock. A graceful shutdown sets `gap = true` on the current day
 and pushes once more, after the findings, incidents and episodes still pending, so a long
 ledger never spends their drain budget. A page the Hub rejects with an unretryable 4xx is dropped, its rows
 counted in `perf_sentinel_hub_export_dropped_total`, and its day set to `gap = true` in the
-ledger. A Hub that answers 404 or 405 on that route predates it: the daemon logs one warning
-and stops pushing detection counts until it restarts, while the other exports keep flowing.
+ledger. A Hub that answers 404 or 405 on `/api/import/detections` too predates the detection
+push: the daemon logs one warning and stops pushing detection counts until it restarts, while
+the other exports keep flowing.
 
 The Hub's reply to a detection page can carry `watch`, the signatures of threshold-type
 findings it wants confirmed: a fix marked done with no confirming day yet. The daemon keeps
@@ -1093,13 +1113,13 @@ and a restart starts a new one. On by default. Daemon-only.
 |--------------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`                | boolean | `true`  | Record every detection in the per-day ledger. `false` skips the ledger, and the bounds below are still checked                                                                                                                                                                                                            |
 | `retained_days`          | integer | `8`     | Days of ledger kept in memory, today included, 2 to 31. The older days are dropped                                                                                                                                                                                                                                        |
-| `max_signatures_per_day` | integer | `10000` | Distinct finding signatures tracked per day, 1 to 1000000. A new signature past it counts in the day's overflow, never in another signature. A signature longer than 1024 bytes or holding a control character is not tracked and counts in the overflow too. The ceiling keeps a typo from sizing the ledger past memory |
+| `max_signatures_per_day` | integer | `50000` | Rows tracked per day, 1 to 1000000, a row being one signature in one grouping (`GET /api/detections?split=grouping`), so a fleet with N groupings needs a cap scaled by about N. Past it, a detection in a new grouping counts on its signature's ungrouped row when the signature already has a row that day, and in the day's overflow otherwise, so a counted signature never loses a detection to the overflow. A signature longer than 1024 bytes or holding a control character is not tracked and counts in the overflow too. The ceiling keeps a typo from sizing the ledger past memory |
 
 ```toml
 [daemon.detections]
 enabled = true
 retained_days = 8
-max_signatures_per_day = 10000
+max_signatures_per_day = 50000
 ```
 
 #### `[daemon.cors]` (optional, since 0.5.23)
@@ -1291,7 +1311,7 @@ memory_high_water_pct = 0
 # [daemon.detections]
 # enabled = true
 # retained_days = 8
-# max_signatures_per_day = 10000
+# max_signatures_per_day = 50000
 
 # Optional: trace bodies `perf-sentinel tempo` reads at once (1 to 64)
 # [tempo]

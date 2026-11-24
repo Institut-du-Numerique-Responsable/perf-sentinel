@@ -447,8 +447,8 @@ pub struct DaemonDetectionsConfig {
     pub enabled: bool,
     /// Days of ledger kept, today included. 2 to 31, default 8.
     pub retained_days: u32,
-    /// Distinct signatures tracked per day, the rest counted as overflow.
-    /// 1 to 1,000,000, default 10,000.
+    /// Rows tracked per day, a row being one signature in one grouping, the
+    /// rest counted as overflow. 1 to 1,000,000, default 50,000.
     pub max_signatures_per_day: usize,
 }
 
@@ -761,7 +761,7 @@ impl Default for DaemonDetectionsConfig {
         Self {
             enabled: true,
             retained_days: 8,
-            max_signatures_per_day: 10_000,
+            max_signatures_per_day: 50_000,
         }
     }
 }

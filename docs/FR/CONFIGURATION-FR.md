@@ -1047,15 +1047,38 @@ identifiant de source, depuis 0.37.0. Chaque tour envoie chaque jour dont les co
 bougé depuis que le Hub l'a accepté pour la dernière fois, seulement les lignes modifiées
 depuis, en pages de la forme d'une page de `GET /api/detections`, au plus 5 000 lignes et
 4 Mio chacune, l'entrée `days` du jour sur sa dernière page. Le Hub garde le plus grand
-compte de chaque ligne, les lignes inchangées n'ont donc pas à repartir. Les tours démarrent
-au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus long, et
-une page en échec est retentée avec le même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
+compte de chaque ligne, les lignes inchangées n'ont donc pas à repartir. Le daemon pousse
+d'abord les lignes réparties par grouping, une par signature et grouping, chaque ligne de
+grouping renvoyée quand elle change, sur `/api/import/detections/by-grouping`, ses pages
+portant `"split": "grouping"`. Un Hub qui répond 404 ou 405 sur cette route avant d'en avoir
+accepté une page la précède : le daemon journalise un avertissement et, jusqu'à son
+redémarrage, pousse vers `/api/import/detections` les lignes sommées par signature, chaque
+jour retenu renvoyé en entier, les lignes de la page refusée comprises, pour que ce Hub ne
+perde aucun compte et qu'aucun jour ne passe à `gap = true`. Une fois qu'une page répartie a
+été acceptée, un 404 ou 405 sur cette route est retenté comme toute page en échec. Un Hub avec
+la connexion active qui précède la route y répond 401 à la place : sur un 401 ou 403 sur cette route
+avant qu'une page répartie ait été acceptée, le daemon envoie une fois la page du même jour,
+non répartie, vers `/api/import/detections`, ou celle du plus ancien jour qu'il garde encore
+quand ce jour a quitté le registre, ou une page sans ligne quand il n'en garde aucun. Si
+cette route l'accepte, le daemon se replie comme sur un 404 ; si elle la refuse aussi, la clé est fausse, et le daemon reste sur la
+route répartie et la retente avec le backoff habituel, en sondant de nouveau à chaque refus.
+Un Hub qui stocke chaque registre sous une seule forme répond à toute page acceptée avec
+`ledger_form`, `split` ou `unsplit`, dès que le registre a une forme, et écarte les comptes d'une page de l'autre forme, comme
+quand la réponse à une page qu'il a stockée s'est perdue et que le daemon a ensuite changé de
+route. Sur un `ledger_form` autre que la forme qu'il pousse, le daemon journalise un
+avertissement et, jusqu'à son redémarrage, pousse sous la forme du Hub, `split` sur la route
+répartie et `unsplit` sur l'ancienne, chaque jour retenu renvoyé en entier sous cette forme. Une
+réponse sans `ledger_form`, d'un Hub plus ancien, ne change rien.
+Les tours
+démarrent au plus une fois par minute, ou une fois par `flush_interval_secs` quand il est plus
+long, et une page en échec est retentée avec le même backoff sur sa propre horloge. Un arrêt propre passe le jour courant à `gap = true` et
 pousse une dernière fois, après les findings, incidents et épisodes encore en attente, pour
 qu'un long registre ne consomme pas leur budget de vidange. Une page que le Hub rejette avec un 4xx non rejouable est
 abandonnée, ses lignes comptées dans `perf_sentinel_hub_export_dropped_total`, et son jour
-passé à `gap = true` dans le registre. Un Hub qui répond 404 ou 405 sur cette route la
-précède : le daemon journalise un avertissement et cesse de pousser les comptes de
-détections jusqu'à son redémarrage, tandis que les autres exports continuent.
+passé à `gap = true` dans le registre. Un Hub qui répond 404 ou 405 sur
+`/api/import/detections` aussi précède la poussée des détections : le daemon journalise un
+avertissement et cesse de pousser les comptes de détections jusqu'à son redémarrage, tandis
+que les autres exports continuent.
 
 La réponse du Hub à une page de détections peut porter `watch`, les signatures de findings
 à seuil qu'il veut voir confirmées : un correctif marqué fait, sans jour de confirmation
@@ -1129,13 +1152,13 @@ Actif par défaut. Daemon uniquement.
 |--------------------------|---------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`                | booléen | `true`  | Enregistre chaque détection dans le registre par jour. `false` saute le registre, et les bornes ci-dessous restent vérifiées                                                                                                                                                                                                                                                          |
 | `retained_days`          | entier  | `8`     | Jours de registre gardés en mémoire, aujourd'hui compris, de 2 à 31. Les jours plus anciens sont abandonnés                                                                                                                                                                                                                                                                           |
-| `max_signatures_per_day` | entier  | `10000` | Signatures de findings distinctes suivies par jour, de 1 à 1000000. Une nouvelle signature au-delà compte dans l'overflow du jour, jamais dans une autre signature. Une signature de plus de 1024 octets ou contenant un caractère de contrôle n'est pas suivie et compte aussi en overflow. Le plafond évite qu'une faute de frappe ne dimensionne le registre au-delà de la mémoire |
+| `max_signatures_per_day` | entier  | `50000` | Lignes suivies par jour, de 1 à 1000000, une ligne étant une signature dans un grouping (`GET /api/detections?split=grouping`) : une flotte de N groupings demande un plafond multiplié d'environ N. Au-delà, une détection dans un nouveau grouping compte sur la ligne sans grouping de sa signature quand celle-ci a déjà une ligne ce jour-là, et dans l'overflow du jour sinon : une signature déjà comptée ne perd jamais de détection dans l'overflow. Une signature de plus de 1024 octets ou contenant un caractère de contrôle n'est pas suivie et compte aussi en overflow. Le plafond évite qu'une faute de frappe ne dimensionne le registre au-delà de la mémoire |
 
 ```toml
 [daemon.detections]
 enabled = true
 retained_days = 8
-max_signatures_per_day = 10000
+max_signatures_per_day = 50000
 ```
 
 #### `[daemon.cors]` (optionnel, depuis 0.5.23)
@@ -1335,7 +1358,7 @@ memory_high_water_pct = 0
 # [daemon.detections]
 # enabled = true
 # retained_days = 8
-# max_signatures_per_day = 10000
+# max_signatures_per_day = 50000
 
 # Optionnel : corps de traces lus à la fois par `perf-sentinel tempo` (de 1 à 64)
 # [tempo]
