@@ -791,3 +791,28 @@ fn the_signatures_gauge_counts_rows() {
     tick_once(&ledger, &metrics, 3 * DAY_MS + 1);
     assert_eq!(metrics.detection_ledger_signatures.get(), 3);
 }
+
+#[test]
+fn passes_of_a_signature_held_in_a_grouping_ignore_the_watch_cap() {
+    let ledger = DetectionLedger::new(&cfg(8, 1), true, 1.0, DayThresholds::default(), 3 * DAY_MS);
+    ledger.record(&[grouped(SLOW, "ns-a", 0)], 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 2), (CHATTY, 5)]), 3 * DAY_MS);
+    ledger.record_below(&passes(&[(SLOW, 3)]), 3 * DAY_MS);
+    let slow = row(&ledger, 3, SLOW).expect("summed row");
+    assert_eq!(slow.below_threshold_passes, Some(5));
+    assert_eq!(slow.detections, 1);
+}
+
+#[test]
+fn an_untrackable_grouping_counts_on_the_ungrouped_row() {
+    let ledger = ledger_at(3, true);
+    let long = "g".repeat(MAX_TRACKED_SIGNATURE_BYTES + 1);
+    let overflowed = ledger.record(&[grouped("a", &long, 1), finding("a", 1)], 3 * DAY_MS);
+    assert_eq!(overflowed, 0);
+    assert_eq!(split_rows(&ledger), owned(&[("a", "", 2)]));
+}
+
+#[test]
+fn the_row_estimate_covers_the_grouping_key() {
+    assert!(ROW_OVERHEAD_BYTES >= 128 + "\"grouping\":\"\",".len());
+}

@@ -27,8 +27,8 @@ pub(crate) const MAX_TRACKED_SIGNATURE_BYTES: usize = 1024;
 /// Estimated JSON bytes one page may carry.
 pub(crate) const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 /// Estimated JSON bytes of a `CountRow` beside its signature.
-/// Room for `below_threshold_passes`.
-const ROW_OVERHEAD_BYTES: usize = 128;
+/// Room for `below_threshold_passes` and a split row's `"grouping":"",` key.
+const ROW_OVERHEAD_BYTES: usize = 144;
 
 /// The JSON length of a tracked signature. Control characters never reach a
 /// key (they go to the overflow), so `"` and `\` are the only escapes.
@@ -403,6 +403,16 @@ fn day_of(now_ms: u64) -> u32 {
     u32::try_from(now_ms / DAY_MS).unwrap_or(u32::MAX)
 }
 
+/// Whether `bucket` holds a row of `signature` in any grouping.
+fn holds_signature(bucket: &DayBucket, signature: &str) -> bool {
+    let probe = (signature, "");
+    bucket
+        .counts
+        .range::<dyn RowKey, _>((Bound::Included(row_key(&probe)), Bound::Unbounded))
+        .next()
+        .is_some_and(|((s, _), _)| **s == *signature)
+}
+
 fn is_trackable(signature: &str) -> bool {
     signature.len() <= MAX_TRACKED_SIGNATURE_BYTES && !signature.chars().any(char::is_control)
 }
@@ -507,7 +517,11 @@ impl DetectionLedger {
             if let Some(tally) = bucket.counts.get_mut(row_key(&(signature, ""))) {
                 tally.below_threshold_passes += n;
                 tally.rev = rev;
-            } else if bucket.watch_rows < cap && bucket.counts.len() < cap.saturating_mul(2) {
+            } else if holds_signature(bucket, signature)
+                || (bucket.watch_rows < cap && bucket.counts.len() < cap.saturating_mul(2))
+            {
+                // A signature already counted in a grouping takes its ungrouped
+                // row freely, so the unsplit passes do not depend on groupings.
                 let tally = Tally {
                     below_threshold_passes: n,
                     rev,
@@ -560,6 +574,8 @@ impl DetectionLedger {
         io: u64,
         rev: u64,
     ) -> bool {
+        // An untrackable grouping counts on the ungrouped row, the total stays.
+        let grouping = if is_trackable(grouping) { grouping } else { "" };
         let bucket = state.bucket(day, self.sampling_rate);
         if let Some(tally) = bucket.counts.get_mut(row_key(&(signature, grouping))) {
             if tally.detections == 0 {
@@ -571,7 +587,6 @@ impl DetectionLedger {
         // Watch rows never take a detection slot. The cap counts rows.
         if bucket.counts.len() - bucket.watch_rows >= self.max_signatures_per_day
             || !is_trackable(signature)
-            || !is_trackable(grouping)
         {
             bucket.overflow.add(io, rev);
             return false;
