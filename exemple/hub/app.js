@@ -411,8 +411,9 @@
         ack: null,
         // The route an in-app Ack link was followed from, for the page's way back.
         ackReturn: null,
-        // How an incident's frozen findings are ordered: strongest link first, ties worst and most seen first.
-        findingSort: {key: 'link', dir: 'desc'},
+        // How an incident's frozen findings are ordered, the first column first: strongest link first,
+        // ties worst and most seen first. Shift and a click on a head adds a column.
+        findingSort: [{key: 'link', dir: 'desc'}],
         incidentFiltersOpen: false,
         // What was typed above each incident's findings, by incident key.
         findingQuery: {},
@@ -6429,7 +6430,7 @@
             const signature = row.finding && row.finding.signature;
             const link = signature && Object.prototype.hasOwnProperty.call(links, signature) ? links[signature] : undefined;
             return link ? {...row, link: link} : row;
-        }), state.findingSort.key, state.findingSort.dir);
+        }), state.findingSort);
         // A link, so it opens in a new tab too. Its end is clamped to the moment it is followed.
         const analyse = el('a', {class: 'pill-button', href: PSL.incidentHandoffHash(detail, Date.now())}, [
             svg([['path', {d: 'M5 12h14M13 6l6 6-6 6'}]], 14),
@@ -6497,7 +6498,8 @@
         return el('div', {class: 'findings-controls'}, [
             row,
             field(t('incidents.link.filter'), level, null),
-            el('p', {class: 'field-note', id: noteId, text: t('incidents.link.note')})
+            el('p', {class: 'field-note', id: noteId, text: t('incidents.link.note')}),
+            el('p', {class: 'field-note', text: t('incidents.sort.hint')})
         ]);
     }
 
@@ -6700,19 +6702,29 @@
             th.textContent = label;
             return th;
         }
-        const sort = state.findingSort;
-        const active = sort.key === key;
-        if (active) th.setAttribute('aria-sort', sort.dir === 'asc' ? 'ascending' : 'descending');
+        const sorts = state.findingSort;
+        const rank = sorts.findIndex(function (sort) { return sort.key === key; });
+        const sort = rank >= 0 ? sorts[rank] : null;
+        if (sort) {
+            th.setAttribute('data-sorted', '');
+            // ARIA allows aria-sort on one head: the first column, the one the rows read by.
+            if (rank === 0) th.setAttribute('aria-sort', sort.dir === 'asc' ? 'ascending' : 'descending');
+        }
         const id = incidentKey(incident) + ':' + key;
         const button = el('button', {type: 'button', class: 'sort-head', 'data-sort': id}, [
             el('span', {text: label}),
             // Idle heads carry both arrows, or only the sorted column would read as sortable.
-            svg([['path', {d: active ? (sort.dir === 'asc' ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6') : 'M8 9l4-4 4 4M8 15l4 4 4-4'}]], 11)
+            svg([['path', {d: sort ? (sort.dir === 'asc' ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6') : 'M8 9l4-4 4 4M8 15l4 4 4-4'}]], 11),
+            sort && sorts.length > 1
+                ? el('span', {class: 'sort-rank', 'aria-hidden': 'true', text: String(rank + 1), title: t('incidents.sort.rank', {rank: rank + 1})})
+                : null,
+            // aria-sort names the first column's direction; the others say their rank and direction here.
+            sort && rank > 0
+                ? el('span', {class: 'visually-hidden', text: ' ' + t('incidents.sort.rank_' + sort.dir, {rank: rank + 1})})
+                : null
         ]);
-        button.addEventListener('click', function () {
-            state.findingSort = active
-                ? {key: key, dir: sort.dir === 'asc' ? 'desc' : 'asc'}
-                : {key: key, dir: key === 'severity' || key === 'link' || key === 'impact' || key === 'seen' ? 'desc' : 'asc'};
+        button.addEventListener('click', function (event) {
+            state.findingSort = PSL.nextFindingSort(sorts, key, event.shiftKey);
             // The ids come from the daemon: escaped, so a quote in one cannot break the selector.
             renderFocus('[data-sort="' + CSS.escape(id) + '"]');
         });
@@ -6771,6 +6783,7 @@
     const EPISODE_COLUMNS = ['episode', 'lasted', 'peak_conf', 'peak_co', 'incidents', ''];
     const EPISODE_COLUMNS_RIGHT = ['lasted', 'peak_conf', 'peak_co'];
     const STRIP_WIDTH = 640;
+    const STRIP_KINDS = ['oom_kill', 'memory_saturation', 'restart', 'deploy', 'other'];
 
     function correlationsPath() {
         const filter = state.correlationFilter;
@@ -7032,20 +7045,39 @@
                 && PSL.spansOverlap(incident.window_from_ms, incidentEnd(incident), fromMs, toMs);
         });
         const guide = foldGuide('correlations.panel', state.panelOpen['pair:' + pair.key] === true);
+        // A pair read a while ago can hold an episode that has since left the range: the strip,
+        // which starts at what it shows, would otherwise pin it to its left edge.
+        const episodes = pair.episodes.filter(function (episode) {
+            return PSL.spansOverlap(episode.started_at_ms, episode.ended_at_ms, fromMs, toMs);
+        });
         return el('div', {class: 'daemon-panel', ...guide}, [
-            timelineStrip(pair.episodes, incidents, fromMs, toMs),
+            timelineStrip(episodes, incidents, fromMs, toMs),
             el('div', {class: 'sources-wrap'}, [episodesTable(pair.episodes, incidents)])
         ]);
     }
 
     /**
-     * The range as a strip: each episode in green, the same daemon's incidents in red behind them.
+     * The range as a strip: each episode in green, the same daemon's incidents behind them coloured by kind.
+     * The strip starts at the earliest episode rather than at the range's start, keeps the incidents
+     * it reaches, carries a few dated marks and a legend, and each bar names its span on hover.
      * @param {Episode[]} episodes
-     * @param {Incident[]} incidents
-     * @param {number} fromMs
+     * @param {Incident[]} rangeIncidents the daemon's incidents in the range
+     * @param {number} rangeFromMs
      * @param {number} toMs
      */
-    function timelineStrip(episodes, incidents, fromMs, toMs) {
+    function timelineStrip(episodes, rangeIncidents, rangeFromMs, toMs) {
+        const episodeSpans = episodes.map(function (episode) {
+            return {from: episode.started_at_ms, to: episode.ended_at_ms};
+        });
+        const shown = PSL.stripWindow(episodeSpans, rangeIncidents.map(function (incident) {
+            return {from: incident.window_from_ms, to: incidentEnd(incident)};
+        }), rangeFromMs, toMs);
+        const fromMs = shown.from;
+        const incidents = shown.incidents.map(function (at) { return rangeIncidents[at]; });
+        const incidentSpans = incidents.map(function (incident) {
+            return {from: incident.window_from_ms, to: incidentEnd(incident)};
+        });
+        const ticks = PSL.stripTicks(fromMs, toMs);
         const ns = 'http://www.w3.org/2000/svg';
         const strip = document.createElementNS(ns, 'svg');
         strip.setAttribute('viewBox', '0 0 ' + STRIP_WIDTH + ' 30');
@@ -7053,38 +7085,80 @@
         strip.setAttribute('class', 'timeline-strip');
         strip.setAttribute('role', 'img');
         strip.setAttribute('aria-label', t('correlations.strip_label', {
-            episodes: episodes.length, incidents: incidents.length, span: PSL.humanDur(state.correlationFilter.range)
+            episodes: episodes.length, incidents: incidents.length, span: PSL.dur(toMs - fromMs)
         }));
+        ticks.forEach(function (tick) {
+            const line = document.createElementNS(ns, 'line');
+            const x = String(Math.round(tick.at * STRIP_WIDTH));
+            line.setAttribute('x1', x);
+            line.setAttribute('x2', x);
+            line.setAttribute('y1', '0');
+            line.setAttribute('y2', '30');
+            line.setAttribute('class', 'timeline-tick');
+            strip.appendChild(line);
+        });
         /**
          * @param {Array<{x: number, w: number}>} marks
+         * @param {string[]} titles
          * @param {string} className
          * @param {number} y
          * @param {number} height
+         * @param {string[]} [kinds] each incident's kind, which picks its colour
          */
-        const draw = function (marks, className, y, height) {
-            marks.forEach(function (mark) {
+        const draw = function (marks, titles, className, y, height, kinds) {
+            marks.forEach(function (mark, at) {
                 const rect = document.createElementNS(ns, 'rect');
+                if (kinds) rect.setAttribute('data-kind', kinds[at]);
                 rect.setAttribute('x', String(mark.x));
                 rect.setAttribute('width', String(mark.w));
                 rect.setAttribute('y', String(y));
                 rect.setAttribute('height', String(height));
                 rect.setAttribute('rx', '3');
                 rect.setAttribute('class', className);
+                // A mouse reads the span here; a screen reader reads it in the table below.
+                const title = document.createElementNS(ns, 'title');
+                title.textContent = titles[at];
+                rect.appendChild(title);
                 strip.appendChild(rect);
             });
         };
-        draw(PSL.timelineMarks(incidents.map(function (incident) {
-            return {from: incident.window_from_ms, to: incidentEnd(incident)};
-        }), fromMs, toMs, STRIP_WIDTH), 'timeline-incident', 2, 26);
-        draw(PSL.timelineMarks(episodes.map(function (episode) {
-            return {from: episode.started_at_ms, to: episode.ended_at_ms};
-        }), fromMs, toMs, STRIP_WIDTH), 'timeline-episode', 9, 12);
+        draw(PSL.timelineMarks(incidentSpans, fromMs, toMs, STRIP_WIDTH), incidents.map(function (incident) {
+            return t('correlations.strip.incident', {
+                kind: PSL.INCIDENT_KIND_LABEL[incident.kind] || incident.kind,
+                span: PSL.episodeSpan(incident.window_from_ms, incidentEnd(incident))
+            });
+        }), 'timeline-incident', 2, 26, incidents.map(function (incident) {
+            return incident.kind;
+        }));
+        draw(PSL.timelineMarks(episodeSpans, fromMs, toMs, STRIP_WIDTH), episodes.map(function (episode) {
+            return t('correlations.strip.episode', {
+                span: episode.ended_at_ms == null
+                    ? t('correlations.strip.running', {start: PSL.dateTime(episode.started_at_ms)})
+                    : PSL.episodeSpan(episode.started_at_ms, episode.ended_at_ms)
+            });
+        }), 'timeline-episode', 9, 12);
         return el('div', {class: 'timeline'}, [
             strip,
             el('div', {class: 'timeline-axis'}, [
                 el('span', {text: PSL.dateTime(fromMs)}),
+                el('span', {class: 'timeline-ticks', 'aria-hidden': 'true'}, ticks.map(function (tick) {
+                    return el('span', {class: 'timeline-tick-label', style: 'left:' + (tick.at * 100).toFixed(2) + '%', text: tick.label});
+                })),
                 el('span', {text: t('correlations.now')})
-            ])
+            ]),
+            // The pair, then one key per kind of incident the strip shows, in the incident chips' order.
+            el('div', {class: 'timeline-legend'}, [
+                el('span', {class: 'timeline-key timeline-key-episode', text: t('correlations.strip.legend_episode')})
+            ].concat(STRIP_KINDS.filter(function (kind) {
+                return incidents.some(function (incident) {
+                    return (STRIP_KINDS.indexOf(incident.kind) >= 0 ? incident.kind : 'other') === kind;
+                });
+            }).map(function (kind) {
+                return el('span', {
+                    class: 'timeline-key timeline-key-incident', 'data-kind': kind,
+                    text: t('correlations.strip.legend_incident', {kind: PSL.INCIDENT_KIND_LABEL[kind] || kind})
+                });
+            })))
         ]);
     }
 
@@ -7180,9 +7254,12 @@
         const cacheKey = PSL.correlationWindowKey(key, incident.window_from_ms, incidentEnd(incident));
         state.incidentCorrelations[cacheKey] = 'loading';
         const scope = '/api/correlations?source_id=' + encodeURIComponent(incident.source_id);
-        readAllEpisodes(scope + '&from=' + incident.window_from_ms + '&to=' + incidentEnd(incident), 0)
-            .then(function (rows) {
-                if (rows.length > 0) return {rows: rows, pushes: true};
+        // The service narrows on the Hub, the namespace here: the route has no grouping filter.
+        readAllEpisodes(scope + '&service=' + encodeURIComponent(incident.service)
+            + '&from=' + incident.window_from_ms + '&to=' + incidentEnd(incident), 0)
+            .then(function (all) {
+                const rows = PSL.incidentEpisodes(all, incident);
+                if (all.length > 0) return {rows: rows, pushes: true};
                 return getJson(scope + '&limit=1').then(function (/** @type {Episode[]} */ any) {
                     return {rows: rows, pushes: any.length > 0};
                 });
@@ -7229,7 +7306,7 @@
         const block = el('div', {class: 'incident-correlations'}, [
             el('p', {class: 'overline daemon-audience', text: t('correlations.overline')}),
             el('h3', {class: 'daemon-lead', text: t('correlations.incident.title')}),
-            el('p', {class: 'daemon-source-note', text: t('correlations.incident.sub')})
+            el('p', {class: 'daemon-source-note', text: t('correlations.incident.sub', {service: incident.service})})
         ]);
         if (held === undefined || held === 'loading') {
             block.appendChild(el('p', {
@@ -7254,7 +7331,7 @@
             block.appendChild(el('p', {
                 class: 'empty-state',
                 text: held.pushes
-                    ? t('correlations.incident.none')
+                    ? t('correlations.incident.none', {service: incident.service})
                     : t('correlations.incident.no_push', {name: incident.source_name || incident.source_id})
             }));
         }

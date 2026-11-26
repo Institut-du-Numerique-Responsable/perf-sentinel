@@ -1212,16 +1212,19 @@
 
     const LINK_RANK = {strong: 3, medium: 2, weak: 1};
 
+    /** @typedef {'type' | 'severity' | 'impact' | 'endpoint' | 'template' | 'seen' | 'first' | 'link'} FindingSortKey */
+
     /**
-     * An incident's frozen findings in the order a column asks for. Ties fall
-     * back to the default reading order, worst and most seen first, so equal
+     * An incident's frozen findings in the order one or more columns ask for, the first column
+     * first. Ties fall back to the default reading order, worst and most seen first, so equal
      * rows never shuffle between two renders.
      * @param {Array<{seen_count?: number, first_seen_ms: number, finding?: any}>} rows
-     * @param {'type' | 'severity' | 'impact' | 'endpoint' | 'template' | 'seen' | 'first' | 'link'} key
-     * @param {'asc' | 'desc'} dir
+     * @param {FindingSortKey | Array<{key: FindingSortKey, dir: 'asc' | 'desc'}>} key a column, or the columns in order
+     * @param {'asc' | 'desc'} [dir] the column's direction when a single one is given
      * @returns {Array<any>}
      */
     function sortFindings(rows, key, dir) {
+        const sorts = Array.isArray(key) ? key : [{key: key, dir: dir || 'asc'}];
         /** @type {Record<string, (row: {seen_count?: number, first_seen_ms: number, finding?: any}) => string | number>} */
         const value = {
             type: function (row) {
@@ -1264,12 +1267,35 @@
             const y = value[name](b);
             return typeof x === 'string' ? x.localeCompare(String(y)) : x - Number(y);
         };
-        const sign = dir === 'asc' ? 1 : -1;
         return rows.slice().sort(function (a, b) {
-            return sign * compare(key, a, b)
-                || -compare('severity', a, b) || -compare('seen', a, b)
+            for (const sort of sorts) {
+                const order = (sort.dir === 'asc' ? 1 : -1) * compare(sort.key, a, b);
+                if (order) return order;
+            }
+            return -compare('severity', a, b) || -compare('seen', a, b)
                 || compare('endpoint', a, b) || compare('first', a, b);
         });
+    }
+
+    /**
+     * The columns a click on a head leaves: alone, turned round when it already sorted alone, or
+     * with Shift after the others, turned round where it already sorts. Counts and severity
+     * start worst first, the rest A to Z.
+     * @param {Array<{key: FindingSortKey, dir: 'asc' | 'desc'}>} sorts
+     * @param {FindingSortKey} key
+     * @param {boolean} shift
+     * @returns {Array<{key: FindingSortKey, dir: 'asc' | 'desc'}>}
+     */
+    function nextFindingSort(sorts, key, shift) {
+        const rank = sorts.findIndex(function (sort) { return sort.key === key; });
+        /** @type {{key: FindingSortKey, dir: 'asc' | 'desc'} | null} */
+        const flipped = rank >= 0 ? {key: key, dir: sorts[rank].dir === 'asc' ? 'desc' : 'asc'} : null;
+        /** @type {{key: FindingSortKey, dir: 'asc' | 'desc'}} */
+        const fresh = {key: key, dir: key === 'severity' || key === 'link' || key === 'impact' || key === 'seen' ? 'desc' : 'asc'};
+        if (!shift) return [flipped && sorts.length === 1 ? flipped : fresh];
+        return flipped
+            ? sorts.map(function (other, at) { return at === rank ? flipped : other; })
+            : sorts.concat([fresh]);
     }
 
     /**
@@ -1563,6 +1589,100 @@
     }
 
     /**
+     * Where a strip starts: at the earliest span it shows, less a small margin, rather than at the
+     * range's start, so a week of episodes in a 180-day range is not crushed into its last pixels.
+     * Never before the range's start, and the range's start when no span falls in it.
+     * @param {Array<{from: number, to: number | null}>} spans
+     * @param {number} fromMs
+     * @param {number} toMs
+     * @returns {number}
+     */
+    function stripStart(spans, fromMs, toMs) {
+        const starts = spans.filter(function (span) {
+            return span.from < toMs && (span.to == null || span.to >= fromMs);
+        }).map(function (span) {
+            return Math.max(fromMs, span.from);
+        });
+        if (starts.length === 0) return fromMs;
+        const earliest = Math.min.apply(null, starts);
+        return Math.max(fromMs, earliest - Math.max((toMs - earliest) * 0.05, 30 * 60000));
+    }
+
+    /**
+     * A pair's strip: it starts at the pair's own episodes. The incidents come from the daemon's
+     * newest page, not only from the pair's services, so an old unrelated one would otherwise
+     * stretch the strip back to it. The incidents kept are those the strip reaches, so its label
+     * and its legend count what it draws.
+     * @param {Array<{from: number, to: number | null}>} episodes
+     * @param {Array<{from: number, to: number | null}>} incidents
+     * @param {number} fromMs
+     * @param {number} toMs
+     * @returns {{from: number, incidents: number[]}} incidents: the indexes of those kept
+     */
+    function stripWindow(episodes, incidents, fromMs, toMs) {
+        const from = stripStart(episodes, fromMs, toMs);
+        const kept = [];
+        incidents.forEach(function (span, at) {
+            if (spansOverlap(span.from, span.to, from, toMs)) kept.push(at);
+        });
+        return {from: from, incidents: kept};
+    }
+
+    const STRIP_TICK_STEPS = [1, 2, 3, 6, 12, 24, 48, 168, 336, 720].map(function (hours) {
+        return hours * 3600000;
+    });
+
+    /**
+     * Up to four dated marks between a strip's ends, on round local hours or midnights, none so
+     * close to an end that its label would run into the end's own.
+     * @param {number} fromMs
+     * @param {number} toMs
+     * @returns {Array<{at: number, label: string}>} at: where the mark sits, 0 to 1
+     */
+    function stripTicks(fromMs, toMs) {
+        const span = toMs - fromMs;
+        if (span <= 0) return [];
+        const step = STRIP_TICK_STEPS.find(function (candidate) {
+            return span / candidate <= 4;
+        }) || STRIP_TICK_STEPS[STRIP_TICK_STEPS.length - 1];
+        const day = step >= 86400000;
+        const midnight = new Date(fromMs);
+        midnight.setHours(0, 0, 0, 0);
+        let mark = midnight.getTime();
+        while (mark <= fromMs) mark = day ? nextMidnight(mark, 1) : mark + step;
+        /** @type {Array<{at: number, label: string}>} */
+        const ticks = [];
+        for (; mark < toMs; mark = day ? nextMidnight(mark, step / 86400000) : mark + step) {
+            const at = (mark - fromMs) / span;
+            // The start's label is a whole date and time, the end's a word: more room on the left.
+            if (at < 0.22 || at > 0.88) continue;
+            ticks.push({at: at, label: day ? dayMonth(mark) : dayMonth(mark) + ' ' + time(mark)});
+        }
+        return ticks;
+    }
+
+    /**
+     * A local midnight some days later, by the calendar, so a change of clock does not drift it.
+     * @param {number} ms
+     * @param {number} days
+     */
+    function nextMidnight(ms, days) {
+        const d = new Date(ms);
+        d.setDate(d.getDate() + days);
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+    }
+
+    /**
+     * A day and month: `25/11` in French, `11-25` in English, as dateTime writes them.
+     * @param {number} ms
+     */
+    function dayMonth(ms) {
+        if (LANG !== 'fr') return dtHuman(ms).slice(5, 10);
+        return new Intl.DateTimeFormat('fr-FR', {day: '2-digit', month: '2-digit'}).format(new Date(ms));
+    }
+
+    /**
      * A median lag, often under a second and seldom over a minute: dur() rounds to whole
      * seconds, which would print 1.2 s as 1 s.
      * @param {number | null | undefined} ms
@@ -1596,6 +1716,24 @@
      */
     function correlationWindowKey(incidentKey, fromMs, toMs) {
         return incidentKey + '@' + fromMs + '-' + toMs;
+    }
+
+    /**
+     * The episodes that concern an incident: a side on its service, and in its namespace when it
+     * names one. A side grouped on no namespace, with no grouping value or with a daemon whose
+     * first grouping attribute is another one, cannot be placed in a namespace, so it stays.
+     * @param {Array<{source: {service: string, grouping_key: string | null, grouping_value: string | null}, target: {service: string, grouping_key: string | null, grouping_value: string | null}}>} episodes
+     * @param {{service: string, namespace?: string}} incident
+     * @returns {Array<any>}
+     */
+    function incidentEpisodes(episodes, incident) {
+        return episodes.filter(function (episode) {
+            return [episode.source, episode.target].some(function (side) {
+                return side.service === incident.service
+                    && (!incident.namespace || side.grouping_key !== 'k8s.namespace.name'
+                        || side.grouping_value === incident.namespace);
+            });
+        });
     }
 
     /**
@@ -5410,6 +5548,7 @@
         incidentCapture,
         findingPhase,
         sortFindings,
+        nextFindingSort,
         linkReasonParts,
         saturationPercent,
         linkChipLevel,
@@ -5431,6 +5570,7 @@
         CORRELATION_RANGES,
         readCorrelationPair,
         correlationWindowKey,
+        incidentEpisodes,
         pairLabel,
         episodeEndNote,
         correlationPairs,
@@ -5440,6 +5580,9 @@
         pairTraceHash,
         readTraceHandoff,
         timelineMarks,
+        stripStart,
+        stripWindow,
+        stripTicks,
         lagText,
         episodeSpan,
         ackRouteHash,

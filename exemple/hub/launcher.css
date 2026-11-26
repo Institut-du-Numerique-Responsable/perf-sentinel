@@ -1118,7 +1118,7 @@ a.shell-identity[aria-current="page"] {
     cursor: pointer;
 }
 
-.sort-head:hover, th[aria-sort] .sort-head {
+.sort-head:hover, th[aria-sort] .sort-head, th[data-sorted] .sort-head {
     color: var(--text);
 }
 
@@ -1126,8 +1126,14 @@ a.shell-identity[aria-current="page"] {
     opacity: .5;
 }
 
-.sort-head:hover svg, th[aria-sort] .sort-head svg {
+.sort-head:hover svg, th[aria-sort] .sort-head svg, th[data-sorted] .sort-head svg {
     opacity: 1;
+}
+
+/* Where a sorted column stands among several: 1 reads first. */
+.sort-rank {
+    font-size: .8em;
+    font-variant-numeric: tabular-nums;
 }
 
 /* An incident's findings: fewer columns than the fleet table, and the
@@ -1182,7 +1188,8 @@ a.shell-identity[aria-current="page"] {
 .findings-controls {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-end;
+    /* Top, not bottom: the match count under the search field must not push the level select down. */
+    align-items: flex-start;
     gap: 8px 16px;
 }
 
@@ -4656,8 +4663,23 @@ a.chip {
     background: var(--surface);
 }
 
+/* An incident behind the pair's episodes, by kind as the incident chips read: a kill red,
+   a saturation orange, a restart or a deploy blue, and `other` the neutral grey. */
 .timeline-incident {
-    fill: var(--crit-bg);
+    fill: var(--text-3);
+}
+
+.timeline-incident[data-kind="oom_kill"] {
+    fill: var(--strip-oom);
+}
+
+.timeline-incident[data-kind="memory_saturation"] {
+    fill: var(--strip-saturation);
+}
+
+.timeline-incident[data-kind="restart"],
+.timeline-incident[data-kind="deploy"] {
+    fill: var(--info-fg);
 }
 
 .timeline-episode {
@@ -4665,12 +4687,82 @@ a.chip {
 }
 
 .timeline-axis {
+    position: relative;
     display: flex;
     justify-content: space-between;
     margin-top: 4px;
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-3);
+}
+
+/* The dated marks sit where their line crosses the strip, between the two ends. */
+.timeline-ticks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.timeline-tick-label {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+/* The marks sit at fractions of the strip and their labels are a fixed width: on a narrow
+   strip they would run into the start's date, so only the lines stay. */
+@container (max-width: 760px) {
+    .timeline-ticks {
+        display: none;
+    }
+}
+
+.timeline-tick {
+    stroke: var(--border);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+.timeline-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.timeline-key::before {
+    content: "";
+    display: inline-block;
+    width: 14px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 3px;
+    vertical-align: middle;
+}
+
+.timeline-key-episode::before {
+    background: var(--brand);
+}
+
+.timeline-key-incident::before {
+    height: 12px;
+    background: var(--text-3);
+}
+
+.timeline-key-incident[data-kind="oom_kill"]::before {
+    background: var(--strip-oom);
+}
+
+.timeline-key-incident[data-kind="memory_saturation"]::before {
+    background: var(--strip-saturation);
+}
+
+.timeline-key-incident[data-kind="restart"]::before,
+.timeline-key-incident[data-kind="deploy"]::before {
+    background: var(--info-fg);
 }
 
 /* An incident's correlations, under its frozen findings and set apart from them. */
