@@ -504,8 +504,8 @@ max_tracked_pairs = 10000  # default 10000, memory ceiling for the table
 # --- Alumet energy scraper (opt-in, no default egress) ---------------------
 # Scrapes the /metrics endpoint of Alumet's prometheus-exporter plugin.
 # Model tag `alumet_rapl`, the TOP of the measured-energy precedence chain
-# (it outranks `scaphandre_rapl`: same RAPL source, less error-prone
-# sampling, per-cgroup rather than per-process attribution).
+# (it outranks `scaphandre_rapl`: same RAPL source, per-cgroup rather
+# than per-process attribution).
 #
 # `metric_name` and `label_key` have NO default and are required: read them
 # off your own endpoint, the exporter names them after a prefix/suffix and

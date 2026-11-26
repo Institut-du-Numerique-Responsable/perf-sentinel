@@ -36,8 +36,8 @@ pub const ENERGY_PER_IO_OP_KWH: f64 = 0.000_000_1;
 
 // Per-operation energy multipliers (proxy model only).
 // SQL verb weights and HTTP tiers are relative weights that rank operation
-// classes on the emitting service. Their ratios come from database-server
-// benchmarks, but they bill no database host.
+// classes on the emitting service. Their ratios are a heuristic, not
+// benchmark measurements, and they bill no database host.
 // See docs/design/05-GREENOPS-AND-CARBON.md for sources and rationale.
 
 const SQL_SELECT_COEFF: f64 = 0.5; // read-only index lookup
@@ -85,11 +85,8 @@ pub const CO2_MODEL_V3: &str = "io_proxy_v3";
 
 /// Carbon estimation model: Alumet RAPL measurement.
 /// Highest measured-energy precedence. Ranks above Scaphandre: both read
-/// RAPL, but Alumet's sampling is measurably less error-prone (Raffin
-/// and Trystram, "Dissecting the Software-Based Measurement of CPU
-/// Energy Consumption: A Comparative Analysis", IEEE Transactions on
-/// Parallel and Distributed Systems, 2024, <https://hal.science/hal-04420527v2>),
-/// and it attributes per cgroup rather than per process.
+/// RAPL, and Alumet attributes per cgroup rather than per process. No
+/// published study compares their accuracy (see `docs/LIMITATIONS.md`).
 pub const CO2_MODEL_ALUMET: &str = "alumet_rapl";
 
 /// Carbon estimation model: Scaphandre per-process RAPL measurement.
