@@ -802,7 +802,7 @@ CCF 2026-04-24 does not publish a memory-class premium so we layer one on top of
 
 #### Correct mental model.
 
-No published source gives an accuracy figure for cloud SPECpower. Cloud Carbon Footprint, the source of its coefficients, publishes "point estimates without confidence intervals" and says it "cannot guarantee their accuracy". The model tracks CPU utilization and the instance type, which the I/O proxy (order-of-magnitude estimate) ignores, but its error on a given host is unknown and it ranks below a RAPL reading (direct hardware measurement).
+No published source gives an accuracy figure for cloud SPECpower. Cloud Carbon Footprint, the source of its coefficients, publishes "point estimates without confidence intervals" and says it "cannot guarantee their accuracy". The model tracks CPU utilization and the instance type, which the I/O proxy (order-of-magnitude estimate) ignores, but its error on a given host is unknown and it ranks below a RAPL reading (direct hardware measurement). Etsy's [Cloud Jewels](https://codeascraft.com/2020/04/23/cloud-jewels-estimating-kwh-in-the-cloud/) (2020), where this interpolation comes from, declined to state a confidence figure "so as to not provide false precision". The one public comparison we know of points the other way from reassurance: Teads' [2021 measurements](https://medium.com/teads-engineering/estimating-aws-ec2-instances-power-consumption-c9745e347959) on AWS bare-metal instances suggest that SPECpower data from comparable machines "would greatly underestimate actual power consumption" for a `c5.metal`. The authors list the caveats themselves: no exact hardware match in SPECpower, RAPL-based measurement, short runs, and `c5` machines later found to be underclocked.
 
 #### Batch mode.
 
