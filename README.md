@@ -404,7 +404,7 @@ Two behaviours to know before sizing. Upstream trace sampling (head-based vs tai
 <details>
 <summary><b>GreenOps (cross-cutting)</b></summary>
 
-![GreenOps integration: external real-time sources (Scaphandre RAPL kWh on x86, Kepler RAPL kWh per container or process, Redfish BMC watts for bare-metal, Electricity Maps gCO₂/kWh) plus internal cold sources (Cloud SPECpower kWh, embodied carbon gCO₂e/req via Boavizta + HotCarbon 2024, network transport kWh/GB via Mytton 2024) feeding Perf Sentinel in batch or daemon mode, emitting energy and carbon alongside traces](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-GreenOps.svg)
+![GreenOps integration: external real-time sources (Scaphandre RAPL kWh on x86, Kepler RAPL kWh per container or process, Redfish BMC watts for bare-metal, Electricity Maps gCO₂/kWh) plus internal cold sources (Cloud SPECpower kWh, embodied carbon gCO₂e/req via Boavizta + Cloud Carbon Footprint, network transport kWh/GB via Mytton 2024) feeding Perf Sentinel in batch or daemon mode, emitting energy and carbon alongside traces](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-GreenOps.svg)
 
 </details>
 
@@ -494,7 +494,7 @@ No infrastructure prerequisite: the I/O proxy model and the embedded grid tables
 | Physical servers with a reachable BMC                        | Redfish (chassis power read from the BMC)   | node-level, periphery included |
 | Anywhere, on top of any row above                            | Electricity Maps (real-time grid intensity) | refines the I axis, not E      |
 
-> The carbon side of Perf Sentinel prices the detected I/O with an activity-based methodology: region-hourly grid intensity (Electricity Maps, ENTSO-E, RTE, National Grid ESO, EIA, ...), bottom-up embodied carbon (Boavizta + HotCarbon 2024) and Sigstore-signed, hash-verifiable disclosures.
+> The carbon side of Perf Sentinel prices the detected I/O with an activity-based methodology: region-hourly grid intensity (Electricity Maps, ENTSO-E, RTE, National Grid ESO, EIA, ...), bottom-up embodied carbon (Boavizta + Cloud Carbon Footprint) and Sigstore-signed, hash-verifiable disclosures.
 >
 > It is suitable as a primary data source for a horizontal carbon accounting platform, or as an internal controlling tool for software-emissions KPIs and RGESN conformance.
 >

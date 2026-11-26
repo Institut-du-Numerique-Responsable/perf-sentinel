@@ -186,9 +186,9 @@ The default of `0.001 gCO₂/request` is derived from typical server lifecycle a
 
 - A modern x86 server has an embodied carbon footprint of ~1000 kgCO₂eq over a 4-year lifecycle (sources: [Boavizta API](https://doc.api.boavizta.org/) lifecycle assessments, [Cloud Carbon Footprint methodology](https://www.cloudcarbonfootprint.org/docs/methodology/)).
 - 4 years × 365 days × 86400 seconds × 1 request/sec ≈ 126 million requests amortized per server.
-- 1000 g per server / 126e6 requests ≈ 0.000008 gCO₂/req (8e-6 g) at 1 req/sec, scaling to ~0.001 at lower request rates or larger / less amortized hardware.
+- 1000 kgCO₂eq is 1e6 g per server. 1e6 g / 126e6 requests ≈ 0.008 gCO₂/req at 1 req/sec. The figure falls as the request rate rises: the `0.001` default is reached at about 8 req/sec sustained over the four years.
 
-The `0.001 g/req` default is a conservative upper bound for lightly-loaded microservice servers. AWS Customer Carbon Footprint methodology (2025) reports ~320 kgCO2eq/year for a Dell R640, which at typical utilization rates yields 10-50 ugCO2/req, 10-20x below our default. Users with measured infrastructure data should lower this value via `[green] embodied_carbon_per_request_gco2`.
+The `0.001 g/req` default therefore fits a server sustaining about 8 req/sec. A busier server amortizes below it and an idler one above it, so it is not an upper bound for lightly-loaded servers. AWS Customer Carbon Footprint methodology (2025) reports ~320 kgCO2eq/year for a Dell R640, which at typical utilization rates yields 10-50 ugCO2/req, 20-100x below our default. Users with measured infrastructure data should lower this value via `[green] embodied_carbon_per_request_gco2`.
 
 **Embodied is region-independent.** Hardware manufacturing emissions don't vary by deployment location. Perf Sentinel emits embodied carbon unconditionally when green scoring is enabled, even when no region resolves, so users see at least a floor estimate.
 

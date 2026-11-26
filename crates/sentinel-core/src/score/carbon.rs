@@ -182,8 +182,8 @@ pub const METHODOLOGY_OPERATIONAL_RATIO_HOSTS: &str = "sci_v1_operational_ratio+
 /// The SCI score proper (an intensity), distinct from the numerator footprint.
 pub const METHODOLOGY_SCI_INTENSITY: &str = "sci_v1_intensity";
 
-/// SCI `M` term: embodied carbon per request in gCO₂eq. Conservative
-/// upper bound for lightly-loaded servers. Override via
+/// SCI `M` term: embodied carbon per request in gCO₂eq. Matches a
+/// server sustaining about 8 req/s over four years. Override via
 /// `[green] embodied_carbon_per_request_gco2`. Derivation in design doc.
 pub const DEFAULT_EMBODIED_CARBON_PER_REQUEST_GCO2: f64 = 0.001;
 

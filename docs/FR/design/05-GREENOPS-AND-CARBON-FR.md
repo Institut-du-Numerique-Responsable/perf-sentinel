@@ -186,9 +186,9 @@ Le défaut de `0.001 gCO₂/request` est dérivé d'hypothèses typiques sur le 
 
 - Un serveur x86 moderne a une empreinte carbone embarquée de ~1000 kgCO₂eq sur un cycle de vie de 4 ans (sources : analyses de cycle de vie de l'[API Boavizta](https://doc.api.boavizta.org/), [méthodologie Cloud Carbon Footprint](https://www.cloudcarbonfootprint.org/docs/methodology/)).
 - 4 ans × 365 jours × 86400 secondes × 1 requête/sec ≈ 126 millions de requêtes amorties par serveur.
-- 1000 g par serveur / 126e6 requêtes ≈ 0,000008 gCO₂/req (8e-6 g) à 1 req/sec, montant à ~0,001 à des taux de requêtes plus bas ou pour du matériel plus gros ou moins amorti.
+- 1000 kgCO₂eq font 1e6 g par serveur. 1e6 g / 126e6 requêtes ≈ 0,008 gCO₂/req à 1 req/sec. Ce chiffre baisse quand le débit augmente : le défaut `0.001` correspond à environ 8 req/sec soutenues sur les quatre ans.
 
-Le défaut `0.001 g/req` est une borne supérieure conservatrice pour des serveurs microservices peu chargés. La méthodologie AWS Customer Carbon Footprint (2025) rapporte ~320 kgCO2eq/an pour un Dell R640, ce qui à des taux d'utilisation typiques donne 10-50 ugCO2/req, soit 10-20x en dessous de notre défaut. Les utilisateurs avec des données d'infrastructure mesurées devraient abaisser cette valeur via `[green] embodied_carbon_per_request_gco2`.
+Le défaut `0.001 g/req` convient donc à un serveur qui soutient environ 8 req/sec. Un serveur plus chargé s'amortit en dessous et un serveur moins chargé au-dessus, ce n'est donc pas une borne supérieure pour des serveurs peu chargés. La méthodologie AWS Customer Carbon Footprint (2025) rapporte ~320 kgCO2eq/an pour un Dell R640, ce qui à des taux d'utilisation typiques donne 10-50 ugCO2/req, soit 20 à 100 fois en dessous de notre défaut. Les utilisateurs avec des données d'infrastructure mesurées devraient abaisser cette valeur via `[green] embodied_carbon_per_request_gco2`.
 
 **L'embarqué est indépendant de la région.** Les émissions de fabrication matérielle ne varient pas selon le lieu de déploiement. Perf Sentinel émet le carbone embarqué inconditionnellement quand le scoring vert est activé, même quand aucune région ne se résout, pour que les utilisateurs voient au moins une estimation plancher.
 

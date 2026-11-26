@@ -404,7 +404,7 @@ Deux comportements à connaître avant de dimensionner. L'échantillonnage de tr
 <details>
 <summary><b>GreenOps (transversal)</b></summary>
 
-![Intégration GreenOps : sources externes temps réel (Scaphandre RAPL en kWh sur x86, Kepler RAPL en kWh par conteneur ou processus, Redfish BMC en watts pour bare-metal, Electricity Maps en gCO₂/kWh) plus sources internes froides (Cloud SPECpower en kWh, carbone embarqué en gCO₂e/req via Boavizta + HotCarbon 2024, transport réseau en kWh/GB via Mytton 2024) alimentant Perf Sentinel en mode batch ou daemon, émettant énergie et carbone en parallèle des traces](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-GreenOps.svg)
+![Intégration GreenOps : sources externes temps réel (Scaphandre RAPL en kWh sur x86, Kepler RAPL en kWh par conteneur ou processus, Redfish BMC en watts pour bare-metal, Electricity Maps en gCO₂/kWh) plus sources internes froides (Cloud SPECpower en kWh, carbone embarqué en gCO₂e/req via Boavizta + Cloud Carbon Footprint, transport réseau en kWh/GB via Mytton 2024) alimentant Perf Sentinel en mode batch ou daemon, émettant énergie et carbone en parallèle des traces](https://raw.githubusercontent.com/Institut-du-Numerique-Responsable/perf-sentinel-simulation-lab/main/docs/diagrams/svg/perf-sentinel-GreenOps.svg)
 
 </details>
 
@@ -494,7 +494,7 @@ Aucun prérequis d'infrastructure : le modèle proxy I/O et les tables de résea
 | Serveurs physiques avec BMC joignable                       | Redfish (puissance du châssis lue sur le BMC)  | par nœud, périphérie incluse    |
 | Partout, en plus de toute ligne ci-dessus                   | Electricity Maps (intensité réseau temps réel) | raffine l'axe I, pas E          |
 
-> Le volet carbone de Perf Sentinel chiffre les I/O détectées avec une méthodologie fondée sur l'activité : intensité horaire du réseau par région (Electricity Maps, ENTSO-E, RTE, National Grid ESO, EIA, ...), carbone embarqué bottom-up (Boavizta + HotCarbon 2024) et divulgations signées Sigstore vérifiables par hash.
+> Le volet carbone de Perf Sentinel chiffre les I/O détectées avec une méthodologie fondée sur l'activité : intensité horaire du réseau par région (Electricity Maps, ENTSO-E, RTE, National Grid ESO, EIA, ...), carbone embarqué bottom-up (Boavizta + Cloud Carbon Footprint) et divulgations signées Sigstore vérifiables par hash.
 >
 > Il convient comme source primaire de données pour une plateforme de comptabilité carbone horizontale, ou comme outil de contrôle interne pour les KPI d'émissions logicielles et la conformité RGESN.
 >
