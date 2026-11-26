@@ -690,7 +690,7 @@ La liste complète des types couverts, avec leurs watts au repos et maximum, est
 
 **Comportement de repli.** Si l'endpoint Prometheus est inaccessible, le daemon utilise le modèle proxy pour tous les services configurés cloud. Les types d'instance inconnus se rabattent sur un défaut au niveau du fournisseur.
 
-**Limites de précision.** Le modèle d'interpolation SPECpower a une précision d'environ +/-30%, meilleure que le modèle proxy mais moins précise que Scaphandre RAPL. Voir `docs/FR/LIMITATIONS-FR.md` pour les détails.
+**Limites de précision.** Aucun chiffre de précision n'est publié pour le modèle d'interpolation SPECpower. Il suit l'utilisation CPU, contrairement au modèle proxy, et se classe sous Scaphandre RAPL. Voir `docs/FR/LIMITATIONS-FR.md` pour les détails.
 
 #### `[green.electricity_maps]` (optionnel, opt-in)
 

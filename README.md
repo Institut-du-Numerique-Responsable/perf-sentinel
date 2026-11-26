@@ -488,7 +488,7 @@ No infrastructure prerequisite: the I/O proxy model and the embedded grid tables
 | Your infrastructure                                          | Energy refinement                           | Precision                      |
 |--------------------------------------------------------------|---------------------------------------------|--------------------------------|
 | Any, zero setup                                              | I/O proxy model (default)                   | directional, ~2x bracket       |
-| Cloud VMs (AWS, GCP, Azure)                                  | Cloud SPECpower (CPU% + instance type)      | ~±30%                          |
+| Cloud VMs (AWS, GCP, Azure)                                  | Cloud SPECpower (CPU% + instance type)      | tracks CPU, error unquantified |
 | Linux hosts with RAPL, on Kubernetes or not                  | Kepler (RAPL, per container or process)     | good, active CPU power only    |
 | Bare metal x86 (incl. AWS `*.metal`, OVH, Hetzner, Scaleway) | Alumet (recommended) or Scaphandre (RAPL)   | highest tier                   |
 | Physical servers with a reachable BMC                        | Redfish (chassis power read from the BMC)   | node-level, periphery included |

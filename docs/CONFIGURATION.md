@@ -674,7 +674,7 @@ The full list of covered types, with their idle and max wattage, is [`INSTANCE-T
 
 **Fallback behaviour.** If the Prometheus endpoint is unreachable, the daemon falls back to the proxy model for all cloud-configured services. Unknown instance types fall back to a provider-level default.
 
-**Precision bounds.** The SPECpower interpolation model has approximately +/-30% accuracy, better than the proxy model but less precise than Scaphandre RAPL. See `docs/LIMITATIONS.md` for details.
+**Precision bounds.** No published accuracy figure exists for the SPECpower interpolation model. It tracks CPU utilization, unlike the proxy model, and ranks below Scaphandre RAPL. See `docs/LIMITATIONS.md` for details.
 
 #### `[green.electricity_maps]` (optional, opt-in)
 

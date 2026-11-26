@@ -3,8 +3,8 @@
 //!
 //! See `docs/design/05-GREENOPS-AND-CARBON.md` for the SCI methodology,
 //! the per-region intensity sources (Ember yearly data in `carbon_data.rs`,
-//! hand-maintained zonal rows in `MANUAL_CARBON_ROWS`), the per-operation energy coefficients (Xu, Tsirogiannis,
-//! `DBJoules`) and the network transport model (Mytton et al. 2024).
+//! hand-maintained zonal rows in `MANUAL_CARBON_ROWS`), the heuristic per-operation energy
+//! coefficients and the network transport model with its caveats.
 
 use std::collections::HashMap;
 use std::sync::Arc;
