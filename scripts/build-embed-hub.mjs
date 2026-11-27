@@ -339,6 +339,21 @@ const PATCH = `<script>
       }).slice(0, Number(q.get('limit')) || undefined));
     }
 
+    // An unfolded pair reads each of its services from the range's start, which moves with
+    // the clock, so the incidents screen's captured first page is filtered here the way
+    // the Hub's store would. The screen's own read keeps its exact route below.
+    if (path.indexOf('/api/incidents?') === 0 && !ROUTES[path]) {
+      var iq = new URLSearchParams(path.split('?')[1]);
+      var iOffset = Number(iq.get('offset')) || 0, iLimit = Number(iq.get('limit')) || 100;
+      return json(shift(ROUTES['/api/incidents?limit=100&offset=0'] || []).filter(function (i) {
+        var end = i.ended_at_ms == null ? i.window_to_ms : i.ended_at_ms;
+        return (!iq.get('service') || i.service === iq.get('service'))
+          && (!iq.get('source_id') || i.source_id === iq.get('source_id'))
+          && (!iq.has('from') || end >= Number(iq.get('from')))
+          && (!iq.has('to') || i.window_from_ms <= Number(iq.get('to')));
+      }).slice(iOffset, iOffset + iLimit));
+    }
+
     // The ack card's windowed read takes from and to off the clock, so the capture
     // holds it once under window=7d and answers it for any from and to.
     if (path.indexOf('/api/findings?') === 0) {
