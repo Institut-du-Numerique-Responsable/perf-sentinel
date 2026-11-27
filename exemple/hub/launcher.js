@@ -1609,9 +1609,8 @@
     }
 
     /**
-     * A pair's strip: it starts at the pair's own episodes. The incidents come from the daemon's
-     * newest page, not only from the pair's services, so an old unrelated one would otherwise
-     * stretch the strip back to it. The incidents kept are those the strip reaches, so its label
+     * A pair's strip: it starts at the pair's own episodes, so an older incident of its services
+     * in the range does not stretch the strip back to it. The incidents kept are those the strip reaches, so its label
      * and its legend count what it draws.
      * @param {Array<{from: number, to: number | null}>} episodes
      * @param {Array<{from: number, to: number | null}>} incidents
@@ -1733,6 +1732,46 @@
                     && (!incident.namespace || side.grouping_key !== 'k8s.namespace.name'
                         || side.grouping_value === incident.namespace);
             });
+        });
+    }
+
+    /**
+     * Where an incident's span stops: its end once the alerting sent one, its window's end before.
+     * @param {{window_to_ms: number, ended_at_ms?: number | null}} incident
+     * @returns {number}
+     */
+    function incidentEnd(incident) {
+        return incident.ended_at_ms == null ? incident.window_to_ms : incident.ended_at_ms;
+    }
+
+    /**
+     * The incidents a pair's strip draws: on the pair's daemon, in the range, and on one of the
+     * pair's services, in its namespace when the incident names one.
+     * @param {import('../types').CorrelationPair} pair
+     * @param {import('../types').Incident[]} incidents
+     * @param {number} fromMs
+     * @param {number} toMs
+     * @returns {import('../types').Incident[]}
+     */
+    function pairIncidents(pair, incidents, fromMs, toMs) {
+        return incidents.filter(function (incident) {
+            return incident.source_id === pair.source_id
+                && spansOverlap(incident.window_from_ms, incidentEnd(incident), fromMs, toMs)
+                && incidentEpisodes(pair.episodes, incident).length > 0;
+        });
+    }
+
+    /**
+     * Every service a pair's episodes name, on either side, once each.
+     * @param {Array<{source: {service: string}, target: {service: string}}>} episodes
+     * @returns {string[]}
+     */
+    function pairServices(episodes) {
+        const services = episodes.flatMap(function (episode) {
+            return [episode.source.service, episode.target.service];
+        });
+        return services.filter(function (service, at) {
+            return services.indexOf(service) === at;
         });
     }
 
@@ -5571,6 +5610,9 @@
         readCorrelationPair,
         correlationWindowKey,
         incidentEpisodes,
+        incidentEnd,
+        pairIncidents,
+        pairServices,
         pairLabel,
         episodeEndNote,
         correlationPairs,

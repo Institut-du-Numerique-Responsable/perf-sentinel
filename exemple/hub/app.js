@@ -316,8 +316,9 @@
         /** @type {Episode[]} */
         correlations: null,
         correlationsError: false,
-        /** @type {Incident[]} */
-        correlationIncidents: [],
+        // An unfolded pair's incidents, by pair key: 'loading', 'error', or the rows read.
+        /** @type {Record<string, Incident[] | 'loading' | 'error'>} */
+        correlationIncidents: {},
         correlationServices: [],
         // pair_key mirrors the route, `#/correlations?pair_key=…`, and is never set from a select.
         correlationFilter: {range: '24h', service: '', source_id: '', active: false, pair_key: ''},
@@ -6796,29 +6797,23 @@
     }
 
     /**
-     * The episodes of the range and the incidents the strips draw beside them, both from the
-     * store: this screen never reads the fleet. The incidents are the store's newest page, so
-     * a strip over an older range draws the ones that page still holds.
+     * The episodes of the range, from the store: this screen never reads the fleet. Each pair
+     * reads its own incidents when it unfolds, see loadPairIncidents.
      */
     function loadCorrelations() {
         state.correlations = null;
         state.correlationsError = false;
+        state.correlationIncidents = {};
         render();
-        Promise.all([
-            getJson(correlationsPath()),
-            getJson('/api/incidents?limit=' + incidentPage() + '&offset=0').catch(function () {
-                return [];
-            })
-        ]).then(function (/** @type {[Episode[], Incident[]]} */ results) {
-            state.correlations = results[0];
-            state.correlationIncidents = results[1];
+        getJson(correlationsPath()).then(function (/** @type {Episode[]} */ episodes) {
+            state.correlations = episodes;
             // A link to one pair lands on it unfolded, on every daemon that saw it.
             if (state.correlationFilter.pair_key) {
-                results[0].forEach(function (/** @type {Episode} */ episode) {
+                episodes.forEach(function (/** @type {Episode} */ episode) {
                     state.panelOpen['pair:' + episode.source_id + ':' + episode.pair_key] = true;
                 });
             }
-            results[0].forEach(function (/** @type {Episode} */ episode) {
+            episodes.forEach(function (/** @type {Episode} */ episode) {
                 [episode.source.service, episode.target.service].forEach(function (service) {
                     if (state.correlationServices.indexOf(service) < 0) state.correlationServices.push(service);
                 });
@@ -6943,11 +6938,11 @@
     }
 
     /**
-     * Where an incident's span stops: its end once the alerting sent one, its window's end before.
-     * @param {Incident} incident
+     * @param {CorrelationPair} pair
      */
-    function incidentEnd(incident) {
-        return incident.ended_at_ms == null ? incident.window_to_ms : incident.ended_at_ms;
+    function pairDetailId(pair) {
+        // Whole: a source id may hold a dot, which a dash in its place would make another daemon's.
+        return 'pair-detail-' + pair.key;
     }
 
     /**
@@ -6955,7 +6950,7 @@
      */
     function pairRow(pair) {
         const fold = 'pair:' + pair.key;
-        const id = 'pair-detail-' + pair.key.replace(/[^A-Za-z0-9_-]/g, '-');
+        const id = pairDetailId(pair);
         const open = state.panelOpen[fold] === true;
         const button = el('button', {
             type: 'button',
@@ -6973,6 +6968,8 @@
             if (cell) {
                 const row = /** @type {HTMLElement} */ (cell.parentNode);
                 row.hidden = !next;
+                // Rebuilt so an unfolding pair reads its incidents, folded ones never do.
+                if (next) cell.replaceChildren(pairPanel(pair));
                 foldAnchors(cell, next);
             }
         });
@@ -7040,28 +7037,95 @@
     function pairPanel(pair) {
         const toMs = Date.now();
         const fromMs = toMs - PSL.parseDur(state.correlationFilter.range);
-        const incidents = state.correlationIncidents.filter(function (incident) {
-            return incident.source_id === pair.source_id
-                && PSL.spansOverlap(incident.window_from_ms, incidentEnd(incident), fromMs, toMs);
-        });
-        const guide = foldGuide('correlations.panel', state.panelOpen['pair:' + pair.key] === true);
+        const open = state.panelOpen['pair:' + pair.key] === true;
+        const held = state.correlationIncidents[pair.key];
+        if (open && held === undefined) {
+            // Marked now, so a second build before the read starts does not read again.
+            state.correlationIncidents[pair.key] = 'loading';
+            queueMicrotask(function () {
+                loadPairIncidents(pair, fromMs);
+            });
+        }
+        const guide = foldGuide('correlations.panel', open);
+        if (held === undefined || held === 'loading') {
+            return el('div', {class: 'daemon-panel', ...guide}, [
+                el('p', {class: 'daemon-loading', role: 'status', text: t('correlations.pair.incidents_reading')})
+            ]);
+        }
+        // Shown once: the next build of this panel, a refold or a re-read, asks again.
+        if (held === 'error') delete state.correlationIncidents[pair.key];
+        const incidents = held === 'error' ? [] : PSL.pairIncidents(pair, held, fromMs, toMs);
         // A pair read a while ago can hold an episode that has since left the range: the strip,
         // which starts at what it shows, would otherwise pin it to its left edge.
         const episodes = pair.episodes.filter(function (episode) {
             return PSL.spansOverlap(episode.started_at_ms, episode.ended_at_ms, fromMs, toMs);
         });
         return el('div', {class: 'daemon-panel', ...guide}, [
+            held === 'error' ? el('p', {class: 'table-muted', text: t('correlations.pair.incidents_error')}) : null,
             timelineStrip(episodes, incidents, fromMs, toMs),
             el('div', {class: 'sources-wrap'}, [episodesTable(pair.episodes, incidents)])
         ]);
     }
 
+    // A service is read ten pages deep at most, so a crash loop over a long range draws its
+    // newest ten pages of incidents in the range; page further if a strip ever needs more.
+    const PAIR_INCIDENT_PAGES = 10;
+
     /**
-     * The range as a strip: each episode in green, the same daemon's incidents behind them coloured by kind.
+     * The incidents of a pair's services that reach the range, newest first, page after page until
+     * a short one. Read on every daemon, so a source since removed from the Hub's configuration,
+     * which source_id refuses, still shows its stored incidents: pairIncidents keeps the pair's.
+     * @param {CorrelationPair} pair
+     * @param {number} fromMs
+     */
+    function loadPairIncidents(pair, fromMs) {
+        // The map of this read of the screen: a re-read starts another, and this answer, made
+        // for the old range, then lands in the old one unseen.
+        const held = state.correlationIncidents;
+        held[pair.key] = 'loading';
+        const services = PSL.pairServices(pair.episodes);
+        Promise.all(services.map(function (service) {
+            return readIncidentPages('/api/incidents?service=' + encodeURIComponent(service)
+                + '&from=' + fromMs, 0);
+        })).then(function (lists) {
+            // A row that slid onto the next page while the pages were read counts once.
+            const seen = new Set();
+            held[pair.key] = lists.flat().filter(function (incident) {
+                const fresh = !seen.has(incident.id);
+                seen.add(incident.id);
+                return fresh;
+            }).sort(function (a, b) {
+                return b.at_ms - a.at_ms;
+            });
+        }).catch(function () {
+            held[pair.key] = 'error';
+        }).finally(function () {
+            const cell = document.getElementById(pairDetailId(pair));
+            if (held === state.correlationIncidents && cell && state.panelOpen['pair:' + pair.key] === true) {
+                cell.replaceChildren(pairPanel(pair));
+            }
+        });
+    }
+
+    /**
+     * @param {string} path
+     * @param {number} page
+     * @returns {Promise<Incident[]>}
+     */
+    async function readIncidentPages(path, page) {
+        const size = incidentPage();
+        /** @type {Incident[]} */
+        const rows = await getJson(path + '&limit=' + size + '&offset=' + page * size);
+        if (rows.length < size || page + 1 >= PAIR_INCIDENT_PAGES) return rows;
+        return rows.concat(await readIncidentPages(path, page + 1));
+    }
+
+    /**
+     * The range as a strip: each episode in green, the incidents of the pair's services on a lane under them, coloured by kind.
      * The strip starts at the earliest episode rather than at the range's start, keeps the incidents
      * it reaches, carries a few dated marks and a legend, and each bar names its span on hover.
      * @param {Episode[]} episodes
-     * @param {Incident[]} rangeIncidents the daemon's incidents in the range
+     * @param {Incident[]} rangeIncidents the incidents of the pair's services in the range
      * @param {number} rangeFromMs
      * @param {number} toMs
      */
@@ -7070,12 +7134,12 @@
             return {from: episode.started_at_ms, to: episode.ended_at_ms};
         });
         const shown = PSL.stripWindow(episodeSpans, rangeIncidents.map(function (incident) {
-            return {from: incident.window_from_ms, to: incidentEnd(incident)};
+            return {from: incident.window_from_ms, to: PSL.incidentEnd(incident)};
         }), rangeFromMs, toMs);
         const fromMs = shown.from;
         const incidents = shown.incidents.map(function (at) { return rangeIncidents[at]; });
         const incidentSpans = incidents.map(function (incident) {
-            return {from: incident.window_from_ms, to: incidentEnd(incident)};
+            return {from: incident.window_from_ms, to: PSL.incidentEnd(incident)};
         });
         const ticks = PSL.stripTicks(fromMs, toMs);
         const ns = 'http://www.w3.org/2000/svg';
@@ -7125,9 +7189,9 @@
         draw(PSL.timelineMarks(incidentSpans, fromMs, toMs, STRIP_WIDTH), incidents.map(function (incident) {
             return t('correlations.strip.incident', {
                 kind: PSL.INCIDENT_KIND_LABEL[incident.kind] || incident.kind,
-                span: PSL.episodeSpan(incident.window_from_ms, incidentEnd(incident))
+                span: PSL.episodeSpan(incident.window_from_ms, PSL.incidentEnd(incident))
             });
-        }), 'timeline-incident', 2, 26, incidents.map(function (incident) {
+        }), 'timeline-incident', 21, 6, incidents.map(function (incident) {
             return incident.kind;
         }));
         draw(PSL.timelineMarks(episodeSpans, fromMs, toMs, STRIP_WIDTH), episodes.map(function (episode) {
@@ -7136,7 +7200,7 @@
                     ? t('correlations.strip.running', {start: PSL.dateTime(episode.started_at_ms)})
                     : PSL.episodeSpan(episode.started_at_ms, episode.ended_at_ms)
             });
-        }), 'timeline-episode', 9, 12);
+        }), 'timeline-episode', 3, 14);
         return el('div', {class: 'timeline'}, [
             strip,
             el('div', {class: 'timeline-axis'}, [
@@ -7182,7 +7246,7 @@
         const rows = episodes.map(function (episode) {
             const overlapped = incidents.filter(function (incident) {
                 return PSL.spansOverlap(episode.started_at_ms, episode.ended_at_ms,
-                    incident.window_from_ms, incidentEnd(incident));
+                    incident.window_from_ms, PSL.incidentEnd(incident));
             });
             const end = episode.ended_at_ms == null ? now : episode.ended_at_ms;
             return el('tr', {}, [
@@ -7251,12 +7315,12 @@
      */
     function loadIncidentCorrelations(incident) {
         const key = incidentKey(incident);
-        const cacheKey = PSL.correlationWindowKey(key, incident.window_from_ms, incidentEnd(incident));
+        const cacheKey = PSL.correlationWindowKey(key, incident.window_from_ms, PSL.incidentEnd(incident));
         state.incidentCorrelations[cacheKey] = 'loading';
         const scope = '/api/correlations?source_id=' + encodeURIComponent(incident.source_id);
         // The service narrows on the Hub, the namespace here: the route has no grouping filter.
         readAllEpisodes(scope + '&service=' + encodeURIComponent(incident.service)
-            + '&from=' + incident.window_from_ms + '&to=' + incidentEnd(incident), 0)
+            + '&from=' + incident.window_from_ms + '&to=' + PSL.incidentEnd(incident), 0)
             .then(function (all) {
                 const rows = PSL.incidentEpisodes(all, incident);
                 if (all.length > 0) return {rows: rows, pushes: true};
@@ -7296,7 +7360,7 @@
      * @param {Incident} incident
      */
     function incidentCorrelationsBlock(incident) {
-        const cacheKey = PSL.correlationWindowKey(incidentKey(incident), incident.window_from_ms, incidentEnd(incident));
+        const cacheKey = PSL.correlationWindowKey(incidentKey(incident), incident.window_from_ms, PSL.incidentEnd(incident));
         const held = state.incidentCorrelations[cacheKey];
         if (held === undefined) {
             queueMicrotask(function () {

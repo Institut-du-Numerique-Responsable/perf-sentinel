@@ -1166,10 +1166,6 @@ a.shell-identity[aria-current="page"] {
     text-underline-offset: 2px;
 }
 
-.findings-filter {
-    max-width: 320px;
-}
-
 /* A thousand frozen findings made the unfolded incident pages tall: past this height the
    table scrolls inside the panel, its heads kept in view. */
 .findings-wrap {
@@ -1196,6 +1192,22 @@ a.shell-identity[aria-current="page"] {
 .findings-controls .field-note {
     flex-basis: 100%;
     margin: 0;
+}
+
+.findings-controls > .field {
+    margin-bottom: 0;
+}
+
+/* A set width: sized by its content, the search field widened once the match count showed
+   under it, cut its placeholder before, and pushed the level select along. */
+.findings-controls > .field:first-child {
+    flex: 0 1 320px;
+}
+
+/* The compact size of the panel around them, not the full size of a form. */
+.findings-controls .input {
+    height: 30px;
+    font-size: 12px;
 }
 
 /* How suspect a finding is: the three levels on the severity tones, unassessed stays neutral. */
@@ -4663,10 +4675,14 @@ a.chip {
     background: var(--surface);
 }
 
-/* An incident behind the pair's episodes, by kind as the incident chips read: a kill red,
+/* An incident on the lane under the pair's episodes, by kind as the incident chips read: a kill red,
    a saturation orange, a restart or a deploy blue, and `other` the neutral grey. */
 .timeline-incident {
     fill: var(--text-3);
+    /* An invisible stroke widens the hover target of a thin lane; the episodes drawn after keep theirs. */
+    stroke: transparent;
+    stroke-width: 10px;
+    vector-effect: non-scaling-stroke;
 }
 
 .timeline-incident[data-kind="oom_kill"] {
@@ -4748,7 +4764,6 @@ a.chip {
 }
 
 .timeline-key-incident::before {
-    height: 12px;
     background: var(--text-3);
 }
 
