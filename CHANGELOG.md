@@ -7,6 +7,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 ### Changed
 
 - Batch analysis allocates each trace's spans at their final size instead of growing them from one slot, which reserved about 60% more slots than spans. On a million SQL spans the heap held through detection and scoring drops from 945 MiB to 705 MiB, and the peak from 1346 MiB to 1106 MiB.
+- The pinned toolchain moves from Rust 1.100.0 to 1.100.1 (`rust-toolchain.toml`, `rust-version`, the CI comments that name it and CONTRIBUTING.md). Clippy and rustfmt are clean on the new release with no code change.
 
 ## [0.50.0] - 2026-11-24
 
