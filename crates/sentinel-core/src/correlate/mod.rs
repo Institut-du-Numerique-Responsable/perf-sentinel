@@ -21,17 +21,26 @@ pub struct Trace {
 pub fn correlate(events: Vec<NormalizedEvent>) -> Vec<Trace> {
     let estimated_traces = (events.len() / 10).max(events.len().min(1));
     let mut index: HashMap<String, usize> = HashMap::with_capacity(estimated_traces);
-    let mut traces: Vec<Trace> = Vec::with_capacity(estimated_traces);
-    for event in events {
+    // Count first so each trace's Vec is allocated at its final size.
+    let mut counts: Vec<usize> = Vec::with_capacity(estimated_traces);
+    for event in &events {
         if let Some(&i) = index.get(event.event.trace_id.as_str()) {
-            traces[i].spans.push(event);
+            counts[i] += 1;
         } else {
-            index.insert(event.event.trace_id.clone(), traces.len());
-            traces.push(Trace {
-                trace_id: String::new(),
-                spans: vec![event],
-            });
+            index.insert(event.event.trace_id.clone(), counts.len());
+            counts.push(1);
         }
+    }
+    let mut traces: Vec<Trace> = counts
+        .into_iter()
+        .map(|count| Trace {
+            trace_id: String::new(),
+            spans: Vec::with_capacity(count),
+        })
+        .collect();
+    for event in events {
+        let i = index[event.event.trace_id.as_str()];
+        traces[i].spans.push(event);
     }
     // Move the index keys in, one clone per trace rather than two.
     for (trace_id, i) in index {
@@ -120,6 +129,21 @@ mod tests {
                 .map(|s| s.event.span_id.as_str())
                 .collect();
             assert_eq!(t1_spans, ["span-1", "span-5"]);
+        }
+    }
+
+    /// Growing each trace from one slot gave a 20-span trace 32 slots,
+    /// carried through detection and scoring.
+    #[test]
+    fn each_trace_holds_no_spare_span_slots() {
+        let events = (0..40)
+            .map(|i| make_event(&format!("trace-{}", i % 2), &format!("span-{i}")))
+            .collect();
+        let traces = correlate(normalize::normalize_all(events));
+        assert_eq!(traces.len(), 2);
+        for trace in &traces {
+            assert_eq!(trace.spans.len(), 20);
+            assert_eq!(trace.spans.capacity(), trace.spans.len());
         }
     }
 }

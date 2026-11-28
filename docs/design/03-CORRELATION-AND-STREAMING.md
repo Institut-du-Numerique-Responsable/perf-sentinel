@@ -4,16 +4,16 @@ Correlation groups normalized events by `trace_id` to form `Trace` objects for d
 
 ## Batch correlation
 
-### Manual `get_mut` / `insert` pattern
+### Manual `get` / `insert` pattern
 
-The batch correlator uses this pattern instead of the `HashMap::entry` API:
+The batch correlator makes two passes. The first counts the spans of each trace, the second moves each event into a `Vec` allocated at its final size. Growing each trace from one slot instead gave a 20-span trace 32 slots, and the spare slots stayed allocated through detection and scoring. The counting pass uses this pattern instead of the `HashMap::entry` API:
 
 ```rust
-if let Some(vec) = map.get_mut(event.event.trace_id.as_str()) {
-    vec.push(event);
+if let Some(&i) = index.get(event.event.trace_id.as_str()) {
+    counts[i] += 1;
 } else {
-    let key = event.event.trace_id.clone();
-    map.insert(key, vec![event]);
+    index.insert(event.event.trace_id.clone(), counts.len());
+    counts.push(1);
 }
 ```
 
@@ -24,10 +24,11 @@ This is a well-known Rust optimization pattern documented in the [Rust Performan
 ### Capacity hint
 
 ```rust
-HashMap::with_capacity(events.len() / 10 + 1)
+let estimated_traces = (events.len() / 10).max(events.len().min(1));
+HashMap::with_capacity(estimated_traces)
 ```
 
-The heuristic assumes ~10 events per trace on average. The `+ 1` prevents a zero-capacity map when `events.len() < 10`. Over-estimating is cheap (a few hundred bytes of unused bucket space). Under-estimating triggers rehashing.
+The heuristic assumes ~10 events per trace on average. The `max` keeps one slot when `events.len()` is between 1 and 9, and an empty input allocates nothing. Over-estimating is cheap (a few hundred bytes of unused bucket space). Under-estimating triggers rehashing.
 
 ## Streaming correlation: TraceWindow
 

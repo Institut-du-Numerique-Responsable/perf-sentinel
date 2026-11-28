@@ -4,16 +4,16 @@ La corrélation regroupe les événements normalisés par `trace_id` pour former
 
 ## Corrélation batch
 
-### Pattern manuel `get_mut` / `insert`
+### Pattern manuel `get` / `insert`
 
-Le corrélateur batch utilise ce pattern au lieu de l'API `HashMap::entry` :
+Le corrélateur batch fait deux passes. La première compte les spans de chaque trace, la seconde déplace chaque événement dans un `Vec` alloué à sa taille finale. Faire grandir chaque trace depuis un seul emplacement donnait 32 emplacements à une trace de 20 spans, et les emplacements vides restaient alloués pendant la détection et le scoring. La passe de comptage utilise ce pattern au lieu de l'API `HashMap::entry` :
 
 ```rust
-if let Some(vec) = map.get_mut(event.event.trace_id.as_str()) {
-    vec.push(event);
+if let Some(&i) = index.get(event.event.trace_id.as_str()) {
+    counts[i] += 1;
 } else {
-    let key = event.event.trace_id.clone();
-    map.insert(key, vec![event]);
+    index.insert(event.event.trace_id.clone(), counts.len());
+    counts.push(1);
 }
 ```
 
@@ -24,10 +24,11 @@ C'est un pattern d'optimisation Rust bien connu documenté dans le [Rust Perform
 ### Indication de capacité
 
 ```rust
-HashMap::with_capacity(events.len() / 10 + 1)
+let estimated_traces = (events.len() / 10).max(events.len().min(1));
+HashMap::with_capacity(estimated_traces)
 ```
 
-L'heuristique suppose ~10 événements par trace en moyenne. Le `+ 1` empêche une map de capacité zéro quand `events.len() < 10`. Surestimer est peu coûteux (quelques centaines d'octets d'espace de buckets inutilisé). Sous-estimer déclenche un rehashing.
+L'heuristique suppose ~10 événements par trace en moyenne. Le `max` garde un emplacement quand `events.len()` vaut entre 1 et 9, et une entrée vide n'alloue rien. Surestimer est peu coûteux (quelques centaines d'octets d'espace de buckets inutilisé). Sous-estimer déclenche un rehashing.
 
 ## Corrélation streaming : TraceWindow
 
