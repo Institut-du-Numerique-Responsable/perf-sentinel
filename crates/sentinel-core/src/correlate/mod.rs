@@ -132,8 +132,8 @@ mod tests {
         }
     }
 
-    /// Growing each trace from one slot left about 60% of the span slots
-    /// empty on 20-span traces, carried through detection and scoring.
+    /// Growing each trace from one slot gave a 20-span trace 32 slots,
+    /// carried through detection and scoring.
     #[test]
     fn each_trace_holds_no_spare_span_slots() {
         let events = (0..40)

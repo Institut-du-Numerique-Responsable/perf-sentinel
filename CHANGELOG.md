@@ -6,7 +6,7 @@ All notable changes to perf-sentinel are documented in this file. Format loosely
 
 ### Changed
 
-- Batch analysis allocates each trace's spans at their final size instead of growing them from one slot, which left about 60% of the slots empty. On a million SQL spans the heap held through detection and scoring drops from 945 MiB to 705 MiB, and the peak from 1346 MiB to 1106 MiB.
+- Batch analysis allocates each trace's spans at their final size instead of growing them from one slot, which reserved about 60% more slots than spans. On a million SQL spans the heap held through detection and scoring drops from 945 MiB to 705 MiB, and the peak from 1346 MiB to 1106 MiB.
 
 ## [0.50.0] - 2026-11-24
 
