@@ -10,6 +10,15 @@ both, while a chart-only release bumps `version` alone and leaves
 through `0.9.21`, `0.9.27` and `0.26.3` did. Read `appVersion` in `Chart.yaml`, never
 the chart version, to know which daemon image ships.
 
+## [0.50.1]
+
+### Changed
+
+- **`appVersion` moves to `0.50.1`.** The image is built with Rust 1.100.1
+  and updated dependencies. The daemon behaves as in 0.50.0: the memory
+  saving of this release is in batch analysis. No chart value or template
+  changes.
+
 ## [0.50.0]
 
 ### Added
